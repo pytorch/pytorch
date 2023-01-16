@@ -53,6 +53,7 @@ CONSTRAINTS = [
     (constraints.simplex,),
     (constraints.corr_cholesky,),
     (constraints.lower_cholesky,),
+    (constraints.positive_definite,),
 ]
 
 

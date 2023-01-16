@@ -599,7 +599,7 @@ PyTorch provides two types of hooks for modules:
 * **Forward hooks** are called during the forward pass. They can be installed for a given module with
   :func:`~torch.nn.Module.register_forward_pre_hook` and :func:`~torch.nn.Module.register_forward_hook`.
   These hooks will be called respectively just before the forward function is called and just after it is called.
-  Alternatively, these hooks can be installed globally for all modules with the analagous
+  Alternatively, these hooks can be installed globally for all modules with the analogous
   :func:`~torch.nn.modules.module.register_module_forward_pre_hook` and
   :func:`~torch.nn.modules.module.register_module_forward_hook` functions.
 * **Backward hooks** are called during the backward pass. They can be installed with

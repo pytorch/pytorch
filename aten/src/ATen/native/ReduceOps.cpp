@@ -1,33 +1,125 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ReduceOps.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
-#include <ATen/native/SharedReduceOps.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cummax_helper.h>
+#include <ATen/ops/_cummax_helper_native.h>
+#include <ATen/ops/_cummin_helper.h>
+#include <ATen/ops/_cummin_helper_native.h>
+#include <ATen/ops/_logcumsumexp.h>
+#include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/all_meta.h>
+#include <ATen/ops/all_native.h>
+#include <ATen/ops/amax.h>
+#include <ATen/ops/amax_meta.h>
+#include <ATen/ops/amax_native.h>
+#include <ATen/ops/amin_meta.h>
+#include <ATen/ops/amin_native.h>
+#include <ATen/ops/aminmax_meta.h>
+#include <ATen/ops/aminmax_native.h>
+#include <ATen/ops/any_meta.h>
+#include <ATen/ops/any_native.h>
+#include <ATen/ops/argmax_meta.h>
+#include <ATen/ops/argmax_native.h>
+#include <ATen/ops/argmin_meta.h>
+#include <ATen/ops/argmin_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/complex.h>
+#include <ATen/ops/cummax.h>
+#include <ATen/ops/cummax_native.h>
+#include <ATen/ops/cummaxmin_backward_native.h>
+#include <ATen/ops/cummin.h>
+#include <ATen/ops/cummin_native.h>
+#include <ATen/ops/cumprod.h>
+#include <ATen/ops/cumprod_backward_native.h>
+#include <ATen/ops/cumprod_meta.h>
+#include <ATen/ops/cumprod_native.h>
+#include <ATen/ops/cumsum.h>
+#include <ATen/ops/cumsum_meta.h>
+#include <ATen/ops/cumsum_native.h>
+#include <ATen/ops/diff_native.h>
+#include <ATen/ops/dist_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/equal_native.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/gather.h>
+#include <ATen/ops/gradient_native.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/isnan_native.h>
+#include <ATen/ops/logcumsumexp.h>
+#include <ATen/ops/logcumsumexp_native.h>
+#include <ATen/ops/logical_xor.h>
+#include <ATen/ops/logsumexp.h>
+#include <ATen/ops/logsumexp_native.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/mean_meta.h>
+#include <ATen/ops/mean_native.h>
+#include <ATen/ops/nanmean_native.h>
+#include <ATen/ops/nansum.h>
+#include <ATen/ops/nansum_native.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/native_norm.h>
+#include <ATen/ops/norm.h>
+#include <ATen/ops/norm_meta.h>
+#include <ATen/ops/norm_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/prod.h>
+#include <ATen/ops/prod_meta.h>
+#include <ATen/ops/prod_native.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/special_logsumexp_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/stack.h>
+#include <ATen/ops/std.h>
+#include <ATen/ops/std_mean.h>
+#include <ATen/ops/std_mean_native.h>
+#include <ATen/ops/std_native.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sum_meta.h>
+#include <ATen/ops/sum_native.h>
+#include <ATen/ops/trace_native.h>
+#include <ATen/ops/value_selecting_reduction_backward_native.h>
+#include <ATen/ops/var.h>
+#include <ATen/ops/var_mean.h>
+#include <ATen/ops/var_mean_native.h>
+#include <ATen/ops/var_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <numeric>
-#include <vector>
-#include <map>
-#include <cmath>
-#include <cfloat>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -636,7 +728,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     for (const auto k : c10::irange(dim_size)) {
       if (k == 0) {
         prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
-        omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+        omitted_products = at::cat({ones, std::move(prods_from_k_plus_1)}, dim);
       } else if (k == dim_size - 1) {
         const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
         omitted_products = prods_until_k;
@@ -660,7 +752,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       }
     }
 
-    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : grad_input;
+    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : std::move(grad_input);
   }
 }
 
@@ -968,7 +1060,7 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   std::vector<Tensor> result;
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
-      auto ax_dx = spacing[i];
+      const auto& ax_dx = spacing[i];
       Tensor prepend, append;
       auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
       if (edge_order==1) {
@@ -1128,6 +1220,18 @@ Tensor nansum(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, c10
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
+namespace {
+template<typename scalar_t, typename accscalar_t = at::acc_type<scalar_t, false>>
+void inline set_result(Tensor& result, accscalar_t sum)
+{
+    if constexpr (std::is_integral_v<accscalar_t>) {
+      // all integer types get promoted to kLong
+      *result.data_ptr<int64_t>() = sum;
+    } else {
+      *result.data_ptr<scalar_t>() = sum;
+    }
+}
+}
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
@@ -1153,12 +1257,8 @@ Tensor trace_cpu(const Tensor& self) {
     for (const auto i : c10::irange(t_diag_size)) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
+    set_result<scalar_t>(result, sum);
 
-    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
-      // all integer types get promoted to kLong
-      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
-      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
-    );
   });
 
   return result;
@@ -1653,6 +1753,9 @@ static Tensor& std_var_out(
   const auto correction = correction_opt.value_or(1);
   ScalarType dtype = get_dtype_from_result(result, {});
   auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
+  TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
+              "result type ", self.scalar_type(), " can't be cast to the "
+              "desired output type ", result.scalar_type());
 
   if (iter.numel() == 0) {
     // Trivial reduction

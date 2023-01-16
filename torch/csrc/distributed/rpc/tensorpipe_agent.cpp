@@ -882,7 +882,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      messageIdToTimeout_.emplace(std::make_pair(messageId, expirationTime));
+      messageIdToTimeout_.emplace(messageId, expirationTime);
       timeoutFuturesVector.emplace_back(
           messageId, futureResponseMessage, timeout);
     }
@@ -1200,6 +1200,7 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
 
 std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
   std::vector<WorkerInfo> workerInfos;
+  workerInfos.reserve(workerNameToInfo_.size());
   for (auto& item : workerNameToInfo_) {
     workerInfos.emplace_back(item.second);
   }
@@ -1260,18 +1261,22 @@ void TensorPipeAgent::updateGroupMembership(
     workerNameToInfo_.erase(name);
     workerNameToURL_.erase(name);
 
-    for (const auto& it : reverseDeviceMaps_) {
-      if (reverseDeviceMaps.find(it.first) == reverseDeviceMaps.end()) {
-        reverseDeviceMaps_.erase(it.first);
+    // remove reverse device maps that are no longer used
+    for (auto it = reverseDeviceMaps_.begin();
+         it != reverseDeviceMaps_.end();) {
+      if (reverseDeviceMaps.find(it->first) == reverseDeviceMaps.end()) {
+        it = reverseDeviceMaps_.erase(it);
+      } else {
+        it++;
       }
     }
 
-    auto iter = devices_.begin();
-    while (iter != devices_.end()) {
-      if (std::find(devices.begin(), devices.end(), *iter) == devices.end()) {
-        iter = devices_.erase(iter);
+    // remove devices that are no longer used
+    for (auto it = devices_.begin(); it != devices_.end();) {
+      if (std::find(devices.begin(), devices.end(), *it) == devices.end()) {
+        it = devices_.erase(it);
       } else {
-        iter++;
+        it++;
       }
     }
   }

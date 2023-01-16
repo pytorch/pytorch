@@ -26,7 +26,7 @@ void validateParallelizationOfTensor(TensorView* tv) {
     // It doesn't matter if this axis is a non-concretized broadcast
     // TODO: merging broadcast and non-broadcast
     if (axis->isBroadcast() &&
-        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+        !GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
             axis)) {
       continue;
     }
@@ -195,7 +195,7 @@ void SyncMap::build(Fusion* fusion) {
               (!parallel_bcast_doms.get(consumer_ptype) ||
                !GpuLower::current()
                     ->concretizedBroadcastDomains()
-                    .isConcretized(consumer_axis))) {
+                    ->isConcretized(consumer_axis))) {
             continue;
           }
 
@@ -240,12 +240,12 @@ void SyncMap::build(Fusion* fusion) {
                     p_id, c_id, IdMappingMode::PERMISSIVE)) {
               const auto halo_info = GpuLower::current()->haloInfo();
 
-              if (halo_info.hasHaloWidth(p_id) !=
-                      halo_info.hasHaloWidth(c_id) ||
-                  (halo_info.hasHaloWidth(p_id) &&
-                   halo_info.hasHaloWidth(c_id) &&
-                   halo_info.getHaloWidth(p_id) !=
-                       halo_info.getHaloWidth(c_id))) {
+              if (halo_info->hasHaloWidth(p_id) !=
+                      halo_info->hasHaloWidth(c_id) ||
+                  (halo_info->hasHaloWidth(p_id) &&
+                   halo_info->hasHaloWidth(c_id) &&
+                   halo_info->getHaloWidth(p_id) !=
+                       halo_info->getHaloWidth(c_id))) {
                 raw_dims.set(parallel_type);
                 continue;
               }
@@ -410,33 +410,13 @@ void SyncMap::build(Fusion* fusion) {
             }
           }
 
-          // If same parallel type and mapped, no need for syncs unless
-          // producer is in smem, producer parallel type is a thread
-          // dimension, and consumer concretizes the dimension. This sync is
-          // due to the redundant predicate omission in lower thread
-          // predicate.
-          auto redundant_preds = GpuLower::current()
-                                     ->threadPredMap()
-                                     .getPredicateInfo(producer)
-                                     .redundant_types;
-
-          if (p_id->isBroadcast() &&
-              GpuLower::current()->concretizedBroadcastDomains().isConcretized(
-                  p_id) &&
-              producer->getMemoryType() == MemoryType::Shared &&
-              redundant_preds.hasTID()) {
-            redundant_preds.clearAllBID();
-            raw_dims |= redundant_preds;
-            continue;
-          }
-
           // When the producer axis is a broadcast, it is not really
           // parallelized unless thread-predicated and concretized
           if (isParallelTypeThread(producer_ptype) && p_id->isBroadcast() &&
               (!parallel_bcast_doms.get(producer_ptype) ||
                !GpuLower::current()
                     ->concretizedBroadcastDomains()
-                    .isConcretized(p_id))) {
+                    ->isConcretized(p_id))) {
             continue;
           }
 
@@ -483,7 +463,7 @@ void SyncMap::build(Fusion* fusion) {
       } // end for consumers
 
       if (raw_dims.any()) {
-        needs_raw_sync_[producer] = raw_dims;
+        needs_raw_sync_[producer] |= raw_dims;
       }
 
     } // end producer
@@ -492,10 +472,14 @@ void SyncMap::build(Fusion* fusion) {
 
 std::string SyncMap::toString() const {
   std::stringstream ss;
-  ss << "TVs requiring RAW:" << std::endl;
+  ss << "SyncMap:";
+  bool is_first = true;
   for (auto entry : needs_raw_sync_) {
-    ss << "  " << entry.first->toString() << " :: " << entry.second.toString()
-       << std::endl;
+    if (!is_first) {
+      ss << ",";
+    }
+    ss << " " << entry.first->toString() << " -> " << entry.second.toString();
+    is_first = false;
   }
   return ss.str();
 }

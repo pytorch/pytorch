@@ -70,8 +70,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -112,7 +111,7 @@ struct PythonResolver : public Resolver {
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
@@ -153,7 +152,7 @@ struct PythonResolver : public Resolver {
     }
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
 
@@ -366,7 +365,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const ResolutionCallback& rcb,
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
-  if (signature.is(py::none())) {
+  if (signature.is_none()) {
     throw ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions";
   }
@@ -1260,8 +1259,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const Module& m) {
             std::vector<StrongFunctionPtr> funcs;
             for (auto& hook : m.type()->getForwardHooks()) {
-              funcs.emplace_back(
-                  StrongFunctionPtr(m.type()->compilation_unit(), hook));
+              funcs.emplace_back(m.type()->compilation_unit(), hook);
             }
             return funcs;
           })
@@ -1270,8 +1268,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const Module& m) {
             std::vector<StrongFunctionPtr> funcs;
             for (auto& pre_hook : m.type()->getForwardPreHooks()) {
-              funcs.emplace_back(
-                  StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
+              funcs.emplace_back(m.type()->compilation_unit(), pre_hook);
             }
             return funcs;
           })
@@ -1774,10 +1771,10 @@ void initJitScriptBindings(PyObject* module) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
                 << "Currently class bodies can only contain method "
-                   "definitions. File an issue on Github if you want "
+                   "definitions. File an issue on GitHub if you want "
                    "something else!";
           }
-          methodDefs.emplace_back(Def(def));
+          methodDefs.emplace_back(def);
           methodRcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
@@ -1869,7 +1866,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          const py::dict& extra_files) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1889,7 +1886,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1909,7 +1906,7 @@ void initJitScriptBindings(PyObject* module) {
          const py::dict& extra_files) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1924,7 +1921,7 @@ void initJitScriptBindings(PyObject* module) {
       "_load_for_lite_interpreter",
       [](const std::string& filename, py::object map_location) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1936,7 +1933,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -2390,5 +2387,5 @@ void initJitScriptBindings(PyObject* module) {
   initScriptDictBindings(module);
   initScriptListBindings(module);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

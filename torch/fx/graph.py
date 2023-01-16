@@ -1,3 +1,4 @@
+from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
@@ -120,7 +121,8 @@ class _Namespace:
     def __init__(self):
         self._obj_to_name: Dict[Any, str] = {}
         self._unassociated_names = set()
-        self._used_names: Dict[str, int] = {}
+        self._used_names: Set[str] = set()
+        self._base_count: Dict[str, int] = defaultdict(int)
 
         self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
         self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
@@ -138,6 +140,9 @@ class _Namespace:
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
 
+        if not candidate:
+            candidate = '_unnamed'
+
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
@@ -150,13 +155,15 @@ class _Namespace:
             num = int(num_str)
 
         candidate = base if num is None else f'{base}_{num}'
-        num = num if num else 0
+        if not num:
+            num = self._base_count[base]
 
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
             num += 1
             candidate = f'{base}_{num}'
 
-        self._used_names.setdefault(candidate, 0)
+        self._used_names.add(candidate)
+        self._base_count[base] = num
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
@@ -445,21 +452,13 @@ class CodeGen(object):
 
                         lines = node.stack_trace.strip().split('\n')
                         idx = 0
-                        context_lines = []
                         while idx < len(lines):
                             line = lines[idx].strip()
                             if line.startswith('File '):
                                 break
-
-                            # Skip printing module stack
-                            if not line.startswith("Module stack"):
-                                context_lines.append(line)
                             idx += 1
 
                         summary_lines = []
-                        if context_lines:
-                            summary_lines.append(', '.join(context_lines))
-
                         if idx + 1 < len(lines):
                             matches = pattern.match(lines[idx].strip())
                             if matches:
@@ -494,7 +493,7 @@ class CodeGen(object):
                 if isinstance(meta_val, FakeTensor):
                     maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
                 elif isinstance(meta_val, py_sym_types):
-                    maybe_type_annotation = f': Sym({meta_val.expr})'
+                    maybe_type_annotation = f': Sym({meta_val})'
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
 
@@ -623,17 +622,49 @@ class _PyTreeCodeGen(CodeGen):
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
+        # Given a user function/model:
+        #   myargs = [myargs0, myargs1]
+        #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
+        #   def forward(self, mypos, *myargs, mykey=None, **mykwargs):
+        #
+        # The generated code flattens all keywords into positional arguments for `forward()`
+        #   e.g forward(self, mypos, myargs0, myargs1, mykey, mykwargs0, mykwargs1):
+        #
+        # Within `forward`, `tree_flatten_spec``still parses args and kwargs separately
+        #   e.g. tree_flatten_spec(([mypos, myargs0, myargs1],
+        #                           {'mykey':mykey, 'mykwargs0':mykwargs0, 'mykwargs1':mykwargs1}),
+        #                          self._in_spec)
+        #
+        # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
+        #   e.g. tree_flatten_spec([mypos, myargs0, myargs1]), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
-        function_args = self.pytree_info.orig_args
-        has_orig_self = (function_args[0] == 'self')
+
+        fn_args = self.pytree_info.orig_args
+        has_orig_self = (fn_args[0] == 'self') if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, 'self')
-        function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
+        fn_definition = super().gen_fn_def(fn_args[:], maybe_return_annotation)
+
         if len(free_vars) > 0:  # pytree has placeholders in it
-            function_definition += f"""
-    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
-        return function_definition
+            # when kwargs is present, in_spec is tuple(args, kwargs)
+            has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
+                len(self.pytree_info.in_spec.children_specs) == 2 and \
+                self.pytree_info.in_spec.children_specs[0].type == tuple and \
+                self.pytree_info.in_spec.children_specs[1].type == dict
+            fn_kwargs = '{}'
+            fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
+            if has_args_kwargs_tuple:
+                count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
+                fn_args = self.pytree_info.orig_args[:count_args]
+                fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
+                                  self.pytree_info.in_spec.children_specs[1].context,
+                                  self.pytree_info.orig_args[count_args:])) + '}'
+                fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
+
+            fn_definition += f"""
+    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+        return fn_definition
 
     def generate_output(self, output_args):
         if self.pytree_info:

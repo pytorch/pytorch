@@ -81,16 +81,14 @@ struct CUDAMethods : public ProfilerStubs {
 
   void onEachDevice(std::function<void(int)> op) const override {
     at::cuda::OptionalCUDAGuard device_guard;
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    int count = at::cuda::device_count();
-    for (const auto i : c10::irange(count)) {
+    for (const auto i : c10::irange(at::cuda::device_count())) {
       device_guard.set_index(i);
       op(i);
     }
   }
 
   void synchronize() const override {
-    cudaDeviceSynchronize();
+    TORCH_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   bool enabled() const override {

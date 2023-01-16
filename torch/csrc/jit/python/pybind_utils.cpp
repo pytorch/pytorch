@@ -12,8 +12,7 @@
 
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static thread_local bool allow_numbers_as_tensors = false;
 
@@ -80,10 +79,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
-        } else if (torch::is_symint_node(py::handle(obj))) {
+        } else if (torch::is_symint(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(7777777);
-        } else if (torch::is_symfloat_node(py::handle(obj))) {
+        } else if (torch::is_symfloat(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
         } else {
@@ -161,12 +160,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return py::cast<int64_t>(obj);
     }
     case TypeKind::SymIntType:
-      if (torch::is_symint_node(obj.ptr())) {
+      if (torch::is_symint(obj.ptr())) {
         return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::SymFloatType:
-      if (torch::is_symfloat_node(obj.ptr())) {
+      if (torch::is_symfloat(obj.ptr())) {
         return py::cast<c10::SymFloat>(obj);
       }
       return py::cast<double>(obj);
@@ -222,8 +221,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
-      auto stream = reinterpret_cast<THPStream*>(obj.ptr());
-      return static_cast<int64_t>(stream->cdata);
+      auto thp_stream = reinterpret_cast<THPStream*>(obj.ptr());
+      auto stream = c10::Stream::unpack3(
+          thp_stream->stream_id,
+          thp_stream->device_index,
+          thp_stream->device_type);
+      return stream;
     }
     case TypeKind::ListType: {
       // If the object is a ScriptList, retrieve the c10::List
@@ -253,7 +256,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint_node(elm)) {
+            if (torch::is_symint(elm)) {
               is_symbolic = true;
               break;
             }
@@ -269,7 +272,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
             // TODO: what about SymInt conversion to SymFloat?
-            if (torch::is_symfloat_node(elm)) {
+            if (torch::is_symfloat(elm)) {
               is_symbolic = true;
               break;
             }
@@ -442,9 +445,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       } else if (PyComplex_CheckExact(obj.ptr())) {
         auto c_obj = py::cast<std::complex<double>>(obj.ptr());
         return static_cast<c10::complex<double>>(c_obj);
-      } else if (torch::is_symint_node(obj)) {
+      } else if (torch::is_symint(obj)) {
         return py::cast<c10::SymInt>(obj);
-      } else if (torch::is_symfloat_node(obj)) {
+      } else if (torch::is_symfloat(obj)) {
         return py::cast<c10::SymFloat>(obj);
       } else {
         throw py::cast_error(
@@ -535,9 +538,9 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(autograd::Variable(std::move(tensor)));
     }
   } else if (ivalue.isStorage()) {
-    return py::cast(ivalue.toStorage());
+    return py::cast(std::move(ivalue).toStorage());
   } else if (ivalue.isGenerator()) {
-    return py::cast(ivalue.toGenerator());
+    return py::cast(std::move(ivalue).toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -656,9 +659,9 @@ py::object toPyObject(IValue ivalue) {
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
-    return py::cast(ivalue.toSymInt());
+    return py::cast(std::move(ivalue).toSymInt());
   } else if (ivalue.isSymFloat()) {
-    return py::cast(ivalue.toSymFloat());
+    return py::cast(std::move(ivalue).toSymFloat());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -678,7 +681,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     stack = createStackForSchema(
         op->schema(), std::move(args), kwargs, c10::nullopt);
 
-    return std::make_pair(op, stack);
+    return std::make_pair(std::move(op), std::move(stack));
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -700,7 +703,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       throw std::runtime_error(ss.str());
     }
 
-    return std::make_pair(found_op, stack);
+    return std::make_pair(std::move(found_op), std::move(stack));
   }
 }
 
@@ -755,8 +758,7 @@ py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0 ||
-      at::impl::PythonTorchFunctionTLS::get_mode()) {
+  if (overloaded_args.size() > 0 || at::impl::torch_function_mode_enabled()) {
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();
@@ -786,5 +788,4 @@ py::object _get_operation_for_overload_or_packet(
   return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

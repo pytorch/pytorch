@@ -1,19 +1,75 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <c10/util/Exception.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
-#include <ATen/native/Fill.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/TensorIndexing.h>
 #include <ATen/native/TypeProperties.h>
-#include <c10/core/QScheme.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_aminmax_native.h>
+#include <ATen/ops/_assert_async_native.h>
+#include <ATen/ops/_make_per_tensor_quantized_tensor.h>
+#include <ATen/ops/_unique.h>
+#include <ATen/ops/allclose_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/argsort_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/clamp.h>
+#include <ATen/ops/clamp_max.h>
+#include <ATen/ops/clamp_max_native.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/clamp_min_native.h>
+#include <ATen/ops/clamp_native.h>
+#include <ATen/ops/clip_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/eq.h>
+#include <ATen/ops/fill.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/index.h>
+#include <ATen/ops/is_nonzero_native.h>
+#include <ATen/ops/isclose.h>
+#include <ATen/ops/isclose_native.h>
+#include <ATen/ops/isfinite.h>
+#include <ATen/ops/isfinite_native.h>
+#include <ATen/ops/isin.h>
+#include <ATen/ops/isin_native.h>
+#include <ATen/ops/isinf.h>
+#include <ATen/ops/isinf_native.h>
+#include <ATen/ops/isnan_native.h>
+#include <ATen/ops/isneginf_native.h>
+#include <ATen/ops/isposinf_native.h>
+#include <ATen/ops/isreal_native.h>
+#include <ATen/ops/max.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/min.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/mode.h>
+#include <ATen/ops/mode_native.h>
+#include <ATen/ops/ne.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/result_type_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/where_native.h>
+#include <ATen/ops/zeros_like.h>
+
+#include <utility>
+#endif
 
 namespace at {
 namespace meta {
@@ -371,7 +427,7 @@ static void isin_sorting(
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
-  Tensor all_elements = at::cat({elements_flat, test_elements_flat});
+  Tensor all_elements = at::cat({std::move(elements_flat), std::move(test_elements_flat)});
   Tensor sorted_elements, sorted_order;
   std::tie (sorted_elements, sorted_order) = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);

@@ -5,7 +5,7 @@ ModelReport
 
  > ⚠️ *While the example below uses the Fx Workflow, the use of the ModelReport class **does not depend** on the Fx Workflow to work*.
  The requirements are detector dependent.
- Most detectors require a **traceable GraphModule**, but some (ex. `PerChannelDetector`) require just a `nn.Module`.
+ Most detectors require a **traceable GraphModule**, but some (ex. `PerChannelDetector`) require just an `nn.Module`.
 
 #### Typical Fx Workflow
 - Initialize model &rarr; Prepare model &rarr; Callibrate model &rarr; Convert model &rarr; ...
@@ -32,7 +32,7 @@ model_report = ModelReport(model, detector_set)
 ready_for_callibrate = model_report.prepare_detailed_callibration()
 
 # callibrate model and generate report
-ready_for_callibrate(example_input) # TODO run callibration of model with relavent data
+ready_for_callibrate(example_input) # TODO run callibration of model with relevant data
 reports = model_report.generate_model_report(remove_inserted_observers=True)
 for report_name in report.keys():
     text_report, report_dict = reports[report_name]
@@ -61,8 +61,8 @@ This is so that we can keep track of where we want to insert observers on a dete
 - `prepare_detailed_calibration(self)` &rarr; `GraphModule` inserts observers into the locations specified by each detector in the model.
 It then returns the GraphModule with the detectors inserted into both the regular module structure as well as the node structure.
 - `generate_model_report(self, remove_inserted_observers: bool)` &rarr; `Dict[str, Tuple[str, Dict]]` uses callibrated GraphModule to optionally removes inserted observers, and generate, for each detector the ModelReport instance was initialized with:
-  - A string-based report that is easily digestable and actionable explaining the data collected by relavent observers for that detector
-  - A dictionary containing statistics collected by the relavent observers and values calculated by the detector for futher analysis or plotting
+  - A string-based report that is easily digestable and actionable explaining the data collected by relevant observers for that detector
+  - A dictionary containing statistics collected by the relevant observers and values calculated by the detector for further analysis or plotting
 
 ## ModelReportVisualizer Overview
 
@@ -127,21 +127,21 @@ return_dict = {
     "[unique_observer_fqn_of_insert_location]" :
     {
         "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node),
-        "insert_observer" -> the intialized observer we wish to insert (ObserverBase),
+        "insert_observer" -> the initialized observer we wish to insert (ObserverBase),
         "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer,
         "observer_args" -> The arguments that are meant to be passed into the observer,
     }
 }
 ```
 - `get_detector_name(self)` -> `str`: returns the name of the detector.
-You should give your detector a unique name different from exisiting detectors.
+You should give your detector a unique name different from existing detectors.
 - `generate_detector_report(self, model)` -> `Tuple[str, Dict[str, Any]]`: generates a report based on the information the detector is trying to collect.
 This report consists of both a text-based report as well as a dictionary of collected and calculated statistics.
 This report is returned to the `ModelReport` instance, which will then compile all the reports of all the Detectors requested by the user.
 
 ## ModelReportObserver Overview
 
-As seen in the [requirments to implement a detector section](#requirements-to-implement-a-detector), one of the key parts of implementing a detector is to specify what `Observer` we are trying to insert.
+As seen in the [requirements to implement a detector section](#requirements-to-implement-a-detector), one of the key parts of implementing a detector is to specify what `Observer` we are trying to insert.
 All the detectors in the ModelReport API use the [`ModelReportObserver`](https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/fx/_model_report/model_report_observer.py).
 While the core purpose of many observers in PyTorch's Quantization API is to collect min / max information to help determine quantization parameters, the `ModelReportObserver` collects additional statistics.
 
@@ -152,7 +152,7 @@ The statistics collected by the `ModelReportObserver` include:
 - Ratio of 100th percentile to some *n*th percentile
 - Number of constant value batches to pass through each channel
 
-After the `ModelReportObserver` collects the statistics above during the callibration process, the detectors then extract the information they need to generate their reports from the relavent observers.
+After the `ModelReportObserver` collects the statistics above during the callibration process, the detectors then extract the information they need to generate their reports from the relevant observers.
 
 ### Using Your Own Observer
 
@@ -187,7 +187,7 @@ Since you are also implementing your own detector in this case, it is up to you 
     - A line plot (for both per-tensor and per-channel statistics)
     - A histogram (for both per-tensor and per-channel statistics)
 - `model_report.py`: File containing the `ModelReport` class
-  - Main class users are interacting with to go through the ModelReport worflow
+  - Main class users are interacting with to go through the ModelReport workflow
   - API described in detail in [Overview section](#modelreport-overview)
 
 # Tests
@@ -200,7 +200,7 @@ These tests include:
 - Test class for the `ModelReportVisualizer` class
 - Test class for **each** of the implemented Detectors
 
-If you wish to add a Detector, make sure to create a test class modeled after one of the exisiting classes and test your detector.
+If you wish to add a Detector, make sure to create a test class modeled after one of the existing classes and test your detector.
 Because users will be interacting with the Detectors through the `ModelReport` class and not directly, ensure that the tests follow this as well.
 
 # Future Tasks and Improvements

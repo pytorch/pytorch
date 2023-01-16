@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
@@ -34,12 +33,12 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
+    string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-        MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
           CachedGraph* newCachedGraph = nil;
           @autoreleasepool {
@@ -72,7 +71,6 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
           }
           return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     // Inputs as placeholders
@@ -115,5 +113,4 @@ TORCH_IMPL_FUNC(addcdiv_out_mps)
   mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, const_cast<Tensor&>(output), true, "addcdiv_out_mps");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -73,7 +73,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
-from torch.testing._internal.common_utils import skipIfSlowGradcheckEnv
 
 from torch.jit._recursive import wrap_cpp_module
 
@@ -1626,7 +1625,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         torch.jit.save(model, b)
 
 
-@skipIfSlowGradcheckEnv
 class TestQuantizeJitOps(QuantizationTestCase):
     """Test graph mode post training static quantization works
     for individual ops end to end.
@@ -2674,6 +2672,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     m.graph
                 )
 
+    @override_qengines
     def test_hardswish(self):
         class FunctionalHardswish(torch.nn.Module):
             def __init__(self, inplace):
@@ -2698,6 +2697,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 m.graph
             )
 
+    @override_qengines
     def test_elu(self):
         class FunctionalELU(torch.nn.Module):
             def __init__(self, inplace=False):
@@ -2714,6 +2714,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             m = self.checkGraphModeOp(m, self.img_data_2d, "quantized::elu", tracing)
             FileCheck().check_not("aten::elu").check_not("aten::elu_").run(m.graph)
 
+    @override_qengines
     def test_layer_norm(self):
         data = [[torch.rand((1, 2, 5, 5), dtype=torch.float)] for _ in range(2)]
         layer_norm = torch.nn.LayerNorm([2, 5, 5])
@@ -2723,6 +2724,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             )
             FileCheck().check_not("aten::layer_norm").run(m.graph)
 
+    @override_qengines
     def test_group_norm(self):
         data = [[torch.rand((1, 4, 5, 5), dtype=torch.float)] for _ in range(2)]
         group_norm = torch.nn.GroupNorm(2, 4)
@@ -2732,6 +2734,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             )
             FileCheck().check_not("aten::group_norm").run(m.graph)
 
+    @override_qengines
     def test_instance_norm(self):
         data_1d = [[torch.rand((1, 4, 5), dtype=torch.float)] for _ in range(2)]
         data_2d = [[torch.rand((1, 4, 5, 1), dtype=torch.float)] for _ in range(2)]

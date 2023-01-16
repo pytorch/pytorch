@@ -1,34 +1,103 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/TensorFactories.h>
+
+#include <ATen/core/Tensor.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TracerMode.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Deprecated.h>
-#include <ATen/native/Math.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TensorFactories.h>
-#include <c10/core/TensorOptions.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <c10/util/Exception.h>
-#include <c10/util/irange.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+#include <c10/util/MathConstants.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cast_Byte_native.h>
+#include <ATen/ops/_cast_Char_native.h>
+#include <ATen/ops/_cast_Double_native.h>
+#include <ATen/ops/_cast_Float_native.h>
+#include <ATen/ops/_cast_Half_native.h>
+#include <ATen/ops/_cast_Int_native.h>
+#include <ATen/ops/_cast_Long_native.h>
+#include <ATen/ops/_cast_Short_native.h>
+#include <ATen/ops/_dim_arange_native.h>
+#include <ATen/ops/_efficientzerotensor_native.h>
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/bartlett_window_native.h>
+#include <ATen/ops/blackman_window_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/complex.h>
+#include <ATen/ops/complex_native.h>
+#include <ATen/ops/cumprod.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/eye.h>
+#include <ATen/ops/eye_native.h>
+#include <ATen/ops/fill_native.h>
+#include <ATen/ops/flip.h>
+#include <ATen/ops/from_file_native.h>
+#include <ATen/ops/full_like_native.h>
+#include <ATen/ops/full_native.h>
+#include <ATen/ops/hamming_window_native.h>
+#include <ATen/ops/hann_window_native.h>
+#include <ATen/ops/kaiser_window_native.h>
+#include <ATen/ops/linspace.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace.h>
+#include <ATen/ops/logspace_native.h>
+#include <ATen/ops/new_empty_native.h>
+#include <ATen/ops/new_empty_strided_native.h>
+#include <ATen/ops/new_full_native.h>
+#include <ATen/ops/new_ones_native.h>
+#include <ATen/ops/new_zeros_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/ones_like_native.h>
+#include <ATen/ops/ones_native.h>
+#include <ATen/ops/polar.h>
+#include <ATen/ops/polar_native.h>
+#include <ATen/ops/promote_types.h>
+#include <ATen/ops/rand_like_native.h>
+#include <ATen/ops/rand_native.h>
+#include <ATen/ops/randint_like_native.h>
+#include <ATen/ops/randint_native.h>
+#include <ATen/ops/randn_like_native.h>
+#include <ATen/ops/randn_native.h>
+#include <ATen/ops/randperm.h>
+#include <ATen/ops/randperm_native.h>
+#include <ATen/ops/range.h>
+#include <ATen/ops/range_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/tril_indices_native.h>
+#include <ATen/ops/triu_indices_native.h>
+#include <ATen/ops/vander_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#include <ATen/ops/zeros_native.h>
 #endif
 
+#include <c10/core/SymIntArrayRef.h>
 #include <algorithm>
-#include <cctype>
-#include <cmath>
 #include <cstddef>
 #include <string>
-#include <c10/core/SymIntArrayRef.h>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -256,12 +325,6 @@ Tensor empty_like(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
 
   TensorOptions options =
       self.options()
@@ -687,7 +750,7 @@ Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 Tensor& rand_out(IntArrayRef size, Tensor& result) {
@@ -696,7 +759,7 @@ Tensor& rand_out(IntArrayRef size, Tensor& result) {
 
 Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 Tensor rand_like(
@@ -731,7 +794,7 @@ Tensor randint(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::randint(0, high, size, generator, dtype, layout, device, pin_memory);
+  return native::randint(0, high, size, std::move(generator), dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
@@ -758,7 +821,7 @@ Tensor randint(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.random_(low, high, generator);
+  return result.random_(low, high, std::move(generator));
 }
 
 Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
@@ -770,7 +833,7 @@ Tensor& randint_out(int64_t high,
     c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
-  return result.random_(0, high, generator);
+  return result.random_(0, high, std::move(generator));
 }
 
 Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result) {
@@ -783,7 +846,7 @@ Tensor& randint_out(int64_t low,
     c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
-  return result.random_(low, high, generator);
+  return result.random_(low, high, std::move(generator));
 }
 
 Tensor randint_like(
@@ -836,7 +899,7 @@ Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor& randn_out(IntArrayRef size, Tensor& result) {
@@ -845,7 +908,7 @@ Tensor& randn_out(IntArrayRef size, Tensor& result) {
 
 Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
@@ -858,13 +921,13 @@ Tensor normal(double mean, double std, IntArrayRef size,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.normal_(mean, std, generator);
+  return result.normal_(mean, std, std::move(generator));
 }
 
 Tensor& normal_out(double mean, double std,
                    IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.normal_(mean, std, generator);
+  return result.normal_(mean, std, std::move(generator));
 }
 
 Tensor randn_like(
@@ -930,7 +993,7 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto tensor = at::empty(n, options);
-  return at::randperm_out(tensor, n, generator);
+  return at::randperm_out(tensor, n, std::move(generator));
 }
 
 Tensor& randperm_out(int64_t n, Tensor& result) {
@@ -1099,6 +1162,19 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
+Tensor _efficientzerotensor_meta(IntArrayRef size,
+                                 c10::optional<ScalarType> dtype,
+                                 c10::optional<Layout> layout,
+                                 c10::optional<Device> device,
+                                 c10::optional<bool> pin_memory) {
+  auto device_ = device_or_default(device);
+  auto allocator = at::native::ZeroTensorAllocator(device_);
+  auto dtype_ = dtype_or_default(dtype);
+  auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+  auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  return out;
+}
+
 Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
   result.sparse_resize_and_clear_(size, size.size(), 0.);
   return result;
@@ -1196,7 +1272,7 @@ Tensor bartlett_window(
                     .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ blackman_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1236,7 +1312,7 @@ Tensor blackman_window(
       native::arange(window_length, dtype, layout, device, pin_memory)
           .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hamming_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1304,7 +1380,7 @@ Tensor hamming_window(
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory);
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hann_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1388,7 +1464,7 @@ Tensor kaiser_window(
   auto window = at::empty(window_length, options);
   auto iter = TensorIterator::unary_op(window, initial);
   kaiser_window_stub(iter.device_type(), iter, window_length, beta);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1564,7 +1640,7 @@ Tensor randn(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, names, options);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor rand(
@@ -1589,7 +1665,7 @@ Tensor rand(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, names, options);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 

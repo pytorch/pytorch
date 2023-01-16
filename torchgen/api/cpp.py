@@ -314,7 +314,7 @@ JIT_TO_CPP_DEFAULT = {
 }
 
 # Convert a JIT default into C++ expression representing the default
-def default_expr(d: str, t: Type) -> str:
+def default_expr(d: str, t: Type, *, symint: bool) -> str:
     if d == "None" and str(t) == "Tensor?":
         return "{}"
     if isinstance(t, BaseType) and t.name is BaseTy.str:
@@ -342,11 +342,13 @@ def default_expr(d: str, t: Type) -> str:
         if d == "None":
             return "c10::nullopt"
 
-        return default_expr(d, t.elem)
+        return default_expr(d, t.elem, symint=symint)
 
     if isinstance(t, ListType):
         if d.startswith("[") and d.endswith("]"):
             return "{" + d[1:-1] + "}"
+        elif symint and d.isdigit() and str(t.elem) == "SymInt":
+            return f"c10::SymInt({d})"
         elif t.size is None:
             # NOTE: Sized lists can have scalar defaults
             raise ValueError(f"Expected a list default '[...]' but found: '{d}'")
@@ -386,7 +388,7 @@ def argument(
             binds = a.name
         default: Optional[str] = None
         if a.name not in cpp_no_default_args and a.default is not None:
-            default = default_expr(a.default, a.type)
+            default = default_expr(a.default, a.type, symint=symint)
         return [
             Binding(
                 nctype=argument_type(a, binds=binds, symint=symint),

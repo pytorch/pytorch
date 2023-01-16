@@ -34,6 +34,10 @@ torch.backends.cuda
 
     A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
 
+.. attribute::  torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+
+    A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
+
 .. attribute::  torch.backends.cuda.cufft_plan_cache
 
     ``cufft_plan_cache`` caches the cuFFT plans
@@ -52,7 +56,13 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
+.. autoclass:: torch.backends.cuda.SDPBackend
+
 .. autofunction:: torch.backends.cuda.flash_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_mem_efficient_sdp
+
+.. autofunction:: torch.backends.cuda.mem_efficient_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_flash_sdp
 

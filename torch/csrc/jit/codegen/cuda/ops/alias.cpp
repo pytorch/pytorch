@@ -36,16 +36,14 @@ TensorView* applyViewTransforms(
     TensorView* orig_tv,
     TensorView* post_reduce_tv,
     const AnalyzeViewResult& view_analysis) {
+  TORCH_INTERNAL_ASSERT(orig_tv != nullptr, "Input is invalid.");
+  TORCH_INTERNAL_ASSERT(post_reduce_tv != nullptr, "Input is invalid.");
   TORCH_INTERNAL_ASSERT(
       !post_reduce_tv->hasComputeAt(),
       "Cannot modify rfactor domain after compute at has been set.");
 
   TORCH_INTERNAL_ASSERT(
       post_reduce_tv->nDims() > 0, "Tried to view a 0-dim TensorView");
-
-  TORCH_CHECK(
-      !post_reduce_tv->domain()->hasRFactor(),
-      "Cannot call view on the same TensorView twice.");
 
   TORCH_INTERNAL_ASSERT(!view_analysis.transforms.empty());
 
@@ -62,6 +60,7 @@ TensorView* applyViewTransforms(
 } // namespace
 
 TensorView* view(TensorView* x, DataType dtype) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   if (x->getDataType() == dtype) {
     return x;
   }
@@ -81,6 +80,7 @@ TensorView* view(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size() ==
       original_sizes.size());
@@ -111,6 +111,7 @@ TensorView* view(
 }
 
 TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
   if (start_dim < 0) {
     start_dim += inp_domain.size();
@@ -140,6 +141,7 @@ TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   TORCH_INTERNAL_ASSERT(
@@ -163,6 +165,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   TORCH_INTERNAL_ASSERT(
@@ -191,6 +194,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
 }
 
 TensorView* unsqueeze(TensorView* x, int dim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   if (dim < 0) {
@@ -210,17 +214,31 @@ TensorView* unsqueeze(TensorView* x, int dim) {
 }
 
 TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   if (new2old.size() == 0) {
     return set(x);
   }
   auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
   std::vector<IterDomain*> out_domain(inp_domain.size());
 
+  TORCH_CHECK(
+      inp_domain.size() == new2old.size(),
+      "The number of dimensions in the tensor input does not match the length",
+      " of the desired ordering of dimensions i.e. input.dim() = ",
+      inp_domain.size(),
+      " is not equal to len(dims) = ",
+      new2old.size());
+
+  // Return scalar tensors immediately
+  if (inp_domain.size() == 0) {
+    return set(x);
+  }
+
   auto normalized_new2old =
       ir_utils::normalizeNew2Old(new2old, inp_domain.size());
 
   for (const auto i : c10::irange(out_domain.size())) {
-    auto in_id = inp_domain[new2old[i]];
+    auto in_id = inp_domain[normalized_new2old[i]];
     out_domain[i] = in_id->cloneWithoutRFactor();
   }
 
@@ -233,6 +251,7 @@ TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
 }
 
 TensorView* transpose(TensorView* x, int64_t dim0, int64_t dim1) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   if (dim0 < 0) {
@@ -263,6 +282,7 @@ TensorView* transpose(TensorView* x, int64_t dim0, int64_t dim1) {
 }
 
 TensorView* transpose(TensorView* x) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   TORCH_CHECK(

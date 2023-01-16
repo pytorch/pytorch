@@ -68,7 +68,8 @@ def torch_to_refs_map():
 
     # Support conversions
     for s in torch._refs._conversions.__all__:
-        r[getattr(torch.Tensor, s)] = torch._refs._conversions.__dict__.get(s)
+        tensor_attr = getattr(torch.Tensor, s, None) or getattr(torch, s)
+        r[tensor_attr] = torch._refs._conversions.__dict__.get(s)
 
     return r
 
@@ -254,10 +255,6 @@ def _is_func_unsupported_nvfuser(
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
     def __init__(self, *, skip_ops=()):
         aten_ops_to_skip = (
-            "aten.transpose.int",
-            "aten.t.default",
-            "aten.unsqueeze.default",
-            "aten.permute.default",
             "aten._log_softmax.default",
             "aten._log_softmax_backward_data.default",
             "aten.expand.default",
@@ -367,6 +364,16 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         )
         return result
 
+    def _is_full(self, func):
+        result = "torch.full" == torch.overrides.resolve_name(func) or (
+            func
+            in [
+                torch.ops.aten.full,
+                torch.ops.aten.full.names,
+            ]
+        )
+        return result
+
     def __torch_function__(
         self,
         orig_func: Callable,
@@ -405,6 +412,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
                 warn("view has ignored kwargs!")
             return torch.ops.nvprims.view(a, shape)
 
+        if orig_func == torch.ops.aten._reshape_alias.default:
+            a, shape, stride = args
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
+
         if self._is_native_batch_norm(orig_func):
             return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
 
@@ -412,6 +425,9 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             if len(kwargs) > 0:
                 warn("rand_like has ignored kwargs!")
             return torch.ops.nvprims.rand_like(*args)
+
+        if self._is_full(orig_func):
+            return torch.ops.nvprims.full(*args, **kwargs)
 
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)

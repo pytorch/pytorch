@@ -41,8 +41,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  # enable split torch_cuda build option in CMake
-  export BUILD_SPLIT_CUDA=ON
   if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
@@ -51,7 +49,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
+  echo "Caffe2 build is ON"
   export BUILD_CAFFE2=ON
 fi
 
@@ -62,9 +61,6 @@ elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
-# TODO: Don't run this...
-pip_install -r requirements.txt || true
-
 # Enable LLVM dependency for TensorExpr testing
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export USE_LLVM=/opt/rocm/llvm
@@ -74,13 +70,11 @@ else
   export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 fi
 
-# TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
@@ -189,17 +183,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 
-# TODO: Remove after xenial->focal migration
-if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
-    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
-  fi
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-focal-py3* ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
-    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
-  fi
+if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+  export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
@@ -207,9 +192,20 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  tools/bazel build --config=no-tty //...
+  # Bazel build is run on a linux.2xlarge (or c5.2xlarge) runner with 8 CPU and 16GB of memory.
+  # The build job sometimes fails with 'runner lost communication with the server' flaky error
+  # which indicates that something there crashes the runner process. The most likely reason is
+  # that the build runs out of memory. So trying to follow https://bazel.build/docs/user-manual
+  # to limit the memory the CPU and memory usage, so that we will know even if it crashes with
+  # OOM error instead of crashing the runner and losing all the logs.
+  #
+  # Leave 1 CPU free and use only up to 80% of memory
+  BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
+  BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
+
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   # Build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty --config=cpu-only :torch :_C.so :all_tests
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
 
 else
   # check that setup.py would fail with bad arguments
@@ -230,7 +226,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
+    pip_install_whl "$(echo dist/*.whl)"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x

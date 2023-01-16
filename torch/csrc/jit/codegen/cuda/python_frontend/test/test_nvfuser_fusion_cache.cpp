@@ -6,6 +6,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
 
 // Tests go in torch::jit
 namespace torch {

@@ -73,10 +73,15 @@ Devices = ["cpu"]
 if torch.cuda.is_available():
     Devices.append("cuda")
 
+
+def name_fn(common_pass, f, device):
+    """Names parameterized test cases."""
+    return f'{type(common_pass()).__name__}_{f.__name__}_{device}'
+
 @instantiate_parametrized_tests
 class TestCommonPass(TestCase):
 
-    @parametrize("common_pass,f,device", itertools.product(Passes, Test_Cases, Devices))
+    @parametrize("common_pass,f,device", itertools.product(Passes, Test_Cases, Devices), name_fn)
     def test_correctness(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
 
@@ -94,7 +99,7 @@ class TestCommonPass(TestCase):
         self.assertEqual(result, expected)
 
 
-    @parametrize("common_pass,f,device", itertools.product(Passes, Factory_Test_Cases, Devices))
+    @parametrize("common_pass,f,device", itertools.product(Passes, Factory_Test_Cases, Devices), name_fn)
     def test_correctness_factory(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
         traced_m = make_fx(f)(inp, device)

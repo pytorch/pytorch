@@ -1,7 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/PadNd.h>
+#include <ATen/core/Tensor.h>
 
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_pad_circular.h>
+#include <ATen/ops/_pad_circular_native.h>
+#include <ATen/ops/_pad_enum_native.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/constant_pad_nd_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/pad_native.h>
+#include <ATen/ops/reflection_pad1d.h>
+#include <ATen/ops/reflection_pad2d.h>
+#include <ATen/ops/reflection_pad3d.h>
+#include <ATen/ops/replication_pad1d.h>
+#include <ATen/ops/replication_pad2d.h>
+#include <ATen/ops/replication_pad3d.h>
+#endif
 
 namespace at { namespace native {
 
@@ -97,9 +118,9 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
 
   // Get shape of padded tensor
   for (const auto i : c10::irange(ndim)) {
-    const auto pad_l = padding[2 * (ndim - i - 1) + 0];
-    const auto pad_r = padding[2 * (ndim - i - 1) + 1];
-    const auto size = in_shape[2 + i];
+    const auto& pad_l = padding[2 * (ndim - i - 1) + 0];
+    const auto& pad_r = padding[2 * (ndim - i - 1) + 1];
+    const auto& size = in_shape[2 + i];
     out_shape[2 + i] = size + pad_l + pad_r;
 
     TORCH_CHECK(
@@ -118,8 +139,8 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   const SymInt zero = 0;
   for (const auto i : c10::irange(ndim)) {
     const auto dim = ndim - i + 1;
-    const auto pad_l = padding[2*i + 0];
-    const auto pad_r = padding[2*i + 1];
+    const auto& pad_l = padding[2*i + 0];
+    const auto& pad_r = padding[2*i + 1];
     out_slice = out_slice.slice_symint(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
     in_slice = in_slice.slice_symint(dim, std::max(-pad_l, zero), in_shape[dim] - std::max(-pad_r, zero));
   }
@@ -133,8 +154,8 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   // is required.
   for (const auto i : c10::irange(ndim)) {
     const auto dim = ndim - i + 1;
-    const auto pad_l = padding[2*i + 0];
-    const auto pad_r = padding[2*i + 1];
+    const auto& pad_l = padding[2*i + 0];
+    const auto& pad_r = padding[2*i + 1];
 
     if (pad_l > 0) {
       out_slice = out.slice_symint(dim, 0, pad_l);

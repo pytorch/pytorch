@@ -22,7 +22,7 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CFLAGS="-fsanitize=thread" \
   USE_TSAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py bdist_wheel
-  python -mpip install dist/*.whl
+  pip_install_whl "$(echo dist/*.whl)"
 
 print_sccache_stats
 

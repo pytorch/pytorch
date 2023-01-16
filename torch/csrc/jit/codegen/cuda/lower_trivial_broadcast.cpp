@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
@@ -10,7 +9,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-void ConcretizedBroadcastDomains::build(Fusion* fusion) {
+ConcretizedBroadcastDomains::ConcretizedBroadcastDomains(Fusion* fusion) {
   exact_map_ = std::make_unique<ExactRootDomainMap>(fusion);
 
   // Initialize the origin map with input broadcast domains

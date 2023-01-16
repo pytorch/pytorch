@@ -9,9 +9,12 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import CPUOffload
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp import (
+    CPUOffload,
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp.flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -25,10 +28,10 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -52,10 +55,8 @@ def _run_test_summon_full_param_writeback(
         model = wrap(nn.Sequential(lin1, lin2))
 
     # set the value
-    outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-    inner_param = model.get_parameter(
-        "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-    )
+    outer_param = model._handles[0].flat_param
+    inner_param = model.module[0]._handles[0].flat_param
     p = outer_param if modify_outer else inner_param
 
     with torch.no_grad():
@@ -131,7 +132,9 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_summon_full_param_shard_value(self, mixed_precision):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        mixed_precision = (
+            MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        )
         raw_model = nn.Linear(10, 11)
         raw_model_size = self.get_model_param_count(raw_model)
         expected_shard_size = self.get_expected_sharded_size(raw_model_size)
@@ -161,7 +164,9 @@ class TestSummonFullParams(FSDPTest):
     @parametrize("summon_outer", [True, False])
     @parametrize("mixed_precision", [True, False])
     def test_summon_full_param_recursive(self, recurse, summon_outer, mixed_precision):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        mixed_precision = (
+            MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        )
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -176,10 +181,8 @@ class TestSummonFullParams(FSDPTest):
         shard_inner_numel = int(math.ceil(global_inner_numel / self.world_size))
         shard_outer_numel = int(math.ceil(global_outer_numel / self.world_size))
 
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-        )
+        outer_param = model._handles[0].flat_param
+        inner_param = model.module[0]._handles[0].flat_param
         self.assertEqual(shard_outer_numel, outer_param.numel())
         self.assertEqual(shard_inner_numel, inner_param.numel())
 
@@ -209,7 +212,7 @@ class TestSummonFullParams(FSDPTest):
 
         model = FSDP(MyModule()).cuda(self.rank)
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState_.FORWARD"
+            ValueError, "Current handle state is HandleTrainingState.FORWARD"
         ):
             model(model)
 
@@ -228,7 +231,7 @@ class TestSummonFullParams(FSDPTest):
         output.register_hook(bad_backwards_hook)
 
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState_.BACKWARD_PRE"
+            ValueError, "Current handle state is HandleTrainingState.BACKWARD_PRE"
         ):
             output.backward()
 
@@ -243,9 +246,7 @@ class TestSummonFullParams(FSDPTest):
         )
 
     def _test_summon_full_params_respects_reshard_after_forward(
-        self,
-        mixed_precision: Optional[MixedPrecision],
-        use_orig_params: bool
+        self, mixed_precision: Optional[MixedPrecision], use_orig_params: bool
     ):
         fsdp_kwargs = {
             "mixed_precision": mixed_precision,
@@ -259,10 +260,8 @@ class TestSummonFullParams(FSDPTest):
             **fsdp_kwargs,
         ).cuda(self.rank)
 
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-        )
+        outer_param = model._handles[0].flat_param
+        inner_param = model.module[0]._handles[0].flat_param
         outer_full_param_size = outer_param.numel() * self.world_size
 
         # trigger lazy init
@@ -285,7 +284,7 @@ class TestSummonFullParams(FSDPTest):
     def test_summon_single_param(self):
         model = FSDP(nn.Linear(1, 1, bias=False)).cuda(self.rank)
 
-        p = model.get_parameter("_fsdp_wrapped_module.flat_param")
+        p = model._handles[0].flat_param
         self.assertEqual(1, p.numel())
 
         with torch.no_grad():
@@ -379,7 +378,9 @@ class TestSummonFullParams(FSDPTest):
     def test_reshard_outside_forward_backward_iteration(
         self, rank0_only, offload_to_cpu, mixed_precision
     ):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        mixed_precision = (
+            MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        )
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -388,10 +389,8 @@ class TestSummonFullParams(FSDPTest):
             mixed_precision=mixed_precision,
         ).cuda(self.rank)
 
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-        )
+        outer_param = model._handles[0].flat_param
+        inner_param = model.module[0]._handles[0].flat_param
         outer_full_param_size = outer_param.numel() * self.world_size
 
         # First lets validate our assumption about resharding
@@ -445,13 +444,15 @@ class TestSummonFullParams(FSDPTest):
     def test_params_are_unflattenned(self, rank0_only, offload_to_cpu, mixed_precision):
         layer_shape = (10, 12)
         model = nn.Linear(*layer_shape, bias=False).cuda(self.rank)
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        mixed_precision = (
+            MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        )
         fsdp_model = FSDP(deepcopy(model), mixed_precision=mixed_precision).cuda(
             self.rank
         )
 
         def _get_flat_param():
-            return fsdp_model.get_parameter("_fsdp_wrapped_module.flat_param")
+            return fsdp_model._handles[0].flat_param
 
         flattened_param = _get_flat_param()
         self.assertEqual(layer_shape[0] * layer_shape[1] / 2, flattened_param.numel())
@@ -494,7 +495,9 @@ class TestSummonFullParams(FSDPTest):
         offload_to_cpu: bool,
         mixed_precision: bool,
     ):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        mixed_precision = (
+            MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+        )
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -582,7 +585,8 @@ class TestSummonFullParams(FSDPTest):
                     self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
-    def test_with_grads(self):
+    def test_with_grads_core(self):
+        """Tests the core usage of ``summon_full_params(with_grads=True)``."""
         self.run_subtests(
             {
                 "writeback": [False, True],
@@ -594,10 +598,10 @@ class TestSummonFullParams(FSDPTest):
                 ],
                 "use_orig_params": [True],
             },
-            self._test_with_grads,
+            self._test_with_grads_core,
         )
 
-    def _test_with_grads(
+    def _test_with_grads_core(
         self,
         writeback: bool,
         offload_to_cpu: bool,
@@ -631,10 +635,13 @@ class TestSummonFullParams(FSDPTest):
                     assert torch.count_nonzero(p2.grad) > 0
                     p2.grad *= WRITEBACK_FACTOR
             new_fsdp_grads = [
-                param.grad for param in fsdp_model.parameters()
+                param.grad
+                for param in fsdp_model.parameters()
                 if param.grad is not None
             ]
-            writeback_persists = writeback or sharding_strategy == ShardingStrategy.NO_SHARD
+            writeback_persists = (
+                writeback or sharding_strategy == ShardingStrategy.NO_SHARD
+            )
             for old_grad, new_grad in zip(old_fsdp_grads, new_fsdp_grads):
                 if writeback_persists:
                     torch.testing.assert_close(old_grad * WRITEBACK_FACTOR, new_grad)
@@ -647,14 +654,16 @@ class TestSummonFullParams(FSDPTest):
 
         def _get_error_context(is_supported: bool):
             return (
-                contextlib.suppress() if is_supported
+                contextlib.suppress()
+                if is_supported
                 else self.assertRaises(NotImplementedError)
             )  # some configs not implemented yet
 
         def _get_fsdp_grads(fsdp_model: FSDP, is_supported: bool):
             if is_supported:
                 return [
-                    param.grad.clone() for param in fsdp_model.parameters()
+                    param.grad.clone()
+                    for param in fsdp_model.parameters()
                     if param.grad is not None
                 ]
             return None  # unused
@@ -698,6 +707,41 @@ class TestSummonFullParams(FSDPTest):
         old_fsdp_grads = _get_fsdp_grads(fsdp_model, is_supported)
         with _get_error_context(is_supported):
             _check_grads(ddp_model, fsdp_model, old_fsdp_grads)
+
+    @skip_if_lt_x_gpu(2)
+    def test_with_grads_none_grads(self):
+        """
+        Tests that if all ranks' ``FlatParameter`` has ``None`` gradient, then
+        each original parameter sees ``None`` gradient as well.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ]
+            },
+            self._test_with_grads_none_grads,
+        )
+
+    def _test_with_grads_none_grads(self, sharding_strategy: ShardingStrategy):
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+            fsdp_kwargs={
+                "use_orig_params": True,
+                "sharding_strategy": sharding_strategy,
+            },
+        )
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model):
+            for handle in fsdp_module._handles:
+                assert handle.flat_param.grad is None
+        with FSDP.summon_full_params(fsdp_model, with_grads=True):
+            for param in fsdp_model.parameters():
+                self.assertTrue(param.grad is None)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)

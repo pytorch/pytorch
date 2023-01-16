@@ -67,3 +67,23 @@ __device__ double rng_uniform(const uint4& rng_result, int rng_component) {
 __device__ float rng_uniformf(const uint4& rng_result, int rng_component) {
   return uniformf((&rng_result.x)[rng_component]);
 }
+
+__device__ double rng_uniform_range(
+    const uint4& rng_result,
+    int rng_component,
+    double from,
+    double to) {
+  auto range = to - from;
+  auto uniform01 = rng_uniform(rng_result, rng_component);
+  return from + range * uniform01;
+}
+
+__device__ float rng_uniform_rangef(
+    const uint4& rng_result,
+    int rng_component,
+    float from,
+    float to) {
+  auto range = to - from;
+  auto uniform01 = rng_uniformf(rng_result, rng_component);
+  return from + range * uniform01;
+}

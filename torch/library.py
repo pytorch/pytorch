@@ -2,7 +2,6 @@ from ._ops import OpOverload
 from typing import Set
 import traceback
 import torch
-import os
 
 __all__ = ['Library', 'impl', 'define']
 
@@ -14,6 +13,7 @@ _impls: Set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
+
 
 class Library:
     """
@@ -30,9 +30,6 @@ class Library:
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
-        if os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "1":
-            raise RuntimeError("Trying to use torch.library in an environment where it is disabled")
-
         if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
 
@@ -61,6 +58,7 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
             >>> my_lib = Library("foo", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         '''
@@ -83,7 +81,7 @@ class Library:
             >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
-            >>>    return self * (1 / other)
+            >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", "CPU")
         '''
         if not callable(fn):
@@ -109,25 +107,24 @@ class Library:
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
 
-
         if dispatch_key == "Meta":
             dispatcher_op_name = name
             if '::' not in dispatcher_op_name:
                 dispatcher_op_name = f'{self.ns}::{dispatcher_op_name}'
-            # get a string containing the names of every dispatch key that the operator has a registration for.
-            dispatch_key_registration = torch._C._dispatch_dump(dispatcher_op_name)
+
             # Internally, we shouldn't be registering meta kernels for any operators that
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
-            if 'CompositeImplicitAutograd' in dispatch_key_registration:
+            if torch._C._dispatch_has_kernel_for_dispatch_key(dispatcher_op_name, "CompositeImplicitAutograd"):
                 raise RuntimeError(
                     f"We should not register a meta kernel directly to the operator '{name}',"
                     " because it has a CompositeImplicitAutograd kernel in core."
                     " Instead we should let the operator decompose, and ensure that we have meta kernels"
                     " for the base ops that it decomposes into.")
 
-        self.m.impl(name, dispatch_key, fn)
+        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
+
         _impls.add(key)
         self._op_impls.add(key)
 
@@ -139,6 +136,7 @@ class Library:
                 _impls.remove(key)
             del self.m
 
+
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
 def impl(lib, name, dispatch_key=""):
@@ -146,6 +144,7 @@ def impl(lib, name, dispatch_key=""):
         lib.impl(name, f, dispatch_key)
         return f
     return wrap
+
 
 def define(lib, schema, alias_analysis=""):
     def wrap(f):

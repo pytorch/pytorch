@@ -227,7 +227,7 @@ class PythonArgument:
         # s/self/input/ outside method bindings
         # [old codegen] TODO: remove this? doesn't rename in codegen, it's just
         # for the parse string
-        if name == "self" and type_str == "Tensor" and not method:
+        if name == "self" and type_str in ["Tensor", "Number"] and not method:
             name = "input"
 
         # add default
@@ -719,7 +719,9 @@ def argument(a: Argument) -> PythonArgument:
         name=a.name,
         type=a.type,
         # TODO: directly translate a.default to python default
-        default=str(pythonify_default(cpp.default_expr(a.default, a.type)))
+        default=str(
+            pythonify_default(cpp.default_expr(a.default, a.type, symint=False))
+        )
         if a.default is not None
         else None,
         default_init=None,
@@ -804,7 +806,7 @@ def signature_from_schema(
             a = getattr(topt_args, name)
             if a.default is None or a.default == "None":
                 return None
-            return cpp.default_expr(a.default, a.type)
+            return cpp.default_expr(a.default, a.type, symint=False)
 
         tensor_options_args.append(
             PythonArgument(

@@ -92,8 +92,8 @@ class C10_API Scalar {
 
   SymInt toSymInt() const {
     if (Tag::HAS_si == tag) {
-      return c10::SymInt::toSymInt(intrusive_ptr<SymIntNodeImpl>::reclaim_copy(
-          static_cast<SymIntNodeImpl*>(v.p)));
+      return c10::SymInt(intrusive_ptr<SymNodeImpl>::reclaim_copy(
+          static_cast<SymNodeImpl*>(v.p)));
     } else {
       return toLong();
     }
@@ -101,9 +101,8 @@ class C10_API Scalar {
 
   SymFloat toSymFloat() const {
     if (Tag::HAS_sd == tag) {
-      return c10::SymFloat::toSymFloat(
-          intrusive_ptr<SymFloatNodeImpl>::reclaim_copy(
-              static_cast<SymFloatNodeImpl*>(v.p)));
+      return c10::SymFloat(intrusive_ptr<SymNodeImpl>::reclaim_copy(
+          static_cast<SymNodeImpl*>(v.p)));
     } else {
       return toDouble();
     }
@@ -153,7 +152,7 @@ class C10_API Scalar {
     return Tag::HAS_si == tag || Tag::HAS_sd == tag;
   }
 
-  C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) {
+  C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) noexcept {
     if (&other == this) {
       return *this;
     }
@@ -293,7 +292,7 @@ class C10_API Scalar {
   Tag tag;
 
   union v_t {
-    double d;
+    double d{};
     int64_t i;
     c10::complex<double> z;
     c10::intrusive_ptr_target* p;

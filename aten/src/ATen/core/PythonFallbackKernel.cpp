@@ -52,9 +52,10 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 
 
   // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-  const auto& maybe_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_mode();
-  if (maybe_torch_dispatch_mode_state) {
-    maybe_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
+  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+  if (mode_stack_len > 0) {
+    const auto& cur_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+    cur_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
     return;
   }
 
@@ -68,16 +69,19 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // interpreter.
   for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
     if (ivalue.isTensor()) {
-      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
+      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
       if (interpreter) {
         (*interpreter)->dispatch(op, stack);
         return;
       }
-    } else if (ivalue.isTensorList() || (ivalue.isOptionalTensorList() && !ivalue.isNone())) {
+    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
       // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
       // is not a thing)
       for (const auto& nv : ivalue.toListRef()) {
-        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
+        if (nv.isNone()) {
+          continue;
+        }
+        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter) {
           (*interpreter)->dispatch(op, stack);
           return;

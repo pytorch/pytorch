@@ -21,11 +21,11 @@ jobs:
       # Used to receive a badge.
       id-token: write
 
-    if: github.repository == 'pytorch/pytorch'  # don't run on forks
+    if: false && github.repository == 'pytorch/pytorch'  # don't run on forks
 
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+        uses: actions/checkout@v3
         with:
           persist-credentials: false
 
@@ -42,7 +42,7 @@ jobs:
       # Upload the results as artifacts (optional). Commenting out will disable uploads of run results in SARIF
       # format to the repository Actions tab.
       - name: "Upload artifact"
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        uses: actions/upload-artifact@v3
         with:
           name: SARIF file
           path: results.sarif

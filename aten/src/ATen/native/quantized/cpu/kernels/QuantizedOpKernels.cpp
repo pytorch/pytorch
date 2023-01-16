@@ -119,7 +119,7 @@ Tensor qcat_nhwc_kernel(
       c10::nullopt);
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
-  // which causes an internal compiler error if they're not
+  // and clang5 which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
     at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
@@ -680,14 +680,18 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
-  // Weight should be a 1d or scalar tensor
-  // Reshape it to an nd tensor that broadcasts with input
-  // All elements go into the channel dimension
-  DimVector sizes(input_ndim, 1);
-  if (input_ndim > 1) {
-    sizes[1] = qw.numel();
+  // This logic is present in at::prelu and repeated here, as this path can be
+  // hit via quantized::prelu, which is registered under quantized/cpu/qprelu.cpu
+  auto qw_nd = qw;
+  if (input_ndim != qw_nd.dim()) {
+    DimVector dim_w(input_ndim, 1);
+    if (input_ndim > 1) {
+      dim_w[1] = qw.numel();
+    }
+    // This will always be a view in CPU/CUDA, but some backends
+    // like MKLDNN do not support views
+    qw_nd = qw_nd.reshape(dim_w);
   }
-  auto qw_nd = qw.reshape(sizes);
 
   auto iter = TensorIteratorConfig()
     .add_output(out)

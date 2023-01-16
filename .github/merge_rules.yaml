@@ -1,12 +1,12 @@
 - name: ONNX exporter
   patterns:
   - .jenkins/caffe2/*
+  - .jenkins/onnx/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
-  - test/jit/test_export_modes.py
   - test/onnx/**
   - tools/onnx/**
   - torch/_C/__init__.pyi.in
@@ -21,6 +21,11 @@
   approved_by:
   - BowenBao
   - abock
+  - justinchuby
+  - shubhambhokare1
+  - thiagocrepaldi
+  - titaiwangms
+  - wschin
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -36,6 +41,7 @@
   - csarofeen
   - ngimel
   - jjsjann123
+  - kevinstephano
   - ptrblck
   mandatory_checks_name:
   - EasyCLA
@@ -228,9 +234,14 @@
   - wanchaol
   - fduwjj
   - H-Huang
-  - d4l3k
   - aazzolini
   - kwen2501
+  - XilunWu
+  - wz337
+  - awgu
+  - fegin
+  - kumpera
+  - yhcharles
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -241,9 +252,12 @@
   - third_party/ideep
   - caffe2/ideep/**
   - caffe2/python/ideep/**
+  - cmake/Modules/FindMKLDNN.cmake
+  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
-  - yanbing-j
+  - jgong5
+  - mingfeima
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -256,6 +270,7 @@
   approved_by:
   - sanchitintel
   - chunyuan-w
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -268,9 +283,11 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
+  - test/test_mkldnn.py
   approved_by:
   - mingfeima
   - XiaobingSuper
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -283,7 +300,7 @@
   - test/test_mkldnn.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -297,7 +314,18 @@
   - test/test_autocast.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: NNC
+  patterns:
+  - torch/csrc/jit/tensorexpr/**
+  approved_by:
+  - EikanWang
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -308,11 +336,12 @@
   - torch/csrc/lazy/**
   - test/cpp/lazy/**
   - test/lazy/**
-  - codegen/api/lazy.py
-  - codegen/dest/lazy_ir.py
-  - codegen/dest/lazy_ts_lowering.py
-  - codegen/gen_lazy_tensor.py
+  - torchgen/api/lazy.py
+  - torchgen/dest/lazy_ir.py
+  - torchgen/dest/lazy_ts_lowering.py
+  - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
+  - .github/ci_commit_pins/xla.txt
   approved_by:
   - alanwaketan
   - JackCaoG
@@ -337,6 +366,7 @@
   approved_by:
   - mruberry
   - lezcano
+  - Skylion007
   mandatory_checks_name:
   - EasyCLA
   - Lint

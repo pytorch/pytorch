@@ -1,10 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorTransformations.h>
+#include <ATen/native/cpu/PixelShuffleKernel.h>
 
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 
-#include <ATen/native/cpu/PixelShuffleKernel.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/pixel_shuffle_native.h>
+#include <ATen/ops/pixel_unshuffle_native.h>
+#endif
+
+#include <algorithm>
+#include <numeric>
+#include <vector>
 
 namespace at {
 namespace native {

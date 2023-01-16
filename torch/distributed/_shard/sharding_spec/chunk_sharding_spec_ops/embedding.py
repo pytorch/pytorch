@@ -61,7 +61,7 @@ def sharded_embedding(types, args, kwargs, pg):
        because when max_norm is specified only weight which has looked will
        be re-normed so mask IDs whose embeddings are not stored in current
        rank will to an extra row will ensure max_norm still works as expected.
-    3. If max_norm is specified, the extra row gurantee that the mask ID will
+    3. If max_norm is specified, the extra row guarantees that the mask ID will
        not affect the behavior of weigh re-norm.
 
     COLWISE SHARDING
@@ -135,7 +135,7 @@ def _validate_embedding_param(args, kwargs):
 
     Args:
         input: list of ID used for lookup.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         kwargs: same as normal Embedding.
 
     Return: None.
@@ -195,7 +195,7 @@ def _handle_col_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: col-wise shared local weight used for lookup.
         max_norm: If given, each embedding vector with norm larger
             than max_norm is renormalized to have norm max_norm.
@@ -246,7 +246,7 @@ def _handle_row_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: row-wise shared local weight used for lookup.
         max_norm: If given, each embedding vector with norm larger
             than max_norm is renormalized to have norm max_norm.

@@ -1,19 +1,39 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/SmallVector.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <c10/macros/Macros.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
-#include <array>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_trilinear.h>
+#include <ATen/ops/_trilinear_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/bilinear_native.h>
+#include <ATen/ops/bmm.h>
+#include <ATen/ops/einsum_native.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/mkldnn_linear.h>
+#include <ATen/ops/mm.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/tensordot_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <cctype>
-#include <cstddef>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace at { namespace native {
@@ -130,7 +150,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   out_size.reserve(out_num_dim);
   for (auto& d : lro) out_size.push_back(left.sym_size(d));
   for (auto& d : lo) out_size.push_back(left.sym_size(d));
-  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warning about not using d
+  for (auto& d : sum_dims_) { out_size.emplace_back(1); (void)(d); }; // avoid warning about not using d
   for (auto& d : ro) out_size.push_back(right.sym_size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -162,8 +182,8 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   }
 
   // now we can execute the operations above
-  left = left.permute(lpermutation).reshape_symint({lro_size, lo_size, sum_size});
-  right = right.permute(rpermutation).reshape_symint({lro_size, sum_size, ro_size});
+  left = left.permute(lpermutation).reshape_symint({lro_size, std::move(lo_size), sum_size});
+  right = right.permute(rpermutation).reshape_symint({std::move(lro_size), std::move(sum_size), std::move(ro_size)});
   Tensor result = at::bmm(left, right);
   result = result.view_symint(out_size).permute(opermutation);
 
@@ -286,7 +306,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
   for(const auto i : c10::irange(num_ops)) {
-    const auto operand = operands[i];
+    const auto& operand = operands[i];
     const auto labels = op_labels[i];
     const auto ndims = operand.dim();
     int64_t nlabels = static_cast<int64_t>(labels.size());
@@ -545,6 +565,9 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
 
   // Sum out contraction dims
   if (perm_index - out_num_dim > 0) {
+    // if there were ops to contract, we would have already done so
+    // in the previous loop and all the dims to sum are now 1
+    // NB: use view instead of squeeze (or sum) for faster (mps) performance
     if (num_ops > 1) {
       auto sizes = ops[0].sym_sizes().vec();
       for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {

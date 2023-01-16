@@ -38,7 +38,7 @@
 #endif
 
 
-namespace at { namespace cuda { namespace jit {
+namespace at::cuda::jit {
 
 // hiprtc already includes some traits, so this removes duplicate definitions of
 // integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
@@ -893,6 +893,8 @@ void codegenOutputQuery(
     max_dev_version = CUDAVersion(7, 5);
   } else if (nvrtc_version == CUDAVersion(11, 0)) { // 11.0 supports 3-8.0
     max_dev_version = CUDAVersion(8, 0);
+  } else if (nvrtc_major == 11 && nvrtc_minor < 8) {
+    max_dev_version = CUDAVersion(8, 6);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
@@ -1530,7 +1532,7 @@ NvrtcFunction jit_pwise_function(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
@@ -1545,7 +1547,7 @@ NvrtcFunction jit_pwise_function(
       std::to_string(cuda_minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   #ifndef NDEBUG
@@ -1655,4 +1657,4 @@ void launch_jitted_pwise_function(
 }
 
 
-}}} // at::cuda::jit
+} // at::cuda::jit

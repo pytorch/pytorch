@@ -8,11 +8,11 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY, skipCUDAMemoryLeakCheckIf
+from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
+                                                  set_default_dtype, skipCUDAMemoryLeakCheckIf)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
-    skipCUDAIfRocm,
     dtypes,
     OpDTypes,
 )
@@ -38,7 +38,6 @@ GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decompositi
 
 class TestPrims(TestCase):
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         def _wrapper(a, b, broadcast_dimensions):
@@ -102,7 +101,6 @@ class TestPrims(TestCase):
             """
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim_sum(self, device, dtype):
         def _wrapper(a):
@@ -130,11 +128,8 @@ class TestPrims(TestCase):
         batches = [(), (1,), (2,), (0, 1), (1, 1), (2, 2)]
         shapes = [(), (0,), (1,), (5,)]
 
-        try:
-            # Sets the default dtype to NumPy's default dtype of double
-            cur_default = torch.get_default_dtype()
-            torch.set_default_dtype(torch.double)
-
+        # Sets the default dtype to NumPy's default dtype of double
+        with set_default_dtype(torch.double):
             # Tested here, as this OP is not currently exposed or tested in ATen
             for b, s in product(batches, shapes):
                 x = make_arg(b + s)
@@ -144,11 +139,8 @@ class TestPrims(TestCase):
                 y_np = scipy.special.cbrt(x_np)
 
                 self.assertEqual(y, y_np, exact_device=False)
-        finally:
-            torch.set_default_dtype(cur_default)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_impl_is_used(self, device):
         # This test is to ensure that when the nvfuser implementation exists it is used
         # Assuming one-to-one mapping between prims and nvfuser implementations
@@ -215,8 +207,69 @@ class TestPrims(TestCase):
         )
         self.assertFalse(include_any_nvprims_sin)
 
+    def test_partitioner_tuple_output(self, device):
+        # This test verifies that the partitioner doesn't segment on nodes with
+        # tuple outputs.
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+        from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
+
+        a = make_tensor(5, 3, 3, device=device, dtype=torch.float32)
+
+        def func(x):
+            xx = torch.ops.nvprims.add(x, 1)
+            var, mean = torch.ops.nvprims.var_mean(x, correction=0)
+            var_cos = torch.ops.nvprims.cos(var)
+            mean_sin = torch.ops.nvprims.sin(mean)
+            return torch.ops.nvprims.add(var_cos, mean_sin)
+
+        gm = make_fx(func)(a)
+        supported_ops = NvfuserPrimOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            gm, supported_ops, allows_single_node_partition=False
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 1)
+
     @onlyCUDA
-    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_full(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        def func1(size, value, b):
+            return (torch.full(size, value, dtype=dtype, device=device),)
+
+        def func2(size, value, b):
+            a = torch.full(size, value, dtype=dtype, device=device)
+            b_sin = b.sin()
+            return (torch.add(a, b_sin),)
+
+        def func3(size, value, b):
+            return (torch.full(size, value, dtype=dtype, device=device), b)
+
+        def func4(size, value, b):
+            b_sin = b.sin()
+            return (torch.full(size, value, dtype=dtype, device=device), b_sin)
+
+        def func5(size, value, b):
+            b_sin = b.sin()
+            a = torch.full(size, value, dtype=dtype, device=device)
+            a_sin = a.sin()
+            return (a, b_sin, a_sin)
+
+        for func in (func1, func3, func2, func3, func4, func5):
+            size = (3, 3)
+            value = 10
+            b = torch.randn(*size, dtype=dtype, device=device)
+
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(size, value, b)
+
+            out = execute(gm, size, value, b, executor="strictly_nvfuser")
+            self.assertEqual(out, func(size, value, b))
+
+    @onlyCUDA
     def test_nvfuser_empty_fusion(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
@@ -268,7 +321,6 @@ class TestPrims(TestCase):
         self.assertEqual(includes_nvprim_convert_element_type, nvprim_support_flag)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_rand_like_fusion(self, device):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -287,7 +339,6 @@ class TestPrims(TestCase):
 
     @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_no_args(self, device):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -318,7 +369,6 @@ class TestPrims(TestCase):
         self.assertEqual(out, func())
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_constant_tensors(self, device):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -341,11 +391,10 @@ class TestPrims(TestCase):
         self.assertEqual(out, gm(b))
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_executor_cached_noncontiguous(self, device):
         # This test is to ensure that nvfuser computes correct results for noncontiguous tensors
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 3, device=device)
@@ -353,16 +402,18 @@ class TestPrims(TestCase):
         def func(a):
             return torch.sigmoid(a)
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         # First run to create the cache
-        execute(gm, a, executor="nvfuser")
+        execute(gm, a, executor="strictly_nvfuser")
 
         # a.mT is noncontiguous, but it shouldn't affect correctness
         expected = execute(gm, a.mT, executor="aten")
-        actual = execute(gm, a.mT, executor="nvfuser")
-        self.assertEqual(expected, actual)
+        for use_python_cache in [True, False]:
+            params = {"use_python_fusion_cache": use_python_cache}
+            actual = execute(gm, a.mT, executor="strictly_nvfuser", executor_parameters=params)
+            self.assertEqual(expected, actual)
 
     def test_nvfuser_capability_context(self, device):
         # This test is to ensure that the torch calls are replaced with refs
@@ -442,7 +493,6 @@ class TestPrims(TestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_executor_parameters(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
@@ -475,7 +525,6 @@ class TestPrims(TestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_executor_partitioned(self, device):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
@@ -483,7 +532,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -496,7 +545,7 @@ class TestPrims(TestCase):
             dd = torch.sqrt(d)
             return torch.mul(aa, dd.digamma())
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
@@ -504,7 +553,6 @@ class TestPrims(TestCase):
         self.assertEqual(expected, actual)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_nvfuser_executor_partitioned_no_partitions_error(self, device):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
@@ -512,7 +560,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -520,7 +568,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:
@@ -549,7 +597,6 @@ class TestPrims(TestCase):
                 self.assertFalse(node.target == torch.ops.aten.add.default)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64)
     def test_native_batch_norm_nvprims(self, device, dtype):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
@@ -612,7 +659,6 @@ class TestPrims(TestCase):
             self.assertEqual(out, gm(sample.input, *sample.args))
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64)
     def test_cudnn_batch_norm_nvprims(self, device, dtype):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
@@ -666,7 +712,13 @@ class TestPrims(TestCase):
 
             # Check that the graph can be executed with nvFuser
             out = execute(gm, sample.input, *sample.args, executor="nvfuser")
-            self.assertEqual(out, gm(sample.input, *sample.args))
+            ref_out = gm(sample.input, *sample.args)
+            for idx, (left, right) in enumerate(zip(out, ref_out)):
+                # Nvfuser does not support torch.uint8 dtype so check reserve output against 0 scalar
+                if idx == 3:
+                    self.assertTrue(torch.all(torch.eq(left, 0)))
+                else:
+                    self.assertEqual(left, right)
 
     # decomposition of native_batch_norm_backward uses a casting, which prevents nvprim lowering on CPU build
     @onlyCUDA
@@ -711,7 +763,6 @@ class TestPrims(TestCase):
             self.assertTrue(all_nvprims)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_silu_backward_no_filled_tensor(self, device, dtype):
         # This test verifies a workaround for
@@ -760,7 +811,6 @@ class TestPrims(TestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
@@ -781,7 +831,6 @@ class TestPrims(TestCase):
             self.assertEqual(_wrapper(a), result)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
     @parametrize("correction", [0, 1])
     @parametrize("keepdim", [True, False])
@@ -806,7 +855,6 @@ class TestPrims(TestCase):
         self.assertTrue(includes_nvprims_var_mean)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_nvprims_view(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -853,7 +901,31 @@ class TestPrims(TestCase):
             self.assertEqual(out, func(a))
 
     @onlyCUDA
-    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_nvprims_view_partitioner(self, device, dtype):
+        # This test verifies that views that are not fused with other ops are
+        # correctly overriden to call aten implementation.
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.nvfuser_executor import maybe_partition_graph
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((4, 5))
+        b = make_arg((5, 4))
+
+        def func(a, b):
+            aa = a.view(b.shape)
+            aa = aa.view(a.shape)
+            return aa.digamma()
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a, b)
+        gm, _ = maybe_partition_graph(gm, False, False)
+
+        out = gm(a, b)
+        self.assertEqual(out, func(a, b))
+
+    @onlyCUDA
     @dtypes(torch.float32, torch.float16)
     def test_cpu_tensor(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -894,7 +966,6 @@ class TestPrims(TestCase):
         self.assertEqual(expected, nvprim_aten_fallback)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_pytree_input_output(self, device, dtype):
         @make_traced
@@ -1051,7 +1122,6 @@ instantiate_device_type_tests(TestRefs, globals())
 
 class TestDecomp(TestCase):
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_decomposition_type_promotion_nvprim_amp(self, device, dtype):
         x = torch.rand(5, device=device).to(dtype)
@@ -1092,7 +1162,6 @@ class TestDecomp(TestCase):
             self.assertFalse(includes_aten_to_copy)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_masked_fill_decomposition_under_nvprim_context(self, device, dtype):
         # masked_fill decomposition extracts cpu scalar tensor value when

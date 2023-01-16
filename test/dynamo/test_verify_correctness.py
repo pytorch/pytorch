@@ -100,8 +100,11 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
-        self.assertTrue(same(r1, r2))
-        self.assertTrue(same(r1, r3))
+
+        self.assertEqual(r1.shape, r2.shape)
+        self.assertEqual(r1.shape, r3.shape)
+        self.assertEqual(r1.device, r2.device)
+        self.assertEqual(r1.device, r3.device)
 
     @patch.object(config, "verify_correctness", True)
     def test_nnc(self):

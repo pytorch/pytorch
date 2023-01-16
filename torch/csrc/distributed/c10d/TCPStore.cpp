@@ -434,7 +434,7 @@ void TCPStoreMasterDaemon::deleteHandler(int socket) {
 }
 
 void TCPStoreMasterDaemon::checkHandler(int socket) const {
-  SizeType nargs;
+  SizeType nargs = 0;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
   for (const auto i : c10::irange(nargs)) {
@@ -449,7 +449,7 @@ void TCPStoreMasterDaemon::checkHandler(int socket) const {
 }
 
 void TCPStoreMasterDaemon::waitHandler(int socket) {
-  SizeType nargs;
+  SizeType nargs = 0;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
   for (const auto i : c10::irange(nargs)) {
@@ -741,7 +741,7 @@ void TCPStoreWorkerDaemon::run() {
     }
 
     // if connection is closed gracefully by master, peeked data will return 0
-    char data;
+    char data = 0;
     int ret = recv(fds[1].fd, &data, 1, MSG_PEEK);
     if (ret == 0) {
       continue;

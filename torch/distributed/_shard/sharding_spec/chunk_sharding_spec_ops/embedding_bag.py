@@ -60,7 +60,7 @@ def sharded_embedding_bag(types, args, kwargs, pg):
                [4, 1, 2, 4, 4, 4],
                [4, 0, 4, 4, 4, 4],
                [4, 4, 4, 4, 4, 1]])
-    3. If ``max_norm`` is specified, the extra row gurantee that the mask ID will
+    3. If ``max_norm`` is specified, the extra row guarantees that the mask ID will
        not affect the behavior of weigh re-norm.
     4. The example above only happens in one rank and each rank does a very similar thing.
        For "Mean" mode we need to divide by either column size (2D) or the interval length
@@ -157,7 +157,7 @@ def _validate_embedding_bag_param(args, kwargs):
 
     Args:
         input: list of ID used for lookup and aggregation.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         kwargs: same as normal EmbeddingBag.
 
     Return: None.
@@ -258,7 +258,7 @@ def _handle_col_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: col-wise shared local weight used for lookup.
         offsets: list of start positions of each bag for 1D input.
         per_sample_weights: weights for weighted sum mode.
@@ -332,7 +332,7 @@ def _handle_row_wise_sharding(
     Args:
         input: list of ID used for lookup and aggregation.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard: row-wise shared local weight used for lookup.
         offsets: list of start positions of each bag for 1D input.
         per_sample_weights: weights for weighted sum mode.
@@ -454,7 +454,7 @@ def _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg):
 
     Args:
         input: tensor to be applied op on.
-        per_sampe_weights: weights for weighted sum mode.
+        per_sample_weights: weights for weighted sum mode.
         offsets: when input is 1D. offsets determines the starting
             index position of each bag (sequence) in input.
         pg: process group.

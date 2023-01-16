@@ -2,7 +2,7 @@
 
 import sys
 from contextlib import suppress
-from enum import Enum, auto
+from enum import auto, Enum
 from typing import Optional
 from unittest.mock import patch
 
@@ -19,10 +19,10 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -45,6 +45,7 @@ class PassType(Enum):
 
 class TestCommunication(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""
+
     def _init_model(
         self,
         nested_model: bool,
@@ -106,7 +107,8 @@ class TestCommunication(FSDPTest):
                 pass_type,
                 is_first_iter,
                 is_last_iter_no_sync,
-            ) for pass_type in PassType
+            )
+            for pass_type in PassType
         )
 
     def _get_ref_num_all_gathers_in_pass(
@@ -121,9 +123,11 @@ class TestCommunication(FSDPTest):
         if sharding_strategy is None:
             sharding_strategy = ShardingStrategy.FULL_SHARD  # default
         # Forward pass:
-        if pass_type == PassType.FWD and \
-            sharding_strategy == ShardingStrategy.SHARD_GRAD_OP and \
-                is_last_iter_no_sync:
+        if (
+            pass_type == PassType.FWD
+            and sharding_strategy == ShardingStrategy.SHARD_GRAD_OP
+            and is_last_iter_no_sync
+        ):
             # Modules do not free the full parameters in the last
             # iteration's backward pass if it was in `no_sync()`
             num_all_gathers = 0
@@ -132,21 +136,27 @@ class TestCommunication(FSDPTest):
             # forward pass
             num_all_gathers = num_fsdp
         # Backward pass:
-        elif pass_type == PassType.BWD and \
-                sharding_strategy == ShardingStrategy.FULL_SHARD:
+        elif (
+            pass_type == PassType.BWD
+            and sharding_strategy == ShardingStrategy.FULL_SHARD
+        ):
             # Root does not free the full parameters at the end of the
             # forward pass
             num_all_gathers = num_fsdp - 1
-        elif pass_type == PassType.BWD and \
-                sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
+        elif (
+            pass_type == PassType.BWD
+            and sharding_strategy == ShardingStrategy.SHARD_GRAD_OP
+        ):
             # Modules do not free the full parameters at the end of the
             # forward pass
             num_all_gathers = 0
         else:
-            assert 0, f"Unsupported: add a branch for pass_type={pass_type} " \
-                f"is_first_iter={is_first_iter} " \
-                f"is_last_iter_no_sync={is_last_iter_no_sync} " \
+            assert 0, (
+                f"Unsupported: add a branch for pass_type={pass_type} "
+                f"is_first_iter={is_first_iter} "
+                f"is_last_iter_no_sync={is_last_iter_no_sync} "
                 f"sharding_strategy={sharding_strategy}"
+            )
         if is_first_iter and pass_type == PassType.FWD:
             # With execution order validation, on the first iteration, we have
             # an additional two all-gathers before every actual all-gather in
@@ -167,7 +177,10 @@ class TestCommunication(FSDPTest):
         if self.rank != 0:
             return  # only print on one rank
         num_all_gathers = self._get_ref_num_all_gathers_in_pass(
-            num_fsdp, sharding_strategy, pass_type, is_first_iter,
+            num_fsdp,
+            sharding_strategy,
+            pass_type,
+            is_first_iter,
             is_last_iter_no_sync,
         )
         print(
@@ -211,8 +224,7 @@ class TestCommunication(FSDPTest):
         # Count the number of FSDP instances that manage parameters since the
         # number of collectives are a function of this number
         num_fsdp = sum(
-            (isinstance(m, FSDP) and len(m.params) > 0)
-            for m in fsdp_model.modules()
+            (isinstance(m, FSDP) and len(m.params) > 0) for m in fsdp_model.modules()
         )
 
         # If `use_no_sync=True`, we run `num_iters` iterations inside
@@ -220,11 +232,16 @@ class TestCommunication(FSDPTest):
         # and if `use_no_sync=False`, we only run `num_iters` iterations
         # outside `no_sync()`
         num_iters = 3
-        with patch("torch.distributed.all_gather_into_tensor") as mock_all_gather, \
-                patch("torch.distributed._reduce_scatter_base") as mock_reduce_scatter:
+        with patch(
+            "torch.distributed.all_gather_into_tensor"
+        ) as mock_all_gather, patch(
+            "torch.distributed.reduce_scatter_tensor"
+        ) as mock_reduce_scatter:
+
             def reset_mocks():
                 mock_all_gather.reset_mock()
                 mock_reduce_scatter.reset_mock()
+
             # Check the communication cost when using `no_sync()`
             if use_no_sync:
                 for i in range(num_iters):
@@ -233,11 +250,14 @@ class TestCommunication(FSDPTest):
                     num_all_gathers = mock_all_gather.call_count
                     num_reduce_scatters = mock_reduce_scatter.call_count
                     ref_num_all_gathers = self._get_ref_num_all_gathers(
-                        num_fsdp, sharding_strategy, is_first_iter=i == 0,
+                        num_fsdp,
+                        sharding_strategy,
+                        is_first_iter=i == 0,
                         is_last_iter_no_sync=i > 0,
                     )
                     ref_num_reduce_scatters = self._get_ref_num_reduce_scatters(
-                        num_fsdp, in_no_sync=True,
+                        num_fsdp,
+                        in_no_sync=True,
                     )
                     self.assertEqual(num_all_gathers, ref_num_all_gathers)
                     self.assertEqual(num_reduce_scatters, ref_num_reduce_scatters)
@@ -248,12 +268,14 @@ class TestCommunication(FSDPTest):
                 num_all_gathers = mock_all_gather.call_count
                 num_reduce_scatters = mock_reduce_scatter.call_count
                 ref_num_all_gathers = self._get_ref_num_all_gathers(
-                    num_fsdp, sharding_strategy,
+                    num_fsdp,
+                    sharding_strategy,
                     is_first_iter=not use_no_sync and i == 0,
                     is_last_iter_no_sync=use_no_sync and i == 0,
                 )
                 ref_num_reduce_scatters = self._get_ref_num_reduce_scatters(
-                    num_fsdp, in_no_sync=False,
+                    num_fsdp,
+                    in_no_sync=False,
                 )
                 self.assertEqual(num_all_gathers, ref_num_all_gathers)
                 self.assertEqual(num_reduce_scatters, ref_num_reduce_scatters)

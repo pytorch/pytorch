@@ -594,6 +594,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
 
+    @override_qengines
     def test_qat_embedding_bag_errors(self):
         default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
 

@@ -138,7 +138,7 @@ A great deal of the tutorials on `pytorch.org <https://pytorch.org/>`__
 come from the community itself and we welcome additional contributions.
 To learn more about how to contribute a new tutorial you can learn more
 here: `PyTorch.org Tutorial Contribution Guide on
-Github <https://github.com/pytorch/tutorials/#contributing>`__
+GitHub <https://github.com/pytorch/tutorials/#contributing>`__
 
 Improving Documentation & Tutorials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

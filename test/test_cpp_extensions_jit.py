@@ -15,7 +15,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, skipIfSlowGradcheckEnv
+from torch.testing._internal.common_utils import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -38,7 +38,6 @@ def remove_build_path():
         shutil.rmtree(default_build_root)
 
 # There's only one test that runs gracheck, run slow mode manually
-@skipIfSlowGradcheckEnv
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -192,13 +191,15 @@ class TestCppExtensionJIT(common.TestCase):
         archflags = {
             '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
-            "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
         }
         if int(torch.version.cuda.split('.')[0]) >= 10:
             # CUDA 9 only supports compute capability <= 7.2
             archflags["7.5+PTX"] = (['75'], ['75'])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        if int(torch.version.cuda.split('.')[0]) < 12:
+            # CUDA 12 drops compute capability < 5.0
+            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)

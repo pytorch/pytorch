@@ -47,6 +47,9 @@ DeviceType parse_type(const std::string& device_string) {
   if (device != types.end()) {
     return device->second;
   }
+  if (device_string == get_privateuse1_backend()) {
+    return DeviceType::PrivateUse1;
+  }
   std::vector<const char*> device_names;
   for (const auto& it : types) {
     if (it.first) {

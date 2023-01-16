@@ -100,16 +100,34 @@ void IndexLowering::handle(const RNGOp* rop) {
 
   // TensorIndex for philox subsequence and component.
   auto philox_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getLinearIndex(out_tv, for_loops_));
+      out_tv, Index::getLinearLogicalIndex(out_tv, for_loops_));
 
-  // TensorIndex for writing randlike output.
+  // TensorIndex for writing rand_like output.
   const auto out = lowerDstIndex(out_tv);
 
   auto lowered = IrBuilder::create<RNGOp>(
-      rop->getRNGOpType(), out, rop->getRNGOffset(), philox_index);
+      rop->getRNGOpType(),
+      out,
+      rop->dtype(),
+      rop->getParameters(),
+      rop->getRNGOffset(),
+      philox_index);
 
   pushBack(lowered);
   GpuLower::current()->propagateExprInfo(rop, back());
+}
+
+void IndexLowering::handle(const FullOp* fop) {
+  auto out_tv = dynamic_cast<TensorView*>(fop->output(0));
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+
+  // TensorIndex for writing output.
+  const auto out = lowerDstIndex(out_tv);
+  auto lowered =
+      IrBuilder::create<FullOp>(out, fop->getFillValue(), fop->dtype());
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(fop, back());
 }
 
 void IndexLowering::handle(const ARangeOp* aop) {
@@ -118,17 +136,35 @@ void IndexLowering::handle(const ARangeOp* aop) {
   auto out_tv = dynamic_cast<TensorView*>(aop->output(0));
   TORCH_INTERNAL_ASSERT(out_tv != nullptr);
 
-  // TensorIndex for philox subsequence and component.
+  // linear index for computing arange output
   auto linear_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getLinearIndex(out_tv, for_loops_));
+      out_tv, Index::getLinearLogicalIndex(out_tv, for_loops_));
 
-  // TensorIndex for writing randlike output.
+  // TensorIndex for writing arange output.
   const auto out = lowerDstIndex(out_tv);
   auto lowered = IrBuilder::create<ARangeOp>(
-      out, aop->start(), aop->end(), aop->step(), linear_index);
+      out, aop->start(), aop->end(), aop->step(), aop->dtype(), linear_index);
 
   pushBack(lowered);
   GpuLower::current()->propagateExprInfo(aop, back());
+}
+
+void IndexLowering::handle(const EyeOp* eop) {
+  auto out_tv = dynamic_cast<TensorView*>(eop->output(0));
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+
+  // linear index for computing eye output
+  auto indices = Index::getPerDimLogicalIndex(out_tv, for_loops_);
+  TORCH_INTERNAL_ASSERT(indices.size() == 2);
+  auto index1 = indices[0];
+  auto index2 = indices[1];
+
+  // TensorIndex for writing eye output.
+  const auto out = lowerDstIndex(out_tv);
+  auto lowered = IrBuilder::create<EyeOp>(out, eop->dtype(), index1, index2);
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(eop, back());
 }
 
 void IndexLowering::handle(const UnaryOp* uop) {
@@ -375,10 +411,12 @@ void IndexLowering::handleBlockReduction(
   ReductionOp* indexed_rop = IrBuilder::create<ReductionOp>(
       rop->getReductionOpType(), rop->init(), out, in, rop->isAllreduce());
   if (rop->predicate()) {
-    indexed_rop->setPredicate(rop->predicate());
+    indexed_rop =
+        indexed_rop->withPredicate(rop->predicate())->as<ReductionOp>();
   }
   if (rop->writePredicate()) {
-    indexed_rop->setWritePredicate(rop->writePredicate());
+    indexed_rop = indexed_rop->withWritePredicate(rop->writePredicate())
+                      ->as<ReductionOp>();
   }
 
   pushBack(indexed_rop);
@@ -457,13 +495,15 @@ void IndexLowering::handleGridReduction(
       n_entrances,
       rop->isAllreduce());
 
-  grid_reduction->setThreadPredicate(thread_pred);
+  grid_reduction = grid_reduction->withThreadPredicate(thread_pred);
 
   if (rop->predicate()) {
-    grid_reduction->setPredicate(rop->predicate());
+    grid_reduction = grid_reduction->withPredicate(rop->predicate())
+                         ->as<kir::GridReduction>();
   }
   if (rop->writePredicate()) {
-    grid_reduction->setWritePredicate(rop->writePredicate());
+    grid_reduction = grid_reduction->withWritePredicate(rop->writePredicate())
+                         ->as<kir::GridReduction>();
   }
 
   pushBack(grid_reduction);
@@ -520,10 +560,12 @@ void IndexLowering::handleBlockReduction(
       inputs,
       grouped_rop->isAllreduce());
   if (grouped_rop->predicate()) {
-    indexed_rop->setPredicate(grouped_rop->predicate());
+    indexed_rop = indexed_rop->withPredicate(grouped_rop->predicate())
+                      ->as<GroupedReductionOp>();
   }
   if (grouped_rop->writePredicate()) {
-    indexed_rop->setWritePredicate(grouped_rop->writePredicate());
+    indexed_rop = indexed_rop->withWritePredicate(grouped_rop->writePredicate())
+                      ->as<GroupedReductionOp>();
   }
 
   pushBack(indexed_rop);
@@ -602,13 +644,16 @@ void IndexLowering::handleGridReduction(
       work_buf_size_info.buffer_stride,
       grouped_rop->isAllreduce());
 
-  grid_reduction->setThreadPredicate(thread_pred);
+  grid_reduction = grid_reduction->withThreadPredicate(thread_pred);
 
   if (grouped_rop->predicate()) {
-    grid_reduction->setPredicate(grouped_rop->predicate());
+    grid_reduction = grid_reduction->withPredicate(grouped_rop->predicate())
+                         ->as<kir::GroupedGridReduction>();
   }
   if (grouped_rop->writePredicate()) {
-    grid_reduction->setWritePredicate(grouped_rop->writePredicate());
+    grid_reduction =
+        grid_reduction->withWritePredicate(grouped_rop->writePredicate())
+            ->as<kir::GroupedGridReduction>();
   }
 
   pushBack(grid_reduction);
@@ -670,10 +715,11 @@ void IndexLowering::handle(const WelfordOp* wop) {
       wop->isAllreduce());
 
   if (wop->predicate()) {
-    indexed_wop->setPredicate(wop->predicate());
+    indexed_wop = indexed_wop->withPredicate(wop->predicate())->as<WelfordOp>();
   }
   if (wop->writePredicate()) {
-    indexed_wop->setWritePredicate(wop->writePredicate());
+    indexed_wop =
+        indexed_wop->withWritePredicate(wop->writePredicate())->as<WelfordOp>();
   }
 
   // Serial welford
@@ -749,22 +795,27 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
       entrance_ind,
       n_entrances);
 
-  grid_welford->setThreadPredicate(thread_pred);
+  grid_welford = grid_welford->withThreadPredicate(thread_pred);
 
   const bool block_reduce_separated =
       out_domain->hasBlockReduction() && !indexed_wop->isAllreduce();
 
   if (indexed_wop->predicate()) {
     if (block_reduce_separated) {
-      grid_welford->setPredicate(IrBuilder::create<kir::Predicate>(
-          GpuLower::current()->kernel()->trueVal()));
+      grid_welford = grid_welford
+                         ->withPredicate(IrBuilder::create<kir::Predicate>(
+                             GpuLower::current()->kernel()->trueVal()))
+                         ->as<kir::GridWelford>();
     } else {
-      grid_welford->setPredicate(indexed_wop->predicate());
+      grid_welford = grid_welford->withPredicate(indexed_wop->predicate())
+                         ->as<kir::GridWelford>();
     }
   }
 
   if (indexed_wop->writePredicate()) {
-    grid_welford->setWritePredicate(indexed_wop->writePredicate());
+    grid_welford =
+        grid_welford->withWritePredicate(indexed_wop->writePredicate())
+            ->as<kir::GridWelford>();
   }
 
   if (block_reduce_separated) {
@@ -909,13 +960,15 @@ void IndexLowering::handleGroupedGridWelford(
       work_buf_size_info.buffer_stride,
       op->isAllreduce());
 
-  indexed_op->setThreadPredicate(thread_pred);
+  indexed_op = indexed_op->withThreadPredicate(thread_pred);
 
   if (op->predicate()) {
-    indexed_op->setPredicate(op->predicate());
+    indexed_op = indexed_op->withPredicate(op->predicate())
+                     ->as<kir::GroupedGridWelford>();
   }
   if (op->writePredicate()) {
-    indexed_op->setWritePredicate(op->writePredicate());
+    indexed_op = indexed_op->withWritePredicate(op->writePredicate())
+                     ->as<kir::GroupedGridWelford>();
   }
 
   pushBack(indexed_op);
@@ -929,7 +982,9 @@ void IndexLowering::handleGroupedGridWelford(
 void IndexLowering::handle(const LoadStoreOp* ldst) {
   const auto in = lowerSrcIndex(ldst->in(), ldst->out());
   const auto out = lowerDstIndex(ldst->out());
-  pushBack(IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in));
+  auto new_ldst = IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in)
+                      ->withPredicate(ldst->predicate());
+  pushBack(new_ldst);
   GpuLower::current()->propagateExprInfo(ldst, back());
 }
 
@@ -961,7 +1016,8 @@ void IndexLowering::handle(const BroadcastOp* bop) {
   const bool block_z = parallel_bitmap.get(ParallelType::BIDz);
 
   if (bop->predicate()) {
-    indexed_expr->setPredicate(bop->predicate());
+    indexed_expr =
+        indexed_expr->withPredicate(bop->predicate())->as<BroadcastOp>();
   }
 
   const bool grid_broadcast_needed = block_x || block_y || block_z;
@@ -988,7 +1044,8 @@ void IndexLowering::handle(const BroadcastOp* bop) {
       indexed_expr, work_buffer, sync_buffer);
 
   if (bop->predicate()) {
-    grid_broadcast->setPredicate(bop->predicate());
+    grid_broadcast = grid_broadcast->withPredicate(bop->predicate())
+                         ->as<kir::GridBroadcast>();
   }
 
   pushBack(grid_broadcast);
@@ -1040,7 +1097,7 @@ kir::Allocate* IndexLowering::allocateUniqueBuffer(
 
   // No existing allocation found. Create a new one
   auto new_buffer =
-      ir_utils::allocGlobalBufferForGridComm(buffer_size, dtype, zero_init);
+      lower_utils::allocGlobalBufferForGridComm(buffer_size, dtype, zero_init);
 
   // Keep track of the allocation
   alloc_map.emplace(out_tv, new_buffer);

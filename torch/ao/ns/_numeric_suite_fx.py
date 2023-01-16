@@ -119,15 +119,11 @@ from .fx.ns_types import (
     NSResultsType,
     NSNodeTargetType,
 )
-
-from torch.ao.quantization import (
-    QConfigMapping,
-)
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.backend_config import BackendConfig
-from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
-from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
+from torch.ao.quantization.fx.match_utils import _find_matches
+from torch.ao.quantization.fx.qconfig_mapping_utils import _generate_node_name_to_qconfig
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
@@ -138,6 +134,7 @@ from torch.ao.ns.fx.n_shadows_utils import (
     print_n_shadows_summary,
     handle_subgraph,
 )
+from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
 
@@ -196,7 +193,7 @@ class OutputLogger(nn.Module):
         self.ref_name = ref_name
         # type of the target of the node whose output this logger is logging
         self.prev_node_target_type = prev_node_target_type
-        # type of the target of the node which was respondible for adding this
+        # type of the target of the node which was responsible for adding this
         # logger
         self.ref_node_target_type = ref_node_target_type
         # what kind of values are inside of stats
@@ -482,9 +479,9 @@ def add_loggers(
     Instrument model A and model B with loggers.
 
     Args:
-        model_name_a: string name of model A to use in results
+        name_a: string name of model A to use in results
         model_a: model A
-        model_name_b: string name of model B to use in results
+        name_b: string name of model B to use in results
         model_b: model B
         logger_cls: class of Logger to use
         base_name_to_sets_of_related_ops: optional override of subgraph base nodes, subject to change
@@ -638,9 +635,9 @@ def add_shadow_loggers(
     Instrument model A and model B with shadow loggers.
 
     Args:
-        model_name_a: string name of model A to use in results
+        name_a: string name of model A to use in results
         model_a: model A
-        model_name_b: string name of model B to use in results
+        name_b: string name of model B to use in results
         model_b: model B
         logger_cls: class of Logger to use
         should_log_inputs: whether to log inputs
@@ -714,7 +711,7 @@ def extend_logger_results_with_comparison(
         model_name_1: string name of model 1
         model_name_2: string name of model 2
         comparison_fn: function to compare two Tensors
-        model_name_to_use_for_layer_names: string name of model to use for
+        comparison_name: string name of model to use for
           layer names in the output
     """
     for _, results_type_to_results in results.items():
@@ -753,8 +750,11 @@ def extend_logger_results_with_comparison(
 def prepare_n_shadows_model(
     model: torch.nn.Module,
     example_inputs: Any,
-    qconfig_mappings: List[QConfigMapping],
+    qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
+    custom_prepare_fn: Optional[Callable] = None,
+    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_tracer: Any = None,
 ) -> torch.nn.Module:
     """
     Given a model with a graph with M ops such as
@@ -770,9 +770,9 @@ def prepare_n_shadows_model(
 
       args_kwargs_m -> op_m -> output_m
            |                        |
-           |---------------------------> mod_with_op_m_transformed_with_qconfig_i
+           |---------------------------> mod_with_op_m_transformed_with_qconfig_n
 
-    Where mod_with_op_m_transformed_with_qconfig_i is a submodule, and its
+    Where mod_with_op_m_transformed_with_qconfig_n is a submodule, and its
     inner graph looks like
 
     .. code::
@@ -790,11 +790,13 @@ def prepare_n_shadows_model(
     1. add deduplication for qconfigs per subgraph
     2. figure out a better way to name the output structure
     3. return a results data structure instead of printing it out
-    4. make specifying sets of QConfigMapping more user friendly
-    5. add examples to docblocks
+    4. add examples to docblocks
     """
 
-    tracer = quantize_fx.QuantizationTracer([], [])
+    if custom_tracer is None:
+        tracer = quantize_fx.QuantizationTracer([], [])
+    else:
+        tracer = custom_tracer
     mt = torch.fx.GraphModule(model, tracer.trace(model))
     # this is necessary to ensure logger FQNs get populated
     mt._node_name_to_scope = tracer.node_name_to_scope
@@ -807,13 +809,13 @@ def prepare_n_shadows_model(
     # Find the set of subgraphs in the original graph which we need to
     # consider.
     modules = dict(mt.named_modules(remove_duplicate=False))
-    patterns = get_pattern_to_quantize_handlers(backend_config)
+    patterns = _get_pattern_to_quantize_handlers(backend_config)
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config)
     standalone_module_names: List[str] = []
     standalone_module_classes: List[Type] = []
     custom_module_classes: List[Type] = []
-    matches = find_matches(
+    matches = _find_matches(
         mt.graph, modules, patterns, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
     subgraphs_dedup: Dict[str, List[Node]] = \
@@ -822,8 +824,8 @@ def prepare_n_shadows_model(
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
-    for qconfig_mapping in qconfig_mappings:
-        node_name_to_qconfig = generate_node_name_to_qconfig(
+    for qconfig_mapping in qconfig_multi_mapping.qconfig_mappings_list:
+        node_name_to_qconfig = _generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
 
@@ -838,7 +840,9 @@ def prepare_n_shadows_model(
             enumerate(subgraphs_dedup.items()):
         handle_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
-            qconfig_mappings, list_of_node_name_to_qconfig)
+            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
+            custom_prepare_fn, custom_prepare_kwargs
+        )
 
     mt.recompile()
     return mt
@@ -866,7 +870,11 @@ def loggers_set_save_activations(
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 
-def convert_n_shadows_model(model: GraphModule) -> GraphModule:
+def convert_n_shadows_model(
+    model: GraphModule,
+    custom_convert_fn: Optional[Callable] = None,
+    custom_convert_kwargs: Optional[Dict[str, Any]] = None
+) -> GraphModule:
     """
     Given a model from `prepare_n_shadows_model`, runs `convert_fx`
     on each shadow submodule.
@@ -876,8 +884,13 @@ def convert_n_shadows_model(model: GraphModule) -> GraphModule:
         # node name string match
         if node.name.startswith(SHADOW_WRAPPER_NODE_NAME_PREFIX):
             orig_mod = getattr(model, node.name)
-            converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
-                orig_mod)
+            if custom_convert_fn is None:
+                converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
+                    orig_mod)
+            else:
+                if custom_convert_kwargs is None:
+                    custom_convert_kwargs = {}
+                converted_mod = custom_convert_fn(orig_mod, **custom_convert_kwargs)
             setattr(model, node.name, converted_mod)
 
     return model

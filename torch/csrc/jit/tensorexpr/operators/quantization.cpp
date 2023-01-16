@@ -696,8 +696,8 @@ Tensor computeUpsampleNearest2d(
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   auto A = c10::get<BufHandle>(inputs[0]);
-  auto output_height = outputShape[2];
-  auto output_width = outputShape[3];
+  const auto& output_height = outputShape[2];
+  const auto& output_width = outputShape[3];
   auto input_height = ExprHandle(A.dim(2));
   auto input_width = ExprHandle(A.dim(3));
 

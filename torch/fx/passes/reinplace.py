@@ -100,8 +100,8 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             # Assert here that this is actually the case, and their storages are the same.
             assert isinstance(node.meta['fake_result'], FakeTensor)
             assert isinstance(node.meta['view_of'].meta['fake_result'], FakeTensor)
-            view_storage = StorageWeakRef(node.meta['fake_result'].storage())
-            base_storage = StorageWeakRef(node.meta['view_of'].meta['fake_result'].storage())
+            view_storage = StorageWeakRef(node.meta['fake_result']._typed_storage())
+            base_storage = StorageWeakRef(node.meta['view_of'].meta['fake_result']._typed_storage())
             assert view_storage == base_storage
         return result
 
@@ -176,7 +176,7 @@ _VIEW_INVERSE_MAP = {
 def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
     def _add_if_tensor(x, set_):
         if isinstance(x, FakeTensor):
-            set_.add(StorageWeakRef(x.storage()))
+            set_.add(StorageWeakRef(x._typed_storage()))
 
     nodes_used_after = set()
     for t in tensor_aliases:
@@ -452,7 +452,7 @@ def reinplace(gm, *sample_args):
     # Useful debug printing
     # def _print(x):
     # if isinstance(x, FakeTensor):
-    # print(f'fake_result: {StorageWeakRef(x.storage()).cdata}')
+    # print(f'fake_result: {StorageWeakRef(x._typed_storage()).cdata}')
 
     # for n in gm.graph.nodes:
     # print(n.format_node())
@@ -468,7 +468,10 @@ def reinplace(gm, *sample_args):
     # so we know not to re-inplace them.
     # NOTE: later, we'll need to add an optimization for fully recovering performance
     # on programs that mutate inputs.
-    input_storages = set(StorageWeakRef(node.meta['fake_result'].storage()) for node in gm.graph.nodes if node.op == 'placeholder')
+    input_storages = set(
+        StorageWeakRef(
+            node.meta['fake_result']._typed_storage()
+        ) for node in gm.graph.nodes if node.op == 'placeholder')
 
 
     # We also need to know for a given node, what are all of its aliasing nodes.
@@ -478,7 +481,7 @@ def reinplace(gm, *sample_args):
             # Tree-mapping because some ops can return lists of tensors.
             def _add_to_map(x):
                 if isinstance(x, FakeTensor):
-                    storage_to_nodes[StorageWeakRef(x.storage())].add(n)
+                    storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
             tree_map(_add_to_map, n.meta['fake_result'])
 
     # inplace-ify functional ops, subject to the constraints written below.
@@ -529,7 +532,7 @@ def reinplace(gm, *sample_args):
 
             # Step 1b: ensure that the op we're trying to re-inplace isn't a program input
             self_arg_name = self_arg.name
-            self_arg_storage = StorageWeakRef(self_arg.meta['fake_result'].storage())
+            self_arg_storage = StorageWeakRef(self_arg.meta['fake_result']._typed_storage())
             if self_arg_storage in input_storages:
                 # TODO: later, add the optimization for handling `copy_()` calls in the graph.
                 continue
@@ -539,7 +542,7 @@ def reinplace(gm, *sample_args):
                 # so we prevent re-inplacing in this case.
                 continue
 
-            self_arg_storage = StorageWeakRef(self_arg.meta['fake_result'].storage())
+            self_arg_storage = StorageWeakRef(self_arg.meta['fake_result']._typed_storage())
             self_aliases = storage_to_nodes[self_arg_storage]
 
             # First, we find all later usages of any of the aliases of self_arg.
@@ -594,7 +597,7 @@ def reinplace(gm, *sample_args):
             # Hmm... morally I think we also want to keep the `fake_result` metadata
             # up to date here, but I'm not sure how easy it is to do.
             # Maybe it's fine to wait until the end of the pass to update it.
-            curr_node_storage = StorageWeakRef(node.meta['fake_result'].storage())
+            curr_node_storage = StorageWeakRef(node.meta['fake_result']._typed_storage())
             storage_to_nodes[self_arg_storage].update(storage_to_nodes[curr_node_storage])
             storage_to_nodes[curr_node_storage].update(storage_to_nodes[self_arg_storage])
 
@@ -624,8 +627,14 @@ def reinplace(gm, *sample_args):
                     old_flattened_res, _ = tree_flatten(old.meta['fake_result'])
                     node_flattened_res, _ = tree_flatten(node_to_update.meta['fake_result'])
 
-                    old_res_storage = set(StorageWeakRef(x.storage()) for x in old_flattened_res if isinstance(x, FakeTensor))
-                    node_res_storage = set(StorageWeakRef(x.storage()) for x in node_flattened_res if isinstance(x, FakeTensor))
+                    old_res_storage = set(
+                        StorageWeakRef(
+                            x._typed_storage()
+                        ) for x in old_flattened_res if isinstance(x, FakeTensor))
+                    node_res_storage = set(
+                        StorageWeakRef(
+                            x._typed_storage()
+                        ) for x in node_flattened_res if isinstance(x, FakeTensor))
 
                     # This will happen if we're updating a view op, e.g.
                     # e.g. replacing
@@ -639,7 +648,10 @@ def reinplace(gm, *sample_args):
                     # We can't just check equality because we might encounter FX nodes that return zero tensor outputs.
                     if len(old_res_storage) == 1 and len(node_res_storage) == 1 and old_res_storage == node_res_storage:
                         new_flattened_res, _ = tree_flatten(new.meta['fake_result'])
-                        new_res_storage = set(StorageWeakRef(x.storage()) for x in new_flattened_res if isinstance(x, FakeTensor))
+                        new_res_storage = set(
+                            StorageWeakRef(
+                                x._typed_storage()
+                            ) for x in new_flattened_res if isinstance(x, FakeTensor))
                         assert len(new_res_storage) == 1
                         (old_ref,) = old_res_storage
                         (new_ref,) = new_res_storage

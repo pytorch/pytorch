@@ -4,7 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_data.h>

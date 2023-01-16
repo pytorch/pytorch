@@ -60,10 +60,19 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
+
         # See Note [Don't serialize hooks]
+        hooks = OrderedDict()
+        if not state:
+            return (
+                torch._utils._rebuild_parameter,
+                (self.data, self.requires_grad, hooks)
+            )
+
         return (
-            torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
+            torch._utils._rebuild_parameter_with_state,
+            (self.data, self.requires_grad, hooks, state)
         )
 
     __torch_function__ = _disabled_torch_function_impl
@@ -156,7 +165,7 @@ def is_lazy(param):
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
-    Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
+    Uninitialized Parameters are a a special case of :class:`torch.nn.Parameter`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
@@ -187,7 +196,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Unitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters

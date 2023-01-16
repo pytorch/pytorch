@@ -45,11 +45,9 @@ Utility functions
     :nosignatures:
     :template: classtemplate.rst
 
-    add_observer_
     swap_module
     propagate_qconfig_
     default_eval_fn
-    get_observer_dict
 
 torch.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -101,6 +99,7 @@ Quantization to work with this as well.
     BackendConfig
     BackendPatternConfig
     DTypeConfig
+    DTypeWithConstraints
     ObservationType
 
 torch.ao.quantization.fx.custom_config
@@ -529,7 +528,7 @@ Quantized dtypes and quantization schemes
 Note that operator implementations currently only
 support per channel quantization for weights of the **conv** and **linear**
 operators. Furthermore, the input data is
-mapped linearly to the the quantized data and vice versa
+mapped linearly to the quantized data and vice versa
 as follows:
 
     .. math::

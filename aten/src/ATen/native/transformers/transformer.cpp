@@ -95,43 +95,26 @@ Tensor transformer_encoder_layer_forward(
   if (norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
   }
+  x = std::get<0>(at::_native_multi_head_attention(
+      x,
+      x,
+      x,
+      embed_dim,
+      num_heads,
+      qkv_weight,
+      qkv_bias,
+      proj_weight,
+      proj_bias,
+      mask,
+      false /* need_weights */,
+      true /* average_attn_weights */,
+      mask_type));
 
-#if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
-  if (x.is_nested() && x.is_cuda() && x.dtype() == at::kHalf && !mask.has_value() &&
-      (embed_dim / num_heads == 16 ||
-       embed_dim / num_heads == 32 ||
-       embed_dim / num_heads == 64 ||
-       embed_dim / num_heads == 128)) {
-     TORCH_WARN_ONCE("transformer_encoder_layer_forward is using flash attention.");
-     x = at::linear(x, qkv_weight, qkv_bias);
-     auto x_size_0 = x.size(0);
-     x = x.view({x_size_0, -1, 3, num_heads, embed_dim / num_heads});
-     x = flash_attention_helper(x, x, x, 0.0, false, false);
-     x = x.view({x_size_0, -1, embed_dim});
-     x = at::linear(x, proj_weight, proj_bias);
-  } else {
-#endif
-     x = std::get<0>(native_multi_head_attention(
-         x,
-         x,
-         x,
-         embed_dim,
-         num_heads,
-         qkv_weight,
-         qkv_bias,
-         proj_weight,
-         proj_bias,
-         mask,
-         false /* need_weights */,
-         true /* average_attn_weights */,
-         mask_type));
-#if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
-  }
-#endif
   x.add_(src);
   if (!norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
   }
+
 
   auto pre_ffn_res = x;
 

@@ -55,7 +55,7 @@
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
           "\n" + getNcclErrorDetailStr(result, failureReason);                \
-      TORCH_CHECK(false, err);                                                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
     }                                                                         \
   } while (0)
 

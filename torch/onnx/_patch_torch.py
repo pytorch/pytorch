@@ -10,18 +10,18 @@ from torch._C import _onnx as _C_onnx
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, jit_utils
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
-# TODO(#78694): Remove this file after PyTorch 1.14.
+# TODO(#78694): Remove this file after PyTorch 2.0.
 # All functions in this file are deprecated and should not be used
 
 
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "note 'g.op()' is to be removed from torch.Graph. Please open a"
     " GitHub issue if you need this functionality.",
 )
@@ -70,7 +70,7 @@ def _graph_op(
     args = [_const_if_tensor(g, arg) for arg in raw_args]
 
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
@@ -98,7 +98,7 @@ def _const_if_tensor(g: _C.Graph, arg):
 
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "note 'g.at()' is to be removed from torch.Graph. Please open a"
     " GitHub issue if you need this functionality.",
 )
@@ -117,14 +117,14 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
 
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "note 'b.op()' is to be removed from torch.Block. Please open a"
     " GitHub issue if you need this functionality.",
 )
 @_beartype.beartype
 def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
@@ -219,7 +219,7 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 
 # TODO(#76254): Remove the deprecated function.
 @_deprecation.deprecated(
-    "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
+    "1.13", "2.0", "Use 'g.op()' to create a constant node instead."
 )
 @_beartype.beartype
 def _graph_constant(
@@ -278,7 +278,7 @@ def _graph_constant(
 # TODO(#76254): Remove the deprecated function.
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "Internally use '_node_get' in symbolic_helper instead.",
 )
 def _node_getitem(self, k):

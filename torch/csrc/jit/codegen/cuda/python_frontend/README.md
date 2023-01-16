@@ -51,7 +51,7 @@ nvf_out = fs.execute([input1, input2])[0]
 * `id()`: Returns the fusion id for a given `Fusion`.
 * `print()`: Prints the low level IR for the currently defined fusion.
 
-### `FusionDefiniton` Context Manager - Interface for Defining Fusions
+### `FusionDefinition` Context Manager - Interface for Defining Fusions
 
 #### Defining Input Tensors
 _All intermediate tensors are created by operations.  Constant tensors do not exist._
@@ -108,7 +108,7 @@ python -c "from torch._C._nvfuser import FusionDefinition; help(FusionDefinition
 ```
 #### Notating Outputs
 
-The `FusionDefintion` `add_output` method is used to indicate an intermediate is an output to the fusion.
+The `FusionDefinition` `add_output` method is used to indicate an intermediate is an output to the fusion.
 
 ```python
 add_output(output: Tensor)

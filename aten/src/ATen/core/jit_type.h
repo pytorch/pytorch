@@ -270,7 +270,7 @@ inline c10::optional<T> merge_primitive(
 // the stride is precisely 1, otherwise a contiguity marker means that $stride_n
 // = size_{n-1}*stride_{n-1}$
 struct TORCH_API Stride {
-  Stride() {}
+  Stride() = default;
   Stride(
       const c10::optional<size_t>& stride_index,
       c10::optional<bool> contiguous,
@@ -1310,7 +1310,6 @@ struct TORCH_API SymIntType : public Type {
     return "SymInt";
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    // TODO: will become a Union[SymIntNodeImpl|int] in the near future
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;

@@ -60,7 +60,7 @@ def mask_fn(tensor, threshold):  # threshold is the sparse config here
 ```
 
 ## API Design
-`ActivationSparsifier`: Attaches itself to a model layer and sparsifies the activation flowing through that layer. The user can pass in the default `aggregate_fn`, `reduce_fn` and `mask_fn`. Additionaly, `features` and `feature_dim` are also accepted.
+`ActivationSparsifier`: Attaches itself to a model layer and sparsifies the activation flowing through that layer. The user can pass in the default `aggregate_fn`, `reduce_fn` and `mask_fn`. Additionally, `features` and `feature_dim` are also accepted.
 
 `register_layer`: Registers a layer for sparsification. Specifically, registers `forward_pre_hook()` that performs aggregation.
 

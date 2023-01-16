@@ -2,7 +2,7 @@ import contextlib
 
 import warnings
 from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
-    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, _set_torch_dispatch_mode
+    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -67,16 +67,11 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
-    if _len_torch_dispatch_stack() == 0:
-        _set_torch_dispatch_mode(_TorchDispatchStackMode())
     _push_on_torch_dispatch_stack(mode)
 
 
 def _pop_mode():
-    old = _pop_torch_dispatch_stack()
-    if _len_torch_dispatch_stack() == 0:
-        _set_torch_dispatch_mode(None)
-    return old
+    return _pop_torch_dispatch_stack()
 
 
 @contextlib.contextmanager
@@ -87,18 +82,17 @@ def _pop_mode_temporarily():
     finally:
         _push_mode(old)
 
-# a helper "mode" used by the torch dispatch push helper method. This is the only mode that will ever
-# be active at the C++ level and it will run the current mode
-class _TorchDispatchStackMode:
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        with _pop_mode_temporarily() as old:
-            if _len_torch_dispatch_stack() > 0:
-                _set_torch_dispatch_mode(self)
-            # we can't check the type of __torch_dispatch__ here but this is sufficient for checking it's a classmethod
-            if old.__torch_dispatch__.__self__ is type(old):
-                raise RuntimeError(f"{type(old)}'s torch_dispatch function " +
-                                   "should be a normal method not a class method")
-            return old.__torch_dispatch__(func, types, args, kwargs)
+
+@contextlib.contextmanager
+def _disable_current_modes():
+    mode_len = _len_torch_dispatch_stack()
+    old_modes = [_pop_mode() for _ in range(mode_len)]
+    try:
+        yield old_modes
+    finally:
+        for mode in reversed(old_modes):
+            _push_mode(mode)
+
 
 class BaseTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):

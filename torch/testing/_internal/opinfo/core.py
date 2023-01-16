@@ -97,13 +97,19 @@ class DecorateInfo(object):
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
-    def is_active(self, cls_name, test_name, device_type, dtype):
+    def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
+            # Support callables over kwargs to determine if the decorator is active.
+            and (
+                self.active_if(param_kwargs)
+                if isinstance(self.active_if, Callable)
+                else self.active_if
+            )
         )
 
 
@@ -1201,12 +1207,14 @@ class OpInfo(object):
             self, device, dtype, requires_grad, **kwargs
         )
 
-    def get_decorators(self, test_class, test_name, device, dtype):
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(test_class, test_name, device, dtype):
+                if decorator.is_active(
+                    test_class, test_name, device, dtype, param_kwargs
+                ):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)
@@ -1732,11 +1740,11 @@ def generate_elementwise_binary_extremal_value_tensors(
     lhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    lhs.flatten()[::3] = nan
+    lhs.view(-1)[::3] = nan
     rhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    rhs.flatten()[::3] = nan
+    rhs.view(-1)[::3] = nan
 
     yield SampleInput(lhs, args=(rhs,))
 
@@ -2588,6 +2596,14 @@ class ForeachFuncInfo(OpInfo):
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
+        elif name == "minimum":
+            # because minimum ref does not support inplace or scalar
+            self.ref = torch.clamp_max
+            self.ref_inplace = torch.Tensor.clamp_max_
+        elif name == "maximum":
+            # because maximum ref does not support inplace or scalar
+            self.ref = torch.clamp_min
+            self.ref_inplace = torch.Tensor.clamp_min_
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):

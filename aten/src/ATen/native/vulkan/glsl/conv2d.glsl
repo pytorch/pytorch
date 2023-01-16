@@ -2,6 +2,13 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+/*
+ * TILE_SIZE = (1, 1, 1)
+ * WEIGHT_STORAGE = TEXTURE_2D
+ * BIAS_STORAGE = TEXTURE_2D
+ * REGISTER_FOR = ('conv2d', ['catchall'])
+ */
+
 layout(std430) buffer;
 
 /*

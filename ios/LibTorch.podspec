@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
     s.name             = 'LibTorch'
-    s.version          = '1.12.0'
+    s.version          = '1.13.0'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
@@ -33,4 +33,5 @@ Pod::Spec.new do |s|
         'VALID_ARCHS' => 'x86_64 arm64'
     }
     s.library = ['c++', 'stdc++']
+    s.frameworks = 'Accelerate'
 end

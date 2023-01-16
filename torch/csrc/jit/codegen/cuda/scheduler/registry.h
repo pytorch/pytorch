@@ -27,6 +27,7 @@ class ExpressionEvaluator;
 //!    segmenter and schedulers.
 //!  It is important that input id encoding should be up to date with any change
 //!   of this class to avoid launching compiled kernels with illegal inputs.
+
 class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
  public:
   // Max vector size we will consider, in bytes,
@@ -111,6 +112,9 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
   // Copy of aten input pointer addresses
   // TODO: Support output tensor pointers
   std::unordered_map<Val*, size_t> input_ptrs_;
+
+  // Copy of aten input tensor strides (in bytes)
+  std::unordered_map<Val*, std::vector<size_t>> input_discontig_strides_;
 
   // Cache for getAlignmentSize
   std::unordered_map<TensorView*, size_t> alignment_map_;

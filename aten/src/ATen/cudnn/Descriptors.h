@@ -46,7 +46,8 @@ inline int dataSize(cudnnDataType_t dataType)
 // that the stride for dim i is the product of the sizes of dims
 // i+1 to the end.  This stride is indeed uniquely determined.  This
 // function modifies 'stride' in place so this invariant holds.
-static inline void fixSizeOneDimStride(int dim, const int *size, int *stride, bool nhwc) {
+template <typename T>
+static inline void fixSizeOneDimStride(int dim, const T *size, T *stride, bool nhwc) {
   int64_t z = 1;
   int index = 0;
   std::vector<int> permutation(dim);
@@ -150,7 +151,7 @@ private:
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
 
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    fixSizeOneDimStride(dim, size, stride, nhwc);
+    fixSizeOneDimStride<int>(dim, size, stride, nhwc);
     AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -304,7 +305,6 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
   void set(cudnnDataType_t datatype) {
     AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
   }
-#if CUDNN_VERSION >= 7600
   void setEx(
       cudnnDataType_t datatype,
       cudnnLossNormalizationMode_t normMode,
@@ -312,7 +312,6 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
-#endif
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor

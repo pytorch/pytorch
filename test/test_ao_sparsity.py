@@ -15,8 +15,9 @@ from ao.sparsity.test_sparsifier import TestBaseSparsifier  # noqa: F401
 from ao.sparsity.test_sparsifier import TestWeightNormSparsifier  # noqa: F401
 from ao.sparsity.test_sparsifier import TestNearlyDiagonalSparsifier  # noqa: F401
 
-# Pruner
-from ao.sparsity.test_pruner import TestBasePruner  # noqa: F401
+# Structured Pruning
+from ao.sparsity.test_structured_sparsifier import TestBaseStructuredSparsifier  # noqa: F401
+from ao.sparsity.test_structured_sparsifier import TestSaliencyPruner  # noqa: F401
 
 # Scheduler
 from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
@@ -41,5 +42,5 @@ from ao.sparsity.test_data_scheduler import TestBaseDataScheduler  # noqa: F401
 # Activation Sparsifier
 from ao.sparsity.test_activation_sparsifier import TestActivationSparsifier  # noqa: F401
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

@@ -1,8 +1,11 @@
+import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
 
 import sympy
+
+from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
 
@@ -57,6 +60,9 @@ def _arg_str(a):
 
 class MockHandler:
     def __getattr__(self, name):
+        if name == "name":
+            return "MockHandler"
+
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
@@ -70,7 +76,7 @@ class MockHandler:
 
     @staticmethod
     def indirect_indexing(index_var):
-        return sympy_symbol(str(index_var))
+        return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
     def _init_cls(cls):
@@ -85,6 +91,29 @@ class MockHandler:
             magic_methods.items(), inplace_methods.items()
         ):
             setattr(cls, name, make_handler(format_string))
+
+
+class KernelFormatterHandler:
+    def __init__(self, parent_handler):
+        self.parent_handler = parent_handler
+        self.output = IndentedBuffer()
+        self.var_counter = itertools.count()
+
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            line = getattr(self.parent_handler, name)(*args, **kwargs)
+            if name == "indirect_indexing":
+                return line
+            # replace line with a new variable name
+            varname = f"tmp{next(self.var_counter)}"
+            self.output.writeline(f"{varname} = {line}")
+            return varname
+
+        return inner
+
+    def getvalue(self, result):
+        self.output.writeline(f"return {result}")
+        return self.output.getvalue()
 
 
 class WrapperHandler:
@@ -105,6 +134,7 @@ _debug = Virtualized("debug", NullHandler)
 
 class _V:
     MockHandler = MockHandler
+    KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
     set_ops_handler = ops._set_handler

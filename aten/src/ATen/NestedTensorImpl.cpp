@@ -7,6 +7,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Logging.h>
 
 #include <numeric>
 #include <functional>
@@ -172,6 +173,7 @@ NestedTensorImpl::NestedTensorImpl(
       nested_stride_tensor_(std::move(nested_stride_tensor)),
       storage_offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+  C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
@@ -302,7 +304,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
+    auto r = pyobj_slot_.load_pyobj_interpreter()->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);

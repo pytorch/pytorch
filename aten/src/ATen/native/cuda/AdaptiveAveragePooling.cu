@@ -19,6 +19,8 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -34,8 +36,7 @@
 #define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
 #define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -601,6 +602,9 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
+
+    adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
+
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {
@@ -795,8 +799,7 @@ namespace {
     return gradInput;
   }
 
-} // at::native
-} // at
+} // namespace at::native
 
 #undef BLOCK_STRIDE
 #undef CUDA_MAX_THREADS

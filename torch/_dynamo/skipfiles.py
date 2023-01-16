@@ -30,6 +30,8 @@ import unittest
 import weakref
 
 import torch
+import torch._inductor.test_operators
+
 
 try:
     import torch._prims
@@ -47,7 +49,23 @@ try:
 except ImportError:
     HAS_PRIMS_REFS = False
 
-from . import config
+from . import comptime, config, external_utils
+
+"""
+A note on skipfiles:
+
+Dynamo consults this file to determine whether code should be compiled or skipped.
+
+A skip applies at the frame boundary, meaning dynamo either triggers a graph break
+at the beginning of the frame or attempts to trace the whole frame.  When skipping
+a frame, recursively called frames are still traced by dynamo unless also skipped.
+
+Skipfiles (skipped at the file level instead of function level) still apply on a
+frame-by-frame boundary as dynamo traces, but apply to all functions in that file.
+
+@skip is a helper decorator that can be applied to your function to cause it to be
+included here.
+"""
 
 
 def _strip_init_py(s):
@@ -101,9 +119,14 @@ SKIP_DIRS = [
         _weakrefset,
     )
 ]
+
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
+    torch._inductor.test_operators.__file__,
+    # These are dynamo files!
+    external_utils.__file__,
+    comptime.__file__,  # Want to inline these helpers
 }
 
 # Include optimizer code for tracing
@@ -114,7 +137,6 @@ FILENAME_ALLOWLIST |= set(
         if inspect.isclass(obj)
     ]
 )
-
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
@@ -127,7 +149,6 @@ if HAS_PRIMS_REFS:
         torch._refs.nn.functional.__file__,
     }
 
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 SKIP_DIRS_RE = None
 

@@ -7,7 +7,7 @@ Responsibilities
 * Triage and fix high priority issues assigned to the module or library
 * Triage, review, and land high priority pull requests assigned to the module or library
 * Answer module or library questions on `discuss.pytorch.org <https://discuss.pytorch.org/>`__
-  and `dev-discuss.pytorch.org <dev-discuss.pytorch.org>`__
+  and `dev-discuss.pytorch.org <https://dev-discuss.pytorch.org/>`__
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
@@ -115,6 +115,22 @@ Sparse (torch.sparse)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  Andrew James (`amjames <https://github.com/amjames>`__)
+
+NestedTensor (torch.nested)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Driss Guessous (`drisspg <https://github.com/drisspg>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
+-  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+
+MaskedTensor (torch.masked)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  (emeritus) George Qi (`george-qi <https://github.com/george-qi>`__)
 
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -307,6 +323,11 @@ TorchAudio
 ~~~~~~~~~~
 
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
+-  Jeff Hwang (`hwangjeff <https://github.com/hwangjeff>`__)
+-  Caroline Chen (`carolineechen <https://github.com/carolineechen>`__)
+-  Xiaohui Zhang (`xiaohui-zhang <https://github.com/xiaohui-zhang>`__)
+-  Zhaoheng Ni (`nateanl <https://github.com/nateanl>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
 
 TorchRec
