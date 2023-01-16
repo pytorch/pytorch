@@ -1541,7 +1541,7 @@ class CppVecKernelChecker(CppVecKernel):
                     # Pick the most inner loop variable since we always vectorize the
                     # most inner loop
                     most_inner_var = self.itervars[-1]
-                    most_inner_loop_irrevelant = self.is_var_irrevelant(
+                    most_inner_loop_irrevelant = self.is_invariant_under(
                         most_inner_var, expr
                     )
                     if not most_inner_loop_irrevelant:
