@@ -499,9 +499,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       source._values(),
       probably_coalesced._values());
   // We would like to respect order in value intersection.
-  Tensor lhs, lhs_selected;
-  Tensor rhs, rhs_selected;
-  std::tie(lhs, lhs_selected, rhs, rhs_selected) = [&]() -> auto {
+  auto [lhs, lhs_selected, rhs, rhs_selected] = [&]() -> auto {
     // Either source <=> x, ...
     if (source.is_same(x)) {
       return std::make_tuple(source, selected_source, probably_coalesced, selected_probably_coalesced);
