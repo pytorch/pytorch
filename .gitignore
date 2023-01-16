@@ -136,6 +136,7 @@ torchgen/packaged/*
 *.swp
 *.swm
 *~
+.~lock.*
 
 # macOS dir files
 .DS_Store
