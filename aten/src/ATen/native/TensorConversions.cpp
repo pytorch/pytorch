@@ -1695,14 +1695,15 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self, c10::optional<int64_t
   return self;
 }
 
-Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
-  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  TORCH_CHECK(sparse_dim <= 2,
-              "sparse_dim must be less than or equal to 2");
-  // TODO: implement coo.to_sparse(sparse_dim) and then use
-  // return self.to_sparse().to_sparse(sparse_dim);
+Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
   TORCH_CHECK(
-      sparse_dim == 2, "sparse dim 1 is not supported by sparse_compressed_to_sparse");
+     sparse_dim == self.sparse_dim(), "sparse dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
+  return self;
+}
+
+Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
+  TORCH_CHECK(
+      sparse_dim == 2, "sparse dim argument must be 2 for sparse_compressed_to_sparse");
   Layout layout = self.layout();
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
