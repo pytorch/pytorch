@@ -3,7 +3,10 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
 #include <c10/util/ArrayRef.h>
+
+#if HAS_CUDNN_V8()
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
@@ -364,5 +367,6 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace at
 
 
+#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

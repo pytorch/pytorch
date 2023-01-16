@@ -8,6 +8,10 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
+
+#if HAS_CUDNN_V8()
+
 #include <ATen/cudnn/Types.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
@@ -350,5 +354,6 @@ cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_
 } // anonymous
 } // cudnn_utils
 
+#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

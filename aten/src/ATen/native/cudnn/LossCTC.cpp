@@ -18,7 +18,7 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-#if (!AT_CUDNN_ENABLED())
+#if (!AT_CUDNN_ENABLED()) || (CUDNN_VERSION < 7600)
 
 namespace at { namespace native {
 
