@@ -4,9 +4,14 @@
 #include <ir_builder.h>
 #include <ir_cloner.h>
 #include <ir_iostream.h>
+#include <ir_utils.h>
 #include <lower_magic_zero.h>
+#include <utils.h>
 
+#include <functional>
+#include <list>
 #include <memory>
+#include <numeric>
 #include <regex>
 #include <sstream>
 #include <unordered_set>
@@ -580,36 +585,54 @@ Val* flattenRule(Val* value) {
       def->outputs().size() == 1,
       "Expressions with multiple output are not supported");
 
-  auto bop = dynamic_cast<BinaryOp*>(def);
+  BinaryOpType op = BinaryOpType::Atan2; // Initialize with an arbitrary
+                                         // non-associative non-commutative op
+  bool changed = false;
+  if (auto bop = dynamic_cast<BinaryOp*>(def)) {
+    op = bop->getBinaryOpType();
+    changed = true;
+  } else if (auto fop = dynamic_cast<FlattenedAssocCommOp*>(def)) {
+    op = fop->getOpType();
+  }
 
-  if (bop != nullptr && isAssociativeAndCommutative(bop->getBinaryOpType())) {
+  if (isAssociativeAndCommutative(op)) {
     // Handle associative-and-commutative op:
-    // Convert binary ops into flattened op
-    auto output = IrBuilder::newScalar(*value->getDataType());
+    // Convert binary ops into flattened op, reflatten already flattened
+    // FlattenedAssocCommOp
     std::vector<Val*> inputs;
 
     auto append_or_merge_inputs = [&](Val* operand) {
-      auto op = dynamic_cast<FlattenedAssocCommOp*>(operand->definition());
-      if (op != nullptr && op->getOpType() == bop->getBinaryOpType() &&
-          hasSimilarType(op->dtype(), *value->getDataType())) {
-        inputs.insert(inputs.end(), op->inputs().begin(), op->inputs().end());
+      auto fop = dynamic_cast<FlattenedAssocCommOp*>(operand->definition());
+      if (fop != nullptr && fop->getOpType() == op &&
+          hasSimilarType(fop->dtype(), *value->getDataType())) {
+        inputs.insert(inputs.end(), fop->inputs().begin(), fop->inputs().end());
+        changed = true;
       } else {
         inputs.emplace_back(operand);
       }
     };
 
-    append_or_merge_inputs(flatten(bop->lhs()));
-    append_or_merge_inputs(flatten(bop->rhs()));
-
-    auto fop = IrBuilder::create<FlattenedAssocCommOp>(
-        bop->getBinaryOpType(), output, std::move(inputs));
-
-    if (fop->isTrivial()) {
-      return fop->input(0);
-    } else {
-      return output;
+    for (auto inp : def->inputs()) {
+      auto flattened = flatten(inp);
+      if (flattened != inp) {
+        changed = true;
+      }
+      append_or_merge_inputs(flattened);
     }
+
+    if (!changed) {
+      return value;
+    }
+
+    if (inputs.size() == 1) {
+      return inputs.at(0);
+    }
+
+    auto output = IrBuilder::newScalar(*value->getDataType());
+    IrBuilder::create<FlattenedAssocCommOp>(op, output, std::move(inputs));
+    return output;
   }
+
   return value;
 }
 
@@ -696,7 +719,227 @@ bool isFlattenedMul(Val* x) {
   return toFlattenedMul(x->definition()) != nullptr;
 }
 
+// Classify terms of a FlattenedMul as (constant, symbolic), for example:
+// a * 3 * b * 5 --> (15, {a, b})
+// a * b --> (1, {a, b})
+// 3 * 5 --> (15, {})
+// If the given Val `x` is not a flattened mul, then return (1, {x})
+std::pair<int64_t, std::list<Val*>> getConstAndSymbolicFactors(Val* x) {
+  std::vector<Val*> factors;
+  if (auto fop = toFlattenedMul(x->definition())) {
+    factors = fop->inputs();
+  } else {
+    factors.emplace_back(x);
+  }
+  int64_t const_factor = 1;
+  std::list<Val*> symbolic_factors;
+  for (auto f : factors) {
+    f = foldConstants(f);
+    if (f->getInt().has_value()) {
+      const_factor *= *f->getInt();
+    } else {
+      symbolic_factors.emplace_back(f);
+    }
+  }
+  return {const_factor, symbolic_factors};
+}
+
+Val* productOfFactors(
+    int64_t const_factor,
+    std::vector<Val*> symbolic_factors,
+    DataType dtype) {
+  if (const_factor != 1) {
+    symbolic_factors.emplace_back(IrBuilder::newConstant(const_factor, dtype));
+  }
+  if (symbolic_factors.size() == 1) {
+    return symbolic_factors.at(0);
+  }
+  if (symbolic_factors.empty()) {
+    return IrBuilder::newConstant(1, dtype);
+  }
+  auto output = IrBuilder::newScalar(dtype);
+  IrBuilder::create<FOp>(
+      BinaryOpType::Mul, output, std::move(symbolic_factors));
+  return output;
+}
+
 } // namespace
+
+namespace sym_algebra {
+
+// Common utilities for symbolic algebra.
+
+// Rewrite x in the form x = x1 * x2 * x3 * ...
+Val* factorize(Val* x);
+
+// Given that x = x1 * x2 * x3 * x4 * ..., y = x2 * x4 * ..., where x is a
+// multiple of y, evaluate x/y as x/y = x1 * x3 * ... Both x and y should have
+// already been factorized in the form of products, otherwise, this function
+// might not be able to get the desired result. Returns nullptr if not
+// divisible. Note that this function does symbolic term cancellation, it does
+// not require y to be non-zero.
+Val* divideFactorized(Val* x, Val* y) {
+  auto x_factors = getConstAndSymbolicFactors(x);
+  auto y_factors = getConstAndSymbolicFactors(y);
+
+  int64_t quoient_const_factor;
+  std::vector<Val*> quoient_symbolic_factors;
+
+  if (x_factors.first % y_factors.first != 0) {
+    // not divisible
+    return nullptr;
+  } else {
+    quoient_const_factor = x_factors.first / y_factors.first;
+  }
+
+  for (auto yf : y_factors.second) {
+    auto it = std::find_if(
+        x_factors.second.begin(), x_factors.second.end(), [yf](Val* v) {
+          return v->sameAs(yf);
+        });
+    if (it == x_factors.second.end()) {
+      // not divisible
+      return nullptr;
+    }
+    x_factors.second.erase(it);
+  }
+  quoient_symbolic_factors.insert(
+      quoient_symbolic_factors.end(),
+      x_factors.second.begin(),
+      x_factors.second.end());
+  return productOfFactors(
+      quoient_const_factor,
+      std::move(quoient_symbolic_factors),
+      *x->getDataType());
+}
+
+// Symbolic gcd, for example: greatestCommonDivisor({6*a*b, 9*b*c}) -> 3*b
+Val* greatestCommonDivisor(const std::vector<Val*>& inputs) {
+  // The gcd of the constant part. Because gcd(0, a) = gcd(a, 0) = a, it is
+  // great to use 0 as initial value because it does not need special handling.
+  int64_t common_const_factor = 0;
+  // The gcd of the symbolic part. nullptr serve as 0, empty vector serve as 1.
+  std::unique_ptr<std::vector<Val*>> common_symbolic_factors = nullptr;
+
+  for (auto inp : inputs) {
+    auto factors = getConstAndSymbolicFactors(inp);
+    common_const_factor = std::gcd(common_const_factor, factors.first);
+    std::vector<Val*> new_common_symbolic_factors;
+    if (common_symbolic_factors == nullptr) {
+      // gcd(0, x) -> x
+      new_common_symbolic_factors.insert(
+          new_common_symbolic_factors.end(),
+          factors.second.begin(),
+          factors.second.end());
+    } else {
+      for (auto f : (*common_symbolic_factors)) {
+        auto it = std::find_if(
+            factors.second.begin(), factors.second.end(), [f](Val* v) {
+              return v->sameAs(f);
+            });
+        if (it != factors.second.end()) {
+          new_common_symbolic_factors.emplace_back(f);
+          factors.second.erase(it);
+        }
+      }
+    }
+    common_symbolic_factors = std::make_unique<std::vector<Val*>>(
+        std::move(new_common_symbolic_factors));
+  }
+
+  TORCH_INTERNAL_ASSERT(common_const_factor != 0);
+  TORCH_INTERNAL_ASSERT(common_symbolic_factors != nullptr);
+  return productOfFactors(
+      common_const_factor,
+      std::move(*common_symbolic_factors),
+      *inputs[0]->getDataType());
+}
+
+namespace {
+
+Val* factorizeFlattenedMul(Val* x) {
+  auto fop = toFlattenedMul(x->definition());
+  TORCH_INTERNAL_ASSERT(fop != nullptr);
+  // Recursively factorize all its inputs, and combine their terms
+  int64_t const_factor = 1;
+  std::vector<Val*> symbolic_factors;
+  bool changed = false;
+  for (auto inp : fop->inputs()) {
+    auto factorized_inp = factorize(inp);
+    auto factors = getConstAndSymbolicFactors(factorized_inp);
+    const_factor *= factors.first;
+    symbolic_factors.insert(
+        symbolic_factors.end(), factors.second.begin(), factors.second.end());
+    if (factors.second != std::list<Val*>{inp}) {
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return x;
+  }
+  return productOfFactors(
+      const_factor, std::move(symbolic_factors), *x->getDataType());
+}
+
+Val* factorizeFlattenedAdd(Val* x) {
+  // Warning: This implementation can only factorize out common divisor. It can
+  // not factorize FlattenedAdd(x * x, 2 * x, 1) as FlattenedMul(x + 1, x + 1).
+  // But I believe factorizing out common divisor is sufficient for index
+  // simplification.
+  auto fop = toFlattenedAdd(x->definition());
+  TORCH_INTERNAL_ASSERT(fop != nullptr);
+  std::vector<Val*> factorized_inputs;
+  for (auto inp : fop->inputs()) {
+    factorized_inputs.emplace_back(factorize(inp));
+  }
+  // Find common factors
+  auto gcd = greatestCommonDivisor(factorized_inputs);
+  if (assoc_comm::isIdentity(gcd, BinaryOpType::Mul)) {
+    return x;
+  }
+  // divide by common factors
+  std::vector<Val*> quotient_inputs;
+  for (auto inp : factorized_inputs) {
+    auto quotient = divideFactorized(inp, gcd);
+    TORCH_INTERNAL_ASSERT(quotient != nullptr);
+    quotient_inputs.emplace_back(quotient);
+  }
+  auto quotient = IrBuilder::newScalar(*x->getDataType());
+  IrBuilder::create<FOp>(
+      BinaryOpType::Add, quotient, std::move(quotient_inputs));
+  auto product = IrBuilder::newScalar(*x->getDataType());
+  IrBuilder::create<FOp>(
+      BinaryOpType::Mul, product, std::vector<Val*>{quotient, gcd});
+  // Quotient might contain nested FlattenedAdd, for example, if we have:
+  //   FlattenedAdd(a * FlattenedAdd(b, c), a * FlattenedAdd(d, e))
+  // then the gcd will be a, and the quotient will be:
+  //   FlattenedAdd(FlattenedAdd(b, c), FlattenedAdd(d, e))
+  // So we need to reflatten to get rid of this nested FlattenedAdd.
+  return assoc_comm::flatten(product);
+}
+
+} // namespace
+
+// Rewrite x in the form x = x1 * x2 * x3 * ...
+Val* factorize(Val* x) {
+  if (x->isConstScalar()) {
+    return foldConstants(x);
+  }
+  if (isProtectedWithMagicZero(x)) {
+    return x;
+  }
+  if (isFlattenedMul(x)) {
+    return factorizeFlattenedMul(x);
+  }
+  if (isFlattenedAdd(x)) {
+    return factorizeFlattenedAdd(x);
+  }
+  // TODO: handle other operators, for example, rule M, O
+  return x;
+}
+
+} // namespace sym_algebra
 
 namespace prove {
 
@@ -711,6 +954,71 @@ namespace prove {
 // - x can be either zero or non-zero, it is just a symbolic number that depends
 // - x is zero
 
+bool isNonNegative(Val* value) {
+  value = foldConstants(value);
+  if (value->getInt().has_value() && *value->getInt() >= 0) {
+    return true;
+  }
+  if (value->getDouble().has_value() && *value->getDouble() >= 0.0) {
+    return true;
+  }
+  if (auto ns = dynamic_cast<NamedScalar*>(value)) {
+    if (ns->getParallelDim().has_value() ||
+        ns->getParallelIndex().has_value()) {
+      return true;
+    }
+  }
+  if (auto fop = dynamic_cast<FOp*>(value->definition())) {
+    auto op = fop->getOpType();
+    if (op == BinaryOpType::Add || op == BinaryOpType::Mul) {
+      for (auto inp : fop->inputs()) {
+        if (!isNonNegative(inp)) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isPositive(Val* value) {
+  value = foldConstants(value);
+  if (value->getInt().has_value() && *value->getInt() > 0) {
+    return true;
+  }
+  if (value->getDouble().has_value() && *value->getDouble() > 0.0) {
+    return true;
+  }
+  if (auto ns = dynamic_cast<NamedScalar*>(value)) {
+    if (ns->getParallelDim().has_value()) {
+      return true;
+    }
+  }
+  if (auto fop = dynamic_cast<FOp*>(value->definition())) {
+    auto op = fop->getOpType();
+    if (op == BinaryOpType::Add) {
+      bool has_positive = false;
+      for (auto inp : fop->inputs()) {
+        if (isPositive(inp)) {
+          has_positive = true;
+        } else if (!isNonNegative(inp)) {
+          return false;
+        }
+      }
+      return has_positive;
+    } else if (op == BinaryOpType::Mul) {
+      for (auto inp : fop->inputs()) {
+        if (!isPositive(inp)) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 bool isNonZero(Val* value) {
   value = foldConstants(value);
   if (value->getInt().has_value() && *value->getInt() != 0) {
@@ -719,10 +1027,8 @@ bool isNonZero(Val* value) {
   if (value->getDouble().has_value() && *value->getDouble() != 0.0) {
     return true;
   }
-  if (auto ns = dynamic_cast<NamedScalar*>(value)) {
-    if (ns->getParallelDim().has_value()) {
-      return true;
-    }
+  if (isPositive(value)) {
+    return true;
   }
   if (auto fop = toFlattenedMul(value->definition())) {
     for (auto inp : fop->inputs()) {
@@ -733,6 +1039,14 @@ bool isNonZero(Val* value) {
     return true;
   }
   return false;
+}
+
+// Tries to prove that x is a multiple of y, that is, there exist an integer `k`
+// such that x = k*y
+bool isMultipleOf(Val* x, Val* y) {
+  auto lhs = sym_algebra::factorize(x);
+  auto rhs = sym_algebra::factorize(y);
+  return sym_algebra::divideFactorized(lhs, rhs) != nullptr;
 }
 
 } // namespace prove
@@ -833,6 +1147,29 @@ Val* eliminateTrivialComputation(Val* value) {
   return value;
 }
 
+// Apply rule L to replace x % y with 0 if x can be proved to be a multiple of y
+// Also, according to rule M, if x can be factorized as x = k * y, then x / y
+// can be simplified as x / y = (k * y) / y = k * (y / y) = k
+Val* simplifyDivisibleDivMod(Val* value) {
+  if (auto bop = dynamic_cast<BinaryOp*>(value->definition())) {
+    if (prove::isNonZero(bop->rhs())) {
+      if (bop->getBinaryOpType() == BinaryOpType::Mod) {
+        if (prove::isMultipleOf(bop->lhs(), bop->rhs())) {
+          return IrBuilder::newConstant(0, *value->getDataType());
+        }
+      } else if (bop->getBinaryOpType() == BinaryOpType::Div) {
+        auto lhs = sym_algebra::factorize(bop->lhs());
+        auto rhs = sym_algebra::factorize(bop->rhs());
+        auto quotient = sym_algebra::divideFactorized(lhs, rhs);
+        if (quotient != nullptr) {
+          return quotient;
+        }
+      }
+    }
+  }
+  return value;
+}
+
 } // namespace rules
 
 #define RUN_PASS(pass_name)                               \
@@ -850,6 +1187,7 @@ Val* simplifyExpr(Val* value, const std::list<ValInfo>& variables) {
   while (old_simplified != simplified) {
     old_simplified = simplified;
     RUN_PASS(eliminateTrivialComputation);
+    RUN_PASS(simplifyDivisibleDivMod);
   }
 
   auto unflattened = assoc_comm::unflatten(simplified, variables);

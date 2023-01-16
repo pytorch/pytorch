@@ -167,7 +167,7 @@ target_include_directories(${NVFUSER_CODEGEN} PUBLIC
                           "$<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>"
                           "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nvfuser>"
                           )
-set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
+set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 17)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 # installing nvfuser headers
 install(DIRECTORY "${NVFUSER_SRCS_DIR}/"
