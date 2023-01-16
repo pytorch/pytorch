@@ -1262,14 +1262,14 @@ class CppVecKernelChecker(CppVecKernel):
         ]
         self.store_supported_dtypes: list[torch.dtype] = [torch.float, torch.float32]
         # Cache the dtypes of the store operation. If the store is mixing dtypes, the
-        # vectorization would not support it as it is hard to determin the vec dtype
+        # vectorization would not support it as it is hard to determine the vec dtype
         self.store_dtypes: list[torch.dtype] = []
         # The dtype is used for vectorization
         self.vec_dtype: torch.dtype = torch.float32
 
     def is_indirect_indexing(self, index: sympy.Expr):
         for _load_res in self.load_results:
-            # The index expression cotains a value that loads from memory
+            # The index expression contains a value that loads from memory
             if index.count(sympy_symbol(_load_res.name)) > 0:
                 return True
         return False
