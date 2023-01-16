@@ -2,7 +2,7 @@ import torch
 import functools
 import warnings
 
-from typing import Any, Optional
+from typing import Any
 from torch.types import _dtype
 
 __all__ = ['autocast_decorator', 'autocast']
@@ -178,9 +178,9 @@ class autocast(object):
             Default: ``True``
     """
     def __init__(self, device_type : str,
-                 dtype : Optional[_dtype] = None,
+                 dtype : _dtype|None = None,
                  enabled : bool = True,
-                 cache_enabled : Optional[bool] = None):
+                 cache_enabled : bool|None = None):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
