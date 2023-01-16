@@ -1961,8 +1961,7 @@ Tensor binary_cross_entropy_target_backward(
       return self.log1p().sub_(self.log());
     }
     return self.logit().neg_();
-
-  }
+  }();
   if (!areAnyTensorSubclassLike({grad})) {
     grad_target.mul_(grad);
   } else {
