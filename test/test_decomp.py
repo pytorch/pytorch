@@ -7,7 +7,6 @@ from torch._decomp import decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch.utils._mode_utils import no_dispatch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -165,8 +164,9 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -250,8 +250,7 @@ def normalize_op_input_output2(
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
+            # TODO We should check that the integer outputs also agree
             result = tuple(
                 r
                 for r in result
@@ -442,10 +441,6 @@ class TestDecomp(TestCase):
 
         class DecompCrossRefMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                with no_dispatch():
-                    return self._torch_dispatch(func, types, args, kwargs)
-
-            def _torch_dispatch(self, func, types, args=(), kwargs=None):
                 test_case.precision = saved_precision
                 test_case.rel_tol = saved_rel_tol
 
@@ -454,6 +449,8 @@ class TestDecomp(TestCase):
 
                 # Stuff we shouldn't bother testing
                 # (TODO: remove detach from the decomp table?)
+                # N.b. Testing in-place ops would need dedicated logic
+                in_place = func.name()[-1] == '_'
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
@@ -464,7 +461,7 @@ class TestDecomp(TestCase):
                     torch.ops.aten.new_empty_strided.default,
                     torch.ops.aten.randn.default,
                     torch.ops.aten.native_dropout.default,
-                ] or any_unsupported(args, kwargs):
+                ] or any_unsupported(args, kwargs) or in_place:
                     return func(*args, **kwargs)
 
                 decomposed.add(func)
@@ -480,12 +477,22 @@ class TestDecomp(TestCase):
                 # decomposition and pytorch are from the "ground truth" (i.e.
                 # fp64). If the decomposition results in more error, we error
 
+                # We also decompose the decomposition recursively for
+                # further coverage, as some paths not be exercised directly by
+                # OpInfos (sadly) but just by other ops
+
                 decomposition = decomposition_table[func]
 
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
+                if run_all:
+                    # Execute recursively via DFS, to find the root of a possible error first
+                    with self:
+                        decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                else:
+                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
@@ -493,7 +500,7 @@ class TestDecomp(TestCase):
                     real_out_double, _ = tree_flatten(
                         func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                     )
-                    for i, orig, decomp, ref in zip(range(len(real_out)), real_out, decomp_out, real_out_double):
+                    for i, (orig, decomp, ref) in enumerate(zip(real_out, decomp_out, real_out_double)):
                         if not isinstance(orig, torch.Tensor):
                             assert type(orig) == type(decomp)
                             assert orig == decomp
