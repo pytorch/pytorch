@@ -17,6 +17,7 @@ from unittest.mock import patch
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 from .hooks import Hooks
@@ -607,8 +608,7 @@ def export(
 
         return result_capturing_wrapper
 
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
@@ -616,6 +616,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -657,9 +658,7 @@ def export(
             dynamo_result_flat = args[0]
             lookup = [*dynamo_result_flat, *self.new_args]
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
-            new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
-
-            return super().output(target, (new_result,), {})
+            return super().output(target, (new_result_flat,), {})
 
         def run_node(self, n):
             self.current_node = n
@@ -675,11 +674,24 @@ def export(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    # Make dynamo graph to have same input/output spec as user code
+    input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
+    new_graph.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            input_strs,
+            in_spec,
+            out_spec_traced,
+        )
+    )
+
+    new_graph.recompile()
 
     return (new_graph, out_guards)
 
@@ -769,8 +781,22 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward
             )
 
-        # disable profile hook
+        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
+
+        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd:
+            multi_tensor_fn_name = f"_multi_tensor_{opt_mod.__name__.split('.')[-1]}"
+            if hasattr(opt_mod, multi_tensor_fn_name):
+                setattr(
+                    opt_mod,
+                    multi_tensor_fn_name,
+                    disable(getattr(opt_mod, multi_tensor_fn_name)),
+                )
+
+        excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
+            if opt in excluded_opts:
+                opt.step = disable(opt.step)
+
             opt._cuda_graph_capture_health_check = disable(
                 opt._cuda_graph_capture_health_check
             )

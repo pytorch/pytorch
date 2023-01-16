@@ -4,9 +4,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 CodeGen::CodeGen(
     StmtPtr stmt,
@@ -144,7 +142,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     // it, and there are no future reuses on its memory).
     // TODO: reuse memory for bufs with dynamic shapes
     if (!bufSize(buf)) {
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(buf, buf);
       continue;
     }
 
@@ -193,7 +191,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     // it.
     if (!allocated) {
       buf_mem_map[buf] = buf;
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(buf, buf);
     }
   }
 
@@ -319,6 +317,4 @@ void CodeGen::allocIntermediateBufs() {
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

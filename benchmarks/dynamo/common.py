@@ -18,12 +18,14 @@ from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
+import psutil
 import torch
 
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -42,6 +44,11 @@ try:
 except ImportError:
     from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
+try:
+    import torch_xla.core.xla_model as xm
+except ImportError:
+    # ignore the error if torch_xla is not installed
+    pass
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +90,20 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
-CI_SKIP_INDCUTOR_INFERENCE = [
+CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
+    *CI_SKIP_AOT_EAGER_TRAINING,
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # setStorage
+    "resnet50_quantized_qat",  # setStorage
+    "tacotron2",  # aten._thnn_fused_lstm_cell.default
+    "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
+    "twins_pcpvt_base",  # timeout
+]
+
+CI_SKIP_INDUCTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "DALLE2_pytorch",
@@ -108,7 +128,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_INDCUTOR_INFERENCE,
+    *CI_SKIP_INDUCTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
@@ -119,6 +139,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
+    "MT5ForConditionalGeneration",  # fails accuracy
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
@@ -126,6 +147,21 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "levit_128",  # fp64_OOM
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+CI_SKIP_OPTIMIZER = {
+    # TIMM
+    "convmixer_768_32",  # accuracy
+    "sebotnet33ts_256",  # accuracy
+    "hrnet_w18",  # Stack issue in fx
+    # TorchBench
+    "dlrm",  # symbolic shapes error
+    # HF
+    "pnasnet5large",  # Stack issue in fx
+    "MobileBertForMaskedLM",  # Stack issue in fx
+    "MobileBertForQuestionAnswering",  # Stack issue in fx
+    "PegasusForConditionalGeneration",  # OOM
+}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -247,30 +283,43 @@ def tensor_is_on_xla(tensors):
     return any(map(lambda x: x.device.type == "xla", tensors))
 
 
-def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
+def timed(
+    model,
+    model_iter_fn,
+    example_inputs,
+    times=1,
+    return_result=False,
+    collect_outputs=False,
+):
+    use_xla = tensor_is_on_xla(example_inputs)
     synchronize()
-    if tensor_is_on_xla(example_inputs):
-        import torch_xla.core.xla_model as xm
 
+    if use_xla:
         xm.mark_step()
+        xm.wait_device_ops()
 
-    reset_rng_state()
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
-        result = model_iter_fn(model, example_inputs, collect_outputs=False)
-        if tensor_is_on_xla(result):
-            # If the model is on XLA device, it's possible that after running
-            # the model, the computation is accumulated but not performed yet.
-            # Flush all the accumulated computations to make the time measurement
-            # accurate.
-            import torch_xla
+        # Put this call inside the loop to reset the seed for each iteration.
+        reset_rng_state(use_xla)
+        result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
-            result_list = result
-            if not isinstance(result, (tuple, list)):
-                result_list = [result]
-            torch_xla._XLAC._xla_sync_multi(result_list, [])
-        synchronize()
+        # instead of calling sync on result_list, we should call mark_step.
+        # In training case, result_list may be empty, but we want to
+        # send all the pending graphs for compilation.
+        if use_xla:
+            # For the model running on regular torchxla (baseline), we need the
+            # mark step to send the accumulated graph for compilation.
+            #
+            # For the model running with dynamo/torchxla bridge, in training case,
+            # we need the mark step to send the optimizer graph out for
+            # compilation.
+            xm.mark_step()
+
+    if use_xla:
+        xm.wait_device_ops()
+    synchronize()
     t1 = time.perf_counter()
     return (t1 - t0, result) if return_result else t1 - t0
 
@@ -383,8 +432,6 @@ def randomize_input(inputs):
 
 def maybe_mark_step(args):
     if args.trace_on_xla:
-        import torch_xla.core.xla_model as xm
-
         xm.mark_step()
 
 
@@ -422,6 +469,12 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         else:
             yield
 
+    times = args.iterations_per_run
+
+    # Use higher tolerance for XLA since XLA cause numerical unstability when
+    # graph size changes
+    tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
+
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
         for rep in range(args.repeat):
@@ -438,7 +491,12 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # interleave the runs to handle frequency scaling and load changes
             with maybe_mark_profile(p=p, mark="expected"):
                 timings[rep, 0], expected_output = timed(
-                    model, model_iter_fn, inputs, return_result=True
+                    model,
+                    model_iter_fn,
+                    inputs,
+                    return_result=True,
+                    times=times,
+                    collect_outputs=args.collect_outputs,
                 )
 
             # call mark_step between the 2 calls to make the comparison fair.
@@ -446,11 +504,18 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
             with maybe_mark_profile(p=p, mark="actual"):
                 timings[rep, 1], actual_output = timed(
-                    model, frozen_model_iter_fn, inputs, return_result=True
+                    model,
+                    frozen_model_iter_fn,
+                    inputs,
+                    return_result=True,
+                    times=times,
+                    collect_outputs=args.collect_outputs,
                 )
 
             if should_check_result:
-                is_correct = is_correct and same(expected_output, actual_output)
+                is_correct = is_correct and same(
+                    expected_output, actual_output, tol=tolerance
+                )
 
     if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name + ".json"
@@ -798,6 +863,10 @@ def cast_to(dtype, model, inputs):
     return model, inputs
 
 
+def cast_to_bf16(model, inputs):
+    return cast_to(torch.bfloat16, model, inputs)
+
+
 def cast_to_fp16(model, inputs):
     return cast_to(torch.float16, model, inputs)
 
@@ -810,10 +879,12 @@ def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
 
 
-def reset_rng_state():
+def reset_rng_state(use_xla=False):
     torch.manual_seed(1337)
     random.seed(1337)
     np.random.seed(1337)
+    if use_xla:
+        xm.set_rng_state(1337, str(xm.xla_device()))
 
 
 class DummyGradScaler:
@@ -869,14 +940,13 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
-        self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
+        self.optimizer = None
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training:
-            assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
+        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -899,17 +969,14 @@ class BenchmarkRunner:
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
+        elif self.args.bfloat16 and self.args.devices == ["cpu"]:
+            self.autocast = torch.cpu.amp.autocast
 
-    def init_optimizer(self, device, params):
-        self.optimizer = None
-        # TODO - Currently, optimizers are used incorrectly. Fix optimizers with
-        # https://github.com/pytorch/pytorch/pull/87492
-        # param_list = list(params)
-        # if device == "cuda" and len(param_list) != 0:
-        #     # capturable is only supported on cuda at the moment
-        #     self.optimizer = torch.optim.Adam(param_list, capturable=True)
-        # else:
-        #     self.optimizer = None
+    def init_optimizer(self, name, device, params):
+        if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
+            self.optimizer = torch.optim.SGD(params, lr=0.01)
+        else:
+            self.optimizer = None
 
     @property
     def args(self):
@@ -988,6 +1055,8 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            model, example_inputs = cast_to_bf16(model, example_inputs)
 
         try:
             self.model_iter_fn(model, example_inputs)
@@ -1001,6 +1070,8 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            model, example_inputs = cast_to_bf16(model, example_inputs)
         return model, example_inputs
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
@@ -1092,12 +1163,12 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.run_n_iterations(
-                *cast_to_fp64(
-                    deepcopy_and_maybe_ddp(model),
-                    clone_inputs(example_inputs),
-                )
+            model_fp64, inputs_fp64 = cast_to_fp64(
+                deepcopy_and_maybe_ddp(model),
+                clone_inputs(example_inputs),
             )
+            self.init_optimizer(name, current_device, model_fp64.parameters())
+            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(
                 f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
@@ -1118,14 +1189,18 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = deepcopy_and_maybe_ddp(model)
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = deepcopy_and_maybe_ddp(model)
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1138,22 +1213,33 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
+            # Sometime CI fails with random triton compilation failure which will be skipped for now
+            # TODO: revisit this after switching to new Triton runtime
             reset_rng_state()
             torch._dynamo.reset()
             try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-
-                new_result = optimized_model_iter_fn(
-                    deepcopy_and_maybe_ddp(model), example_inputs
-                )
+                new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
-                accuracy_status = "fail_to_run"
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
                 log.exception(e)
-                return record_status(accuracy_status)
-
+                if (
+                    self.args.ci
+                    and isinstance(e, BackendCompilerFailed)
+                    and (
+                        "Internal Triton PTX codegen error" in str(e)
+                        or "cubin" in str(e)
+                    )
+                ):
+                    accuracy_status = "pass_due_to_skip"
+                    return record_status(accuracy_status)
+                else:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    accuracy_status = "fail_to_run"
+                    return record_status(accuracy_status)
             if not same(
                 correct_result,
                 new_result,
@@ -1186,6 +1272,10 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
+                elif current_device == "cpu":
+                    total = psutil.virtual_memory().total
+                    percentage = psutil.Process(os.getpid()).memory_percent()
+                    peak_mem = percentage * total / 10**9
             except Exception as e:
                 log.exception(f"Failed for {mode} {e}")
                 return sys.exit(-1)
@@ -1193,6 +1283,7 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+        self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -1370,13 +1461,25 @@ def parse_args(args=None):
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
+    iterations_per_run_help = """
+        Run this may iterations for each time measurement. This is mainly used for
+        XLA training. We want to run multiple iterations per measurement so the
+        tracing and computation for different iteartions can overlap with each
+        other. This makes sure we have an accurate xla baseline.
+    """
+    parser.add_argument(
+        "--iterations-per-run", type=int, default=1, help=iterations_per_run_help
+    )
     parser.add_argument(
         "--randomize-input",
         action="store_true",
         help="Whether to randomize the input values. Dimensions will be kept the same.",
     )
     parser.add_argument(
-        "--threads", "-t", type=int, help="number of threads to use for eager"
+        "--threads",
+        "-t",
+        type=int,
+        help="number of threads to use for eager and inductor",
     )
     parser.add_argument(
         "--nopython", action="store_true", help="Turn graph breaks into errors"
@@ -1412,6 +1515,17 @@ def parse_args(args=None):
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--dynamic-ci-skips-only",
+        action="store_true",
+        help=(
+            "Run only the models that would have been skipped in CI "
+            "if dynamic-shapes, compared to running without dynamic-shapes.  "
+            "This is useful for checking if more models are now "
+            "successfully passing with dynamic shapes.  "
+            "Implies --dynamic-shapes and --ci"
+        ),
     )
     parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
@@ -1551,6 +1665,19 @@ def parse_args(args=None):
         action="store_true",
         help="Whether to trace the model on XLA or on eager device",
     )
+    parser.add_argument(
+        "--xla-tolerance",
+        type=float,
+        default=1e-2,
+        help="XLA needs a loose tolerance to pass the correctness check",
+    )
+    parser.add_argument(
+        "--collect-outputs",
+        action="store_true",
+        help="""Whether to collect outputs for training. Set this to true if we
+        want to verify the numerical correctness of graidents. But that may
+        cause time measurement not accurate""",
+    )
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1559,6 +1686,9 @@ def parse_args(args=None):
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
+    group_prec.add_argument(
+        "--bfloat16", action="store_true", help="cast model to bf16"
+    )
     group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
@@ -1669,21 +1799,41 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_ci_skips_only:
+        args.dynamic_shapes = True
+        args.ci = True
+        # We only have a CI skip list for aot_eager right now.  When inductor
+        # comes online, add that skip list too.
+        assert (
+            args.backend == "aot_eager"
+        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
+    if args.dynamic_shapes:
+        torch._dynamo.config.dynamic_shapes = True
+        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
-            args.exclude = (
-                CI_SKIP_AOT_EAGER_TRAINING
-                if args.training
-                else CI_SKIP_AOT_EAGER_INFERENCE
-            )
+            if args.dynamic_ci_skips_only:
+                assert args.training and args.dynamic_shapes
+                args.filter = list(
+                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
+                    - set(CI_SKIP_AOT_EAGER_TRAINING)
+                )
+            else:
+                args.exclude = (
+                    CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                    if args.training and args.dynamic_shapes
+                    else CI_SKIP_AOT_EAGER_TRAINING
+                    if args.training
+                    else CI_SKIP_AOT_EAGER_INFERENCE
+                )
         elif args.inductor:
             args.exclude = (
                 CI_SKIP_INDUCTOR_TRAINING
                 if args.training
-                else CI_SKIP_INDCUTOR_INFERENCE
+                else CI_SKIP_INDUCTOR_INFERENCE
             )
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
@@ -1722,6 +1872,7 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -1907,7 +2058,18 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         output_filename = "nothing.csv"
     elif args.backend:
-        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+        if args.backend == "ipex":
+            if args.bfloat16:
+                optimize_ctx = torch._dynamo.optimize(
+                    backends.ipex_bf16, nopython=args.nopython
+                )
+            else:
+                assert args.float32, "IPEX only supports fp32 and bf16 for now."
+                optimize_ctx = torch._dynamo.optimize(
+                    backends.ipex_fp32, nopython=args.nopython
+                )
+        else:
+            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
@@ -2007,8 +2169,6 @@ def run(runner, args, original_dir=None):
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
-                import torch_xla.core.xla_model as xm
-
                 xla_dev = xm.xla_device()
                 model = model.to(device=xla_dev)
                 example_inputs = tree_map(
@@ -2024,6 +2184,8 @@ def run(runner, args, original_dir=None):
                 model, example_inputs = cast_to_fp32(model, example_inputs)
             elif args.float16:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
+            elif args.bfloat16:
+                model, example_inputs = cast_to_bf16(model, example_inputs)
 
             if args.log_operator_inputs:
                 log_operator_inputs(

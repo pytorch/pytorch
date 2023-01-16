@@ -743,6 +743,27 @@ PyObject* THPModule_allowFP16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowBF16ReductionCuBLAS(
+    PyObject* _unused,
+    PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_allow_bf16_reduction_cublas expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_allowBF16ReductionCuBLAS(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowBF16ReductionCuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -805,6 +826,27 @@ PyObject* THPModule_supportedQEngines(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().isXNNPACKAvailable())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_setCheckSparseTensorInvariants(
+    PyObject* _unused,
+    PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_check_sparse_tensor_invariants expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_checkSparseTensorInvariants(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().checkSparseTensorInvariants())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -878,6 +920,13 @@ PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
 PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getCurrentNode(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return torch::autograd::functionToPyObject(
+      torch::autograd::get_current_node());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1056,6 +1105,14 @@ static PyMethodDef TorchMethods[] = {
      THPModule_setAllowFP16ReductionCuBLAS,
      METH_O,
      nullptr},
+    {"_get_cublas_allow_bf16_reduced_precision_reduction",
+     THPModule_allowBF16ReductionCuBLAS,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublas_allow_bf16_reduced_precision_reduction",
+     THPModule_setAllowBF16ReductionCuBLAS,
+     METH_O,
+     nullptr},
     {"_vmapmode_increment_nesting",
      THPModule_vmapmode_increment_nesting,
      METH_NOARGS,
@@ -1086,6 +1143,14 @@ static PyMethodDef TorchMethods[] = {
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
     {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
     {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+    {"_set_check_sparse_tensor_invariants",
+     THPModule_setCheckSparseTensorInvariants,
+     METH_O,
+     nullptr},
+    {"_check_sparse_tensor_invariants",
+     THPModule_checkSparseTensorInvariants,
+     METH_NOARGS,
+     nullptr},
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
@@ -1098,6 +1163,7 @@ static PyMethodDef TorchMethods[] = {
      THPModule_getCurrentGraphTaskId,
      METH_NOARGS,
      nullptr},
+    {"_current_autograd_node", THPModule_getCurrentNode, METH_NOARGS, nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
@@ -1124,8 +1190,8 @@ static PyMethodDef TorchMethods[] = {
      METH_O,
      nullptr},
     {"_has_torch_function_variadic",
-     MAYBE_WRAP_FASTCALL(THPModule_has_torch_function_variadic),
-     MAYBE_METH_FASTCALL,
+     (PyCFunction)(void (*)(void))THPModule_has_torch_function_variadic,
+     METH_FASTCALL,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
@@ -1603,6 +1669,10 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr(
       "default_generator",
       (PyObject*)THPDefaultCPUGenerator,
+      /* incref= */ false));
+  ASSERT_TRUE(set_module_attr(
+      "DisableTorchFunctionSubclass",
+      (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
       "DisableTorchFunction",

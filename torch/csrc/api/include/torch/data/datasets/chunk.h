@@ -335,7 +335,6 @@ class ChunkDataset final
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         options_(std::move(options)),
         preprocessing_policy_(preprocessing_policy),
         quit_worker_(false),

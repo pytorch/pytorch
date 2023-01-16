@@ -871,8 +871,9 @@ class GitHubPR:
         skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
         land_check_commit: Optional[str] = None
-    ) -> None:
+    ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
+        additional_prs: List["GitHubPR"] = []
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
@@ -898,9 +899,11 @@ class GitHubPR:
                     skip_mandatory_checks=skip_mandatory_checks,
                     skip_internal_checks=can_skip_internal_checks(self, comment_id),
                     land_check_commit=land_check_commit)
+                additional_prs.append(pr)
 
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
+        return additional_prs
 
     def gen_commit_message(self, filter_ghstack: bool = False) -> str:
         """ Fetches title and body from PR description
@@ -918,6 +921,14 @@ class GitHubPR:
         msg += f"Approved by: {approved_by_urls}\n"
         return msg
 
+    def add_numbered_label(self, label_base: str) -> None:
+        labels = self.get_labels()
+        label = label_base
+        for i in range(len(labels) if labels is not None else 0):
+            if label in labels:
+                label = f"{label_base}X{i+2}"
+        gh_add_labels(self.org, self.project, self.pr_num, [label])
+
     def merge_into(self, repo: GitRepo, *,
                    skip_mandatory_checks: bool = False,
                    dry_run: bool = False,
@@ -930,20 +941,22 @@ class GitHubPR:
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             land_check_commit=land_check_commit)
-        self.merge_changes(repo, skip_mandatory_checks, comment_id, land_check_commit=land_check_commit)
+        additional_merged_prs = self.merge_changes(repo, skip_mandatory_checks, comment_id, land_check_commit=land_check_commit)
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
             if land_check_commit:
                 self.delete_land_time_check_branch(repo)
-            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
+            self.add_numbered_label("merged")
+            for pr in additional_merged_prs:
+                pr.add_numbered_label("merged")
 
     def merge_changes(self,
                       repo: GitRepo,
                       skip_mandatory_checks: bool = False,
                       comment_id: Optional[int] = None,
                       land_check_commit: Optional[str] = None,
-                      branch: Optional[str] = None) -> None:
+                      branch: Optional[str] = None) -> List["GitHubPR"]:
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
@@ -953,8 +966,9 @@ class GitHubPR:
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
+            return []
         else:
-            self.merge_ghstack_into(
+            return self.merge_ghstack_into(
                 repo,
                 skip_mandatory_checks,
                 comment_id=comment_id,
@@ -1257,8 +1271,11 @@ def validate_revert(repo: GitRepo, pr: GitHubPR, *,
         commit_sha = commits[0]
     msg = repo.commit_message(commit_sha)
     rc = RE_DIFF_REV.search(msg)
-    if rc is not None and not can_skip_internal_checks:
-        raise PostCommentError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+    if rc is not None and not skip_internal_checks:
+        raise PostCommentError(
+            f"Can't revert PR that was landed via phabricator as {rc.group(1)}.  " +
+            "Please revert by going to the internal diff and clicking Unland."
+        )
     return (author_login, commit_sha)
 
 
@@ -1283,7 +1300,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
     repo.push(pr.default_branch(), dry_run)
     post_comment(f"@{pr.get_pr_creator_login()} your PR has been successfully reverted.")
     if not dry_run:
-        gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
+        pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
 
 
