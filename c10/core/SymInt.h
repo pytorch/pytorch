@@ -163,7 +163,7 @@ class C10_API SymInt {
   void operator/=(const SymInt& sci);
 
   SymBool sym_eq(const SymInt&) const;
-  SymBool sym_neq(const SymInt&) const;
+  SymBool sym_ne(const SymInt&) const;
   SymBool sym_lt(const SymInt&) const;
   SymBool sym_le(const SymInt&) const;
   SymBool sym_gt(const SymInt&) const;
@@ -173,7 +173,7 @@ class C10_API SymInt {
     return sym_eq(o).guard_bool(__FILE__, __LINE__);
   }
   bool operator!=(const SymInt& o) const {
-    return sym_neq(o).guard_bool(__FILE__, __LINE__);
+    return sym_ne(o).guard_bool(__FILE__, __LINE__);
   }
   bool operator<(const SymInt& o) const {
     return sym_lt(o).guard_bool(__FILE__, __LINE__);
