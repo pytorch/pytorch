@@ -1076,7 +1076,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
-        xfail('linalg.vecdot', ''),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1182,6 +1181,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
         xfail('linalg.vecdot', ''),
+        xfail('masked.cumprod', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
