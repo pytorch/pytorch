@@ -498,7 +498,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   const auto binary_op_res_dtype = at::result_type(
       source._values(),
       probably_coalesced._values());
-  // We would like to respect the order in value intersection.
+  // We would like to respect order in value intersection.
   Tensor lhs, lhs_selected;
   Tensor rhs, rhs_selected;
   std::tie(lhs, lhs_selected, rhs, rhs_selected) = [&]() -> auto {
