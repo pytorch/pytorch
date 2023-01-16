@@ -627,7 +627,8 @@ index_select_scale_add(
               /* normalize_by_lengths */ false,
               /* prefetch */ 16,
               /* is_weight_positional */ false,
-              /* use_offsets */ true);
+              /* use_offsets */ true,
+              /* isbf16*/ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
