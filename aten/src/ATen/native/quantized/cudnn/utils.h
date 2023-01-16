@@ -8,16 +8,15 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/cudnn/Types.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/ArrayRef.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
+C10_DIAGNOSTIC_POP()
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -118,7 +117,7 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
 
   at::Tensor apply_dynamic(
     const at::Tensor& input,
-    bool reduce_range) {
+    bool reduce_range) override {
     TORCH_CHECK(false, "apply_dynamic is currently not reported");
   }
 
@@ -351,6 +350,5 @@ cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_
 } // anonymous
 } // cudnn_utils
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

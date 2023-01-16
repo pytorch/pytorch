@@ -25,7 +25,13 @@ from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch import fx
@@ -37,9 +43,7 @@ from torch.utils._pytree import tree_flatten, tree_map
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -286,30 +290,43 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    return istype(
-        value,
-        (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        )
+    else:
+        return False
 
 
 def is_numpy_float_type(value):
-    return istype(
-        value,
-        (
-            np.float16,
-            np.float32,
-            np.float64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.float16,
+                np.float32,
+                np.float64,
+            ),
+        )
+    else:
+        return False
+
+
+def is_numpy_ndarray(value):
+    if HAS_NUMPY:
+        return istype(value, np.ndarray)
+    else:
+        return False
 
 
 def istensor(obj):
@@ -730,6 +747,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    relax_numpy_equality=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -737,7 +755,16 @@ def same(
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         return len(ref) == len(res) and all(
-            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            same(
+                ai,
+                bi,
+                fp64_refi,
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+                relax_numpy_equality,
+            )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif isinstance(ref, dict):
@@ -755,6 +782,7 @@ def same(
                     tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
+                    relax_numpy_equality=relax_numpy_equality,
                 )
             ):
                 log.error(f"Accuracy failed for key name {k}")
@@ -791,7 +819,6 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                breakpoint()
                 log.warning(f"Similarity score={score.cpu().detach().item()}")
             return score >= 0.99
         else:
@@ -819,7 +846,7 @@ def same(
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-4)
+                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
@@ -833,7 +860,11 @@ def same(
     elif isinstance(ref, float):
         return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
+        if relax_numpy_equality:
+            ref = ref.item()
         return (type(ref) is type(res)) and (ref == res)
+    elif is_numpy_ndarray(ref):
+        return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -857,6 +888,7 @@ def same(
                 tol=tol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                relax_numpy_equality=relax_numpy_equality,
             )
             for key in ref.__dict__.keys()
         )
@@ -1060,6 +1092,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"

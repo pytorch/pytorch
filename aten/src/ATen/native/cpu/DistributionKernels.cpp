@@ -23,7 +23,7 @@
 #include <cpuinfo.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
@@ -237,5 +237,4 @@ REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

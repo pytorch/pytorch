@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 ExprHandle ExprHandle::operator+(const ExprHandle& other) const {
   return Add::make(*this, other);
@@ -193,10 +191,17 @@ ExprHandle fast_sigmoid(const ExprHandle& x) {
   // sigmoid(x) = (tanh(x / 2) + 1) / 2
   ExprHandle one_v = FloatImm::make(1.f);
   ExprHandle half_v = FloatImm::make(0.5f);
+  ExprHandle zero_v = FloatImm::make(0.0f);
   ExprHandle x2 = x * half_v;
   ExprHandle y{fast_tanh(x2)};
   ExprHandle z = (y + one_v) * half_v;
-  return z;
+  // fast_tanh is not precise
+  // but clients rely on the sigmoid return values being probability-like
+  // so clamp them into (0, 1)
+  return Min::make(
+      one_v,
+      Max::make(zero_v, z, /* propagate_nans= */ false),
+      /* propagate_nans= */ false);
 }
 
 ExprHandle fast_log(const ExprHandle& v) {
@@ -558,6 +563,4 @@ ExprHandle expr_to_vec(ExprHandle v, int lanes) {
   }
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
