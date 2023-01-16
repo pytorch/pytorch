@@ -3529,7 +3529,8 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    # Treat scalars as elements of \R^1
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
     if x.ndim == 0:
         # Treat scalars as elements of \R^1
         # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
@@ -4300,17 +4301,8 @@ def arange(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
-    check(
-        start.dtype == end.dtype,
-        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
-    )
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
-    else:
-        check(
-            start.dtype == weight.dtype,
-            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
-        )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
     # that 0 <= weight <= 1. We take the abs to deal with complex numbers
@@ -4775,7 +4767,7 @@ def _uniform_helper(
     return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
-@register_decomposition([aten.masked_fill.Scalar, aten.masked_fill.Tensor])
+@register_decomposition(aten.masked_fill)
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
