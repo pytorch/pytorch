@@ -1,4 +1,3 @@
-#include "ATen/core/ATen_fwd.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
