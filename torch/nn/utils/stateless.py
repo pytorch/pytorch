@@ -4,6 +4,7 @@ import warnings
 
 import torch
 from torch import Tensor
+from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 __all__ = ["functional_call"]
 
@@ -144,24 +145,13 @@ def _reparametrize_module(
     parameters_and_buffers: Dict[str, Tensor],
     tie_weights: bool = False,
 ) -> Iterator[None]:
-    submodules = {"": module}
-
-    def get_submodule(path: str) -> 'torch.nn.Module':
-        try:
-            return submodules[path]
-        except KeyError:
-            prefix, dot, attr = path.rpartition(".")
-            if dot:
-                submodule = submodules[path] = getattr(get_submodule(prefix), attr)
-            else:
-                submodule = submodules[path] = getattr(module, attr)
-            return submodule
+    accessor = NamedMemberAccessor(module)
 
     def apply_func_submodules(
         func: Callable[..., None], full_path: str, given_path: str, args: Tuple
     ) -> None:
         prefix_path, _, last_atom = full_path.rpartition(".")
-        func(get_submodule(prefix_path), last_atom, given_path, *args)
+        func(accessor.get_submodule(prefix_path), last_atom, given_path, *args)
 
     tied_weights_map = (
         _create_tied_weights_map(module, parameters_and_buffers) if tie_weights else {}

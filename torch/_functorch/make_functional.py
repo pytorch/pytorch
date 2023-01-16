@@ -21,85 +21,11 @@ from typing import (
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
 # the parameters and evaluate the nn.Module using fixed inputs.
-
-
-def _get_submodule(
-    mod: nn.Module,
-    name: str,
-    *,
-    memo: Dict[str, nn.Module] = None,
-) -> nn.Module:
-    """
-    Return the submodule specified by the given path.
-    For example, to get the submodule mod.layer1.conv1,
-    use _get_submodule(mod, 'layer1.conv1')
-    """
-    if not name:
-        return mod
-
-    if memo is None:
-        memo = {}
-    try:
-        return memo[name]
-    except KeyError:
-        prefix, dot, attr = name.rpartition(".")
-        if dot:
-            submodule = memo[name] = getattr(
-                _get_submodule(mod, prefix, memo=memo), attr
-            )
-        else:
-            submodule = memo[name] = getattr(mod, attr)
-        return submodule
-
-
-def _del_nested_attr(
-    mod: nn.Module,
-    name: str,
-    *,
-    memo: Dict[str, nn.Module] = None,
-) -> None:
-    """
-    Delete the attribute specified by the given path.
-    For example, to delete the attribute mod.layer1.conv1.weight,
-    use _del_nested_attr(mod, 'layer1.conv1.weight')
-    """
-    prefix, _, attr = name.rpartition(".")
-    delattr(_get_submodule(mod, prefix, memo=memo), attr)
-
-
-def _set_nested_attr(
-    mod: nn.Module,
-    name: str,
-    value: Tensor,
-    *,
-    memo: Dict[str, nn.Module] = None,
-) -> None:
-    """
-    Set the attribute specified by the given path to value.
-    For example, to set the attribute mod.layer1.conv1.weight,
-    use _set_nested_attr(mod, 'layer1.conv1.weight', value)
-    """
-    prefix, _, attr = name.rpartition(".")
-    setattr(_get_submodule(mod, prefix, memo=memo), attr, value)
-
-
-def _get_nested_attr(
-    mod: nn.Module,
-    name: str,
-    *,
-    memo: Dict[str, nn.Module] = None,
-) -> Tensor:
-    """
-    Get the attribute specified by the given path to value.
-    For example, to get the attribute mod.layer1.conv1.weight,
-    use _get_nested_attr(mod, 'layer1.conv1.weight')
-    """
-    prefix, _, attr = name.rpartition(".")
-    return getattr(_get_submodule(mod, prefix, memo=memo), attr)
 
 
 def raise_parameter_tying_error() -> NoReturn:
@@ -151,12 +77,12 @@ def _extract_members(
 
     # Remove all the members in the model
     memo = {}
-    submodule_memo = {"": mod}
+    accessor = NamedMemberAccessor(mod)
     for name, p in all_named_members:
         if p not in memo:
             memo[p] = subclass(torch.empty_like(p, device="meta"))
         replacement = memo[p]
-        _set_nested_attr(mod, name, replacement, memo=submodule_memo)
+        accessor.set_tensor(name, replacement)
 
     if len(unique_named_members) == 0:
         names, params = (), ()
@@ -196,25 +122,25 @@ def load_weights(
     Note that the `params` are regular Tensors (that can have history) and so are left
     as Tensors. This means that mod.parameters() will still be empty after this call.
     """
-    submodule_memo = {"": mod}
+    accessor = NamedMemberAccessor(mod)
     for name, p in zip(names, params):
         if as_params:
             p = nn.Parameter(p)
-        _del_nested_attr(mod, name, memo=submodule_memo)
-        _set_nested_attr(mod, name, p, memo=submodule_memo)
+        accessor.del_tensor(name)
+        accessor.set_tensor(name, p)
 
 
 def _swap_state(
     mod: nn.Module, names_map: Dict[str, List[str]], elems: Iterable[Tensor]
 ) -> List[Tensor]:
     result: List[Tensor] = []
-    submodule_memo = {"": mod}
+    accessor = NamedMemberAccessor(mod)
     for (_, attr_names), elem in zip(names_map.items(), elems):
         for i, attr_name in enumerate(attr_names):
             if i == 0:
-                result.append(_get_nested_attr(mod, attr_name, memo=submodule_memo))
-            _del_nested_attr(mod, attr_name, memo=submodule_memo)
-            _set_nested_attr(mod, attr_name, elem, memo=submodule_memo)
+                result.append(accessor.get_tensor(attr_name))
+            accessor.del_tensor(attr_name)
+            accessor.set_tensor(attr_name, elem)
     return result
 
 
@@ -224,9 +150,9 @@ def load_buffers(
     buffers: Sequence[Tensor],
     as_params: bool = False,
 ) -> None:
-    submodule_memo = {"": mod}
+    accessor = NamedMemberAccessor(mod)
     for name, p in zip(names, buffers):
-        _set_nested_attr(mod, name, p, memo=submodule_memo)
+        accessor.set_tensor(name, p)
 
 
 def load_state(
@@ -615,8 +541,7 @@ def combine_state_for_ensemble(
     model0_typ = type(models[0])
     if not all(type(m) == model0_typ for m in models):
         raise RuntimeError(
-            "combine_state_for_ensemble: Expected all models to "
-            "be of the same class."
+            "combine_state_for_ensemble: Expected all models to be of the same class."
         )
     funcs, params, buffers = zip(
         *[make_functional_with_buffers(model) for model in models]
