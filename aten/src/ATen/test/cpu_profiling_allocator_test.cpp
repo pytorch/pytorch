@@ -75,10 +75,19 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     }
     return success;
   };
-  ASSERT_FALSE(validate_allocation_plan(false, true));
-  ASSERT_FALSE(validate_allocation_plan(true, false));
   ASSERT_TRUE(validate_allocation_plan(true, true));
   ASSERT_TRUE(validate_allocation_plan(false, false));
+
+  #ifdef C10_MOBILE
+  // Returning false when record mode != validation mode only applies to
+  // DefaultMobileCPUAllocator, DefaultCPUAllocator has no such behavior
+  // and will always return true
+  ASSERT_FALSE(validate_allocation_plan(false, true));
+  ASSERT_FALSE(validate_allocation_plan(true, false));
+  #else
+  ASSERT_TRUE(validate_allocation_plan(false, true));
+  ASSERT_TRUE(validate_allocation_plan(true, false));
+  #endif
 }
 
 TEST(CPUAllocationPlanTest, with_profiling_alloc) {
@@ -164,21 +173,33 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
   ASSERT_TRUE(ref_output.equal(output));
 
+  #ifdef C10_MOBILE
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(true, false, false), c10::Error);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(false, true, false), c10::Error);
+  #else
+  // Throwing when record mode != validation mode only applies to
+  // DefaultMobileCPUAllocator, DefaultCPUAllocator has no such
+  // behavior and throw nothing
+  ASSERT_NO_THROW(validate_allocation_plan(true, false, false));
+  ASSERT_NO_THROW(validate_allocation_plan(false, true, false));
+  #endif
 }
 
 int main(int argc, char* argv[]) {
   // Setting the priority high to make sure no other allocator gets used instead of this.
-  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
-  // Need to disable mkldnn for this test since it allocatred memory
+  c10::SetCPUAllocator(c10::GetDefaultCPUAllocator(), /*priority*/ 100);
+
+  #ifdef C10_MOBILE
+  // Need to disable mkldnn for this test since it allocated memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
+  #endif
+
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();
