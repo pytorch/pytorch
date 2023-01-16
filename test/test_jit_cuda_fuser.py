@@ -965,10 +965,10 @@ class TestCudaFuser(JitTestCase):
                     self.assertEqual(o, jit_o)
                 self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         except Exception as e:
-            print("failing test for op: ", operation.__name__)
-            print("with input\n\tx: ", x)
-            print("\ty: ", y)
-            print("\tz: ", z)
+            print(f"Failing test for op: {operation.__name__}")
+            print(f"With input\n\tx: {x}")
+            print(f"\ty: {y}")
+            print(f"\tz: {z}")
             raise e
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -1357,10 +1357,10 @@ class TestCudaFuser(JitTestCase):
             print(desc, close)
             z = a - b
             index = (torch.abs(z) >= error + error * torch.abs(b)).nonzero()
-            print("dif    : ", z[index])
-            print("inp1   : ", a[index])
-            print("inp2   : ", b[index])
-            print("maximum difference", z[index].max())
+            print(f"dif    : {z[index]}")
+            print(f"inp1   : {a[index]}")
+            print(f"inp2   : {b[index]}")
+            print(f"Maximum difference: {z[index].max()}")
         return close
 
     # Permutation helper that applies binary operation between two tensors:
