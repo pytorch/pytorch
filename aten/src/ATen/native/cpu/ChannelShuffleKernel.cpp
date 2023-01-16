@@ -8,7 +8,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -113,4 +113,4 @@ void channel_shuffle_kernel_impl(
 
 REGISTER_DISPATCH(channel_shuffle_kernel, &channel_shuffle_kernel_impl);
 
-}} // at::native
+} // at::native
