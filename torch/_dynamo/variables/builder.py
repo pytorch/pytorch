@@ -147,7 +147,10 @@ class GraphArg:
                 not config.dynamic_shapes
                 and self.fake_tensor.shape != self.example.shape
             ):
-                self.fake_tensor = self.fake_tensor.reshape(self.example.shape)
+                converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+                self.fake_tensor = converter.from_real_tensor(
+                    self.fake_tensor.fake_mode, self.example
+                )
             return [self.fake_tensor]
 
     def __len__(self):
