@@ -1846,6 +1846,31 @@ def index_add_(
     *,
     alpha: NumberType = 1,
 ):
+    return _index_add(x, dim, index, tensor, inplace=True, alpha=alpha)
+
+
+@register_decomposition(aten.index_add)
+@out_wrapper()
+def index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+
+
+def _index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    inplace: bool,
+    alpha: NumberType = 1,
+):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
         index.ndim <= 1,
@@ -1859,9 +1884,47 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
+    # Treat scalars as elements of \R^1
+    zero_dim = x.ndim == 0
+    x1 = x.unsqueeze(0) if zero_dim else x
     idx = (None,) * dim + (index,)
-    aten.index_put_(x, idx, tensor, accumulate=True)
-    return x
+    index_put = aten.index_put_ if inplace else aten.index_put
+    out = index_put(x1, idx, tensor, accumulate=True)
+    if inplace:
+        return x
+    else:
+        return out.squeeze(0) if zero_dim else out.contiguous()
+
+
+@register_decomposition(aten.index_copy_)
+def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return _index_copy(x, dim, index, tensor, inplace=True)
+
+
+@register_decomposition(aten.index_copy)
+@out_wrapper()
+def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return _index_copy(x, dim, index, tensor, inplace=False)
+
+
+def _index_copy(
+    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    zero_dim = x.ndim == 0
+    x1 = x.unsqueeze(0) if zero_dim else x
+    idx = (None,) * dim + (index,)
+    index_put = aten.index_put_ if inplace else aten.index_put
+    out = index_put(x1, idx, tensor)
+    if inplace:
+        return x
+    else:
+        return out.squeeze(0) if zero_dim else out.contiguous()
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:

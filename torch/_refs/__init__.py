@@ -3426,7 +3426,6 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     )
 
 
-@register_decomposition(aten.index_copy)
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return x.clone(memory_format=torch.contiguous_format).index_copy_(
@@ -3434,7 +3433,6 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     )
 
 
-@register_decomposition(aten.index_copy_)
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
@@ -3452,33 +3450,62 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def index_fill(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
-    return x.clone().index_fill_(dim, index, value)  # type: ignore[arg-type]
+    return _index_fill(x, dim, index, value, inplace=False)
 
 
 @register_decomposition(aten.index_fill_)
 def index_fill_(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
+    return _index_fill(x, dim, index, value, inplace=True)
+
+
+def _index_fill(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    value: Union[NumberType, TensorLike],
+    *,
+    inplace: bool,
+):
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
     if isinstance(value, TensorLike):
         utils.check(
             value.ndim == 0,
             lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
             f"Got a tensor with {value.ndim} dimensions.",
         )  # type: ignore[arg-type]
-        return x.clone().index_copy_(dim, index, value)
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    idx = (slice(None),) * dim + (index,)
-    # Treat scalars as elements of \R^1
-    y = x.unsqueeze(0) if x.ndim == 0 else x
-    y[idx] = value  # type: ignore[assignment]
-    return x
+    else:
+        value = torch.scalar_tensor(
+            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
+        )
+
+    # index_copy has some unnecessary preconditions when x is a scalar. We do this to work through them
+    zero_dim = x.ndim == 0
+    y = x.unsqueeze(0) if zero_dim else x
+    # index_copy does not broadcast on value so we have to do it manually
+    shape = list(y.shape)
+    shape[dim] = index.numel()
+    value = value.expand(shape)
+    index_copy = Tensor.index_copy_ if inplace else torch.index_copy
+    out = index_copy(y, dim, index, value)  # type: ignore[operator]
+    if inplace:
+        return x
+    else:
+        if zero_dim:
+            # The clone is necessary so that it returns a fresh tensor rather than a view
+            out = out.squeeze(0).clone()
+        # index_fill preserves the strides. index_copy always returns contiguous tensors
+        if out.stride() != x.stride():
+            new_out = torch.empty_like(x)
+            new_out.copy_(out)
+            out = new_out
+        return out
 
 
-@register_decomposition(aten.index_add)
 @out_wrapper()
 def index_add(
     x: TensorLike,
@@ -3504,10 +3531,10 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     )
     # Treat scalars as elements of \R^1
     if x.ndim == 0:
-        # we cannot write `x.unsqueeze(0)[index].squeeze(0).clone()`
-        # as tensor[index] will trigger index.item() if index is a 0-dim tensor
-        # and .item() cannot be symbolically traced with FakeTensor.
-        return aten.index(x.unsqueeze(0), [index]).squeeze(0).clone()
+        # Treat scalars as elements of \R^1
+        # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
+        return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
+
     idx = (slice(None),) * dim + (index,)
     return x[idx]
 
