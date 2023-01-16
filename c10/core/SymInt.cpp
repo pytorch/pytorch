@@ -102,8 +102,12 @@ SymBool SymInt::sym_eq(const SymInt& sci) const {
   return res[0]->eq(res[1]);
 }
 
-SymBool SymInt::sym_neq(const SymInt& sci) const {
-  return ~sym_eq(sci);
+SymBool SymInt::sym_ne(const SymInt& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ != sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->ne(res[1]);
 }
 
 SymBool SymInt::sym_lt(const SymInt& sci) const {

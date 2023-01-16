@@ -149,6 +149,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__, other);
   }
 
+  c10::SymNode ne(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
   c10::SymNode gt(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
