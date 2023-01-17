@@ -1295,6 +1295,136 @@ class TestAutogradFunctionVmapAPI(TestCase):
         x = torch.randn(2, 3)
         vmap(f)(x)
 
+    @_set_autograd_function_extension_enabled()
+    def test_none_returns(self, device):
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return torch.zeros(input.shape, device=input.device)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                assert in_dims == (0,)
+                return torch.zeros(input.shape[1:], device=input.device), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = vmap(Zeros.apply)(x)
+        self.assertEqual(y, torch.zeros_like(x))
+
+        class TwoZeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r, r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                assert in_dims == (0,)
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return (r, r), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        result = vmap(TwoZeros.apply)(x)
+
+        self.assertTrue(isinstance(result, tuple))
+        y, z = result
+        self.assertEqual(y, torch.zeros_like(x))
+        self.assertEqual(z, torch.zeros_like(x))
+
+    @_set_autograd_function_extension_enabled()
+    def test_should_have_two_returns(self, device):
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return r
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "to have two returns"):
+            result = vmap(Zeros.apply)(x)
+
+        class TwoZeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r, r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return r, r, 0, 0
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "to have two returns"):
+            result = vmap(Zeros.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_incompatible_out_dims_error_msg(self, device):
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return r, (None,)
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
+            result = vmap(Zeros.apply)(x)
+
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return [r]
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return [r], (None,)
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
+            result = vmap(Zeros.apply)(x)
+
 
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
