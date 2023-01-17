@@ -338,9 +338,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             # See @once_differentiable docs for why there are two different errors
             x = torch.tensor(1.0, requires_grad=True)
             if grad_output is None:
-                error_msg = "does not require grad and does not have a grad_fn"
+                err = "does not require grad and does not have a grad_fn"
             else:
-                error_msg = "function that was marked with @once_differentiable"
+                err = "torch.compile with aot_autograd does not currently support double backward"
 
             # The following cases should be equivalent:
 
@@ -355,7 +355,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
             compiled_f1 = torch.compile(backend="aot_eager")(f1)
             f1(x)
-            with self.assertRaisesRegex(RuntimeError, error_msg):
+            with self.assertRaisesRegex(RuntimeError, err):
                 compiled_f1(x)
 
             # (2) the second half of double backward outside compiled function
@@ -368,7 +368,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
             compiled_f2 = torch.compile(backend="aot_eager")(f2)
             gx = compiled_f2(x)
-            with self.assertRaisesRegex(RuntimeError, error_msg):
+            with self.assertRaisesRegex(RuntimeError, err):
                 gx.backward()
 
             # (3) double backward entirely outside compiled function
@@ -381,7 +381,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             (gx,) = torch.autograd.grad(
                 y, x, create_graph=True, grad_outputs=grad_output
             )
-            with self.assertRaisesRegex(RuntimeError, error_msg):
+            with self.assertRaisesRegex(RuntimeError, err):
                 gx.backward()
 
     @patch("torch._functorch.config.debug_assert", True)
