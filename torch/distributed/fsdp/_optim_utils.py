@@ -1104,6 +1104,7 @@ def _get_param_key_to_param(
         assert (
             param_to_fqns is not None and flat_param_to_fqn is not None
         ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
+        assert model is not None
         for key, _ in model.named_parameters():
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
