@@ -988,8 +988,11 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    unnormalized = torch.exp(x - x_max)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
@@ -1008,8 +1011,11 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    shifted = x - x_max
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -1897,6 +1903,12 @@ def uniform(
     )
 
 
+@register_decomposition(aten.uniform_)
+def uniform_(self, low=0, high=1, generator=None):
+    assert generator is None
+    return self.copy_((high - low) * torch.rand_like(self) + low)
+
+
 # aten/src/ATen/native/UpSample.cpp compute_output_size
 def upsample_compute_output_size(input_size, output_size, scale_factors):
     spatial_dimensions = len(input_size) - 2
@@ -2648,7 +2660,12 @@ def upsample_bicubic2d_default(
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
     coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
-    return _upsample_cubic_interp1d(coeffs_y, t_y)
+    result = _upsample_cubic_interp1d(coeffs_y, t_y)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(a)
+    result = result.contiguous(memory_format=memory_format)
+    return result
 
 
 @register_decomposition(aten.upsample_bicubic2d.vec)
