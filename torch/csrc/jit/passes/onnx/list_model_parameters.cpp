@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -58,11 +56,11 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
   auto new_schema = FunctionSchema(
       schema.name(),
       schema.overload_name(),
-      std::move(args),
+      args,
       schema.returns(),
       schema.is_vararg(),
       schema.is_varret());
-  function->setSchema(std::move(new_schema));
+  function->setSchema(new_schema);
   return toGraphFunction(*function).graph()->addInput(name)->setType(
       attr.type());
 }
