@@ -9,7 +9,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 enum class OpType {GE, GT, LE, LT};
 
@@ -100,4 +100,4 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
 REGISTER_DISPATCH(le_stub, &le_kernel_cuda);
 REGISTER_DISPATCH(lt_stub, &lt_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

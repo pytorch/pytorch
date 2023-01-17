@@ -3378,8 +3378,11 @@ def softmax(
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    a_max = amax(a_, dim, keepdim=True)
-    a_exp = exp(a_ - a_max)
+    if a.numel() == 0:
+        a_exp = exp(a_)
+    else:
+        a_max = amax(a_, dim, keepdim=True)
+        a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
         true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
     )  # type: ignore[return-value]
@@ -3510,21 +3513,22 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 
 @register_decomposition(aten.squeeze)
-def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
-    if dim is not None:
-        dim = utils.canonicalize_dim(a.ndim, dim)
-        # Short-circuits if the tensor has no dimensions
-        if len(a.shape) == 0:
-            assert dim == 0
-            return prims.view_of(a)
+def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+    if dim is None:
+        dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
+        return prims.squeeze(a, dims) if dims else prims.view_of(a)
 
-        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-        if a.shape[dim] != 1:
-            return prims.view_of(a)
-        return prims.squeeze(a, (dim,))
+    ndim = a.ndim
+    dim = utils.canonicalize_dims(ndim, dim)
+    dims = (dim,) if isinstance(dim, Dim) else dim
+    # Short-circuits if the tensor has no dimensions
+    if ndim == 0:
+        assert len(dims) == 0 or dims == (0,)
+        return prims.view_of(a)
 
-    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
-    return prims.squeeze(a, dims)
+    # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+    dims = tuple(d for d in dims if a.shape[d] == 1)
+    return prims.squeeze(a, dims) if dims else prims.view_of(a)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow

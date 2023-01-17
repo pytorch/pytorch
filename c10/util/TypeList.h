@@ -18,7 +18,7 @@ namespace typelist {
  */
 template <class... Items>
 struct typelist final {
- private:
+ public:
   typelist() = delete; // not for instantiation
 };
 
