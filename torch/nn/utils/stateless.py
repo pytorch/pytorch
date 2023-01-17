@@ -181,7 +181,7 @@ def functional_call(
 
     .. warning::
 
-        This API is deprecated as of PyTorch 2.0.0 and will be removed in a future
+        This API is deprecated as of PyTorch 2.0 and will be removed in a future
         version of PyTorch. Please use :func:`torch.func.functional_call` instead,
         which is a drop-in replacement for this API.
 
