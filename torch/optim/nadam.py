@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        differentiable_doc)
+                        _differentiable_doc)
 from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
@@ -154,7 +154,7 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
 
-    """.format(differentiable=differentiable_doc)
+    """.format(differentiable=_differentiable_doc)
 
 
 def nadam(params: List[Tensor],

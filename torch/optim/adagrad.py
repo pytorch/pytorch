@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
-                        differentiable_doc, maximize_doc)
+                        _differentiable_doc, maximize_doc)
 from typing import List, Optional
 
 __all__ = ["Adagrad", "adagrad"]
@@ -179,7 +179,7 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
 
-    """.format(maximize=maximize_doc, differentiable=differentiable_doc)
+    """.format(maximize=maximize_doc, differentiable=_differentiable_doc)
 
 
 def adagrad(

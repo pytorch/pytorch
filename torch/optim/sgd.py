@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, required, _use_grad_for_differentiable, differentiable_doc, maximize_doc
+from .optimizer import Optimizer, required, _use_grad_for_differentiable, _differentiable_doc, maximize_doc
 from typing import List, Optional
 
 __all__ = ['SGD', 'sgd']
@@ -139,7 +139,7 @@ SGD.__doc__ = r"""\
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
         {differentiable}
-    """.format(maximize=maximize_doc, differentiable=differentiable_doc) + r"""
+    """.format(maximize=maximize_doc, differentiable=_differentiable_doc) + r"""
 
     Example:
         >>> # xdoctest: +SKIP

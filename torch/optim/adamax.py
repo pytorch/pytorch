@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        maximize_doc, differentiable_doc)
+                        _maximize_doc, _differentiable_doc)
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -173,7 +173,7 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """.format(maximize=maximize_doc, differentiable=differentiable_doc)
+    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def adamax(

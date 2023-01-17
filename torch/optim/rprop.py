@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, differentiable_doc, maximize_doc
+from .optimizer import Optimizer, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc
 from typing import List, Optional
 
 __all__ = ["Rprop", "rprop"]
@@ -167,7 +167,7 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
         {maximize}
         {differentiable}
 
-    """.format(maximize=maximize_doc, differentiable=differentiable_doc)
+    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 def rprop(
     params: List[Tensor],

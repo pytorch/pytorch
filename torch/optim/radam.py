@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        differentiable_doc)
+                        _differentiable_doc)
 from typing import List, Optional
 
 __all__ = ["RAdam", "radam"]
@@ -178,7 +178,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
     .. _author's implementation:
         https://github.com/LiyuanLucasLiu/RAdam
 
-    """.format(differentiable=differentiable_doc)
+    """.format(differentiable=_differentiable_doc)
 
 
 def radam(

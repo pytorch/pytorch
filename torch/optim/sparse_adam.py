@@ -1,6 +1,6 @@
 import torch
 from . import _functional as F
-from .optimizer import Optimizer, maximize_doc
+from .optimizer import Optimizer, _maximize_doc
 
 __all__ = ['SparseAdam']
 
@@ -115,4 +115,4 @@ SparseAdam.__doc__ = r"""Implements lazy version of Adam algorithm suitable for 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """.format(maximize=maximize_doc)
+    """.format(maximize=_maximize_doc)
