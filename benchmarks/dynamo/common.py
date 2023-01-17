@@ -99,7 +99,6 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
-    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "twins_pcpvt_base",  # timeout
 ]
 
