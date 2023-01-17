@@ -250,10 +250,10 @@ uint16_t _mask_to_meta(bool pos0, bool pos1, bool pos2, bool pos3) {
   if (pos_tuple == std::make_tuple(1, 0, 1, 0)) {
     return 8; // 1000
   }
-  if (pos_tuple == std::make_tuple(1, 0, 0, 1)) {
+  if (pos_tuple == std::make_tuple(0, 1, 1, 0)) {
     return 9; // 1001
   }
-  if (pos_tuple == std::make_tuple(0, 1, 1, 0)) {
+  if (pos_tuple == std::make_tuple(1, 0, 0, 1)) {
     return 12; // 1100
   }
   if (pos_tuple == std::make_tuple(0, 1, 0, 1)) {
@@ -289,7 +289,7 @@ Tensor _cusparselt_create_meta(const Tensor& mask) {
     for (int64_t j = 0; j < length_k; j += 16) {
       result_ptr[i * (length_k / 16) + (j / 16)] = 0;
       uint16_t result_val = 0;
-      for (int64_t k = 3; k >= 0; k--) {
+      for (int64_t k = 0; k < 4; k++) {
         bool pos0 = mask_ptr[i * length_k + j + k * 4];
         bool pos1 = mask_ptr[i * length_k + j + k * 4 + 1];
         bool pos2 = mask_ptr[i * length_k + j + k * 4 + 2];
@@ -302,9 +302,14 @@ Tensor _cusparselt_create_meta(const Tensor& mask) {
         uint16_t meta_val = _mask_to_meta(pos0, pos1, pos2, pos3);
         // std::cout << " Want: " << (meta_val << (4 * k)) << std::endl;
         // std::cout << std::endl;
-        result_val += (meta_val << (4 * k));
+        result_val += (meta_val << (4 * (3 - k)));
       }
-      result_ptr[i * (length_k / 16) + (j / 16)] = result_val;
+      // PyTorch doesn't have a uint16_t dtype, so we're using the signed equivalent.
+      // However, we don't want to actually convert or overflow. We just want to store the
+      // bits as is and then retrieve them again later on.
+      int16_t result_storage;
+      std::memcpy(&result_storage, &result_val, sizeof(result_storage));
+      result_ptr[i * (length_k / 16) + (j / 16)] = result_storage;
     }
   }
 
