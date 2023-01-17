@@ -159,14 +159,6 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
-          # Spare one CPU for the runner to avoid crashing it
-          CPU_COUNT=$(nproc)
-          echo "The runner has ${CPU_COUNT} CPUs"
-
-          if [[ $TEST_CONFIG == 'xla' ]]; then
-            CPU_COUNT=$((CPU_COUNT - 1))
-          fi
-
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -198,7 +190,6 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --cpus="${CPU_COUNT}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -213,7 +204,6 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
-
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Print remaining test logs
