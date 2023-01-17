@@ -267,7 +267,6 @@ class SizeVarAllocator(object):
                     and solutions[0]
                     and "/" not in str(solutions[0])
                 ):
-                    breakpoint()
                     self.replacements[free[-1]] = solutions[0]
             except NotImplementedError:
                 pass
