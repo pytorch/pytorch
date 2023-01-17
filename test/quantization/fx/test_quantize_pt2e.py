@@ -6,6 +6,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
+    RNNDynamicModel,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import (
@@ -14,6 +15,10 @@ from torch.testing._internal.common_quantized import (
 from torch.ao.quantization import (
     get_default_qconfig,
     QConfigMapping,
+    per_channel_dynamic_qconfig,
+    default_dynamic_qconfig,
+    float16_dynamic_qconfig,
+    quantize_dynamic,
 )
 from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
@@ -25,6 +30,7 @@ from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
+import itertools
 
 class TestQuantizePT2E(QuantizationTestCase):
     @skipIfNoQNNPACK
@@ -75,6 +81,53 @@ class TestQuantizePT2E(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(
                 m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
+
+class TestQuantizePT2EOps(QuantizationTestCase):
+    def _test_rnn_impl(self, qconfigs, M, module_type_strs, module_types, sample_input):
+        options = itertools.product(qconfigs, module_type_strs)
+        for qconfig, module_type_str in options:
+            model_eager = M(module_type_str).eval()
+            model_graph = copy.deepcopy(model_eager)
+            if torch.backends.quantized.engine == 'qnnpack' and \
+               qconfig is float16_dynamic_qconfig:
+                continue
+                # fp16 dynamic quant is not supported for qnnpack
+
+            eager_qconfig_dict = {x : qconfig for x in module_types}
+            model_eager = quantize_dynamic(model_eager, qconfig_spec=eager_qconfig_dict)
+
+            graph_qconfig_mapping = QConfigMapping()
+            # TODO: need to support this
+            # for x in module_types:
+            #     graph_qconfig_mapping.set_object_type(x, qconfig)
+            # use global config for now
+            graph_qconfig_mapping.set_global(qconfig)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            example_inputs = (sample_input,)
+            model_graph, guards = torchdynamo.export(
+                model_graph,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+            model_graph = prepare_pt2e(model_graph, graph_qconfig_mapping, example_inputs, backend_config)
+            model_graph = convert_pt2e(model_graph)
+            print("model_graph:", model_graph)
+            self.assertEqual(model_eager(sample_input), model_graph(sample_input))
+            # self.checkScriptable(model_graph, [[sample_input]], True)
+
+    @skipIfNoQNNPACK
+    def test_rnn(self):
+        print("running rnn test")
+        with override_quantized_engine("qnnpack"):
+            qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
+            module_type_strs = ['LSTM']
+            module_types = [torch.nn.LSTM]
+            niter = 10
+            sample_input = torch.tensor([[100, -155],
+                                         [-155, 100],
+                                         [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+            self._test_rnn_impl(qconfigs, RNNDynamicModel, module_type_strs, module_types, sample_input)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
