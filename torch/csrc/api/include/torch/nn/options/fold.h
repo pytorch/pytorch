@@ -17,9 +17,7 @@ namespace nn {
 /// ```
 struct TORCH_API FoldOptions {
   FoldOptions(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
-      // NOLINTNEXTLINE(performance-move-const-arg)
       : output_size_(std::move(output_size)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         kernel_size_(std::move(kernel_size)) {}
 
   /// describes the spatial shape of the large containing tensor of the sliding

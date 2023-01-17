@@ -11,7 +11,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 // See note [Jiterator]
 const char gcd_name[] = "gcd";
@@ -55,4 +55,4 @@ void lcm_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native
