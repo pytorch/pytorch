@@ -70,9 +70,9 @@ void spmm_reduce_kernel_impl(
     const Tensor& crow_indices_,
     const Tensor& col_indices_,
     const Tensor& values_,
-    const Tensor& weight_) {
+    const Tensor& other_) {
 
-  int64_t nnz = values_.numel();
+  int64_t nnz = other_.numel();
   if (nnz == 0) {
     return;
   }
@@ -80,16 +80,16 @@ void spmm_reduce_kernel_impl(
   auto crow_indices = crow_indices_.contiguous();
   auto col_indices = col_indices_.contiguous();
   auto values = values_.contiguous();
-  auto weight = weight_.contiguous();
+  auto other = other_.contiguous();
 
   scalar_t* out_data = out.data_ptr<scalar_t>();
   index_t* csr_data = crow_indices.data_ptr<index_t>();
   index_t* col_data = col_indices.data_ptr<index_t>();
   scalar_t* val_data = values.data_ptr<scalar_t>();
-  scalar_t* weight_data = weight.data_ptr<scalar_t>();
+  scalar_t* other_data = other.data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
-  int64_t K = weight.size(-1);
+  int64_t K = other.size(-1);
 
   // directly parallel on `M` may lead to load imbalance,
   // statically determine thread partition here to average payload
@@ -151,12 +151,12 @@ void spmm_reduce_kernel_impl(
           for (const auto e : c10::irange(e0, e1)) {
             c = col_data[e];
             scalar_t val = val_data[e];
-            scalar_t* weight_ptr = weight_data + c * K + k;
+            scalar_t* other_ptr = other_data + c * K + k;
 
-            Reducer<scalar_t, reduce>::update(out_vec0, Vec::loadu(weight_ptr) * Vec(val));
-            Reducer<scalar_t, reduce>::update(out_vec1, Vec::loadu(weight_ptr + kVecSize) * Vec(val));
-            Reducer<scalar_t, reduce>::update(out_vec2, Vec::loadu(weight_ptr + kVecSize * 2) * Vec(val));
-            Reducer<scalar_t, reduce>::update(out_vec3, Vec::loadu(weight_ptr + kVecSize * 3) * Vec(val));
+            Reducer<scalar_t, reduce>::update(out_vec0, Vec::loadu(other_ptr) * Vec(val));
+            Reducer<scalar_t, reduce>::update(out_vec1, Vec::loadu(other_ptr + kVecSize) * Vec(val));
+            Reducer<scalar_t, reduce>::update(out_vec2, Vec::loadu(other_ptr + kVecSize * 2) * Vec(val));
+            Reducer<scalar_t, reduce>::update(out_vec3, Vec::loadu(other_ptr + kVecSize * 3) * Vec(val));
           }
           out_vec0.store(out_ptr + k);
           out_vec1.store(out_ptr + k + kVecSize);
@@ -168,8 +168,8 @@ void spmm_reduce_kernel_impl(
           for (const auto e : c10::irange(e0, e1)) {
             c = col_data[e];
             scalar_t val = val_data[e];
-            scalar_t* weight_ptr = weight_data + c * K;
-            Reducer<scalar_t, reduce>::update(out_vec, Vec::loadu(weight_ptr + k) * Vec(val));
+            scalar_t* other_ptr = other_data + c * K;
+            Reducer<scalar_t, reduce>::update(out_vec, Vec::loadu(other_ptr + k) * Vec(val));
           }
           out_vec.store(out_ptr + k);
         }
@@ -178,8 +178,8 @@ void spmm_reduce_kernel_impl(
           for (const auto e : c10::irange(e0, e1)) {
             c = col_data[e];
             scalar_t val = val_data[e];
-            scalar_t* weight_ptr = weight_data + c * K;
-            Reducer<scalar_t, reduce>::update(out_val, weight_ptr[k] * val);
+            scalar_t* other_ptr = other_data + c * K;
+            Reducer<scalar_t, reduce>::update(out_val, other_ptr[k] * val);
           }
           out_ptr[k] = out_val;
         }
@@ -216,7 +216,7 @@ void spmm_reduce_arg_kernel_impl(
     const Tensor& crow_indices_,
     const Tensor& col_indices_,
     const Tensor& values_,
-    const Tensor& weight_) {
+    const Tensor& other_) {
 
   TORCH_CHECK(reduce == SPMM_MAX || reduce == SPMM_MIN);
   int64_t nnz = values_.numel();
@@ -227,17 +227,17 @@ void spmm_reduce_arg_kernel_impl(
   auto crow_indices = crow_indices_.contiguous();
   auto col_indices = col_indices_.contiguous();
   auto values = values_.contiguous();
-  auto weight = weight_.contiguous();
+  auto other = other_.contiguous();
 
   scalar_t* out_data = out.data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
   index_t* csr_data = crow_indices.data_ptr<index_t>();
   index_t* col_data = col_indices.data_ptr<index_t>();
   scalar_t* val_data = values.data_ptr<scalar_t>();
-  scalar_t* weight_data = weight.data_ptr<scalar_t>();
+  scalar_t* other_data = other.data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
-  int64_t K = weight.size(-1);
+  int64_t K = other.size(-1);
 
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     int64_t row_start, row_end, c;
@@ -255,10 +255,10 @@ void spmm_reduce_arg_kernel_impl(
           c = col_data[e];
           scalar_t val = val_data[e];
 
-          scalar_t* weight_ptr = weight_data + c * K;
+          scalar_t* other_ptr = other_data + c * K;
           for (const auto k : c10::irange(K)) {
             update<scalar_t, index_t, reduce>(
-                &out_ptr[k], val *  weight_ptr[k], &arg_out_ptr[k], index_t(e));
+                &out_ptr[k], val *  other_ptr[k], &arg_out_ptr[k], index_t(e));
           };
         }
       }
@@ -268,14 +268,14 @@ void spmm_reduce_arg_kernel_impl(
 
 template <typename scalar_t, typename index_t, SPMM_REDUCE_OP reduce>
 void spmm_reduce_backward_input_kernel_impl(
-    const Tensor& grad_input,
+    const Tensor& grad_self,
     const Tensor& grad_out_,
     const Tensor& crow_indices_,
     const Tensor& col_indices_,
-    const Tensor& weight_,
+    const Tensor& other_,
     const Tensor& row_indices_) {
 
-  int64_t nnz = grad_input._nnz();
+  int64_t nnz = grad_self._nnz();
   if (nnz == 0) {
     return;
   }
@@ -283,14 +283,14 @@ void spmm_reduce_backward_input_kernel_impl(
   auto grad_out = grad_out_.contiguous();
   auto crow_indices = crow_indices_.contiguous();
   auto col_indices = col_indices_.contiguous();
-  auto weight = weight_.contiguous();
+  auto other = other_.contiguous();
   auto row_indices = row_indices_.contiguous();
 
-  scalar_t* grad_values_data = grad_input.values().data_ptr<scalar_t>();
+  scalar_t* grad_values_data = grad_self.values().data_ptr<scalar_t>();
   scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
   index_t* crow_data = crow_indices.data_ptr<index_t>();
   index_t* col_data = col_indices.data_ptr<index_t>();
-  scalar_t* weight_data = weight.data_ptr<scalar_t>();
+  scalar_t* other_data = other.data_ptr<scalar_t>();
   index_t* row_data = row_indices.data_ptr<index_t>();
 
   int64_t K = grad_out.size(1);
@@ -303,7 +303,7 @@ void spmm_reduce_backward_input_kernel_impl(
       scalar_t val = vec::map2_reduce_all<scalar_t>(
           [](Vec x, Vec y) { return x * y; },
           [](Vec x, Vec y) { return x + y; },
-          weight_data + col * K,
+          other_data + col * K,
           grad_out_data + row * K,
           K);
 
@@ -320,26 +320,26 @@ void spmm_reduce_backward_input_kernel_impl(
 // backward for reduce type 'max' or 'min'
 template <typename scalar_t, typename index_t>
 void spmm_reduce_backward_input_arg_kernel_impl(
-    const Tensor& grad_input,
+    const Tensor& grad_self,
     const Tensor& grad_out_,
     const Tensor& col_indices_,
-    const Tensor& weight_,
+    const Tensor& other_,
     const Tensor& arg_out_) {
 
-  int64_t nnz = grad_input._nnz();
+  int64_t nnz = grad_self._nnz();
   if (nnz == 0) {
     return;
   }
 
   auto grad_out = grad_out_.contiguous();
   auto col_indices = col_indices_.contiguous();
-  auto weight = weight_.contiguous();
+  auto other = other_.contiguous();
   auto arg_out = arg_out_.contiguous();
 
-  scalar_t* grad_values_data = grad_input.values().data_ptr<scalar_t>();
+  scalar_t* grad_values_data = grad_self.values().data_ptr<scalar_t>();
   scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
   index_t* col_data = col_indices.data_ptr<index_t>();
-  scalar_t* weight_data = weight.data_ptr<scalar_t>();
+  scalar_t* other_data = other.data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
 
   int64_t M = grad_out.size(0);
@@ -359,7 +359,7 @@ void spmm_reduce_backward_input_arg_kernel_impl(
         } else {
           // collect weight at max/min indices
           index_t col = col_data[arg_out_data[m * K + k]];
-          grad_ptr[k] = weight_data[col * K + k] * grad_out_ptr[k];
+          grad_ptr[k] = other_data[col * K + k] * grad_out_ptr[k];
         }
       }
     }
@@ -405,8 +405,8 @@ void spmm_reduce_update_values_kernel_impl(
 }
 
 template <typename scalar_t, typename index_t>
-void spmm_reduce_backward_weight_arg_kernel_impl(
-    const Tensor& grad_weight,
+void spmm_reduce_backward_other_arg_kernel_impl(
+    const Tensor& grad_other,
     const Tensor& grad_out_,
     const Tensor& col_indices_,
     const Tensor& values_,
@@ -422,7 +422,7 @@ void spmm_reduce_backward_weight_arg_kernel_impl(
   auto values = values_.contiguous();
   auto arg_out = arg_out_.contiguous();
 
-  scalar_t* grad_weight_data = grad_weight.data_ptr<scalar_t>();
+  scalar_t* grad_other_data = grad_other.data_ptr<scalar_t>();
   scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
   index_t* col_data = col_indices.data_ptr<index_t>();
   scalar_t* values_data = values.data_ptr<scalar_t>();
@@ -455,7 +455,7 @@ void spmm_reduce_backward_weight_arg_kernel_impl(
       index_t ind = arg_out_data[m * K + k];
       if (ind != index_t(nnz)) {
         index_t col = col_data[ind];
-        grad_weight_data[col * K + k] += grad_data[m * K + k];
+        grad_other_data[col * K + k] += grad_data[m * K + k];
       }
     }
   }
@@ -466,13 +466,13 @@ void spmm_reduce_kernel(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
-    const Tensor& weight,
+    const Tensor& other,
     SPMM_REDUCE_OP reduce_op) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_kernel_impl<scalar_t, index_t, reduce>(
-            out, crow_indices, col_indices, values, weight);
+            out, crow_indices, col_indices, values, other);
       });
     });
   });
@@ -484,49 +484,49 @@ void spmm_reduce_arg_kernel(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
-    const Tensor& weight,
+    const Tensor& other,
     SPMM_REDUCE_OP reduce_op) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_arg_kernel_impl<scalar_t, index_t, reduce>(
-            out, arg_out, crow_indices, col_indices, values, weight);
+            out, arg_out, crow_indices, col_indices, values, other);
       });
     });
   });
 }
 
 void spmm_reduce_backward_input_kernel(
-    const Tensor& grad_input,
+    const Tensor& grad_self,
     const Tensor& grad_out,
     const Tensor& crow_indices,
     const Tensor& col_indices,
-    const Tensor& weight,
+    const Tensor& other,
     const Tensor& row_indices,
     SPMM_REDUCE_OP reduce_op) {
   TORCH_CHECK(reduce_op == SPMM_SUM || reduce_op == SPMM_MEAN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, weight.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_backward_input_kernel_impl<scalar_t, index_t, reduce>(
-            grad_input, grad_out, crow_indices, col_indices, weight, row_indices);
+            grad_self, grad_out, crow_indices, col_indices, other, row_indices);
       });
     });
   });
 }
 
 void spmm_reduce_backward_input_arg_kernel(
-    const Tensor& grad_input,
+    const Tensor& grad_self,
     const Tensor& grad_out,
     const Tensor& col_indices,
-    const Tensor& weight,
+    const Tensor& other,
     const Tensor& arg_out,
     SPMM_REDUCE_OP reduce_op) {
   TORCH_CHECK(reduce_op == SPMM_MAX || reduce_op == SPMM_MIN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, weight.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_arg_indices", [&]() {
       spmm_reduce_backward_input_arg_kernel_impl<scalar_t, index_t>(
-          grad_input, grad_out, col_indices, weight, arg_out);
+          grad_self, grad_out, col_indices, other, arg_out);
     });
   });
 }
@@ -544,8 +544,8 @@ void spmm_reduce_update_values_kernel(
   });
 }
 
-void spmm_reduce_backward_weight_kernel(
-    const Tensor& grad_weight,
+void spmm_reduce_backward_other_kernel(
+    const Tensor& grad_other,
     const Tensor& grad_out,
     const Tensor& crow_indices,
     const Tensor& values,
@@ -569,22 +569,22 @@ void spmm_reduce_backward_weight_kernel(
   }
 
   if (reduce_op == SPMM_SUM || reduce_op == SPMM_MEAN) {
-    spmm_reduce_kernel(grad_weight, ccol_indices, row, val, grad_out, SPMM_SUM);
+    spmm_reduce_kernel(grad_other, ccol_indices, row, val, grad_out, SPMM_SUM);
   }
 }
 
-void spmm_reduce_backward_weight_arg_kernel(
-    const Tensor& grad_weight,
+void spmm_reduce_backward_other_arg_kernel(
+    const Tensor& grad_other,
     const Tensor& grad_out,
     const Tensor& col_indices,
     const Tensor& values,
     const Tensor& arg_out,
     SPMM_REDUCE_OP reduce_op) {
   TORCH_CHECK(reduce_op == SPMM_MAX || reduce_op == SPMM_MIN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_backward_weight_arg_kernel", [&]() {
-    AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_weight_arg_indices", [&]() {
-      spmm_reduce_backward_weight_arg_kernel_impl<scalar_t, index_t>(
-          grad_weight, grad_out, col_indices, values, arg_out);
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
+    AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_other_arg_indices", [&]() {
+      spmm_reduce_backward_other_arg_kernel_impl<scalar_t, index_t>(
+          grad_other, grad_out, col_indices, values, arg_out);
     });
   });
 }
@@ -595,7 +595,7 @@ REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel);
 REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_weight_stub, &spmm_reduce_backward_weight_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_weight_arg_stub, &spmm_reduce_backward_weight_arg_kernel);
+REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel);
+REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel);
 
 }} // at::native

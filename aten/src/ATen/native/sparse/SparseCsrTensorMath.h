@@ -77,30 +77,31 @@ inline SPMM_REDUCE_OP get_operator_enum(const c10::string_view reduce) {
 
 template <bool train>
 inline void check_spmm_reduce_inputs(
-    const Tensor& input,
-    const Tensor& grad_output,
-    const Tensor& weight,
+    const Tensor& self,
+    const Tensor& grad_out,
+    const Tensor& other,
     const Tensor& row_indices,
     const Tensor& ccol_indices,
     const Tensor& csr2csc) {
-  TORCH_CHECK(input.is_sparse_csr(),"Expected input to be sparse CSR tensor.");
+  TORCH_CHECK(self.is_sparse_csr(),"Expected self to be sparse CSR tensor.");
+  TORCH_CHECK(self.dense_dim() == 0, "Expected non-hybrid self tensor.");
 
-  const auto input_scalar_type = input.values().scalar_type();
-  const auto index_scalar_type = input.col_indices().scalar_type();
-  int64_t nnz = input._nnz();
+  const auto input_scalar_type = self.values().scalar_type();
+  const auto index_scalar_type = self.col_indices().scalar_type();
+  int64_t nnz = self._nnz();
 
   CheckedFrom c = train ? "spmm_reduce_backward" : "spmm_reduce";
   if (train) {
-    checkLayout(c, grad_output, kStrided);
-    checkScalarType(c, {grad_output, "grad_output", 1}, input_scalar_type);
-    check_dim_size(grad_output, 2, 0, input.size(0));
-    check_dim_size(grad_output, 2, 1, weight.size(1));
+    checkLayout(c, grad_out, kStrided);
+    checkScalarType(c, {grad_out, "grad_out", 1}, input_scalar_type);
+    check_dim_size(grad_out, 2, 0, self.size(0));
+    check_dim_size(grad_out, 2, 1, other.size(1));
   }
 
   int pos = train ? 2 : 1;
-  checkLayout(c, weight, kStrided);
-  checkScalarType(c, {weight, "weight", pos}, input_scalar_type);
-  check_dim_size(weight, 2, 0, input.size(1));
+  checkLayout(c, other, kStrided);
+  checkScalarType(c, {other, "other", pos}, input_scalar_type);
+  check_dim_size(other, 2, 0, self.size(1));
 
   if (row_indices.defined()) {
     checkLayout(c, row_indices, kStrided);
@@ -110,7 +111,7 @@ inline void check_spmm_reduce_inputs(
   if (ccol_indices.defined()) {
     checkLayout(c, ccol_indices, kStrided);
     checkScalarType(c, {ccol_indices, "ccol_indices", pos++}, index_scalar_type);
-    check_dim_size(ccol_indices, 1, 0, input.size(1) + 1);
+    check_dim_size(ccol_indices, 1, 0, self.size(1) + 1);
   }
   if (csr2csc.defined()) {
     checkLayout(c, csr2csc, kStrided);

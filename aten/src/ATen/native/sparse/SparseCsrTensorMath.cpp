@@ -1297,8 +1297,8 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
 }
 
 std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
-    const Tensor& input,
-    const Tensor& weight,
+    const Tensor& self,
+    const Tensor& other,
     const c10::string_view reduce,
     const c10::optional<Tensor>& row_indices_opt,
     const c10::optional<Tensor>& ccol_indices_opt,
@@ -1311,20 +1311,20 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
   const Tensor& csr2csc = c10::value_or_else(csr2csc_opt, [] {return Tensor();});
 
   sparse::impl::check_spmm_reduce_inputs</*train*/false>(
-      input, Tensor(), weight, row_indices, ccol_indices, csr2csc);
+      self, Tensor(), other, row_indices, ccol_indices, csr2csc);
 
   auto op = sparse::impl::get_operator_enum(reduce);
 
-  auto crow = input.crow_indices();
-  auto col = input.col_indices();
-  auto val = input.values();
+  auto crow = self.crow_indices();
+  auto col = self.col_indices();
+  auto val = self.values();
 
   // init output to be all zeros, for `rows` that has no nonzero elements,
   // the corresponding rows in the output will be zero.
-  auto out = at::zeros({input.size(0), weight.size(1)}, weight.options());
+  auto out = at::zeros({self.size(0), other.size(1)}, other.options());
   auto arg_out = at::empty({0}, col.options());
 
-  int64_t nnz = input._nnz();
+  int64_t nnz = self._nnz();
   if (nnz == 0) {
     return std::make_tuple(out, arg_out);
   }
@@ -1332,25 +1332,25 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
   // only need to calculate the out args
   // for reduce type "max" and "min" for training
   bool need_arg_out = at::GradMode::is_enabled()
-      && (input.requires_grad() || weight.requires_grad())
+      && (self.requires_grad() || other.requires_grad())
       && (op == SPMM_MAX || op == SPMM_MIN);
 
   if (!need_arg_out) {
-    spmm_reduce_stub(kCPU, out, crow, col, val, weight, op);
+    spmm_reduce_stub(kCPU, out, crow, col, val, other, op);
   } else {
     // allocate memory and init with invalid index
     arg_out.resize_(out.sizes());
     arg_out.fill_(nnz);
-    spmm_reduce_arg_stub(kCPU, out, arg_out, crow, col, val, weight, op);
+    spmm_reduce_arg_stub(kCPU, out, arg_out, crow, col, val, other, op);
   }
 
   return std::make_tuple(std::move(out), std::move(arg_out));
 }
 
 std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
-    const Tensor& input,
+    const Tensor& self,
     const Tensor& grad_out,
-    const Tensor& weight,
+    const Tensor& other,
     const c10::string_view reduce,
     const Tensor& arg_out,
     const Tensor& row_indices,
@@ -1359,13 +1359,13 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
     std::array<bool, 2> output_mask) {
 
   sparse::impl::check_spmm_reduce_inputs</*train*/true>(
-      input, grad_out, weight, row_indices, ccol_indices, csr2csc);
+      self, grad_out, other, row_indices, ccol_indices, csr2csc);
 
   auto op = sparse::impl::get_operator_enum(reduce);
 
-  auto crow = input.crow_indices();
-  auto col = input.col_indices();
-  auto val = input.values();
+  auto crow = self.crow_indices();
+  auto col = self.col_indices();
+  auto val = self.values();
 
   // reconstruct the CSC indices in case not all given
   bool has_csc_indices = row_indices.defined()
@@ -1388,48 +1388,48 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
 
     // calculte the global index for CSC
     // and get the conversion permute pattern
-    Tensor index = col.mul(input.size(0)).add(row);
+    Tensor index = col.mul(self.size(0)).add(row);
     permute = index.argsort();
 
     ccol = at::_convert_indices_from_coo_to_csr(
         /*column indices*/col.index_select(0, permute),
-        /*column count*/input.size(1),
+        /*column count*/self.size(1),
         out_int32);
   }
 
-  Tensor grad_input, grad_weight;
+  Tensor grad_self, grad_other;
   if (output_mask[0]) {
     // grad_input has the same indices and nnz with input
-    grad_input = at::empty_like(input);
-    grad_input.values().zero_();
+    grad_self = at::empty_like(self);
+    grad_self.values().zero_();
     if (op == SPMM_MAX || op == SPMM_MIN) {
-      spmm_reduce_backward_input_arg_stub(kCPU, grad_input, grad_out, col, weight, arg_out, op);
+      spmm_reduce_backward_input_arg_stub(kCPU, grad_self, grad_out, col, other, arg_out, op);
     } else {
-      spmm_reduce_backward_input_stub(kCPU, grad_input, grad_out, crow, col, weight, row, op);
+      spmm_reduce_backward_input_stub(kCPU, grad_self, grad_out, crow, col, other, row, op);
     }
   }
   if (output_mask[1]) {
-    grad_weight = at::zeros(weight.sizes(), weight.options());
+    grad_other = at::zeros(other.sizes(), other.options());
     if (op == SPMM_MAX || op == SPMM_MIN) {
-      spmm_reduce_backward_weight_arg_stub(kCPU, grad_weight, grad_out, col, val, arg_out, op);
+      spmm_reduce_backward_other_arg_stub(kCPU, grad_other, grad_out, col, val, arg_out, op);
     } else {
-      spmm_reduce_backward_weight_stub(kCPU, grad_weight, grad_out, crow, val, row, ccol, permute, op);
+      spmm_reduce_backward_other_stub(kCPU, grad_other, grad_out, crow, val, row, ccol, permute, op);
     }
   }
 
-  return std::make_tuple(std::move(grad_input), std::move(grad_weight));
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
 }
 
 Tensor spmm_reduce(
-    const Tensor& input,
-    const Tensor& weight,
+    const Tensor& self,
+    const Tensor& other,
     const c10::string_view reduce,
     const c10::optional<Tensor>& row_indices_opt,
     const c10::optional<Tensor>& ccol_indices_opt,
     const c10::optional<Tensor>& csr2csc_opt) {
 
   // result: out, arg_out
-  auto result = at::_spmm_reduce(input, weight, reduce, row_indices_opt, ccol_indices_opt, csr2csc_opt);
+  auto result = at::_spmm_reduce(self, other, reduce, row_indices_opt, ccol_indices_opt, csr2csc_opt);
   return std::get<0>(result);
 }
 
@@ -1437,8 +1437,8 @@ DEFINE_DISPATCH(spmm_reduce_stub);
 DEFINE_DISPATCH(spmm_reduce_arg_stub);
 DEFINE_DISPATCH(spmm_reduce_backward_input_stub);
 DEFINE_DISPATCH(spmm_reduce_backward_input_arg_stub);
-DEFINE_DISPATCH(spmm_reduce_backward_weight_stub);
-DEFINE_DISPATCH(spmm_reduce_backward_weight_arg_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_other_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_other_arg_stub);
 
 } // namespace native
 } // namespace at

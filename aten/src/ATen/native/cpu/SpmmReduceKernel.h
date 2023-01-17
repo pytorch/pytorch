@@ -3,7 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 enum SPMM_REDUCE_OP {SPMM_SUM, SPMM_MAX, SPMM_MIN, SPMM_MEAN};
 
@@ -11,14 +11,14 @@ using spmm_reduce_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, cons
 using spmm_reduce_arg_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, SPMM_REDUCE_OP op);
 using spmm_reduce_backward_input_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, SPMM_REDUCE_OP op);
 using spmm_reduce_backward_input_arg_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, SPMM_REDUCE_OP op);
-using spmm_reduce_backward_weight_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, SPMM_REDUCE_OP op);
+using spmm_reduce_backward_other_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, SPMM_REDUCE_OP op);
 
 DECLARE_DISPATCH(spmm_reduce_fn, spmm_reduce_stub);
 DECLARE_DISPATCH(spmm_reduce_arg_fn, spmm_reduce_arg_stub);
 DECLARE_DISPATCH(spmm_reduce_backward_input_fn, spmm_reduce_backward_input_stub);
 DECLARE_DISPATCH(spmm_reduce_backward_input_arg_fn, spmm_reduce_backward_input_arg_stub);
-DECLARE_DISPATCH(spmm_reduce_backward_weight_fn, spmm_reduce_backward_weight_stub);
-DECLARE_DISPATCH(spmm_reduce_backward_input_arg_fn, spmm_reduce_backward_weight_arg_stub);
+DECLARE_DISPATCH(spmm_reduce_backward_other_fn, spmm_reduce_backward_other_stub);
+DECLARE_DISPATCH(spmm_reduce_backward_input_arg_fn, spmm_reduce_backward_other_arg_stub);
 
 #define AT_DISPATCH_REDUCTION_TYPES(op, ...)                                   \
   [&] {                                                                        \
@@ -42,4 +42,4 @@ DECLARE_DISPATCH(spmm_reduce_backward_input_arg_fn, spmm_reduce_backward_weight_
     }                                                                          \
   }()
 
-}} // at::native
+} // at::native
