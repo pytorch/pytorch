@@ -298,7 +298,7 @@ class SchedulerNode(BaseSchedulerNode):
             return super().allocate()
 
         if config.inplace_buffers and (
-            isinstance(V.kernel, torch._inductor.codegen.cpp.CppKernel)
+            not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
             or getattr(V.kernel, "mutations", None) is not None
         ):
             from .codegen.wrapper import buffer_reuse_key
