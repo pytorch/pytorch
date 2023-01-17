@@ -442,6 +442,48 @@ class Function(_SingleLevelFunction):
     # for the tracer
     is_traceable = False
 
+    """
+    Bool that specifies if PyTorch should attempt to autogenerate
+    :func:`torch.vmap` support for this autograd.Function. You may set this to
+    True only if this autograd.Function's forward, backward, and jvp (if they
+    exist) are written using PyTorch operations; otherwise, please override
+    :meth:`torch.autograd.Function.vmap` to add support for :func:`torch.vmap`.
+
+    Please see :ref:`func-autograd-function` for more details.
+    """
+    generate_vmap_rule = False
+
+    @staticmethod
+    def vmap(info, in_dims, *args):
+        r"""Defines a rule for the behavior of this autograd.Function underneath
+        :func:`torch.vmap`. For a :func:`torch.autograd.Function` to support
+        :func:`torch.vmap`, you must either override this staticmethod, or set
+        ``generate_vmap_rule`` to ``True`` (you may not do both).
+
+        If you choose to override this staticmethod: it must accept
+
+        - an ``info`` object as the first argument. ``info.batch_size``
+          specifies the size of the dimension being vmapped over,
+          while ``info.randomness`` is the randomness option passed to
+          :func:`torch.vmap`.
+        - an ``in_dims`` tuple as the second argument.
+          For each arg in ``args``, ``in_dims`` has a corresponding
+          ``Optional[int]``. It is ``None`` if the arg is not a Tensor or if
+          the arg is not being vmapped over, otherwise, it is an integer
+          specifying what dimension of the Tensor is being vmapped over.
+        - ``*args``, which is the same as the args to :meth:`~Function.forward`.
+
+        The return of the vmap staticmethod is a tuple of ``(output, out_dims)``.
+        Similar to ``in_dims``, ``out_dims`` should be of the same structure as
+        ``output`` and contain one ``out_dim`` per output that specifies if the
+        output has the vmapped dimension and what index it is in.
+
+        Please see :ref:`func-autograd-function` for more details.
+        """
+        raise NotImplementedError(
+            "To use autograd.Function with vmap, you must either override the "
+            "vmap staticmethod or set generate_vmap_rule=True.")
+
     @classmethod
     def apply(cls, *args, **kwargs):
         if not torch._C._is_autograd_function_extension_enabled():

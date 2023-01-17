@@ -568,6 +568,26 @@ class TestAutograd(TestCase):
         enabled = torch._C._is_autograd_function_extension_enabled()
         self.assertTrue(enabled)
 
+    @torch.autograd.function._set_autograd_function_extension_enabled(True)
+    def test_custom_function_vmap_defaults(self):
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                return x ** 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return gO * 2 * x
+
+        self.assertFalse(MySquare.generate_vmap_rule)
+        self.assertTrue(hasattr(MySquare, 'vmap'))
+
     def test_custom_function_setup_context_simple(self):
         class MySquare(Function):
             @staticmethod
