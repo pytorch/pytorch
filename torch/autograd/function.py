@@ -507,13 +507,12 @@ class Function(_SingleLevelFunction):
             args = _functorch.utils.unwrap_dead_wrappers(args)
             return super().apply(*args, **kwargs)
 
-        if not hasattr(cls, 'setup_context'):
-            # TODO: link documentation in error message
-            # https://github.com/pytorch/pytorch/issues/90224
+        if cls.setup_context == _SingleLevelFunction.setup_context:
             raise RuntimeError(
-                'In order to use an autograd.Function with functorch transforms ',
-                '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
-                'staticmethod.')
+                'In order to use an autograd.Function with functorch transforms '
+                '(vmap, grad, jvp, jacrev, ...), it must override the setup_context '
+                'staticmethod. For more details, please see '
+                'https://pytorch.org/docs/master/notes/extending.func.html')
 
         return custom_function_call(cls, *args, **kwargs)
 
