@@ -86,7 +86,9 @@ class PackagingErrorReason(Enum):
     )
     NO_DUNDER_FILE = "Module had no __file__ defined."
     SOURCE_FILE_NOT_FOUND = (
-        "Module had a __file__, but we could not find it in your filesystem."
+        "Module had a __file__, but we could not find it in your filesystem. "
+        + "You many want to add this file into extern/intern/mock for your "
+        + "package exporter."
     )
     DEPENDENCY_RESOLUTION_FAILED = "Dependency resolution failed."
     NO_ACTION = (
