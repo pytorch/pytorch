@@ -103,7 +103,7 @@ static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, 
   templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
-#if !AT_MKL_ENABLED()
+#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2))
 void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
