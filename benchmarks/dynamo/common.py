@@ -93,8 +93,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
     "hf_T5_base",  # fp64_OOM
-    "mobilenet_v2_quantized_qat",  # setStorage
-    "resnet50_quantized_qat",  # setStorage
     "tacotron2",  # aten._thnn_fused_lstm_cell.default
     "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
