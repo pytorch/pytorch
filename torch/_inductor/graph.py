@@ -250,6 +250,7 @@ class GraphLowering(torch.fx.Interpreter):
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
         ):
             # the first N inputs are weights
+            # print(len(self.graph_inputs), self.num_static_inputs)
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)

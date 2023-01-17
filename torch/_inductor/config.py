@@ -22,7 +22,7 @@ dynamic_shapes = (
 )  # Use dynamic shapes if torchdynamo dynamic shapes is set
 
 # assume weight tensors are fixed size
-static_weight_shapes = True
+static_weight_shapes = False
 
 # put correctness assertions in generated code
 size_asserts = True

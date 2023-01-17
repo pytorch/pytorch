@@ -164,7 +164,8 @@ def compile_fx_inner(
                 elif complex_memory_overlap_inputs:
                     log.warning("skipping cudagraphs due to complex input striding")
 
-    result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    # result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    result = compiled_fn
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
@@ -369,6 +370,7 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        # breakpoint()
         fixed = len(example_inputs) - num_example_inputs
         return inner_compile(
             model,
