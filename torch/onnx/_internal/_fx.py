@@ -6,8 +6,7 @@ from typing import Callable, Dict, Tuple, Union
 
 import onnx
 from onnxscript import evaluator
-from onnxscript.evaluator import TorchScriptEvaluator
-from onnxscript.function_libs.torch_aten import ops
+from onnxscript.function_libs.torch_aten import graph_building, ops
 
 import torch
 import torch._C
@@ -181,7 +180,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
         env={},  # Pointless. Just make linter happy.
     )
     # Initialize the ONNX graph
-    torchscript_evaluator = TorchScriptEvaluator(graph_context)
+    torchscript_evaluator = graph_building.TorchScriptEvaluator(graph_context)
 
     # assume atenlib API
     atenlib = {"aten::sigmoid": ops.core.aten_sigmoid, "aten::add": ops.core.aten_add}
@@ -236,7 +235,9 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     graph_context, fx_module_with_metadata, node, fx_name_to_ts_value
                 )
                 # TODO(titaiwang): ts_args to onnxscript args
-                onnx_inputs, onnx_attrs = torchscript_evaluator.decode_attributes(symbolic_fn, ts_args, {})
+                onnx_inputs, onnx_attrs = torchscript_evaluator.decode_attributes(
+                    symbolic_fn, ts_args, {}
+                )
                 # TODO(titaiwang): ONNXFunction triggers adding custom Ops and record it
                 # into dict for function_proto insertion. It also needs to define type of
                 # the return torch._C.Value.
@@ -451,7 +452,9 @@ def _export(
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
-    ts_graph, ts_initializers, function_dict = _export_fx_to_ts(decomposed_module, opset_version)
+    ts_graph, ts_initializers, function_dict = _export_fx_to_ts(
+        decomposed_module, opset_version
+    )
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = _ts_graph_to_onnx_model_in_protobuf(
         ts_graph, ts_initializers, opset_version, function_dict
