@@ -558,7 +558,7 @@ class CtxCustomSave(WrappedCtx):
 
 
 def reductify(grad_input, grad_input_bdim, input_bdim, batch_size,
-              reduce_to_input_shape_without_bdim=None):
+              target_shape_without_bdim_to_reduce_to=None):
     if not isinstance(grad_input, tuple):
         grad_input = (grad_input,)
     if not isinstance(grad_input_bdim, tuple):
@@ -566,18 +566,18 @@ def reductify(grad_input, grad_input_bdim, input_bdim, batch_size,
     if not isinstance(input_bdim, tuple):
         input_bdim = (input_bdim,)
 
-    if reduce_to_input_shape_without_bdim is None:
-        reduce_to_input_shape_without_bdim = len(grad_input) * (None,)
+    if target_shape_without_bdim_to_reduce_to is None:
+        target_shape_without_bdim_to_reduce_to = len(grad_input) * (None,)
     result = tuple(
         reductify_leaf(gi, gi_bdim, i_bdim, batch_size, maybe_ishape)
         for gi, gi_bdim, i_bdim, maybe_ishape in
-        zip(grad_input, grad_input_bdim, input_bdim, reduce_to_input_shape_without_bdim)
+        zip(grad_input, grad_input_bdim, input_bdim, target_shape_without_bdim_to_reduce_to)
     )
     return result
 
 
 def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
-                   reduce_to_input_shape_without_bdim=None):
+                   target_shape_without_bdim_to_reduce_to=None):
     if grad_input is None:
         return None
 
@@ -607,7 +607,7 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
     # from [B, 4].
     #
     # This means that we need to also reduce the grad_input to the shape of the
-    # input. This behavior is controlled by the `reduce_to_input_shape_without_bdim` flag;
+    # input. This behavior is controlled by the `target_shape_without_bdim_to_reduce_to` flag;
     # if not-None then we do the reducing manually, otherwise, we do not do a reduction.
     assert input_bdim is not None
 
@@ -618,9 +618,9 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
         grad_input = grad_input.expand(new_shape)
         grad_input_bdim = input_bdim
 
-    if reduce_to_input_shape_without_bdim is not None:
+    if target_shape_without_bdim_to_reduce_to is not None:
         return vmap(torch.Tensor.sum_to_size, in_dims=(grad_input_bdim, None), out_dims=input_bdim)(
-            grad_input, reduce_to_input_shape_without_bdim)
+            grad_input, target_shape_without_bdim_to_reduce_to)
 
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
