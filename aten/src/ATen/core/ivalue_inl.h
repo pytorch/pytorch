@@ -186,10 +186,18 @@ inline c10::Storage IValue::toStorage() const& {
   return c10::Storage(toIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Stream IValue::toStream() && {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::Stream IValue::toStream() const& {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());

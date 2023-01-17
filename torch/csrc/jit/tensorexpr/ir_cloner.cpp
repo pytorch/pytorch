@@ -6,9 +6,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 template <
     typename Op,
@@ -369,6 +367,4 @@ ExprPtr Expr::clone(ExprPtr e) {
   return e->accept_mutator(&cloner);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

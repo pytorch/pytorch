@@ -64,13 +64,13 @@ from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
-    FullStateDictConfig,
     FullOptimStateDictConfig,
+    FullStateDictConfig,
     LocalOptimStateDictConfig,
-    ShardedOptimStateDictConfig,
     LocalStateDictConfig,
     MixedPrecision,
     OptimStateDictConfig,
+    ShardedOptimStateDictConfig,
     ShardedStateDictConfig,
     ShardingStrategy,
     StateDictConfig,
@@ -617,9 +617,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             if prev_state_dict_type is None:
                 prev_state_dict_type = submodule._state_dict_type
             else:
-                assert prev_state_dict_type == submodule._state_dict_type, (
-                    "All FSDP modules should have the same state_dict_type."
-                )
+                assert (
+                    prev_state_dict_type == submodule._state_dict_type
+                ), "All FSDP modules should have the same state_dict_type."
             if prev_state_dict_config is None:
                 prev_state_dict_config = submodule._state_dict_config
             else:
@@ -630,7 +630,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 prev_optim_state_dict_config = submodule._optim_state_dict_config
             else:
                 assert isinstance(
-                    submodule._optim_state_dict_config, type(prev_optim_state_dict_config)
+                    submodule._optim_state_dict_config,
+                    type(prev_optim_state_dict_config),
                 ), "All FSDP modules must have the same type of optim_state_dict_config."
 
             submodule._state_dict_type = state_dict_type
@@ -655,7 +656,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 submodule_settings = StateDictSettings(
                     submodule._state_dict_type,
                     submodule._state_dict_config,
-                    submodule._optim_state_dict_config
+                    submodule._optim_state_dict_config,
                 )
                 assert state_dict_settings == submodule_settings, (
                     "All FSDP modules must have the same state dict settings."
@@ -695,18 +696,20 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         try:
             prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
-                module, state_dict_type, state_dict_config, optim_state_dict_config,
+                module,
+                state_dict_type,
+                state_dict_config,
+                optim_state_dict_config,
             )
             yield
         except Exception as e:
             raise e
-        finally:
-            FullyShardedDataParallel.set_state_dict_type(
-                module,
-                prev_state_dict_settings.state_dict_type,
-                prev_state_dict_settings.state_dict_config,
-                prev_state_dict_settings.optim_state_dict_config
-            )
+        FullyShardedDataParallel.set_state_dict_type(
+            module,
+            prev_state_dict_settings.state_dict_type,
+            prev_state_dict_settings.state_dict_config,
+            prev_state_dict_settings.optim_state_dict_config,
+        )
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -1212,7 +1215,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model, False, False
             )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1261,7 +1266,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1274,7 +1281,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use_orig_params,
         )
         if is_named_optimizer:
-            ret_state_dict =  _rekey_named_optim_state_dict(sharded_osd)
+            ret_state_dict = _rekey_named_optim_state_dict(sharded_osd)
         else:
             ret_state_dict = _rekey_sharded_optim_state_dict(
                 sharded_osd,
@@ -1762,7 +1769,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim_input=None,
             rank0_only=getattr(state_dict_settings, "rank0_only", False),
             group=None,
-            full_state_dict=state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT,
+            full_state_dict=state_dict_settings.state_dict_type
+            == StateDictType.FULL_STATE_DICT,
         )
 
     @staticmethod
@@ -1803,7 +1811,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim_input=None,
             rank0_only=getattr(state_dict_settings, "rank0_only", False),
             group=group,
-            full_state_dict=state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT,
+            full_state_dict=state_dict_settings.state_dict_type
+            == StateDictType.FULL_STATE_DICT,
         )
 
     @staticmethod
@@ -1818,7 +1827,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             model=model,
             optim_input=None,
             optim=optim,
-            full_state_dict=state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT,
+            full_state_dict=state_dict_settings.state_dict_type
+            == StateDictType.FULL_STATE_DICT,
             is_named_optimizer=True,
         )
 
@@ -1854,7 +1864,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             model=model,
             optim_input=None,
             optim=optim,
-            full_state_dict=state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT,
+            full_state_dict=state_dict_settings.state_dict_type
+            == StateDictType.FULL_STATE_DICT,
             is_named_optimizer=is_named_optimizer,
         )
 

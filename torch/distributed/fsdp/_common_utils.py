@@ -24,7 +24,14 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import FullStateDictConfig, ShardingStrategy, StateDictConfig, StateDictType, OptimStateDictConfig, FullOptimStateDictConfig
+from .api import (
+    FullOptimStateDictConfig,
+    FullStateDictConfig,
+    OptimStateDictConfig,
+    ShardingStrategy,
+    StateDictConfig,
+    StateDictType,
+)
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."

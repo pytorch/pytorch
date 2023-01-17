@@ -7,7 +7,7 @@
 #include <c10/core/Scalar.h>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -125,4 +125,4 @@ void _assert_async_cuda(const Tensor& self_tensor) {
   });
 }
 
-}} // namespace at::native
+} // namespace at::native
