@@ -16,9 +16,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
-namespace internal {
+namespace at::native::internal {
 
 namespace {
 
@@ -340,6 +338,4 @@ INSTANTIATE_UNIQUE_CUDA_TEMPLATE(at::Half);
 
 #undef INSTANTIATE
 
-} // namespace internal
-} // namespace native
-} // namespace at
+} // namespace at::native::internal

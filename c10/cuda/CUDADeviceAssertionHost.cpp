@@ -21,6 +21,33 @@ namespace cuda {
 
 namespace {
 
+#ifdef TORCH_USE_CUDA_DSA
+/// Get current device id
+/// We need our own implementation of this function to prevent
+/// an infinite initialization loop for CUDAKernelLaunchRegistry
+int dsa_get_device_id() {
+  int device = -1;
+  C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
+  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
+  return device;
+}
+
+/// Get a device's compute capability - note that this dangerously assumes
+/// that if one CUDA GPU supports device-side assertions they all do. This is
+/// probably fine since the latest CUDA GPU that doesn't support UVM is the
+/// K80 released 2014-11-17. Mixing that GPU with a newer one is likely to be
+/// rare enough that the defensive
+/// We need our own implementation of this function to prevent
+/// an infinite initialization loop for CUDAKernelLaunchRegistry
+int dsa_get_device_compute_capability(const int device_num) {
+  int compute_capability = -1;
+  C10_CUDA_ERROR_HANDLED(cudaDeviceGetAttribute(
+      &compute_capability, cudaDevAttrComputeCapabilityMajor, device_num));
+  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
+  return compute_capability;
+}
+#endif
+
 /// Get the number of CUDA devices
 /// We need our own implementation of this function to prevent
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
@@ -60,40 +87,13 @@ void uvm_deleter(DeviceAssertionsData* uvm_assertions_ptr) {
   }
 }
 
-#ifdef TORCH_USE_CUDA_DSA
-/// Get current device id
-/// We need our own implementation of this function to prevent
-/// an infinite initialization loop for CUDAKernelLaunchRegistry
-int dsa_get_device_id() {
-  int device = -1;
-  C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
-  return device;
-}
-
-/// Get a device's compute capability - note that this dangerously assumes
-/// that if one CUDA GPU supports device-side assertions they all do. This is
-/// probably fine since the latest CUDA GPU that doesn't support UVM is the
-/// K80 released 2014-11-17. Mixing that GPU with a newer one is likely to be
-/// rare enough that the defensive
-/// We need our own implementation of this function to prevent
-/// an infinite initialization loop for CUDAKernelLaunchRegistry
-int dsa_get_device_compute_capability(const int device_num) {
-  int compute_capability = -1;
-  C10_CUDA_ERROR_HANDLED(cudaDeviceGetAttribute(
-      &compute_capability, cudaDevAttrComputeCapabilityMajor, device_num));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
-  return compute_capability;
-}
-#endif
-
 } // namespace
 
 /// Check that kernels ran correctly by checking the message buffer. BLOCKING.
 std::string c10_retrieve_device_side_assertion_info() {
 #ifdef TORCH_USE_CUDA_DSA
   const auto& launch_registry = CUDAKernelLaunchRegistry::get_singleton_ref();
-  if (!launch_registry.enabled) {
+  if (!launch_registry.enabled_at_runtime) {
     return "Device-side assertion tracking was not enabled by user.";
   } else if (!launch_registry.do_all_devices_support_managed_memory) {
     return "Device-side assertions disabled because not all devices support managed memory.";
@@ -115,20 +115,7 @@ std::string c10_retrieve_device_side_assertion_info() {
 
   std::stringstream oss;
 
-  {
-    oss << "This process interacted the following GPUs = {";
-    bool first_gpu_listed = true;
-    for (const auto& x : uvm_assertions) {
-      if (x) {
-        if (!first_gpu_listed) {
-          oss << ","
-        }
-        first_gpu_listed = true;
-        oss << x;
-      }
-    }
-    oss << "}" << std::endl;
-  }
+  oss << "Looking for device-side assertion failure information...\n";
 
   // Loop over each device that could be managed by the process
   for (const auto device_num : c10::irange(assertion_data.size())) {
@@ -202,7 +189,7 @@ CUDAKernelLaunchRegistry::CUDAKernelLaunchRegistry()
     : do_all_devices_support_managed_memory(
           dsa_check_if_all_devices_support_managed_memory()),
       gather_launch_stacktrace(check_env_for_enable_launch_stacktracing()),
-      enabled(check_env_for_dsa_enabled()) {
+      enabled_at_runtime(check_env_for_dsa_enabled()) {
   for (C10_UNUSED const auto _ : c10::irange(dsa_get_device_count())) {
     uvm_assertions.emplace_back(nullptr, uvm_deleter);
   }
@@ -226,7 +213,7 @@ uint32_t CUDAKernelLaunchRegistry::insert(
     const char* kernel_name,
     const int32_t stream_id) {
 #ifdef TORCH_USE_CUDA_DSA
-  if (!is_enabled()) {
+  if (!enabled_at_runtime) {
     return 0;
   }
 
@@ -274,7 +261,7 @@ CUDAKernelLaunchRegistry::snapshot() const {
 DeviceAssertionsData* CUDAKernelLaunchRegistry::
     get_uvm_assertions_ptr_for_current_device() {
 #ifdef TORCH_USE_CUDA_DSA
-  if (!is_enabled()) {
+  if (!enabled_at_runtime) {
     return nullptr;
   }
 
@@ -350,17 +337,6 @@ bool CUDAKernelLaunchRegistry::has_failed() const {
     }
   }
   return false;
-}
-
-bool CUDAKernelLaunchRegistry::is_enabled() const {
-#ifdef TORCH_USE_CUDA_DSA
-  std::cerr << ""
-#else
-  std::cerr
-      << "TORCH_USE_CUDA_DSA not enabled in CUDAKernelLaunchRegistry::is_enabled"
-      << std::endl;
-  return false;
-#endif
 }
 
 } // namespace cuda

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -10,10 +11,10 @@ from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     get_isolated_graphmodule,
-    get_proxy_slot,
     ProxyTorchDispatchMode,
     make_fx,
     track_tensor_tree,
+    unwrap_proxy,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
@@ -36,11 +37,6 @@ cond = PyOperator("cond")
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    def _unwrap_proxy(e):
-        if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
-            return e
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
-
     assert isinstance(operands, list), "Cond operands must be a list of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
@@ -87,7 +83,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     args = (pred, true_graph, false_graph, [operands])
 
-    proxy_args = pytree.tree_map(_unwrap_proxy, args)
+    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), args)
 
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="conditional")
