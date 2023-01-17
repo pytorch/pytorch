@@ -960,7 +960,7 @@ class GitHubPR:
                     land_check_commit=land_check_commit)
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
-        return ghstack_prs
+        return [x for x, _ in ghstack_prs]
 
     def gen_commit_message(self, filter_ghstack: bool = False) -> str:
         """ Fetches title and body from PR description
