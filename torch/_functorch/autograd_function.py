@@ -1,7 +1,7 @@
 import torch
 from torch._ops import PyOperator
 from torch._C._functorch import TransformType
-from torch._functorch.utils import enable_autograd_function
+from torch._functorch.utils import enable_single_level_autograd_function
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -86,7 +86,7 @@ custom_function_call = CustomFunctionPyOperator()
 @custom_function_call.py_impl(TransformType.Jvp)
 def custom_function_call_grad(interpreter, autograd_function, *operands):
     Generated = generate_single_level_function(interpreter, autograd_function)
-    with enable_autograd_function():
+    with enable_single_level_autograd_function():
         flat_out = Generated.apply(*operands)
     return flat_out
 
