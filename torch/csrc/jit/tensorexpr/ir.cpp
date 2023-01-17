@@ -6,9 +6,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
@@ -264,7 +262,7 @@ std::vector<VarHandle> VarVectorToVarHandleVector(
   return result;
 }
 
-bool immediateIsNegative(ExprPtr e) {
+bool immediateIsNegative(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() < 0;                 \
@@ -274,7 +272,7 @@ bool immediateIsNegative(ExprPtr e) {
   return false;
 }
 
-bool immediateIsPositive(ExprPtr e) {
+bool immediateIsPositive(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() > 0;                 \
@@ -284,7 +282,7 @@ bool immediateIsPositive(ExprPtr e) {
   return false;
 }
 
-bool immediateIsZero(ExprPtr e) {
+bool immediateIsZero(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == 0;                \
@@ -294,6 +292,4 @@ bool immediateIsZero(ExprPtr e) {
   return false;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
