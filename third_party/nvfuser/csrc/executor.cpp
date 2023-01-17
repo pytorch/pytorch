@@ -195,7 +195,7 @@ void FusionExecutor::compileFusion(
     Fusion* fusion,
     const KernelArgumentHolder& args,
     const LaunchParams& launch_constraints,
-    const int maxrregcount) {
+    CompileParams compile_params) {
   FUSER_PERF_SCOPE("compileFusion");
 
   TORCH_INTERNAL_ASSERT(
@@ -245,24 +245,20 @@ void FusionExecutor::compileFusion(
   // TODO: refactor the options_ passed through
   options_.device = c10::Device(c10::DeviceType::CUDA, args.getDeviceIndex());
   options_.index_mode = args.getIndexMode();
+  compile_params.index_type =
+      (options_.index_mode == KernelIndexMode::INT64 ? DataType::Int
+                                                     : DataType::Int32);
   c10::DeviceGuard dg(options_.device);
 
   TORCH_INTERNAL_ASSERT(
       options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
   auto properties = at::cuda::getDeviceProperties(options_.device.index());
   configured_device_smem_ = properties->sharedMemPerBlock;
-#ifndef USE_ROCM
   device_smem_limit_ = properties->sharedMemPerBlockOptin;
-#else
-  // don't know if rocm supports opt-in shared memory reconfiguration
-  device_smem_limit_ = properties->sharedMemPerBlock;
-#endif
   warp_size_ = properties->warpSize;
 
-  lowered_ = std::make_unique<GpuLower>(
-      fusion,
-      options_.index_mode == KernelIndexMode::INT64 ? DataType::Int
-                                                    : DataType::Int32);
+  lowered_ = std::make_unique<GpuLower>(fusion, compile_params);
+
   const auto kernel = lowered_->kernel();
   fusion_ = lowered_->kernel()->as<Fusion>();
 
@@ -342,7 +338,7 @@ void FusionExecutor::compileFusion(
   block_size_high_water_mark = std::max<int64_t>(
       (block_size.has_value() ? block_size.value() : 1),
       block_size_high_water_mark);
-  maxrregcount_high_water_mark = maxrregcount;
+  maxrregcount_high_water_mark = compile_params.maxrregcount;
   std::tie(compiled_kernel_, last_compiler_log_) = executor_utils::nvrtcCompile(
       kernel_code_,
       structured_code,
@@ -969,7 +965,7 @@ KernelArgumentHolder FusionExecutor::inferOutputSizes(
 std::vector<at::Tensor> FusionExecutor::runFusion(
     KernelArgumentHolder& args,
     const LaunchParams& launch_constraints,
-    const int maxrregcount,
+    CompileParams compile_params,
     const std::vector<at::Tensor>& outputs) {
   FUSER_PERF_SCOPE("FusionExecutor::RunFusion");
   TORCH_INTERNAL_ASSERT(compiled());
@@ -993,7 +989,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 << " (strides = " << output.strides() << ")" << std::endl;
     }
     std::cout << launch_constraints.toString();
-    std::cout << "maxrregcount= " << maxrregcount << std::endl;
+    std::cout << "maxrregcount= " << compile_params.maxrregcount << std::endl;
   }
 
   ExecutorEntry* executor_entry = nullptr;
@@ -1102,12 +1098,12 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     // Recompile the kernel if the number of threads in the block has increased
     // or maxrregcount has changed
     if (launch_params_.nThreads() > block_size_high_water_mark ||
-        maxrregcount != maxrregcount_high_water_mark) {
+        compile_params.maxrregcount != maxrregcount_high_water_mark) {
       const auto kernel = lowered_->kernel();
       kernel_code_ = codegen::generateCudaKernel(kernel, kernelName());
       const auto structured_code = getStructuredCode(kernel_code_);
       block_size_high_water_mark = launch_params_.nThreads();
-      maxrregcount_high_water_mark = maxrregcount;
+      maxrregcount_high_water_mark = compile_params.maxrregcount;
 
       std::tie(compiled_kernel_, last_compiler_log_) =
           executor_utils::nvrtcCompile(

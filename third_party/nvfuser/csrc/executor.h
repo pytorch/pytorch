@@ -1,5 +1,5 @@
 #pragma once
-#include <executor_launch_params.h>
+#include <executor_params.h>
 #include <executor_utils.h>
 #include <expr_evaluator.h>
 #include <fusion.h>
@@ -46,7 +46,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       Fusion* fusion,
       const KernelArgumentHolder& args,
       const LaunchParams& launch_constraints = LaunchParams(),
-      const int maxrregcount = 255);
+      CompileParams compile_params = CompileParams());
 
   // TODO: merge it with the overload above.
   //! This API is merely here so we don't have to go back and update all cpp
@@ -55,38 +55,38 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       Fusion* fusion,
       const at::ArrayRef<IValue>& inputs = {},
       const LaunchParams& launch_constraints = LaunchParams(),
-      const int maxrregcount = 255) {
+      CompileParams compile_params = CompileParams()) {
     KernelArgumentHolder args =
         KernelArgumentHolder::createKernelArgumentHolder(inputs);
-    compileFusion(fusion, args, launch_constraints, maxrregcount);
+    compileFusion(fusion, args, launch_constraints, compile_params);
   }
 
   std::vector<at::Tensor> runFusion(
       KernelArgumentHolder& args,
       const LaunchParams& launch_constraints = LaunchParams(),
-      const int maxrregcount = 255,
+      CompileParams compile_params = CompileParams(),
       const std::vector<at::Tensor>& outputs = {});
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
       const std::vector<at::Tensor>& outputs,
       const LaunchParams& launch_constraints = LaunchParams(),
-      const int maxrregcount = 255,
+      CompileParams compile_params = CompileParams(),
       const c10::optional<size_t>& opt_code = c10::nullopt) {
     KernelArgumentHolder args =
         KernelArgumentHolder::createKernelArgumentHolder(inputs);
     if (opt_code.has_value()) {
       args.setCacheId(*opt_code);
     }
-    return runFusion(args, launch_constraints, maxrregcount, outputs);
+    return runFusion(args, launch_constraints, compile_params, outputs);
   }
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
       const LaunchParams& launch_constraints = LaunchParams(),
-      const int maxrregcount = 255,
+      CompileParams compile_params = CompileParams(),
       const c10::optional<size_t>& opt_code = c10::nullopt) {
-    return runFusion(inputs, {}, launch_constraints, maxrregcount, opt_code);
+    return runFusion(inputs, {}, launch_constraints, compile_params, opt_code);
   }
 
   // function to query whether a `FusionExecutor` has a compiled kernel to

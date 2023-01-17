@@ -1,6 +1,6 @@
 #pragma once
 
-#include <executor_launch_params.h>
+#include <executor_params.h>
 #include <utils.h>
 
 #include <string>
@@ -15,7 +15,7 @@ class HeuristicParams : public PolymorphicBase {
   std::string tag = "";
 
   LaunchParams lparams;
-  int maxrregcount = 255;
+  CompileParams cparams;
 
   virtual std::string toString() const {
     return "Undefined Heuristic Params";

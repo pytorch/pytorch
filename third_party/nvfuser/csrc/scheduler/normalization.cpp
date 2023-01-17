@@ -491,7 +491,7 @@ std::shared_ptr<ReductionParams> innerPersistentHeuristic(
 
   auto rparams = std::make_shared<ReductionParams>();
 
-  rparams->maxrregcount = nvrtc_register_per_thread;
+  rparams->cparams.maxrregcount = nvrtc_register_per_thread;
   rparams->persistent_kernel = true;
   rparams->fastest_dim = true;
 

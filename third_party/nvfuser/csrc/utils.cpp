@@ -149,7 +149,8 @@ auto parseDisableOptions() {
       {"index_hoist", DisableOption::IndexHoist},
       {"nvtx", DisableOption::Nvtx},
       {"predicate_elimination", DisableOption::PredicateElimination},
-      {"welford_vectorization", DisableOption::WelfordVectorization}};
+      {"welford_vectorization", DisableOption::WelfordVectorization},
+      {"magic_zero", DisableOption::MagicZero}};
 
   auto options = parseEnvOptions("PYTORCH_NVFUSER_DISABLE", available_options);
 

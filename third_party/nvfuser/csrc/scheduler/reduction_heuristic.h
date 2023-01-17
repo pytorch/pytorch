@@ -116,7 +116,8 @@ class ReductionParams : public HeuristicParams {
       return false;
     }
     const ReductionParams& other = *other_casted;
-    bool attr_equal = other.fastest_dim == fastest_dim &&
+    bool attr_equal = other.cparams == cparams &&
+        other.fastest_dim == fastest_dim &&
         other.persistent_kernel == persistent_kernel &&
         other.project_persistent_buffers == project_persistent_buffers &&
         other.schedule_3D == schedule_3D && other.flip_grid == flip_grid &&
@@ -139,8 +140,7 @@ class ReductionParams : public HeuristicParams {
         other.split_grid_dim_outer_reduction ==
             split_grid_dim_outer_reduction &&
         other.batches_per_block_outer_reduction ==
-            batches_per_block_outer_reduction &&
-        other.maxrregcount == maxrregcount;
+            batches_per_block_outer_reduction;
     return attr_equal;
   }
 

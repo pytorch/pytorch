@@ -6,7 +6,7 @@
 #include <codegen.h>
 #include <disjoint_set.h>
 #include <executor.h>
-#include <executor_launch_params.h>
+#include <executor_params.h>
 #include <expr_evaluator.h>
 #include <fusion.h>
 #include <fusion_segmenter.h>
@@ -941,14 +941,14 @@ TEST_F(NVFuserTest, FusionExpandRepro_CUDA) {
   FusionExecutor fe;
   fe.compileFusion(&fusion);
   LaunchParams l_params;
-  auto outputs = fe.runFusion(aten_inputs, {}, l_params, 0);
+  auto outputs = fe.runFusion(aten_inputs, {}, l_params, {});
 
   auto out = at_x.expand_as(at_y);
 
   testValidate(&fusion, outputs, aten_inputs, {out}, __LINE__, __FILE__);
 
   // second run to verify cached output allocation
-  outputs = fe.runFusion(aten_inputs, {}, l_params, 0);
+  outputs = fe.runFusion(aten_inputs, {}, l_params, {});
   testValidate(&fusion, outputs, aten_inputs, {out}, __LINE__, __FILE__);
 }
 

@@ -1,7 +1,7 @@
 #pragma once
 #include <dynamic_type.h>
 #include <executor_kernel_arg.h>
-#include <executor_launch_params.h>
+#include <executor_params.h>
 #include <fusion.h>
 #include <ir_all_nodes.h>
 #include <lower2device.h>

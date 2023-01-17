@@ -5,7 +5,7 @@
 #include <codegen.h>
 #include <disjoint_set.h>
 #include <executor.h>
-#include <executor_launch_params.h>
+#include <executor_params.h>
 #include <expr_evaluator.h>
 #include <fusion.h>
 #include <fusion_segmenter.h>

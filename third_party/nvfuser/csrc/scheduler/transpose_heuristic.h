@@ -56,7 +56,8 @@ class TransposeParams : public HeuristicParams {
       return false;
     }
     const TransposeParams& other = *other_casted;
-    bool attr_equal = other.split_before_tiling == split_before_tiling &&
+    bool attr_equal = other.cparams == cparams &&
+        other.split_before_tiling == split_before_tiling &&
         other.dims_merged_with_1 == dims_merged_with_1 &&
         other.dims_merged_with_2 == dims_merged_with_2 &&
         other.vectorize_factor1 == vectorize_factor1 &&

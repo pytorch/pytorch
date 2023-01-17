@@ -1,6 +1,7 @@
 #include <arith.h>
 #include <codegen.h>
 #include <disjoint_set.h>
+#include <executor_params.h>
 #include <fusion.h>
 #include <fusion_segmenter.h>
 #include <instrumentation.h>
@@ -357,18 +358,19 @@ void Fusion::print() {
   std::cout << "}\n\n";
 }
 
-void Fusion::printKernel(DataType index_type) {
+void Fusion::printKernel(const CompileParams& compile_params) {
   FUSER_PERF_SCOPE("Fusion::printKernel");
   TORCH_INTERNAL_ASSERT(
       !this->isA<kir::Kernel>(),
       "Cannot \"print kernel\" of a kernel container. ",
       "This would require lowering during lowering.");
-  std::cout << codegen::generateCudaKernel(GpuLower(this, index_type).kernel());
+  std::cout << codegen::generateCudaKernel(
+      GpuLower(this, compile_params).kernel());
 }
 
 std::unordered_map<std::string, std::pair<int, int>> Fusion::bankConflictInfo(
-    DataType index_type) {
-  GpuLower lower(this, index_type);
+    const CompileParams& compile_params) {
+  GpuLower lower(this, compile_params);
   auto kernel = lower.kernel();
   auto info = getBankConflictInfo(kernel);
   // The container of exprs goes out of scope, so we return a map of string here

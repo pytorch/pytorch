@@ -6,6 +6,18 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+struct TORCH_CUDA_CU_API CompileParams {
+  DataType index_type = DataType::Int;
+  int maxrregcount = 255;
+  bool enable_magic_zero = true;
+
+  bool operator==(const CompileParams& other) const {
+    return index_type == other.index_type &&
+        maxrregcount == other.maxrregcount &&
+        enable_magic_zero == other.enable_magic_zero;
+  }
+};
+
 class TORCH_CUDA_CU_API LaunchParams {
  public:
   static constexpr int64_t UNINITIALIZED_VAL = -1;

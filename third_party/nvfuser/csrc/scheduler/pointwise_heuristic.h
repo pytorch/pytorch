@@ -49,8 +49,9 @@ class PointwiseParams : public HeuristicParams {
       return false;
     }
     const PointwiseParams& other = *other_casted;
-    bool attr_equal = other.vectorize == vectorize &&
-        other.break_point == break_point && other.split_block == split_block &&
+    bool attr_equal = other.cparams == cparams &&
+        other.vectorize == vectorize && other.break_point == break_point &&
+        other.split_block == split_block &&
         other.split_grid_y_dim == split_grid_y_dim &&
         other.unroll_factor == unroll_factor &&
         other.flip_grid_binding == flip_grid_binding;

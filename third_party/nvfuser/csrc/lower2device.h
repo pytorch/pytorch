@@ -3,6 +3,7 @@
 #include <c10/macros/Export.h>
 
 #include <compute_at_map.h>
+#include <executor_params.h>
 #include <ir_all_nodes.h>
 #include <kernel.h>
 #include <kernel_ir.h>
@@ -48,8 +49,11 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   // into cuda code. index_type allows to compile the kernel based on int32
   // indexing instead of int64 for additional performance.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit GpuLower(Fusion* fusion, DataType index_type = DataType::Int) {
-    lower(fusion, index_type);
+  explicit GpuLower(
+      Fusion* fusion,
+      const CompileParams& cparams = CompileParams())
+      : cparams_(cparams) {
+    lower(fusion);
   }
 
   kir::Kernel* kernel() const;
@@ -166,6 +170,13 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return profile_;
   }
 
+  bool isNvFuserZeroEnabled() {
+    if (isOptionDisabled(DisableOption::MagicZero)) {
+      return false;
+    }
+    return cparams_.enable_magic_zero;
+  }
+
   // This is an interface to propagate information after expression
   //  replacement on the kernel IR. E.g.:
   //    for ...
@@ -180,7 +191,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   void propagateExprInfo(const Expr* old_expr, const Expr* new_expr);
 
  private:
-  void lower(Fusion* fusion, DataType index_type);
+  void lower(Fusion* fusion);
 
   // Goes through the parallelized iterdomains of the used TVs and find
   //  the parallel dimensions that need to be padded to a multiples of
@@ -215,6 +226,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   std::shared_ptr<const SyncMap> sync_map_;
   kir::KernelPerformanceProfile profile_;
   std::unordered_set<Split*> divisible_splits_;
+  CompileParams cparams_;
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size

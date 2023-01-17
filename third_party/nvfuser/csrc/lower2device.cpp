@@ -220,7 +220,7 @@ void dumpExprsIfEnabled(
   }
 }
 
-void GpuLower::lower(Fusion* fusion, DataType index_type) {
+void GpuLower::lower(Fusion* fusion) {
   FUSER_PERF_SCOPE("GpuLower::lower");
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
   TORCH_INTERNAL_ASSERT(
@@ -235,7 +235,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
     }
   } lower_guard(this);
   // Copy fusion into a new kernel for processing
-  kernel_ = std::make_unique<kir::Kernel>(fusion, index_type);
+  kernel_ = std::make_unique<kir::Kernel>(fusion, cparams_.index_type);
   // Alias the fusion kernel caries around as a view of itself.
   fusion_ = kernel_.get();
 
@@ -441,11 +441,15 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
     exprs_welford_vectorized = exprs_common_index_allocated;
   }
 
-  // Insert fake zero updates to make sure nvrtc doesn't blow out register use
-  // on index and predicate reuse
-  const auto exprs_register_adjusted =
-      insertMagicZero(exprs_welford_vectorized);
-  dumpExprsIfEnabled(exprs_register_adjusted, "insertMagicZero");
+  std::vector<Expr*> exprs_register_adjusted;
+  if (isNvFuserZeroEnabled()) {
+    // Insert fake zero updates to make sure nvrtc doesn't blow out register use
+    // on index and predicate reuse
+    exprs_register_adjusted = insertMagicZero(exprs_welford_vectorized);
+    dumpExprsIfEnabled(exprs_register_adjusted, "insertMagicZero");
+  } else {
+    exprs_register_adjusted = exprs_welford_vectorized;
+  }
 
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);

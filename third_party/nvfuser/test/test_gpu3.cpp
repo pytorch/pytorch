@@ -6,7 +6,7 @@
 #include <codegen.h>
 #include <disjoint_set.h>
 #include <executor.h>
-#include <executor_launch_params.h>
+#include <executor_params.h>
 #include <expr_evaluator.h>
 #include <fusion.h>
 #include <fusion_segmenter.h>
@@ -1500,7 +1500,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
 
   // Use Int32 as the index type to verify Int32 is used as the type
   // of hoisted indices
-  GpuLower gpulw(&fusion, DataType::Int32);
+  GpuLower gpulw(&fusion, {DataType::Int32});
   auto kernel = gpulw.kernel();
 
   auto is_index_times_ns = [](Val* val, Val* index, std::string name) -> bool {

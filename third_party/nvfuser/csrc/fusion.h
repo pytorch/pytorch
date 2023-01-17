@@ -4,6 +4,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
+#include <executor_params.h>
 #include <ir_base_nodes.h>
 #include <ir_container.h>
 #include <iter_visitor.h>
@@ -134,7 +135,7 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   void printTransforms();
 
   //! Lower the fusion and print a kernel
-  void printKernel(DataType index_type = DataType::Int);
+  void printKernel(const CompileParams& compile_params = CompileParams());
 
   //! Returns if this fusion is noop, for example, trivially forwarding inputs,
   //! or all outputs are size-0 tensors, etc.
@@ -142,7 +143,7 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
 
   //! Lower the fusion and evaluate bank conflict info
   std::unordered_map<std::string, std::pair<int, int>> bankConflictInfo(
-      DataType index_type = DataType::Int);
+      const CompileParams& compile_params = CompileParams());
 
   //! Return a list of topologically sorted expressions. This only includes
   //! exprs required to genereate registered outputs.

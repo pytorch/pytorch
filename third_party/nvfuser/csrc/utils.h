@@ -92,6 +92,7 @@ enum class DisableOption {
   Nvtx, //! Disable NVTX instrumentation
   PredicateElimination, //! Disable predicate elimination
   WelfordVectorization, //! Disable vectorizaton of Welford ops
+  MagicZero, //! Disable nvfuser_zero
   EndOfOption //! Placeholder for counting the number of elements
 };
 

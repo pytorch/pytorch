@@ -954,7 +954,6 @@ void dumpCompiledCodeToFile(
 }
 #endif
 
-#ifndef USE_ROCM
 // Get the max register count passed as -maxrregcount ptxas
 // option. The count is determined based on block sizes, an optional
 // heuristic and an environment variable.
@@ -1017,7 +1016,6 @@ c10::optional<int> getMaxRegCount(
     return c10::optional<int>();
   }
 }
-#endif // USE_ROCM
 
 } // namespace
 
@@ -1157,7 +1155,6 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     }
   }
 
-#ifndef USE_ROCM
   const auto max_register =
       getMaxRegCount(opt_block_size, max_register_heuristic);
 
@@ -1185,7 +1182,6 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       ptxas_log << " ; block size=" << opt_block_size.value() << "\n";
     }
   }
-#endif
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;

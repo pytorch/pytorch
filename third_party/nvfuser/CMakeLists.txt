@@ -36,7 +36,7 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/expr_simplifier.cpp
     ${NVFUSER_SRCS_DIR}/executor.cpp
     ${NVFUSER_SRCS_DIR}/executor_kernel_arg.cpp
-    ${NVFUSER_SRCS_DIR}/executor_launch_params.cpp
+    ${NVFUSER_SRCS_DIR}/executor_params.cpp
     ${NVFUSER_SRCS_DIR}/evaluator_common.cpp
     ${NVFUSER_SRCS_DIR}/executor_utils.cpp
     ${NVFUSER_SRCS_DIR}/fusion.cpp

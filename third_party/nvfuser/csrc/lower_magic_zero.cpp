@@ -98,6 +98,10 @@ bool needsMagicZero(
     return false;
   }
 
+  if (!GpuLower::current()->isNvFuserZeroEnabled()) {
+    return false;
+  }
+
   bool ref_dom_simple =
       reference_domain == nullptr || reference_domain->definition() != nullptr;
   bool ind_simple =
