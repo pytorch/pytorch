@@ -5191,6 +5191,17 @@
   device_check: NoCheck
   device_guard: False
 
+
+- func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: squeeze
+    QuantizedCPU, QuantizedCUDA: squeeze_quantized
+    NestedTensorCPU, NestedTensorCUDA: squeeze_dim_nested
+  tags: canonical
+
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -5200,6 +5211,14 @@
     CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  tags: inplace_view
+  dispatch:
+    CompositeExplicitAutograd: squeeze_
+
+- func: squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -6427,6 +6446,12 @@
     SparseCPU: s_addmm_sparse_dense_cpu_
     SparseCUDA: s_addmm_sparse_dense_cuda_
 
+- func: _triton_bsr_dense_mm(Tensor bsr, Tensor dense) -> Tensor
+  variants: function
+  dispatch:
+    CPU: triton_bsr_dense_mm
+  autogen: _triton_bsr_dense_mm.out
+
 - func: _addmm_activation.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
@@ -6614,8 +6639,7 @@
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
-    SparseCPU: sparse_mask_cpu
-    SparseCUDA: sparse_mask_cuda
+    SparseCPU, SparseCUDA: sparse_mask
     SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
   autogen: sparse_mask.out
 
@@ -6799,10 +6823,11 @@
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
+    SparseCPU, SparseCUDA: sparse_coo_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.sparse_dim_out
 
-- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
+- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
@@ -6810,7 +6835,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.out
 
-- func: to_sparse_csr(Tensor self) -> Tensor
+- func: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csr
@@ -6818,7 +6843,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csr
   autogen: to_sparse_csr.out
 
-- func: to_sparse_csc(Tensor self) -> Tensor
+- func: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csc
@@ -6826,7 +6851,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csc
   autogen: to_sparse_csc.out
 
-- func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+- func: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsr
@@ -6834,7 +6859,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsr
   autogen: to_sparse_bsr.out
 
-- func: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+- func: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsc
@@ -13572,6 +13597,12 @@
     CompositeExplicitAutogradNonFunctional: squeeze_copy_dim
   tags: view_copy
 
+- func: squeeze_copy.dims(Tensor self, int[] dim) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: squeeze_copy_dims
+  tags: view_copy
+
 - func: t_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
@@ -13782,6 +13813,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: squeeze_copy_dim_out
+
+
+- func: squeeze_copy.dims_out(Tensor self, int[] dim, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: squeeze_copy_dims_out
 
 
 - func: t_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)

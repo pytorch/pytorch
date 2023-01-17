@@ -53,6 +53,12 @@ decompositions = get_decompositions(
         aten.hardtanh_backward,
         aten.im2col,
         aten.index_select,
+        aten.index_add,
+        aten.index_add_,
+        aten.index_copy,
+        aten.index_copy_,
+        aten.index_fill,
+        aten.index_fill_,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
@@ -523,7 +529,7 @@ We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
-    [aten.native_dropout, aten.cauchy, aten.cauchy_]
+    [aten.native_dropout, aten.cauchy, aten.cauchy_, aten.uniform_]
 )
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps

@@ -88,6 +88,10 @@ class SGD(Optimizer):
             \end{aligned}
 
         The Nesterov version is analogously modified.
+
+        Moreover, the initial value of the momentum buffer is set to the
+        gradient value at the first step. This is in contrast to some other
+        frameworks that initialize it to all zeros.
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
