@@ -34,7 +34,7 @@ runs:
       run: |
         # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
+        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv'
 
     - name: Zip usage log for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -48,6 +48,9 @@ runs:
         # so check to see if the file exists first
         if [ -f 'usage_log.txt' ]; then
             zip "usage-log-${FILE_SUFFIX}.zip" 'usage_log.txt'
+        fi
+        if ls test/**/*.log 1> /dev/null 2>&1; then
+            zip -r "usage-log-${FILE_SUFFIX}.zip" test -i '*.log'
         fi
 
     # Windows zip
@@ -67,7 +70,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
+        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv'
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -76,7 +79,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "usage-log-$Env:FILE_SUFFIX.zip" 'usage_log.txt'
+        7z a "usage-log-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\*.log'
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
@@ -127,8 +130,11 @@ runs:
         # Add the run attempt, see [Artifact run attempt]
         name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
-        if-no-files-found: error
-        path: test/**/*.xml
+        # Don't want to fail the workflow here because not all workflows have csv files
+        if-no-files-found: ignore
+        path: |
+          test/**/*.xml
+          test/**/*.csv
 
     - name: Store Usage Logs on Github
       uses: actions/upload-artifact@v3
@@ -138,5 +144,7 @@ runs:
         name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: ignore
-        path: usage_log.txt
+        path: |
+          usage_log.txt
+          test/**/*.log
       continue-on-error: true

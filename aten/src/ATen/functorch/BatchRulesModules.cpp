@@ -21,16 +21,16 @@ static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::S
 std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
     const Tensor& weight, optional<int64_t> weight_bdim,
     const Tensor& indices, optional<int64_t> indices_bdim,
-    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+    c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (!weight_bdim && indices_bdim) {
     // B*, ED -> B*D
-    const auto result = at::embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse);
+    const auto result = at::embedding_symint(weight, indices, padding_idx, scale_grad_by_freq, sparse);
     return std::make_tuple(result, indices_bdim);
   } else if (weight_bdim && !indices_bdim) {
     // *, BED -> *, E(BD) -> *(BD) -> *BD
     const auto batch_size = weight.size(*weight_bdim);
     const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
-    auto result = at::embedding(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
+    auto result = at::embedding_symint(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
     result = reshape_dim_outof(-1, batch_size, result);
     return std::make_tuple(result, result.dim() - 2);
   }
@@ -44,7 +44,7 @@ std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
 
   const auto range = getStepTensor(indices, batch_size, num_embeddings);
   indices_ = indices_ + range;
-  const auto result = at::embedding(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
+  const auto result = at::embedding_symint(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
   return std::make_tuple(result, 0);
 }
 
@@ -52,7 +52,7 @@ std::tuple<Tensor,optional<int64_t>>
 embedding_dense_backward_batch_rule(
     const Tensor& grad_, optional<int64_t> grad_bdim,
     const Tensor& indices_, optional<int64_t> indices_bdim,
-    c10::SymInt num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
+    c10::SymInt num_weights, c10::SymInt padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
   if (!indices_bdim && grad_bdim) {
@@ -74,7 +74,7 @@ embedding_dense_backward_batch_rule(
   // Fill in the padding. We can't do it in the embedding_dense_backward call
   // because we need to fill in multiple rows!
   if (padding_idx >= 0) {
-    result.select(1, padding_idx).fill_(0);
+    result.select_symint(1, padding_idx).fill_(0);
   }
   return std::make_tuple(result, 0);
 }
@@ -401,7 +401,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(cudnn_grid_sampler_backward, CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
 
   VMAP_SUPPORT(cudnn_grid_sampler, GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
-  VMAP_SUPPORT(cross, cross_batch_rule);
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);

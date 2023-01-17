@@ -5,9 +5,36 @@ from typing import Optional, TypeVar
 
 import torch
 from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics.infra import utils as infra_utils
+from torch.utils import cpp_backtrace
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
+
+
+def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32):
+    """Returns the current C++ call stack.
+
+    This function utilizes `torch.utils.cpp_backtrace` to get the current C++ call stack.
+    The returned C++ call stack is a concatenated string of the C++ call stack frames.
+    Each frame is separated by a newline character, in the same format of
+    r"frame #[0-9]+: (?P<frame_info>.*)". More info at `c10/util/Backtrace.cpp`.
+
+    """
+    frames = cpp_backtrace.get_cpp_backtrace(frames_to_skip, frames_to_log).split("\n")
+    frame_messages = []
+    for frame in frames:
+        segments = frame.split(":", 1)
+        if len(segments) == 2:
+            frame_messages.append(segments[1].strip())
+        else:
+            frame_messages.append("<unknown frame>")
+    return infra.Stack(
+        frames=[
+            infra.StackFrame(location=infra.Location(message=message))
+            for message in frame_messages
+        ]
+    )
 
 
 class ExportDiagnostic(infra.Diagnostic):
@@ -18,40 +45,34 @@ class ExportDiagnostic(infra.Diagnostic):
     diagnostic.
     """
 
+    python_call_stack: Optional[infra.Stack] = None
+    cpp_call_stack: Optional[infra.Stack] = None
+
     def __init__(
         self,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
+        self.record_python_call_stack(frames_to_skip=1)
+        self.record_cpp_call_stack(frames_to_skip=1)
 
-    def with_cpp_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
-        # TODO: Implement this.
-        # self.stacks.append(...)
-        raise NotImplementedError()
-        return self
+    def record_python_call_stack(self, frames_to_skip) -> None:
+        """Records the current Python call stack in the diagnostic."""
+        frames_to_skip += 1  # Skip this function.
+        stack = infra_utils.python_call_stack(frames_to_skip=frames_to_skip)
+        stack.message = "Python call stack"
+        self.with_stack(stack)
+        self.python_call_stack = stack
 
-    def with_python_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
-        # TODO: Implement this.
-        # self.stacks.append(...)
-        raise NotImplementedError()
-        return self
-
-    def with_model_source_location(
-        self: _ExportDiagnostic,
-    ) -> _ExportDiagnostic:
-        # TODO: Implement this.
-        # self.locations.append(...)
-        raise NotImplementedError()
-        return self
-
-    def with_export_source_location(
-        self: _ExportDiagnostic,
-    ) -> _ExportDiagnostic:
-        # TODO: Implement this.
-        # self.locations.append(...)
-        raise NotImplementedError()
-        return self
+    def record_cpp_call_stack(self, frames_to_skip) -> None:
+        """Records the current C++ call stack in the diagnostic."""
+        # No need to skip this function because python frame is not recorded
+        # in cpp call stack.
+        stack = _cpp_call_stack(frames_to_skip=frames_to_skip)
+        stack.message = "C++ call stack"
+        self.with_stack(stack)
+        self.cpp_call_stack = stack
 
 
 class ExportDiagnosticEngine(infra.DiagnosticEngine):
@@ -78,7 +99,6 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
             name="torch.onnx",
             version=torch.__version__,
             diagnostic_type=ExportDiagnostic,
-            options=None,
         )
 
     @property
@@ -113,6 +133,7 @@ def create_export_diagnostic_context():
     try:
         yield context
     finally:
+        context.pretty_print(context.options.log_verbose, context.options.log_level)
         context = engine.background_context
 
 

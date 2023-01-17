@@ -69,16 +69,19 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // interpreter.
   for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
     if (ivalue.isTensor()) {
-      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
+      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
       if (interpreter) {
         (*interpreter)->dispatch(op, stack);
         return;
       }
-    } else if (ivalue.isTensorList() || (ivalue.isOptionalTensorList() && !ivalue.isNone())) {
+    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
       // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
       // is not a thing)
       for (const auto& nv : ivalue.toListRef()) {
-        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
+        if (nv.isNone()) {
+          continue;
+        }
+        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter) {
           (*interpreter)->dispatch(op, stack);
           return;

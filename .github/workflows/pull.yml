@@ -78,7 +78,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
@@ -217,7 +217,7 @@ jobs:
       docker-image-name: xla_base
       test-matrix: |
         { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "xla", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
         ]}
 
   linux-bionic-py3_7-clang8-xla-test:
@@ -261,12 +261,12 @@ jobs:
       sync-tag: win-cuda-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
@@ -299,12 +299,17 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  linux-focal-rocm5_2-py3_8-build:
+  linux-focal-rocm5_3-py3_8-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.2-py3.8
+    name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.2-py3.8
-      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      build-environment: linux-focal-rocm5.3-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
       sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}

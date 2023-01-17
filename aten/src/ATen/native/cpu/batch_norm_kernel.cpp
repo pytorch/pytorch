@@ -21,7 +21,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -789,15 +789,6 @@ void batch_norm_cpu_collect_stats_contiguous_impl<BFloat16>(
   }
 }
 
-static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr) {
-  return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
-}
-
-static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
-  using Vec = Vectorized<float>;
-  return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
-}
-
 template <typename param_t>
 inline void batch_norm_cpu_collect_stats_channels_last_internal(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
@@ -1306,4 +1297,4 @@ REGISTER_DISPATCH(batch_norm_cpu_stub, &batch_norm_cpu_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_collect_stats_stub, &batch_norm_cpu_collect_stats_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_backward_stub, &batch_norm_cpu_backward_kernel);
 
-}} // namespace at::native
+} // namespace at::native

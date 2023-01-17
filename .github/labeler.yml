@@ -15,6 +15,9 @@
 - torch/_subclasses/fake_tensor.py
 - torch/_subclasses/fake_utils.py
 - torch/_subclasses/meta_utils.py
+- test/distributed/test_dynamo_distributed.py
+- functorch/_src/partitioners.py
+- functorch/_src/aot_autograd.py
 
 "module: cpu":
 - aten/src/ATen/cpu/**
@@ -44,8 +47,9 @@
 "NNC":
 - torch/csrc/jit/tensorexpr/**
 
-"oncall: quantization":
+"release notes: quantization":
 - torch/ao/quantization/**
 - torch/quantization/**
 - aten/src/ATen/quantized/**
 - aten/src/ATen/native/quantized/cpu/**
+- test/quantization/**

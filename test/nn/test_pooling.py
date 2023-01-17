@@ -1,5 +1,6 @@
 # Owner(s): ["module: nn"]
 from functools import reduce
+from functools import partial
 from itertools import repeat
 import unittest
 import subprocess
@@ -11,6 +12,7 @@ import math
 
 from torch._six import inf, nan
 import torch
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
     instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -130,16 +132,8 @@ class TestAvgPool(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
-    def test_adaptive_pooling_input_size(self):
-        for numel in (2, 3):
-            for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
-                module_cls = getattr(nn, cls_name)
-                output_size = (2,) * numel
-                module = module_cls(output_size)
-
-                input = torch.randn(output_size)
-                self.assertRaises(ValueError, lambda: module(input))
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
 
     def test_adaptive_pooling_size_none(self):
         for numel in (2, 3):
@@ -376,6 +370,41 @@ class TestPoolingNNDeviceType(NNTestCase):
         mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
         _test_module_empty_input(self, mod, inp, check_size=False)
 
+    # The tests are used to verify the functions raises errors for backward propagation
+    # when output_size = 0, in adaptive_{avg, max}_pool and its variants.
+    # These tests are explicitly written because ErrorInputs does not support backward calls
+    # Issue: https://github.com/pytorch/pytorch/issues/78868
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    def test_adaptive_pooling_empty_output_size(self, dtype, device):
+        error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        input = make_arg((1, 64, 10, 9))
+        output_size = 0
+
+        fns = (
+            nn.functional.adaptive_avg_pool2d,
+            nn.functional.adaptive_avg_pool3d,
+            nn.functional.adaptive_max_pool2d,
+            nn.functional.adaptive_max_pool3d,
+        )
+
+        for fn in fns:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                fn(input, output_size).sum().backward()
+
+        fns2 = (
+            nn.functional.adaptive_avg_pool1d,
+            nn.functional.adaptive_max_pool1d,
+        )
+        input2 = make_arg((1, 64))
+
+        for fn in fns2:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                fn(input2, output_size).sum().backward()
+
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
@@ -409,6 +438,30 @@ class TestPoolingNNDeviceType(NNTestCase):
         inp = torch.rand([16, 50, 32, 32], device=device)
         out = mod(inp)
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 2], device=device)
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 3], device=device)
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[1, 1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 50, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
 
     @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
@@ -1070,15 +1123,6 @@ torch.cuda.synchronize()
 
         y.backward(grad)
 
-    def test_pooling_size_empty(self, device):
-        t = torch.rand([1, 2, 3, 4], device=device)
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool2d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool3d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
-
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim, dtype):
             if dim == 1:
@@ -1412,20 +1456,6 @@ torch.cuda.synchronize()
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertEqual(x.grad, torch.ones_like(x.grad))
-
-    def test_adaptive_pool_invalid(self, device):
-        inp_1d = (torch.randn(1, 1, 1, device=device), (-1,))
-        inp_2d = (torch.randn(1, 1, 1, 1, device=device), (-1, 0))
-        inp_3d = (torch.randn(1, 1, 1, 1, 1, device=device), (-1, 0, 2))
-        module_input_dict = {torch.nn.AdaptiveAvgPool1d: inp_1d,
-                             torch.nn.AdaptiveAvgPool2d: inp_2d,
-                             torch.nn.AdaptiveAvgPool3d: inp_3d}
-
-        for m, inp in module_input_dict.items():
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"elements of output_size must be greater than or equal to 0"):
-                t, output_size = inp
-                m(output_size)(t)
 
     @slowTest
     def test_adaptive_pool_odd_size(self, device):

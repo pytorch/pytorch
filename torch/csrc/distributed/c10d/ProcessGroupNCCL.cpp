@@ -83,11 +83,10 @@ ncclRedOpRAII unpackPreMulSum(
   const auto* preMulSupplement =
       reinterpret_cast<NCCLPreMulSumSupplement*>(reduceOp.supplement_.get());
   ncclRedOp_t preMulSum;
-  bool has_tensor = !preMulSupplement->tensor_factors.empty();
+  bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  T* ptr_factor = has_tensor
-      ? preMulSupplement->tensor_factors[dev_in_group].data_ptr<T>()
-      : nullptr;
+  T* ptr_factor =
+      has_tensor ? preMulSupplement->tensor_factor.data_ptr<T>() : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
   ncclRedOpCreatePreMulSum(
       &preMulSum,
@@ -609,7 +608,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : ProcessGroup(rank, size),
+    : Backend(rank, size),
       store_(store),
       options_(options),
       ncclCommCounter_(0),
@@ -694,7 +693,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   if (uccLib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    typedef c10::intrusive_ptr<ProcessGroup> fn(
+    typedef c10::intrusive_ptr<Backend> fn(
         const c10::intrusive_ptr<Store>& store, int rank, int size);
     auto createProcessGroupUCC =
         reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
@@ -1120,7 +1119,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
           "[",
           rank_,
           "] is setting up NCCL communicator and "
-          "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+          "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
           storeKey,
           "', but store->get('",
           storeKey,
@@ -1133,7 +1132,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
               "Unknown exception while [",
               rank_,
               "] is setting up NCCL communicator and "
-              "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+              "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
               storeKey,
               "'"));
     }
@@ -1489,7 +1488,7 @@ void ProcessGroupNCCL::workEnqueue(
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : ProcessGroup::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 void ProcessGroupNCCL::startCoalescing() {

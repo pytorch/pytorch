@@ -50,6 +50,7 @@ def setup_torchbench_cwd():
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
     "demucs": 4,
+    "dlrm": 1024,
     "densenet121": 4,
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
@@ -117,9 +118,12 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "tacotron2",
 }
 
+REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "drq",
+}
+
 REQUIRE_COSINE_TOLERACE = {
-    # https://github.com/pytorch/torchdynamo/issues/556
-    "resnet50_quantized_qat",
+    # Just keeping it here even though its empty, if we need this in future.
 }
 
 # non-deterministic output / cant check correctness
@@ -182,10 +186,17 @@ SKIP_ACCURACY_CHECK_MODELS = {
 }
 
 
+MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
+    "hf_GPT2": 2,
+    "pytorch_unet": 2,
+}
+
+
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super(TorchBenchmarkRunner, self).__init__()
         self.suite_name = "torchbench"
+        self.optimizer = None
 
     @property
     def skip_models(self):
@@ -226,12 +237,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        part=None,
     ):
 
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        module = importlib.import_module(f"torchbenchmark.models.{model_name}")
+        try:
+            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
+        except ModuleNotFoundError:
+            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
@@ -245,22 +260,32 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
+
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
+        extra_args = []
+        if part:
+            extra_args = ["--part", part]
         if is_training:
             benchmark = benchmark_cls(
-                test="train", device=device, jit=False, batch_size=batch_size
+                test="train",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
             )
         else:
             benchmark = benchmark_cls(
-                test="eval", device=device, jit=False, batch_size=batch_size
+                test="eval",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
             )
-        if dynamic_shapes:
-            if not hasattr(benchmark, "get_dynamic_shapes_module"):
-                raise NotImplementedError("Dynamic Shapes not supported")
-            model, example_inputs = benchmark.get_dynamic_shapes_module()
-        else:
-            model, example_inputs = benchmark.get_module()
+        model, example_inputs = benchmark.get_module()
 
         # Models that must be in train mode while training
         if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
@@ -270,8 +295,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         gc.collect()
         batch_size = benchmark.batch_size
 
-        self.init_optimizer(device, model.parameters())
-
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":
@@ -279,6 +302,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+
+        if self.args.trace_on_xla:
+            # work around for: https://github.com/pytorch/xla/issues/4174
+            import torch_xla  # noqa: F401
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
@@ -311,9 +338,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         tolerance = 1e-4
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
-        if self.args.float16:
+        if self.args.float16 or self.args.amp:
+            if name in REQUIRE_HIGHER_FP16_TOLERANCE:
+                return 1e-2, cosine
             return 1e-3, cosine
         if is_training and current_device == "cuda":
+            tolerance = 1e-3
             if name in REQUIRE_COSINE_TOLERACE:
                 cosine = True
             elif name in REQUIRE_HIGHER_TOLERANCE:
@@ -326,11 +356,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(*inputs)
+        with self.autocast():
+            return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)

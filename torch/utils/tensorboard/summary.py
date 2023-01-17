@@ -433,7 +433,8 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
         channels]` where `channels` is 1, 3, or 4.
         'tensor' can either have values in [0, 1] (float32) or [0, 255] (uint8).
         The image() function will scale the image values to [0, 255] by applying
-        a scale factor of either 1 (uint8) or 255 (float32).
+        a scale factor of either 1 (uint8) or 255 (float32). Out-of-range values
+        will be clipped.
     Returns:
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol
       buffer.
@@ -443,7 +444,7 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
     # Do not assume that user passes in values in [0, 255], use data type to detect
     scale_factor = _calc_scale_factor(tensor)
     tensor = tensor.astype(np.float32)
-    tensor = (tensor * scale_factor).astype(np.uint8)
+    tensor = (tensor * scale_factor).clip(0, 255).astype(np.uint8)
     image = make_image(tensor, rescale=rescale)
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
@@ -457,7 +458,7 @@ def image_boxes(
     tensor_boxes = make_np(tensor_boxes)
     tensor_image = tensor_image.astype(np.float32) * _calc_scale_factor(tensor_image)
     image = make_image(
-        tensor_image.astype(np.uint8), rescale=rescale, rois=tensor_boxes, labels=labels
+        tensor_image.clip(0, 255).astype(np.uint8), rescale=rescale, rois=tensor_boxes, labels=labels
     )
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
@@ -513,7 +514,7 @@ def video(tag, tensor, fps=4):
     # If user passes in uint8, then we don't need to rescale by 255
     scale_factor = _calc_scale_factor(tensor)
     tensor = tensor.astype(np.float32)
-    tensor = (tensor * scale_factor).astype(np.uint8)
+    tensor = (tensor * scale_factor).clip(0, 255).astype(np.uint8)
     video = make_video(tensor, fps)
     return Summary(value=[Summary.Value(tag=tag, image=video)])
 
