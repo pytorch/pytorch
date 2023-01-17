@@ -283,10 +283,10 @@ test_inductor_benchmark() {
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   # Check training with symbolic shapes (not actually inductor)
   # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --training --accuracy --dynamic-shapes \
-    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+  python benchmarks/dynamo/$1.py --ci --training --accuracy \
+    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/aot_eager_training_$1.csv
   # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/aot_eager_training_$1.csv
 }
 
 test_inductor_benchmark_perf() {
