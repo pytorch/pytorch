@@ -193,6 +193,7 @@ Tensor autograd functions
     Function.forward
     Function.backward
     Function.jvp
+    Function.vmap
 
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

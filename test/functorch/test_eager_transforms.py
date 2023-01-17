@@ -1160,7 +1160,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 raise RuntimeError("foobar")
 
         x = torch.randn(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'does not have a vmap rule defined'):
+        with self.assertRaisesRegex(RuntimeError, 'does not have vmap support'):
             vmap(NumpyCube.apply)(x)
 
     @_set_autograd_function_extension_enabled()
@@ -1187,7 +1187,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 raise RuntimeError("foobar")
 
         x = torch.randn(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and a vmap staticmethod'):
+        with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and'):
             vmap(NumpyCube.apply)(x)
 
     @_set_autograd_function_extension_enabled()
