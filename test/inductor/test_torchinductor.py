@@ -2595,7 +2595,7 @@ class CommonTemplate:
         def fn(x):
             dim = 1
             x_max = torch.amax(x, dim, keepdim=True)
-            unnormalized = torch.exp(x * x_max)
+            unnormalized = torch.exp(x - x_max)
             result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
             return result
 
@@ -2607,7 +2607,7 @@ class CommonTemplate:
     def test_softmax_one_kernel_loop(self):
         def fn(x):
             x_max = torch.amax(x, 1, keepdim=True)
-            unnormalized = torch.exp(x * x_max)
+            unnormalized = torch.exp(x - x_max)
             result = unnormalized / torch.sum(unnormalized, 1, keepdim=True)
             return result
 
