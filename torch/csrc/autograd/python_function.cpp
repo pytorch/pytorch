@@ -911,7 +911,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
 
   // autograd.Function may optionally contain a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
-  bool has_separate_setup_context_fn = PyObject_HasAttrString(cls, "setup_context");
+  bool has_separate_setup_context_fn =
+      PyObject_HasAttrString(cls, "setup_context");
 
   auto num_args = PyTuple_GET_SIZE(inputs);
 
