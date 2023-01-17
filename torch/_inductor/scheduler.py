@@ -429,6 +429,9 @@ class SchedulerNode(BaseSchedulerNode):
         not modify the returned node.
         """
 
+        if len(self.get_ranges()[0]) != ndim:
+            return None
+
         def loop_reorder(ir_node: ir.ComputedBuffer):
             (
                 iter_vars,
@@ -567,6 +570,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def reorder_loop(
         self, reorder: Callable, ndim: int
     ) -> Optional["FusedSchedulerNode"]:
+        if any(len(n.get_ranges()[0]) != ndim for n in self.get_nodes()):
+            return None
+
         new_nodes = []
         for n in self.get_nodes():
             if not isinstance(n, SchedulerNode):
@@ -1077,15 +1083,11 @@ class Scheduler:
                 reorder_node1 = node2.is_reduction() and not node1.is_reduction()
                 if reorder_node1:
                     assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-                    new_node = node1.reorder_loop(
-                        ir.inverse_reorder(order), len(order)
-                    )
+                    new_node = node1.reorder_loop(ir.inverse_reorder(order), len(order))
                     node_pair = (new_node, node2)
                 else:
                     assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
-                    new_node = node2.reorder_loop(
-                        ir.same_reorder(order), len(order)
-                    )
+                    new_node = node2.reorder_loop(ir.same_reorder(order), len(order))
                     node_pair = (node1, new_node)
 
                 if new_node is None:
