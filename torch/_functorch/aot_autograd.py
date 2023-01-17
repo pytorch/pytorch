@@ -1667,6 +1667,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             return tuple(fw_outs[0:num_forward_returns])
 
         @staticmethod
+        @torch.autograd.function.once_differentiable
         def backward(ctx, *all_flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
