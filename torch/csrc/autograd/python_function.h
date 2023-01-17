@@ -27,7 +27,6 @@ namespace autograd {
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 struct PyNode : public Node {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;

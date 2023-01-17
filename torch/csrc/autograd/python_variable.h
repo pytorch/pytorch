@@ -14,7 +14,6 @@
 namespace py = pybind11;
 
 // Python object that backs torch.autograd.Variable
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPVariable {
   PyObject_HEAD;
   // Payload

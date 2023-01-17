@@ -173,7 +173,6 @@ struct TORCH_API VariableInfo {
 // backward function for Function<T>. Calls to CppNode::apply are forward to
 // T::backward().
 template <class T>
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct CppNode : public Node {
   variable_list apply(variable_list&& inputs) override;
   AutogradContext ctx_;
