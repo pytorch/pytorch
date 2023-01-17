@@ -26,10 +26,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -174,6 +171,19 @@ class TestUnshardParamsBase(FSDPTest):
                     )  # even if FSDP uses mixed precision
                     self.assertEqual(p1, p2)
                     self.assertTrue(isinstance(p2, nn.Parameter))
+            else:
+                # Check that each `FlatParameter` has the sharded size as a
+                # proxy for it being resharded
+                for handle in traversal_utils._get_fsdp_handles(fsdp_model):
+                    if handle.uses_sharded_strategy:
+                        self.assertEqual(
+                            handle.flat_param.shape, handle.flat_param._sharded_size
+                        )
+                    else:
+                        self.assertEqual(
+                            handle.flat_param.shape,
+                            handle.flat_param._unpadded_unsharded_size,
+                        )
 
         # Prove the number of FSDP roots after lazy initialization
         num_fsdp_roots = 0
@@ -201,7 +211,7 @@ class TestUnshardParams(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_writeback(self):
-        """Tests the ``writeback`` argument."""
+        """Tests the ``writeback`` argument (using default for all others)."""
         self.run_subtests(
             self._get_test_unshard_params_writeback_config(),
             self._test_unshard_params_writeback,
@@ -209,7 +219,10 @@ class TestUnshardParams(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_param_data(self):
-        """Tests that parameters are exposed correctly."""
+        """
+        Tests that parameters are exposed correctly for ``recurse=True`` and
+        all other argument configs for a non-FSDP root module.
+        """
         self.run_subtests(
             self._get_test_unshard_params_param_data_config(),
             self._test_unshard_params_param_data,
@@ -217,7 +230,11 @@ class TestUnshardParams(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_singleton_param_writeback(self):
-        """NOTE: This method peaks into FSDP internals."""
+        """
+        Tests ``writeback=True`` for a singleton parameter, which includes
+        testing that writing to padding does not persist.
+        NOTE: This method depends on FSDP internals.
+        """
         model = FSDP(nn.Linear(1, 1, bias=False, device=self.device))
         flat_param = model._handles[0].flat_param
         self.assertEqual(1, flat_param.numel())
@@ -230,7 +247,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             with torch.no_grad():
                 flat_param.zero_()
         # NOTE: This checks that writes to padding did not persist, which is
-        # not strictly required for correctness.
+        # *not* strictly required for correctness.
         if self.rank == 0:  # did not write to padding
             self.assertEqual(0, flat_param[0])
         else:  # wrote to padding
@@ -259,7 +276,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         mixed_precision: Optional[MixedPrecision],
         use_orig_params: bool,
     ):
-        """NOTE: This method peaks into FSDP internals."""
+        """NOTE: This method depends on FSDP internals."""
         fsdp_kwargs = {
             "mixed_precision": mixed_precision,
             "use_orig_params": use_orig_params,
@@ -322,7 +339,7 @@ class TestUnshardParams(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_recurse(self):
-        """Tests the ``recurse`` option."""
+        """Tests the ``recurse`` argument (using default for all others)."""
         self.run_subtests(
             {
                 "recurse": [False, True],
@@ -340,7 +357,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         mixed_precision: Optional[MixedPrecision],
         use_orig_params: bool,
     ):
-        """NOTE: This method peaks into FSDP internals."""
+        """NOTE: This method depends on FSDP internals."""
         fsdp_kwargs = {
             "mixed_precision": mixed_precision,
             "use_orig_params": use_orig_params,
@@ -420,8 +437,8 @@ class TestUnshardParams(TestUnshardParamsBase):
     @skip_if_lt_x_gpu(2)
     def test_with_grads_core(self):
         """
-        Tests the core usage of the ``with_grads=True`` option by comparing
-        against DDP as the unsharded equivalent.
+        Tests the core usage of``with_grads=True`` by comparing against DDP as
+        the unsharded equivalent.
         """
         self.run_subtests(
             {
@@ -590,7 +607,7 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(1)
     def test_unshard_params_writeback_no_shard(self):
-        """Tests the ``writeback`` argument."""
+        """Tests the ``writeback`` argument (using default for all others)."""
         self.run_subtests(
             self._get_test_unshard_params_writeback_config(),
             self._test_unshard_params_writeback,
@@ -598,9 +615,13 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(1)
     def test_unshard_params_param_data_no_shard(self):
-        """Tests that parameters are exposed correctly."""
+        """
+        Tests that parameters are exposed correctly for ``recurse=True`` and
+        all other argument configs for a non-FSDP root module.
+        """
         config = self._get_test_unshard_params_param_data_config()
-        # TODO: `offload_to_cpu=True` with `NO_SHARD` is not supported yet
+        # TODO: `offload_to_cpu=True` with `NO_SHARD` is not supported yet. See
+        # `test_offload_to_cpu_no_shard_raises()`.
         config["offload_to_cpu"] = [False]
         self.run_subtests(
             config,
