@@ -39,7 +39,6 @@ from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_single_level_autograd_function
-from torch.autograd.function import _set_autograd_function_extension_enabled
 import torch.autograd.forward_ad as fwAD
 from torch.func import functional_call, stack_module_state
 
@@ -1008,7 +1007,6 @@ class TestGradTransform(TestCase):
 
 
 class TestAutogradFunction(TestCase):
-    @_set_autograd_function_extension_enabled()
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -1035,7 +1033,6 @@ class TestAutogradFunction(TestCase):
         grad(f)(y, x)
         grad(grad(f))(y, x)
 
-    @_set_autograd_function_extension_enabled()
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -1078,7 +1075,6 @@ class TestAutogradFunction(TestCase):
 
         return NumpyCubeNotComposable
 
-    @_set_autograd_function_extension_enabled()
     def test_once_differentiable_autograd_vjp(self, device):
         NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
 
@@ -1099,7 +1095,6 @@ class TestAutogradFunction(TestCase):
     # (or, if impossible, figure out how to raise a nice error)
     # https://github.com/pytorch/pytorch/issues/90224
     @unittest.expectedFailure
-    @_set_autograd_function_extension_enabled()
     def test_once_differentiable_grad_vjp(self, device):
         NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
 
@@ -1114,7 +1109,6 @@ class TestAutogradFunction(TestCase):
 
         grad(h, argnums=(0, 1))(x, grad_y)
 
-    @_set_autograd_function_extension_enabled()
     def test_grad_fn_name(self, device):
         names = []
 
@@ -1142,7 +1136,6 @@ class TestAutogradFunction(TestCase):
 
 
 class TestAutogradFunctionVmapAPI(TestCase):
-    @_set_autograd_function_extension_enabled()
     def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
@@ -1163,7 +1156,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'does not have vmap support'):
             vmap(NumpyCube.apply)(x)
 
-    @_set_autograd_function_extension_enabled()
     def test_has_vmap_staticmethod_and_has_generate_vmap_rule(self, device):
         class NumpyCube(torch.autograd.Function):
             generate_vmap_rule = True
@@ -1190,7 +1182,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and'):
             vmap(NumpyCube.apply)(x)
 
-    @_set_autograd_function_extension_enabled()
     def test_info_object(self, device):
         batch_size = 10
 
@@ -1218,7 +1209,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         for randomness in ('error', 'different', 'same'):
             vmap(Id.apply, randomness=randomness)(x)
 
-    @_set_autograd_function_extension_enabled()
     def test_in_dims_single_input(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
@@ -1243,7 +1233,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         vmap(Id.apply, in_dims=1)(x)
         vmap(Id.apply, in_dims=(1,))(x)
 
-    @_set_autograd_function_extension_enabled()
     def test_in_dims_multiple_inputs(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
@@ -1268,7 +1257,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         x = torch.randn(2, device=device)
         vmap(Id.apply)(x, [x, x])
 
-    @_set_autograd_function_extension_enabled()
     def test_skips_empty_layer(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
@@ -1295,7 +1283,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         x = torch.randn(2, 3)
         vmap(f)(x)
 
-    @_set_autograd_function_extension_enabled()
     def test_none_returns(self, device):
         class Zeros(torch.autograd.Function):
             @staticmethod
@@ -1341,7 +1328,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         self.assertEqual(y, torch.zeros_like(x))
         self.assertEqual(z, torch.zeros_like(x))
 
-    @_set_autograd_function_extension_enabled()
     def test_should_have_two_returns(self, device):
         class Zeros(torch.autograd.Function):
             @staticmethod
@@ -1383,7 +1369,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
             result = vmap(Zeros.apply)(x)
 
-    @_set_autograd_function_extension_enabled()
     def test_incompatible_out_dims_error_msg(self, device):
         class Zeros(torch.autograd.Function):
             @staticmethod
@@ -3035,7 +3020,6 @@ class TestComposability(TestCase):
         with self.assertRaises(RuntimeError):
             grad(f)(x)
 
-    @_set_autograd_function_extension_enabled()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
