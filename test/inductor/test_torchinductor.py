@@ -258,6 +258,19 @@ def clone_preserve_strides(x):
     return out
 
 
+@patch.object(config, "debug", True)
+def run_and_get_cpp_code(fn, args):
+    torch._dynamo.reset()
+    from contextlib import redirect_stdout
+    import io
+
+    f = io.StringIO()
+    with redirect_stdout(f):
+        fn(*args)
+    s = f.getvalue()
+    return s
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -5001,6 +5014,19 @@ class CommonTemplate:
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
         )
+
+    @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
+    def test_in_out_buffer(self):
+        def fn(x):
+            return (
+                aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2,
+            )
+
+        inps = [torch.randn(64, 64)]
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        code = run_and_get_cpp_code(fn_opt, inps)
+        self.assertTrue("in_out_ptr" in code)
+        self.assertEqual(fn_opt(*inps), fn(*inps))
 
     @patch.object(config, "profiler_mark_wrapper_call", True)
     def test_profiler_mark_wrapper_call(self):

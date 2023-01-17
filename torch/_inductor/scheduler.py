@@ -300,7 +300,7 @@ class SchedulerNode(BaseSchedulerNode):
         if config.inplace_buffers and (
             isinstance(V.kernel, torch._inductor.codegen.cpp.CppKernel)
             or getattr(V.kernel, "mutations", None) is not None
-        ):            
+        ):
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
