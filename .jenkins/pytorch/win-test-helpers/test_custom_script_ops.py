@@ -14,9 +14,9 @@ def pushd(new_dir):
         os.chdir(previous_dir)
 
 
-subprocess.check_call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
+subprocess.run('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
-subprocess.check_call('git submodule update --init --recursive --jobs 0 third_party/pybind11', shell=True)
+subprocess.run('git submodule update --init --recursive --jobs 0 third_party/pybind11', shell=True)
 
 os.chdir('test\\custom_operator')
 
@@ -27,41 +27,41 @@ with pushd('build'):
 
     try:
         # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
-        subprocess.check_call('echo Executing CMake for custom_operator test...', shell=True)
-        subprocess.check_call('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
+        subprocess.run('echo Executing CMake for custom_operator test...', shell=True)
+        subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
             '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True)
 
-        subprocess.check_call('echo Executing Ninja for custom_operator test...', shell=True)
-        subprocess.check_call('ninja -v', shell=True)
+        subprocess.run('echo Executing Ninja for custom_operator test...', shell=True)
+        subprocess.run('ninja -v', shell=True)
 
-        subprocess.check_call('echo Ninja succeeded for custom_operator test.', shell=True)
+        subprocess.run('echo Ninja succeeded for custom_operator test.', shell=True)
 
     except Exception as e:
 
-        subprocess.check_call('echo custom_operator test failed', shell=True)
-        subprocess.check_call('echo ' + str(e), shell=True)
+        subprocess.run('echo custom_operator test failed', shell=True)
+        subprocess.run('echo ' + str(e), shell=True)
         sys.exit()
 
 
 try:
     # Run tests Python-side and export a script module.
-    subprocess.check_call('conda install -n test_env python test_custom_ops.py -v', shell=True)
+    subprocess.run('conda install -n test_env python test_custom_ops.py -v', shell=True)
 
     # TODO: fix and re-enable this test
     # See https://github.com/pytorch/pytorch/issues/25155
     # subprocess.run(['python', 'test_custom_classes.py', '-v'])
 
-    subprocess.check_call('conda install -n test_env python module.py --export-script-module="build/model.pt"', shell=True)
+    subprocess.run('conda install -n test_env python module.py --export-script-module="build/model.pt"', shell=True)
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
     os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
         + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
-    subprocess.check_call('test_custom_ops.exe model.pt', shell=True)
+    subprocess.run('test_custom_ops.exe model.pt', shell=True)
 
 except Exception as e:
 
-    subprocess.check_call('echo test_custom_ops failed', shell=True)
-    subprocess.check_call('echo ' + str(e), shell=True)
+    subprocess.run('echo test_custom_ops failed', shell=True)
+    subprocess.run('echo ' + str(e), shell=True)
     sys.exit()

@@ -34,40 +34,41 @@ tmp_dir_win = os.environ['TMP_DIR_WIN']
 if install_fresh_conda == '1':
 
     try:
-        subprocess.check_call('echo Installing conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
+        subprocess.run('echo Installing conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
 
-        subprocess.check_call('curl --retry 3 -k https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe ' +
+        subprocess.run('curl --retry 3 -k https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe ' +
                 '--output ' + tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe', shell=True)
 
-        subprocess.check_call(tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe ' +
+        # run gave errors with conda here
+        subprocess.run(tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe ' +
             '/InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=' + conda_parent_dir + '\\Miniconda3', shell=True)
 
-        subprocess.check_call('echo Installed conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
+        subprocess.run('echo Installed conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
 
         os.environ['PATH'] = conda_parent_dir + '\\Miniconda3\\Library\\bin;' + conda_parent_dir +\
             '\\Miniconda3;' + conda_parent_dir + '\\Miniconda3\\Scripts;' + os.environ['PATH']
 
     except Exception as e:
 
-        subprocess.check_call('echo activate conda failed', shell=True)
-        subprocess.check_call('echo ' + str(e), shell=True)
+        subprocess.run('echo activate conda failed', shell=True)
+        subprocess.run('echo ' + str(e), shell=True)
         sys.exit()
 
 
 # Activate conda so that we can use its commands, i.e. conda, python, pip
-subprocess.check_call('conda create --prefix ' + conda_parent_dir + '\\Miniconda3\\\envs\\test_env', shell=True)
+subprocess.run('conda create --prefix ' + conda_parent_dir + '\\Miniconda3\\\envs\\test_env', shell=True)
 
 
 if install_fresh_conda == '1':
 
     try:
 
-        subprocess.check_call('conda install -n test_env -y -q numpy cffi pyyaml boto3 libuv', shell=True)
+        subprocess.run('conda install -n test_env -y -q numpy cffi pyyaml boto3 libuv', shell=True)
 
-        subprocess.check_call('conda install -n test_env -y -q -c conda-forge cmake=3.22.3', shell=True)
+        subprocess.run('conda install -n test_env -y -q -c conda-forge cmake=3.22.3', shell=True)
 
     except Exception as e:
 
-        subprocess.check_call('echo activate conda failed', shell=True)
-        subprocess.check_call('echo ' + str(e), shell=True)
+        subprocess.run('echo activate conda failed', shell=True)
+        subprocess.run('echo ' + str(e), shell=True)
         sys.exit()
