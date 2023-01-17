@@ -11,7 +11,7 @@ __all__ = ['clip_grad_norm_', 'clip_grad_norm', 'clip_grad_value_']
 
 def clip_grad_norm_(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0,
-        error_if_nonfinite: bool = False, foreach: bool = True) -> torch.Tensor:
+        error_if_nonfinite: bool = False, foreach: bool = None) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
@@ -26,7 +26,10 @@ def clip_grad_norm_(
         error_if_nonfinite (bool): if True, an error is thrown if the total
             norm of the gradients from :attr:`parameters` is ``nan``,
             ``inf``, or ``-inf``. Default: False (will switch to True in the future)
-        foreach (bool): use the faster foreach-based implementation for CUDA and CPU gradients
+        foreach (bool): use the faster foreach-based implementation.
+            If ``None``, use the foreach implementation for CUDA and CPU tensors and silently fall back to the slow
+            implementation for other device types.
+            Default: ``None``
 
     Returns:
         Total norm of the parameter gradients (viewed as a single vector).
@@ -47,8 +50,10 @@ def clip_grad_norm_(
     else:
         norms = []
         for ((device, _), [grads]) in grouped_grads.items():
-            if foreach and device.type in {'cpu', 'cuda'}:
+            if (foreach is None or foreach) and device.type in {'cpu', 'cuda'}:
                 norms.extend(torch._foreach_norm(grads, norm_type))
+            elif foreach:
+                raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
             else:
                 norms.extend([torch.norm(g, norm_type) for g in grads])
 
@@ -66,8 +71,10 @@ def clip_grad_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for ((device, _), [grads]) in grouped_grads.items():
-        if foreach and device.type in ('cpu', 'cuda'):
+        if (foreach is None or foreach) and device.type in ('cpu', 'cuda'):
             torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
+        elif foreach:
+            raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
             clip_coef_clamped_device = clip_coef_clamped.to(device)
             for g in grads:
@@ -90,7 +97,7 @@ def clip_grad_norm(
     return clip_grad_norm_(parameters, max_norm, norm_type, error_if_nonfinite)
 
 
-def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach: bool = True) -> None:
+def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach: bool = None) -> None:
     r"""Clips gradient of an iterable of parameters at specified value.
 
     Gradients are modified in-place.
@@ -101,7 +108,10 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
         clip_value (float): maximum allowed value of the gradients.
             The gradients are clipped in the range
             :math:`\left[\text{-clip\_value}, \text{clip\_value}\right]`
-        foreach (bool): use the faster foreach-based implementation for CUDA and CPU gradients
+        foreach (bool): use the faster foreach-based implementation
+            If ``None``, use the foreach implementation for CUDA and CPU tensors and silently fall back to the slow
+            implementation for other device types.
+            Default: ``None``
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
@@ -111,9 +121,11 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for ((device, _), [grads]) in grouped_grads.items():
-        if foreach and device.type in {'cpu', 'cuda'}:
+        if (foreach is None or foreach) and device.type in {'cpu', 'cuda'}:
             torch._foreach_clamp_min_(grads, -clip_value)
             torch._foreach_clamp_max_(grads, clip_value)
+        elif foreach:
+            raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
             for grad in grads:
                 grad.data.clamp_(min=-clip_value, max=clip_value)
