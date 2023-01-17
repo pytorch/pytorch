@@ -347,13 +347,7 @@ void Engine::thread_init(
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
 
-#if defined(USE_CUDA)
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-    set_device(device);
-  }
-#else
   set_device(device);
-#endif
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
@@ -1378,14 +1372,19 @@ auto Engine::start_device_threads() -> void {
   // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
+  std::vector<int> device_ids;
+  device_ids.reserve(8);
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
     // Only record the number of devices for device that don't run on the
     // cpu ready queue.
     if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
+      device_ids.push_back(impl->getDevice().index());
     }
   }
+
+  num_devices = std::min(num_devices, (c10::DeviceIndex) device_ids.size());
 
   // If there are no device except cpu, no need to create worker threads
   if (num_devices == 0) {
@@ -1404,7 +1403,7 @@ auto Engine::start_device_threads() -> void {
   }
 
   for (const auto i : c10::irange(num_devices)) {
-    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
+    std::thread t(&Engine::thread_init, this, device_ids[i], device_ready_queues_[i], true);
     t.detach();
   }
   // Wait for the threads to start

@@ -1414,6 +1414,16 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @base_and_logging_tensor
+    def test_mixed_cpu_and_cuda_devices(self, ctors):
+        a = torch.rand(10, requires_grad=True)
+        a.sum().backward() # This call creates the worker threads, no cuda context here
+
+        b = torch.rand(10, device="cuda", requires_grad=True)
+        b.sum().backward() # This one will now run with no current device set!!
+
 instantiate_parametrized_tests(TestAutogradFunctional)
 
 if __name__ == '__main__':
