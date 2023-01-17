@@ -304,7 +304,7 @@ def timed(
         # Put this call inside the loop to reset the seed for each iteration.
         # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
-        t_iter_0 = time.perf_counter()
+        t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
         # instead of calling sync on result_list, we should call mark_step.
@@ -318,8 +318,8 @@ def timed(
             # we need the mark step to send the optimizer graph out for
             # compilation.
             xm.mark_step()
-        t_iter_1 = time.perf_counter()
-        time_total += t_iter_1 - t_iter_0
+        t_iter_end = time.perf_counter()
+        time_total += t_iter_end - t_iter_begin
 
     t_0 = time.perf_counter()
     if use_xla:
