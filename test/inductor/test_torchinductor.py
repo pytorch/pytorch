@@ -26,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -3111,6 +3112,13 @@ class CommonTemplate:
             return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
+
+    def test_full_truncation(self):
+        def fn(a):
+            return a + torch.full_like(a, 7.777)
+
+        for dtype in all_types():
+            self.common(fn, (make_tensor(8, dtype=dtype, device="cpu"),))
 
     def test_index1(self):
         def fn(a, b, c):
