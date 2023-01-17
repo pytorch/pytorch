@@ -942,7 +942,7 @@ def _rekey_sharded_optim_state_dict(
             _get_param_to_param_id_from_optim_input(model, optim_input)
             if using_optim_input
             else _get_param_to_param_key(
-                optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
+                optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
             )
         ),
     )
@@ -1088,6 +1088,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
 
 def _get_param_key_to_param(
     optim: torch.optim.Optimizer,
+    model: Optional[nn.Module] = None,
     is_named_optimizer: bool = False,
     param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
     flat_param_to_fqn: Optional[Dict[nn.Parameter, str]] = None,
@@ -1098,10 +1099,13 @@ def _get_param_key_to_param(
     are FQNs. This API may be used both for models with ``FlatParameter`` s and
     without.
     """
+    clean_fqn_to_curr_fqn: Dict[str, str] = {}
     if is_named_optimizer:
         assert (
             param_to_fqns is not None and flat_param_to_fqn is not None
         ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
+        for key, _ in model.named_parameters():
+            clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
     param_key_to_param: Dict[Union[str, int], nn.Parameter] = {}
     pid = 0
@@ -1117,6 +1121,7 @@ def _get_param_key_to_param(
                     # use_orig_params case
                     assert len(param_to_fqns[param]) == 1
                     key = param_to_fqns[param][0]
+                key = clean_fqn_to_curr_fqn[key]
                 param_key_to_param[key] = param
         else:
             for param in param_group["params"]:
@@ -1128,6 +1133,7 @@ def _get_param_key_to_param(
 
 def _get_param_to_param_key(
     optim: torch.optim.Optimizer,
+    model: Optional[nn.Module] = None,
     is_named_optimizer: bool = False,
     param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
     flat_param_to_fqn: Optional[Dict[nn.Parameter, str]] = None,
@@ -1138,7 +1144,7 @@ def _get_param_to_param_key(
     So the parameter keys will be parameter id.
     """
     param_id_to_param = _get_param_key_to_param(
-        optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
+        optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
     )
     return {param: param_id for param_id, param in param_id_to_param.items()}
 
@@ -1360,7 +1366,7 @@ def _optim_state_dict(
             _get_param_id_to_param_from_optim_input(model, optim_input)
             if using_optim_input
             else _get_param_key_to_param(
-                optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
+                optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
             )
         ),
     )
@@ -1438,6 +1444,7 @@ def _optim_state_dict(
         if is_named_optimizer:
             flat_param_fqns = set(flat_param_to_fqn.values())
             for key, value in optim_state_dict["state"].items():
+                clean_key = clean_tensor_name(key)
                 if key in fsdp_osd_state:
                     continue
                 if key in flat_param_fqns:
