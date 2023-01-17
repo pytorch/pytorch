@@ -1373,9 +1373,17 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // the indirectly accessed ID and its corresponding output ID. The
   // above relaxed mapping is only for the rest of the IDs.
   //
-  // Note that when the consumer has swizzle, the swizzle are skipped,
-  // for this case, we should allow the root unmapped, otherwise the c2p_map
-  // might no longer be injective.
+  // Note that when the consumer has swizzle, the swizzle are skipped. For
+  // example, if we have:
+  //   consumer:
+  //     root: I0, I1, I2
+  //     leaf: I0, I3, I4
+  //   producer:
+  //     root I5, I6, I7
+  // where I3, I4 = swizzle(I1, I2) , then the c2p map will be I3->I6, I4->I7,
+  // I1 and I2 are not mapped. For this case, we should allow the root unmapped,
+  // If we add I1->I6 and I2->I7, the c2p map will no longer be injective, which
+  // is not what we want.
   const auto p2c_map_ = invertOneToOneMap(c2p_map);
   for (const auto& kv :
        PairwiseRootDomainMap(producer_tv, consumer_tv, true, false)
