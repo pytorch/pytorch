@@ -26,12 +26,12 @@ int64_t PythonTorchFunctionTLS::stack_len() {
   return pythonTorchFunctionState.stack_.size();
 }
 
-void PythonTorchFunctionTLS::set_disabled(bool disabled) {
-  pythonTorchFunctionState.disabled_ = disabled;
+void PythonTorchFunctionTLS::set_disabled_state(TorchFunctionDisabledState disabled_state) {
+  pythonTorchFunctionState.disabled_state_ = disabled_state;
 }
 
-bool PythonTorchFunctionTLS::is_disabled() {
-  return pythonTorchFunctionState.disabled_;
+TorchFunctionDisabledState PythonTorchFunctionTLS::get_disabled_state() {
+  return pythonTorchFunctionState.disabled_state_;
 }
 
 void PythonTorchFunctionTLS::set_state(const PythonTorchFunctionTLS& state) {
@@ -43,7 +43,8 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
 }
 
 bool torch_function_mode_enabled() {
-  return PythonTorchFunctionTLS::stack_len() > 0;
+  return PythonTorchFunctionTLS::get_disabled_state() != TorchFunctionDisabledState::ALL_DISABLED &&
+         PythonTorchFunctionTLS::stack_len() > 0;
 }
 
 } // namespace impl
