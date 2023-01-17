@@ -6051,6 +6051,51 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_autograd_node_isinstance(self):
+        # Node is a "virtual" base class of codegen'd nodes. This means that
+        # isinstance and issubclass are overridden, but mro is unchanged
+        Node = torch.autograd.graph.Node
+
+        a = torch.rand(3, 3, requires_grad=True)
+        b = a.exp()
+
+        # Some nodes have codegened registrations to the torch._C._function module
+        self.assertIsInstance(b.grad_fn, Node)
+        self.assertTrue(issubclass(type(b.grad_fn), Node))
+        self.assertTrue(Node not in type(b.grad_fn).mro())
+
+        # Other nodes have manual registrations to the torch._C._function module
+        self.assertNotIsInstance(torch._C._functions.AccumulateGrad, Node)
+        self.assertTrue(issubclass(torch._C._functions.AccumulateGrad, Node))
+        self.assertIsInstance(b.grad_fn.next_functions[0][0], Node)
+        self.assertTrue(issubclass(torch._C._functions.DelayedError, Node))
+
+        # Special cases
+        self.assertNotIsInstance(None, Node)
+        self.assertNotIsInstance(1, Node)
+        self.assertNotIsInstance(Node, Node)
+        self.assertTrue(issubclass(Node, Node))
+
+        # Custom function case
+        self.assertTrue(issubclass(torch.autograd.function.BackwardCFunction, Node))
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                self.assertIsInstance(ctx, Node)
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                self.assertIsInstance(ctx, Node)
+                return x
+
+        out = Func.apply(a)
+        self.assertIsInstance(out.grad_fn, Node)
+        self.assertTrue(issubclass(type(out.grad_fn), Node))
+        self.assertTrue(Node not in type(out.grad_fn).mro())
+        out.sum().backward()
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected

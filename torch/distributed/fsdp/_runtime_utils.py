@@ -1224,6 +1224,7 @@ def _register_post_backward_hooks(
             "register the post-backward hook",
         )
         acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
+        assert acc_grad is not None
         hook_handle = acc_grad.register_hook(
             functools.partial(_post_backward_hook, state, handle)
         )

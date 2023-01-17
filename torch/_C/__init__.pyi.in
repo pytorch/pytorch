@@ -3,6 +3,7 @@
 import torch
 from torch.package import PackageExporter
 from torch import Tensor
+from torch.autograd.graph import Node as _Node
 from enum import Enum
 from pathlib import Path
 from typing import (
@@ -1178,7 +1179,7 @@ class _TensorBase(metaclass=_TensorMeta):
     _version: _int
     _base: Optional[Tensor]
     _cdata: _int
-    grad_fn: Any
+    grad_fn: _Node
     _grad_fn: Any
     _grad: Optional[Tensor]
     grad: Optional[Tensor]
@@ -1542,7 +1543,7 @@ def _activate_cuda_trace() -> None: ...
 
 # Defined in torch/csrc/Module.cpp
 def _current_graph_task_id() -> _int: ...
-def _current_autograd_node() -> Any: ...
+def _current_autograd_node() ->  _Node: ...
 
 class _OutOfMemoryError:
     pass
