@@ -4,6 +4,7 @@
 #include <ATen/functorch/VmapInterpreter.h>
 #include <ATen/functorch/FunctionalizeInterpreter.h>
 #include <ATen/functorch/ADInterpreters.h>
+#include <ATen/functorch/DynamicLayer.h>
 
 namespace at { namespace functorch {
 
@@ -88,10 +89,10 @@ void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto num_args = op.schema().arguments().size();
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
       [](const Tensor& tensor) {
-
-        auto* wrapper = maybeGetTensorWrapper(tensor);
+        auto result = unwrapIfDead(tensor);
+        auto* wrapper = maybeGetTensorWrapper(result);
         TORCH_INTERNAL_ASSERT(wrapper == nullptr);
-        auto* batched = maybeGetBatchedImpl(tensor);
+        auto* batched = maybeGetBatchedImpl(result);
         TORCH_INTERNAL_ASSERT(batched == nullptr);
         return tensor;
       });

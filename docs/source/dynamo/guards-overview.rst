@@ -193,7 +193,7 @@ instruction and doing *something* with it.
 .. note:: These are real instructions processed by TorchDynamo’s
    ``transform_code_object``, and it is pretty cool.
 
-.. note:: This section purposly skips the details of
+.. note:: This section purposely skips the details of
    `dis.get_instructions <https://docs.python.org/3/library/dis.html>`__.
 
 For the example above, here is a snippet of a what a few
@@ -317,7 +317,7 @@ Here is what this code does:
    the only thing pushed onto and popped from our stack are
    ``VariableTracker``\ s.
 
-3) The function calls ``VariableTracker.propogate``. This
+3) The function calls ``VariableTracker.propagate``. This
    takes the guards from every single item popped off the stack in 2,
    and recursively traverses it and combines all the guards into
    ``options``: ``py  return {      "guards": guards,  }``
