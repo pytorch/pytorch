@@ -2793,38 +2793,38 @@ class TestHelpers(TestCase):
         B = 2
 
         # grad_input None case
-        output = reductify_leaf(None, None, 0, (3,), B)
+        output = reductify_leaf(None, None, 0, B)
         self.assertIsNone(output)
-        output = reductify_leaf(None, None, None, (4, 3), B)
+        output = reductify_leaf(None, None, None, B)
         self.assertIsNone(output)
 
         # grad_input has bdim, input does not have bdim
         grad_input = torch.randn([B, 3, 4], device=device)
-        output = reductify_leaf(grad_input, 0, None, (3, 4), B)
+        output = reductify_leaf(grad_input, 0, None, B)
         self.assertEqual(output, grad_input.sum(0))
 
         grad_input = torch.randn([3, B, 4], device=device)
-        output = reductify_leaf(grad_input, 1, None, (3,), B)
+        output = reductify_leaf(grad_input, 1, None, B, (3,))
         self.assertEqual(output, grad_input.sum(1))
 
         # grad_input does not have bdim, input has bdim
         # This can happen if the user returns a fresh Tensor from the backward pass
         # that is unrelated to the input
         grad_input = torch.randn([3, 4], device=device)
-        output = reductify_leaf(grad_input, None, 1, (3, 4), B)
+        output = reductify_leaf(grad_input, None, 1, B)
         self.assertEqual(output, grad_input.view(3, 1, 4).expand(3, B, 4))
 
         grad_input = torch.randn([3, 4], device=device)
-        output = reductify_leaf(grad_input, None, 1, (4,), B)
+        output = reductify_leaf(grad_input, None, 1, B, (4,))
         self.assertEqual(output, grad_input.view(3, 4, 1).expand(3, 4, B).sum(0))
 
         # grad_input has bdim, input has bdim
         grad_input = torch.randn([B, 3, 4], device=device)
-        output = reductify_leaf(grad_input, 0, 1, (3, 4), B)
+        output = reductify_leaf(grad_input, 0, 1, B)
         self.assertEqual(output, grad_input.movedim(0, 1))
 
         grad_input = torch.randn([3, 4, 5, B], device=device)
-        output = reductify_leaf(grad_input, 3, 0, (5,), B)
+        output = reductify_leaf(grad_input, 3, 0, B, (5,))
         self.assertEqual(output, grad_input.movedim(-1, 2).sum(0).sum(0))
 
 

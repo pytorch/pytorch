@@ -344,7 +344,6 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
     #   get overwritten.
     out_dims = "not populated"
     input_shapes: Any = "not populated"
-    output_shapes: Any = "not populated"
     saved_tensors_bdims: Any = "not populated"
 
     def forward(*operands):
@@ -355,7 +354,6 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
     def setup_context(ctx, inputs, outputs):
         input_shapes_ = None
-        output_shapes_ = None
         saved_tensors_bdims_ = None
 
         def inner(inputs, outputs):
@@ -373,9 +371,6 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             nonlocal input_shapes_
             input_shapes_ = tuple(inp.shape if isinstance(inp, torch.Tensor) else None
                                   for inp in inputs)
-            nonlocal output_shapes_
-            output_shapes_ = tuple(out.shape if isinstance(out, torch.Tensor) else None
-                                   for out in outputs)
             nonlocal saved_tensors_bdims_
             saved_tensors_bdims_ = wrapped_ctx._pt_saved_tensors_bdims
 
@@ -389,15 +384,12 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
         nonlocal input_shapes
         input_shapes = input_shapes_
-        nonlocal output_shapes
-        output_shapes = output_shapes_
         nonlocal saved_tensors_bdims
         saved_tensors_bdims = saved_tensors_bdims_
 
     def jvp(ctx, *tangents):
         assert out_dims != "not populated"
         assert saved_tensors_bdims != "not populated"
-        assert output_shapes != "not populated"
 
         def jvp_no_context(saved_tensors, tangents):
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
@@ -408,8 +400,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             jvp_no_context, (saved_tensors_bdims, tangent_in_dims), batch_size, randomness)(
                 ctx.saved_tensors, tangents)
 
-        result = reductify(out_tangents, out_tangents_dims, out_dims,
-                           output_shapes, batch_size, allow_expanded_grad=False)
+        result = reductify(out_tangents, out_tangents_dims, out_dims, batch_size)
         return result
 
     def backward(ctx, *grad_outputs):
@@ -425,7 +416,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         grad_ins, grad_ins_dims = restore_vmap(
             backward_no_context, ((saved_tensors_bdims, out_dims),), batch_size, randomness)(
                 (ctx.saved_tensors, grad_outputs))
-        result = reductify(grad_ins, grad_ins_dims, in_dims, input_shapes, batch_size)
+        result = reductify(grad_ins, grad_ins_dims, in_dims, batch_size, input_shapes)
         return result
 
     name = f'Vmapped{autograd_function.__name__}'
@@ -566,27 +557,27 @@ class CtxCustomSave(WrappedCtx):
         self._pt_saved_tensors_bdims = bdims
 
 
-def reductify(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim, batch_size,
-              allow_expanded_grad=True):
+def reductify(grad_input, grad_input_bdim, input_bdim, batch_size,
+              target_shape_without_bdim_to_reduce_to=None):
     if not isinstance(grad_input, tuple):
         grad_input = (grad_input,)
     if not isinstance(grad_input_bdim, tuple):
         grad_input_bdim = (grad_input_bdim,)
     if not isinstance(input_bdim, tuple):
         input_bdim = (input_bdim,)
-    if not isinstance(input_shape_without_bdim, tuple):
-        input_shape_without_bdim = (input_shape_without_bdim,)
 
+    if target_shape_without_bdim_to_reduce_to is None:
+        target_shape_without_bdim_to_reduce_to = len(grad_input) * (None,)
     result = tuple(
-        reductify_leaf(gi, gi_bdim, i_bdim, ishape, batch_size, allow_expanded_grad)
-        for gi, gi_bdim, i_bdim, ishape in
-        zip(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim)
+        reductify_leaf(gi, gi_bdim, i_bdim, batch_size, maybe_ishape)
+        for gi, gi_bdim, i_bdim, maybe_ishape in
+        zip(grad_input, grad_input_bdim, input_bdim, target_shape_without_bdim_to_reduce_to)
     )
     return result
 
 
-def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim, batch_size,
-                   allow_expanded_grad=True):
+def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
+                   target_shape_without_bdim_to_reduce_to=None):
     if grad_input is None:
         return None
 
@@ -616,8 +607,8 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_
     # from [B, 4].
     #
     # This means that we need to also reduce the grad_input to the shape of the
-    # input. This behavior is controlled by the `allow_expanded_grad` flag;
-    # if True then we do the reducing manually.
+    # input. This behavior is controlled by the `target_shape_without_bdim_to_reduce_to` flag;
+    # if not-None then we do the reducing manually, otherwise, we do not do a reduction.
     assert input_bdim is not None
 
     if grad_input_bdim is None:
@@ -627,9 +618,9 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_
         grad_input = grad_input.expand(new_shape)
         grad_input_bdim = input_bdim
 
-    if allow_expanded_grad:
+    if target_shape_without_bdim_to_reduce_to is not None:
         return vmap(torch.Tensor.sum_to_size, in_dims=(grad_input_bdim, None), out_dims=input_bdim)(
-            grad_input, input_shape_without_bdim)
+            grad_input, target_shape_without_bdim_to_reduce_to)
 
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
