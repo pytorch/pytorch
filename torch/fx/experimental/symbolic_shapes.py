@@ -335,8 +335,9 @@ def eval_is_non_overlapping_and_dense(sizes, strides):
 
     # Short-circuits for tensors of rank one, which are
     # non-overlapping and "dense" if their stride is one
+    # or it is a 0/1 element tensor
     if dim == 1:
-        return strides[0] == 1
+        return strides[0] == 1 or sizes[0] < 2
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
@@ -344,6 +345,8 @@ def eval_is_non_overlapping_and_dense(sizes, strides):
         tuple(zip(sizes, strides)), key=operator.itemgetter(1)
     )
 
+    # Unlike the C++ code, we don't move the 0/1 size dimensions to the
+    # end.  So we have to keep going for this code.
     expected_stride = 1
     for length, stride in lengths_and_strides:
 

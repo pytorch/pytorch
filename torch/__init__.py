@@ -351,9 +351,23 @@ class SymBool:
     def __or__(self, other) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
-    # This is not a real magic method but we define it anyway, because
-    # calling ~a on things that are potentially booleans will lead to
-    # very strange results.  You can trigger this with sym_not instead.
+    # We very carefully define __sym_not__, and not a number of other
+    # plausible alternatives:
+    #
+    #   - We do not override __not__ because this is not a real magic
+    #     method; you cannot override the meaning of the not builtin in
+    #     Python.  We use the name 'sym_not' to clarify that in user code you
+    #     cannot use the builtin not or operator.not_ or operator.__not__ and
+    #     hit this magic method; you must use our custom sym_not operator.
+    #
+    #   - We do not override the __invert__ method because SymBool is
+    #     meant to be usable in situations where bool is expected.  However,
+    #     bitwise negation ~a does the wrong thing with booleans (because
+    #     bool is a subclass of int, so ~1 = -2 which is not falseish.)
+    #     This would be a giant footgun, so we get around it by defining
+    #     our own operator.  Note that bitwise and/or do the right thing,
+    #     so we reuse the conventional operators there for readability.
+    #
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
@@ -1300,11 +1314,13 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 
 class _TorchCompileInductorWrapper:
+    compiler_name = "inductor"
+
     def __init__(self, mode, passes):
         from torch._dynamo.eval_frame import lookup_backend
         from torch._inductor.config import InductorConfigContext
 
-        self.compile_fn = lookup_backend("inductor")
+        self.compile_fn = lookup_backend(self.compiler_name)
         self.cm = InductorConfigContext(mode if mode is not None else passes)
         self._torchdynamo_orig_callable = self.compile_fn
 
