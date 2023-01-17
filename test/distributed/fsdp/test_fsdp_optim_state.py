@@ -2,7 +2,6 @@
 
 import bisect
 import sys
-import unittest
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
@@ -783,7 +782,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_use_orig_params(self) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
@@ -1442,7 +1440,6 @@ class TestFSDPOptimState(FSDPTest):
         loss.backward()
         optim.step()
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_compatible_with_named_optimizer(self):
         class TestDummyModel(torch.nn.Module):
