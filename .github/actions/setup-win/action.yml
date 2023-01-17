@@ -93,4 +93,4 @@ runs:
         }
 
         # Reload the profile to update the path
-        . "$PS_PROFILE"
+        . "$PS_PROFILE" -ErrorAction "SilentlyContinue"
