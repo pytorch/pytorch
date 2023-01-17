@@ -1,3 +1,5 @@
+from typing import cast
+
 import torch
 from .base_structured_sparsifier import BaseStructuredSparsifier, FakeStructuredSparsity
 
@@ -11,7 +13,7 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
 
         for p in getattr(module.parametrizations, tensor_name):
             if isinstance(p, FakeStructuredSparsity):
-                mask = p.mask
+                mask = cast(torch.Tensor, p.mask)
 
                 # select weights based on magnitude
                 if weights.dim() > 1:

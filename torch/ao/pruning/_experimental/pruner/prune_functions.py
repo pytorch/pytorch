@@ -364,10 +364,12 @@ def prune_lstm_linear(
     prune_lstm_layernorm_linear(lstm, getitem, None, linear)
 
 
-def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: nn.LayerNorm, linear: nn.Linear) -> None:
+def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: Optional[nn.LayerNorm], linear: nn.Linear) -> None:
     for i in range(lstm.num_layers):
         if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
-            mask = lstm.parametrizations[f"weight_ih_l{i}"][0].mask
+            parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
+            weight_parameterizations = cast(ParametrizationList, parametrization_dict[f"weight_ih_l{i}"])
+            mask = weight_parameterizations[0].mask
 
             with torch.no_grad():
                 parametrize.remove_parametrizations(
@@ -388,7 +390,9 @@ def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: nn.
                 )
 
         if parametrize.is_parametrized(lstm, f"weight_hh_l{i}"):
-            mask = lstm.parametrizations[f"weight_hh_l{i}"][0].mask
+            parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
+            weight_parameterizations = cast(ParametrizationList, parametrization_dict[f"weight_hh_l{i}"])
+            mask = weight_parameterizations[0].mask
 
             with torch.no_grad():
                 parametrize.remove_parametrizations(
@@ -420,7 +424,7 @@ def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: nn.
 
             # If this is the final layer, then we need to prune linear layer columns
             if i + 1 == lstm.num_layers:
-                lstm.hidden_size = M_hi.sum()
+                lstm.hidden_size = int(M_hi.sum())
                 with torch.no_grad():
                     if parametrize.is_parametrized(linear):
                         parametrization_dict = cast(

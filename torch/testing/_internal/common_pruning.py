@@ -318,20 +318,27 @@ class Conv2dPoolFlatten(nn.Module):
 class LSTMLinearModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a linear."""
 
-    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int):
         super().__init__()
-        self.rnn = nn.LSTM(ninp, nhid, nlayers)
-        self.linear = nn.Linear(nhid, ntoken)
-        self.init_weights()
-        self.nhid = nhid
-        self.nlayers = nlayers
-
-    def init_weights(self):
-        initrange = 0.1
-        self.linear.bias.data.zero_()
-        self.linear.weight.data.uniform_(-initrange, initrange)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
+        self.linear = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, input):
-        output, hidden = self.rnn(input)
+        output, hidden = self.lstm(input)
         decoded = self.linear(output)
         return decoded, output
+
+class LSTMLayerNormLinearModel(nn.Module):
+    """Container module with an LSTM, a LayerNorm, and a linear."""
+
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.linear = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x, state = self.lstm(x)
+        x = self.norm(x)
+        x = self.linear(x)
+        return x, state

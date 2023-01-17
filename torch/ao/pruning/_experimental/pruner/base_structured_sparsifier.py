@@ -247,7 +247,6 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
             # if linear / conv, we add in bias hooks
             if isinstance(module, (nn.Linear, nn.Conv2d)):
-                print(module)
                 prune_bias = config.get("prune_bias", True)
                 if module.bias is not None:
                     module.register_parameter(
