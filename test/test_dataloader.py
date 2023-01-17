@@ -1435,6 +1435,7 @@ except RuntimeError as e:
             list(iter(ChainDataset([dataset1, self.dataset])))
 
     @unittest.skipIf(IS_MACOS, "Not working on macos")
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/90940
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
