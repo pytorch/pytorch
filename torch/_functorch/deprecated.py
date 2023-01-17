@@ -16,8 +16,8 @@ def get_warning(api, new_api=None, replace_newlines=False):
     warning = (
         f"We've integrated functorch into PyTorch. As the final step of the \n"
         f"integration, functorch.{api} is deprecated as of PyTorch \n"
-        f"2.0.0 and will be deleted in a future version of PyTorch >= 2.3.0. \n"
-        f"Please use {new_api} instead; see the PyTorch 2.0.0 release notes \n"
+        f"2.0 and will be deleted in a future version of PyTorch >= 2.3. \n"
+        f"Please use {new_api} instead; see the PyTorch 2.0 release notes \n"
         f"and/or the torch.func migration guide for more details."
     )
     if replace_newlines:
@@ -27,7 +27,7 @@ def get_warning(api, new_api=None, replace_newlines=False):
 
 def warn_deprecated(api, new_api=None):
     warning = get_warning(api, new_api, replace_newlines=True)
-    warnings.warn(warning, DeprecationWarning)
+    warnings.warn(warning)
 
 
 def setup_docs_annotations(functorch_api, torch_func_api=None, new_api_name=None):

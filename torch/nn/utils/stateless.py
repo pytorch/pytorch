@@ -236,8 +236,7 @@ def functional_call(
     warnings.warn(
         "This API is deprecated as of PyTorch 2.0.0 and will be removed in a future "
         "version of PyTorch. Please use torch.func.functional_call instead "
-        "which is a drop-in replacement for this API.",
-        DeprecationWarning)
+        "which is a drop-in replacement for this API.")
 
     return _functional_call(module, parameters_and_buffers, args, kwargs,
                             tie_weights=tie_weights)
