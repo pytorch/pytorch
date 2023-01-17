@@ -119,7 +119,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   explicit SequentialImpl(std::initializer_list<NamedAnyModule> named_modules) {
     modules_.reserve(named_modules.size());
     for (const auto& named_module : named_modules) {
-      // NOLINTNEXTLINE(performance-move-const-arg)
       push_back(
           std::move(named_module.name()), std::move(named_module.module()));
     }
