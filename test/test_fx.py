@@ -18,7 +18,6 @@ import typing
 import types
 import warnings
 import unittest
-import torch.nn.utils._stateless as _stateless
 from math import sqrt
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
@@ -3065,7 +3064,7 @@ class TestFX(JitTestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         fx_module = torch.fx.symbolic_trace(module)
-        res = _stateless.functional_call(fx_module, parameters, x)
+        res = torch.func.functional_call(fx_module, parameters, x)
         res.backward()
         self.assertIsNotNone(weight.grad)
         self.assertIsNotNone(bias.grad)
