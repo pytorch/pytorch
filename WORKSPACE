@@ -259,8 +259,18 @@ local_repository(
 )
 
 local_repository(
-    name = "unused_kineto_dynolog",
-    path = "third_party/kineto/libkineto/third_party/dynolog",
+    name = "unused_kineto_dynolog_googletest",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/googletest",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_gflags",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/gflags",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_glog",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/glog",
 )
 
 local_repository(
