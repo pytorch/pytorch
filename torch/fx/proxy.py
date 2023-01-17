@@ -334,9 +334,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            if orig_method.__name__ in {"cond", "map"}:
-                # TODO: symbolically trace control flow ops
-                raise RuntimeError("Unable to symbolically trace control flow ops")
+            if isinstance(orig_method, torch._ops.PyOperator):
+                # TODO: Define how to symbolically trace PyOperators
+                raise RuntimeError("Unable to symbolically trace PyOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 
