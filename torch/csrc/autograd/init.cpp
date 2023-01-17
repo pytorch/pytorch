@@ -60,13 +60,14 @@ struct DisableAutocast {
 
 struct EnableTorchFunction {
   EnableTorchFunction()
-      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+      : old_(at::impl::PythonTorchFunctionTLS::get_disabled_state()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ENABLED);
   }
   ~EnableTorchFunction() {
-    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
-  bool old_;
+  at::impl::TorchFunctionDisabledState old_;
 };
 
 struct EnablePythonDispatcher {
@@ -384,11 +385,9 @@ namespace autograd {
 
 static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
   at::autocast::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -417,11 +416,9 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
   at::autocast::set_cpu_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -439,11 +436,10 @@ static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      THPDtype_Check(arg),
-      "dtype must be a torch.dtype (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_gpu_dtype(targetType);
   Py_RETURN_NONE;
@@ -452,11 +448,10 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      THPDtype_Check(arg),
-      "dtype must be a torch.dtype (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_cpu_dtype(targetType);
   Py_RETURN_NONE;
@@ -512,49 +507,19 @@ static PyObject* is_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  at::autocast::set_autocast_cache_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* is_autograd_function_extension_enabled(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (torch::autograd::isAutogradFunctionExtensionEnabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_autograd_function_extension_enabled(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  torch::autograd::setAutogradFunctionExtensionEnabled(arg == Py_True);
+  at::autocast::set_autocast_cache_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
   GradMode::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -572,11 +537,9 @@ static PyObject* is_grad_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
   c10::AutogradState::get_tls_state().set_fw_grad_mode(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -812,14 +775,6 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"_set_autograd_function_extension_enabled",
-     set_autograd_function_extension_enabled,
-     METH_O,
-     nullptr},
-    {"_is_autograd_function_extension_enabled",
-     is_autograd_function_extension_enabled,
-     METH_NOARGS,
-     nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

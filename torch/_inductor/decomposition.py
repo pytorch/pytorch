@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 decompositions = get_decompositions(
     [
         aten.linspace,
+        aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -52,6 +53,12 @@ decompositions = get_decompositions(
         aten.hardtanh_backward,
         aten.im2col,
         aten.index_select,
+        aten.index_add,
+        aten.index_add_,
+        aten.index_copy,
+        aten.index_copy_,
+        aten.index_fill,
+        aten.index_fill_,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
@@ -81,7 +88,6 @@ decompositions = get_decompositions(
         aten.nll_loss_backward,
         aten.nll_loss_forward,
         aten.norm,
-        aten.reflection_pad2d_backward,
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
@@ -106,8 +112,6 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
         aten.bucketize,
     ]
 )
@@ -164,14 +168,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
@@ -532,7 +528,7 @@ Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
-extra_random_decomps = get_decompositions([aten.native_dropout])
+extra_random_decomps = get_decompositions([aten.native_dropout, aten.uniform_])
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
 )

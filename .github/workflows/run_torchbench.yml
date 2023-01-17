@@ -39,10 +39,8 @@ jobs:
           # shellcheck source=/dev/null
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
-          # pin cmake version to 3.22 since 3.23 breaks pytorch build
-          # see details at: https://github.com/pytorch/pytorch/issues/74985
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
-                           setuptools cmake=3.22 cffi typing_extensions boto3 \
+                           setuptools cmake=3.22.* cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu116/torch_nightly.html
       - name: Setup TorchBench branch

@@ -71,6 +71,9 @@ class NVFuserEnabler {
 
  public:
   bool nvfuserCanBeEnabled() {
+#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    return false;
+#endif
     return at::globalContext().hasCUDA() && getExecutorMode() &&
         loading_nvfuser_library_.nvfuserLib_ != nullptr;
   }

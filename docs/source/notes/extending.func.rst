@@ -44,7 +44,7 @@ Depending on the transform,
 
 - to support reverse-mode AD (:func:`torch.func.grad`, :func:`torch.func.vjp`),
   the :class:`torch.autograd.Function` needs a :meth:`~Function.backward` staticmethod.
-- to support :func:`torch.vmap`, the :class:`torch.autograd.Function` needs a ``vmap`` staticmethod.
+- to support :func:`torch.vmap`, the :class:`torch.autograd.Function` needs a :meth:`~Function.vmap` staticmethod.
 - to support :func:`torch.func.jvp`, the :class:`torch.autograd.Function` needs a :meth:`~Function.jvp` staticmethod.
 - to support compositions of transforms (like :func:`torch.func.jacrev`,
   :func:`torch.func.jacfwd`, :func:`torch.func.hessian`) -- you may need multiple
@@ -251,7 +251,7 @@ these Tensors will not get tracked
 
 To use an :class:`torch.autograd.Function` with :func:`torch.vmap`, you must either:
 
-- provide a ``vmap`` staticmethod that tells us the behavior of the :class:`torch.autograd.Function`
+- provide a :meth:`~Function.vmap` staticmethod that tells us the behavior of the :class:`torch.autograd.Function`
   under :func:`torch.vmap`
 - ask us to autogenerate it by setting ``generate_vmap_rule=True``.
 
@@ -312,10 +312,10 @@ Defining the vmap staticmethod
 
 If your :class:`torch.autograd.Function` calls into another system (like NumPy, C++, CUDA, triton),
 then to get it to work with :func:`torch.vmap` or transforms that use it, you'll
-need to manually define a ``vmap`` staticmethod.
+need to manually define a :meth:`~Function.vmap` staticmethod.
 
 Depending on what transforms you want to use and your use case, you may not need
-to add a ``vmap`` staticmethod to all of your :class:`torch.autograd.Function`:
+to add a :meth:`~Function.vmap` staticmethod to all of your :class:`torch.autograd.Function`:
 
 - For example, :func:`torch.func.jacrev` performs :func:`~torch.vmap` over the backward pass.
   So if you're only interested in using :func:`torch.func.jacrev`, only
@@ -332,7 +332,7 @@ being vmapped over). This is similar to how :func:`torch.vmap` is implemented ov
 PyTorch operations: for each operation, we define a vmap rule (sometimes also
 referred to as a "batching rule").
 
-Here's how to define the ``vmap`` staticmethod:
+Here's how to define the :meth:`~Function.vmap` staticmethod:
 
 - the signature is ``vmap(info, in_dims: Tuple[Optional[int]], *args)``, where
   ``*args`` is the same as the args to :meth:`~Function.forward`.

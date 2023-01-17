@@ -122,22 +122,36 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
             @torch.no_grad()
             class Foo():
-                pass
+                def __init__(self):
+                    assert not torch.is_grad_enabled()
+
+                def foo(self):
+                    # Not applied to methods
+                    assert torch.is_grad_enabled()
+
+            # Show that we can actually construct the class
+            foo = Foo()
+            foo.foo()
 
         # Decorating functions or methods is fine though
         with warnings.catch_warnings(record=True) as w:
             @torch.no_grad()
             def foo():
-                pass
+                assert not torch.is_grad_enabled()
+
+            foo()
 
             class Foo2():
                 @torch.no_grad()
                 def __init__(self):
-                    pass
+                    assert not torch.is_grad_enabled()
 
                 @torch.no_grad()
                 def foo(self):
-                    pass
+                    assert not torch.is_grad_enabled()
+
+            foo2 = Foo2()
+            foo2.foo()
 
         self.assertEqual(len(w), 0)
 
@@ -545,14 +559,24 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
             torch._C._will_engine_execute_node(out)
 
-    def test_autograd_function_extension_enabled_by_default(self):
-        # This feature flag is enabled by default. We're not deleting it yet
-        # so we can easily turn the feature off, but we want it enabled by
-        # default so that people can begin to test with it.
-        # We'll keep it around until approx. after next PyTorch release.
-        # Tracking issue: https://github.com/pytorch/pytorch/issues/90224
-        enabled = torch._C._is_autograd_function_extension_enabled()
-        self.assertTrue(enabled)
+    def test_custom_function_vmap_defaults(self):
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                return x ** 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return gO * 2 * x
+
+        self.assertFalse(MySquare.generate_vmap_rule)
+        self.assertTrue(hasattr(MySquare, 'vmap'))
 
     def test_custom_function_setup_context_simple(self):
         class MySquare(Function):
@@ -570,11 +594,10 @@ class TestAutograd(TestCase):
                 x, = ctx.saved_tensors
                 return gO * 2 * x
 
-        with torch.autograd.function._set_autograd_function_extension_enabled(True):
-            x = torch.randn([], requires_grad=True)
-            y = MySquare.apply(x)
-            gx, = torch.autograd.grad(y, x)
-            self.assertEqual(gx, 2 * x)
+        x = torch.randn([], requires_grad=True)
+        y = MySquare.apply(x)
+        gx, = torch.autograd.grad(y, x)
+        self.assertEqual(gx, 2 * x)
 
     def test_custom_function_setup_context_multi_output(self):
         # Multiple outputs with some non-Tensor outputs.
@@ -595,11 +618,10 @@ class TestAutograd(TestCase):
             def backward(ctx, gO, _):
                 return gO * ctx.two_x
 
-        with torch.autograd.function._set_autograd_function_extension_enabled(True):
-            x = torch.randn([], requires_grad=True)
-            y, _ = MySquare.apply(x)
-            gx, = torch.autograd.grad(y, x)
-            self.assertEqual(gx, 2 * x)
+        x = torch.randn([], requires_grad=True)
+        y, _ = MySquare.apply(x)
+        gx, = torch.autograd.grad(y, x)
+        self.assertEqual(gx, 2 * x)
 
     def test_custom_function_setup_context_multi_input(self):
         class MyReshape(Function):
@@ -638,9 +660,8 @@ class TestAutograd(TestCase):
             self.assertEqual(y_expected, y)
             self.assertEqual(gx_expected, gx)
 
-        with torch.autograd.function._set_autograd_function_extension_enabled(True):
-            test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
-            test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+        test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
+        test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -844,6 +865,149 @@ class TestAutograd(TestCase):
         x.register_hook(MyHookClass())
         x.sum().backward()
         # Should run fine
+
+    def test_prehook_ordering(self):
+        # Hooks registered to tensor are ordered before those
+        # that are registered to grad_fn
+        log = []
+
+        def hook1(g):
+            log.append(1)
+            return g * 3
+
+        def hook2(gs):
+            log.append(2)
+            return tuple(g * 2 for g in gs)
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+
+        b.grad_fn.register_prehook(hook2)
+        b.register_hook(hook1)
+        b.grad_fn.register_prehook(hook2)
+
+        acc = b.grad_fn.next_functions[0][0]
+        a.register_hook(hook1)
+        acc.register_prehook(hook2)
+        a.register_hook(hook1)
+
+        b.sum().backward(retain_graph=True)
+        self.assertEqual(log, [1, 2, 2, 1, 1, 2])
+
+        # grad also runs hooks on accumulate grad nodes, even though
+        # the accumulate grad nodes are not actually executed
+        log = []
+        torch.autograd.grad(b.sum(), inputs=(a,), retain_graph=True)
+        self.assertEqual(log, [1, 2, 2, 1, 1])
+
+        log = []
+        b.sum().backward(inputs=(b,))
+        self.assertEqual(log, [1, 2, 2])
+        # retains_grad hooks would not observe modifications by all pre hooks
+        # because they are executed after
+        self.assertEqual(b.grad.item(), 3)
+
+    def test_retains_grad_can_always_observe_tensor_prehook(self):
+        def tensor_prehook(g):
+            return g * 2
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        b.register_hook(tensor_prehook)
+        b.retain_grad()
+        b.register_hook(tensor_prehook)
+
+        b.clone().backward()
+        self.assertEqual(b.grad.item(), 4)
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        b.retain_grad()
+        b.register_hook(tensor_prehook)
+
+        b.clone().backward()
+        self.assertEqual(b.grad.item(), 2)
+
+    def test_accumulate_grad_posthooks_can_observe_tensor_prehook(self):
+        # Post hooks on accumulate should be able to observe changes to
+        # grad made by tensor prehooks
+        a = torch.tensor(1., requires_grad=True)
+
+        def tensor_prehook(g):
+            return g * 2
+
+        def posthook(gO, gI):
+            self.assertTrue(torch.allclose(gI[0], a * 2))
+            self.assertEqual(len(gO), 0)
+
+        def prehook(gI):
+            self.assertTrue(torch.allclose(gI[0], a * 2))
+            self.assertEqual(len(gI), 1)
+
+        b = a.clone()
+        acc = b.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+        acc.register_prehook(prehook)
+        a.register_hook(tensor_prehook)
+
+        b.backward()
+
+    def test_hook_edge_case_when_called_with_grad(self):
+        # grad executes the tensor hooks of the next node but not
+        # grad_fn pre hooks or the post hooks
+        a = torch.tensor(1., requires_grad=True)
+        b = a * 2
+        c = b * 2
+
+        tensor_hook_count = [0]
+        prehook_count = [0]
+        posthook_count = [0]
+
+        def reset_counts():
+            nonlocal tensor_hook_count, prehook_count, posthook_count
+            tensor_hook_count = [0]
+            prehook_count = [0]
+            posthook_count = [0]
+
+        def tensor_prehook(g):
+            tensor_hook_count[0] += 1
+
+        def prehook(g):
+            prehook_count[0] += 1
+
+        def posthook(gI, gO):
+            posthook_count[0] += 1
+
+        a.register_hook(tensor_prehook)
+        b.register_hook(tensor_prehook)
+        acc = b.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+        acc.register_prehook(prehook)
+        b.grad_fn.register_hook(posthook)
+        b.grad_fn.register_prehook(prehook)
+
+        torch.autograd.grad(c, inputs=(b), retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 1)
+        self.assertEqual(posthook_count[0], 0)
+        self.assertEqual(prehook_count[0], 0)
+        reset_counts()
+
+        torch.autograd.grad(c, inputs=(a, b), retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 2)
+        self.assertEqual(posthook_count[0], 1)
+        self.assertEqual(prehook_count[0], 1)
+        reset_counts()
+
+        c.backward(retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 2)
+        self.assertEqual(posthook_count[0], 2)
+        self.assertEqual(prehook_count[0], 2)
+        reset_counts()
+
+        c.backward(inputs=(a, b), retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 2)
+        self.assertEqual(posthook_count[0], 2)
+        self.assertEqual(prehook_count[0], 2)
 
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
@@ -1079,20 +1243,6 @@ class TestAutograd(TestCase):
             self.assertEqual(pre_counter[0], 4)
             self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
 
-    def test_autograd_function_extension_feature_flag(self):
-        try:
-            prev = torch._C._is_autograd_function_extension_enabled()
-
-            torch._C._set_autograd_function_extension_enabled(True)
-            state = torch._C._is_autograd_function_extension_enabled()
-            self.assertTrue(state)
-
-            torch._C._set_autograd_function_extension_enabled(False)
-            state = torch._C._is_autograd_function_extension_enabled()
-            self.assertFalse(state)
-        finally:
-            torch._C._set_autograd_function_extension_enabled(prev)
-
     def test_grad_fn_prehooks_multiple_outputs(self):
         # Compute gradients without hooks
         b = torch.rand(3, 3, requires_grad=True)
@@ -1263,8 +1413,7 @@ class TestAutograd(TestCase):
         self.assertEqual(input * 18, input.grad)
 
     # NB: See test/cpp/api/autograd.cpp for more tests on the interaction between
-    #     retains_grad and hooks in cpp. There's no point testing in python because
-    #     Python hooks use a completely different mechanism.
+    #     retains_grad and hooks in cpp
     def test_retain_grad_inplace(self):
         a = torch.tensor([1.], requires_grad=True).clone()
         a.retain_grad()
@@ -1274,13 +1423,43 @@ class TestAutograd(TestCase):
 
         a = torch.tensor([1.], requires_grad=True).clone()
         a.retain_grad()
-        # Inplace multiple times is OK, the real test here would be in cpp though
-        # because the index here is always zero, having cpp hooks in addition,
-        # will force us to properly update the index
+        # Inplace multiple times is OK
         a.mul_(2)
         a.mul_(2)
         a.sum().backward()
         self.assertEqual(a.grad, torch.tensor([1.]))
+
+    def test_retains_grad_inplace_multiple_outputs(self):
+        class DoubleMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, g1, g2):
+                return g1 * 2 + g2 * 3
+
+        var_mean = partial(torch.var_mean, dim=0)
+
+        for fn in (DoubleMul.apply, var_mean):
+            b = torch.rand(3, 3, requires_grad=True)
+            var, mean = fn(b)
+            var.retain_grad()
+            mean.retain_grad()
+            # node has two retains_grad hooks
+            var.mul_(2)
+            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            (var + mean).sum().backward()
+            gvar = var.grad
+            gmean = mean.grad
+
+            a = b.detach().requires_grad_(True)
+            var, mean = fn(a)
+            var.mul_(2)
+            out = (var + mean).sum()
+            gvar_expected, gmean_expected = torch.autograd.grad(out, inputs=(var, mean))
+            self.assertTrue(torch.allclose(gvar, gvar_expected))
+            self.assertTrue(torch.allclose(gmean, gmean_expected))
 
     def test_retain_grad_inplace_over_view(self):
         base = torch.tensor([1.], requires_grad=True).clone()

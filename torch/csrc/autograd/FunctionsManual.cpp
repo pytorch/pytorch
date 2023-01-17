@@ -863,15 +863,25 @@ Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
 
 Tensor unsqueeze_to(
     const Tensor& self,
+    IntArrayRef dims,
+    c10::SymIntArrayRef sym_sizes) {
+  const auto ndim = sym_sizes.size();
+  auto mask = at::dim_list_to_bitset(dims, ndim);
+
+  Tensor result = self;
+  for (const auto d : c10::irange(ndim)) {
+    if (mask.test(d) && sym_sizes[d] == 1) {
+      result = result.unsqueeze(d);
+    }
+  }
+  return result;
+}
+
+Tensor unsqueeze_to(
+    const Tensor& self,
     int64_t dim,
     c10::SymIntArrayRef sym_sizes) {
-  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
-  // in NumPy it's not an error to unsqueeze a scalar, but we still need to
-  // avoided unsqueezing in the backward.
-  if (sym_sizes.size() > 0 && sym_sizes[dim] == 1) {
-    return self.unsqueeze(dim);
-  }
-  return self;
+  return unsqueeze_to(self, IntArrayRef{dim}, sym_sizes);
 }
 
 std::vector<Tensor> cat_tensors_backward(
@@ -6311,8 +6321,16 @@ Tensor logsumexp_jvp(
     bool keepdim) {
   // NB: for simplicitly, we recompute some values that can be reused from
   // forward
-  auto self_p_exp = (self_p - at::amax(self_p, dim, true))
-                        .exp(); // Use the exp-normalize trick
+  auto self_p_exp = [&self_p, &dim]() {
+    if (self_p.numel() > 0) {
+      return (self_p - at::amax(self_p, dim, true))
+          .exp(); // Use the exp-normalize trick
+    } else {
+      // amax fails if numel() == 0, in which case it doesn't matter anyway
+      return self_p.exp();
+    }
+  }();
+
   auto sumexp_p = self_p_exp.sum(dim, keepdim);
 
   // NB: it's OK for logsumexp_jvp to be reused for formulas like
