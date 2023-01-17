@@ -145,7 +145,7 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
     # out_dim is non None
     if not isinstance(batched_output, torch.Tensor):
         raise ValueError(f'vmap({name}, ...): `{name}` must only return '
-                         f'Tensors, got type {type(batched_output)} as a return. '
+                         f'Tensors, got type {type(batched_output)}. '
                          'Did you mean to set out_dim= to None for output?')
 
     return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)

@@ -323,7 +323,7 @@ class TestVmapAPI(TestCase):
         tensor = torch.randn(2, 3)
         result = vmap(foo, out_dims=(0, None))(tensor)
         self.assertEqual(result[1], 'hello world')
-        self.assertIsInstance(result[0], torch.Tensor)
+        self.assertEqual(result[0], tensor)
 
         def foo(x):
             x.add_(1)
