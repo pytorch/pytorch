@@ -24,17 +24,16 @@ class C10_CUDA_API CUDAError : public c10::Error {
 };
 } // namespace c10
 
-#define C10_CUDA_CHECK(EXPR)                                             \
-  do {                                                                   \
-    /* We get & disarm the error inside of */                            \
-    /* `c10_cuda_check_implementation` */                                \
-    C10_UNUSED const cudaError_t __err = EXPR;                           \
-    c10::cuda::c10_cuda_check_implementation(                            \
-        __FILE__,                                                        \
-        __func__, /* Line number's data type is not well-defined between \
-                      compilers, so we perform an explicit cast */       \
-        static_cast<uint32_t>(__LINE__),                                 \
-        true);                                                           \
+#define C10_CUDA_CHECK(EXPR)                                        \
+  do {                                                              \
+    const cudaError_t __err = EXPR;                                 \
+    c10::cuda::c10_cuda_check_implementation(                       \
+        static_cast<int32_t>(__err),                                \
+        __FILE__,                                                   \
+        __func__, /* Line number data type not well-defined between \
+                      compilers, so we perform an explicit cast */  \
+        static_cast<uint32_t>(__LINE__),                            \
+        true);                                                      \
   } while (0)
 
 #define C10_CUDA_CHECK_WARN(EXPR)                              \
@@ -93,6 +92,7 @@ namespace cuda {
 /// In the event of a CUDA failure, formats a nice error message about that
 /// failure and also checks for device-side assertion failures
 C10_CUDA_API void c10_cuda_check_implementation(
+    const int32_t err,
     const char* filename,
     const char* function_name,
     const int line_number,
