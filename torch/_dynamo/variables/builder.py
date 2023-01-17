@@ -151,7 +151,13 @@ class GraphArg:
                 self.fake_tensor = converter.from_real_tensor(
                     self.fake_tensor.fake_mode, self.example
                 )
-            elif config.dynamic_shapes and self.fake_tensor.dim() != self.example.dim():
+            elif config.dynamic_shapes and self.fake_tensor.shape != torch.Size(
+                self.fake_tensor.fake_mode.shape_env.create_symbolic_sizes_strides_storage_offset(
+                    self.example, self.source
+                )[
+                    0
+                ]
+            ):
                 self.fake_tensor.fake_mode.converter = (
                     torch._subclasses.fake_tensor.FakeTensorConverter()
                 )
