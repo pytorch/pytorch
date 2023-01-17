@@ -1491,6 +1491,11 @@ def merge(pr_num: int, repo: GitRepo,
     # here to stop the merge process right away
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
+    if not has_required_labels(pr):
+        raise RuntimeError(LABEL_ERR_MSG)
+    else:
+        delete_all_label_err_comments(pr)
+
     if land_checks and not dry_run:
         land_check_commit = pr.create_land_time_check_branch(
             repo,
@@ -1620,12 +1625,6 @@ def main() -> None:
     if pr.is_cross_repo() and pr.is_ghstack_pr():
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
-
-    if not has_required_labels(pr):
-        add_label_err_comment(pr)
-        return
-    else:
-        delete_all_label_err_comments(pr)
 
     try:
         merge(args.pr_num, repo,

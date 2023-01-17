@@ -396,19 +396,14 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, True))
-    @mock.patch('trymerge.has_required_labels', return_value=True)
-    @mock.patch('trymerge.delete_all_label_err_comments', side_effect=mock_delete_all_label_err_comments)
     @mock.patch('trymerge.merge', side_effect=mock_merge)
     def test_main_force(
         self,
         mock_merge: Any,
-        mock_delete_all_label_err_comments: Any,
-        mock_has_required_labels: Any,
         mock_parse_args: Any,
         mock_gh_get_info: Any,
     ) -> None:
         trymerge_main()
-        mock_delete_all_label_err_comments.assert_called_once_with(mock.ANY)
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
                                            dry_run=mock.ANY,
@@ -420,19 +415,14 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
-    @mock.patch('trymerge.has_required_labels', return_value=True)
-    @mock.patch('trymerge.delete_all_label_err_comments', side_effect=mock_delete_all_label_err_comments)
     @mock.patch('trymerge.merge', side_effect=mock_merge)
     def test_main_merge(
         self,
         mock_merge: Any,
-        mock_delete_all_label_err_comments: Any,
-        mock_has_required_labels: Any,
         mock_parse_args: Any,
         mock_gh_get_info: Any,
     ) -> None:
         trymerge_main()
-        mock_delete_all_label_err_comments.assert_called_once_with(mock.ANY)
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
                                            dry_run=mock.ANY,
@@ -441,23 +431,6 @@ class TestTryMerge(TestCase):
                                            on_green=False,
                                            land_checks=False,
                                            mandatory_only=False)
-
-    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
-    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
-    @mock.patch('trymerge.has_required_labels', return_value=False)
-    @mock.patch('trymerge.add_label_err_comment', side_effect=mock_add_label_err_comment)
-    @mock.patch('trymerge.merge', side_effect=mock_merge)
-    def test_merge_fails_without_required_labels(
-        self,
-        mock_merge: Any,
-        mock_add_label_err_comment: Any,
-        mock_has_required_labels: Any,
-        mock_parse_args: Any,
-        mock_gh_get_info: Any,
-    ) -> None:
-        trymerge_main()
-        mock_add_label_err_comment.assert_called_once_with(mock.ANY)
-        mock_merge.assert_not_called()
 
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
