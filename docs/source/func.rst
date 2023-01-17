@@ -52,4 +52,3 @@ Read More
    func.whirlwind_tour
    func.api
    func.ux_limitations
-   func.migrating
