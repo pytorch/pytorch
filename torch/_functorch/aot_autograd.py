@@ -1440,6 +1440,10 @@ def describe_input(i, aot_config):
         return f"input {i - aot_config.num_params_buffers}"
 
 
+once_differentiable_with_aot_autograd_err_msg = torch.autograd.function.once_differentiable_with_error_msg(
+    error_msg="torch.compile with aot_autograd does not currently support double backward"
+)
+
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
@@ -1667,7 +1671,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             return tuple(fw_outs[0:num_forward_returns])
 
         @staticmethod
-        @torch.autograd.function.once_differentiable
+        @once_differentiable_with_aot_autograd_err_msg
         def backward(ctx, *all_flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
