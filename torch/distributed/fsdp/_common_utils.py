@@ -35,22 +35,23 @@ class _FSDPState(_State):
     def __init__(self) -> None:
         # TODO: Move all the attributes to this class to enable typing for
         # FSDP/fully_shard.
+        self._ignored_modules: Set[nn.Module] = set()
+        self._ignored_params: Set[nn.Parameter] = set()
+        self.process_group: Optional[dist.ProcessGroup] = None
+        self.rank: int = -1
+        self.world_size: int = -1
+        self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
+        self.training_state = TrainingState.IDLE
         self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
-        self._ignored_modules: Set[nn.Module] = set()
         self._fully_sharded_module_to_handles: Dict[
             nn.Module, flat_param_file.FlatParamHandle
         ] = {}
-        self.rank: int = -1
-        self.world_size: int = -1
-        self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self.compute_device = torch.device("cuda", torch.cuda.current_device())
-        self.process_group: Optional[dist.ProcessGroup] = None
-        self._ignored_params: Set[nn.Parameter] = set()
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -60,7 +61,9 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     return state
 
 
-def _get_module_fsdp_state_if_comm_module(module: nn.Module) -> Optional[_FSDPState]:
+def _get_module_fsdp_state_if_fully_sharded_module(
+    module: nn.Module,
+) -> Optional[_FSDPState]:
     state = _get_module_fsdp_state(module)
     if state is None:
         return None

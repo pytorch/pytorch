@@ -53,16 +53,23 @@ HOMOGENEOUS_ATTR_NAMES = (
 )
 
 
-def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+def _get_fsdp_root_states_with_modules(
+    module: nn.Module,
+) -> Tuple[List[_FSDPState], List[nn.Module]]:
     """
-    Returns all root ``_FSDPState`` instances in the module tree rooted at
-    ``module``.
+    Returns a tuple containing:
+    1. A list of the root ``_FSDPState`` instances in the module tree rooted at
+    ``module`` without any duplicates and following the ``module.modules()``
+    traversal order (which is assumed to be depth-first).
+    2. A corresponding list of the root modules owning the states in the first
+    list.
 
-    This is similar to :func:`_get_fsdp_states` except we must call
-    :func:`_is_fsdp_root` to force a lazy initialization to determine the FSDP
-    root in case lazy initialization has not yet happened.
+    This is similar to :func:`_get_fsdp_states_with_modules` except that we
+    must call :func:`_is_fsdp_root` to force a lazy initialization to determine
+    the FSDP root in case lazy initialization has not yet happened.
     """
     fsdp_root_states: List[_FSDPState] = []
+    fsdp_root_modules: List[nn.Module] = []
     visited_fsdp_states: Set[_FSDPState] = set()
     # NOTE: This function assumes that `module.modules()` proceeds top-down.
     for submodule in module.modules():
@@ -74,6 +81,13 @@ def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
         ):
             visited_fsdp_states.add(optional_state)
             fsdp_root_states.append(optional_state)
+            fsdp_root_modules.append(submodule)
+    return fsdp_root_states, fsdp_root_modules
+
+
+def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+    """See :func:`_get_fsdp_root_states_with_modules`."""
+    fsdp_root_states, _ = _get_fsdp_root_states_with_modules(module)
     return fsdp_root_states
 
 
@@ -172,7 +186,10 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
     """
     cpu_device = torch.device("cpu")
     for handle in traversal_utils._get_fsdp_handles(module):
-        if not handle._offload_params and handle.flat_param.device != state.compute_device:
+        if (
+            not handle._offload_params
+            and handle.flat_param.device != state.compute_device
+        ):
             raise RuntimeError(
                 "An FSDP-managed module unexpectedly has parameters on "
                 f"{handle.flat_param.device}. Make sure to move the module to "
@@ -402,9 +419,7 @@ def _pre_forward(
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
     if state.mixed_precision.cast_forward_inputs:
-        args, kwargs = _cast_forward_inputs(
-            input_dtype, *args, **kwargs
-        )
+        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
 
@@ -527,16 +542,16 @@ def _root_pre_forward(
     # Prepares the forward inputs by moving them to ``compute_device``
     # TODO: Do not use the side stream for tensor copies for now; investigate
     # the perf with/without it.
-    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, state.compute_device.index, False)
+    args_tuple, kwargs_tuple = _to_kwargs(
+        args, kwargs, state.compute_device.index, False
+    )
     args = args_tuple[0]
     kwargs = kwargs_tuple[0]
 
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
 
     if state.mixed_precision.cast_root_forward_inputs:
-        args, kwargs = _cast_forward_inputs(
-            input_dtype, *args, **kwargs
-        )
+        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
 
