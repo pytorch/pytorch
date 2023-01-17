@@ -62,6 +62,10 @@ class Node(abc.ABC):
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
 
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
         Example::
 
             >>> import torch
@@ -89,12 +93,15 @@ class Node(abc.ABC):
 
             hook(grad_outputs: Tuple[Tensor]) -> Tuple[Tensor] or None
 
-
         The hook should not modify its argument, but it can optionally return
         a new gradient which will be used in place of :attr:`grad_outputs`.
 
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
+
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
 
         Example::
 
@@ -306,6 +313,10 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     The hook should not modify its arguments.
 
     This function returns a handle with a method ``handle.remove()`` that removes the hook.
+
+    .. note::
+        See :ref:`backward-hooks-execution` for more information on how when this hook
+        is executed, and how its execution is ordered relative to other hooks.
 
     Example::
 
