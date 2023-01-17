@@ -63,10 +63,9 @@ class AdamW(Optimizer):
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
         foreach (bool, optional): whether foreach implementation of optimizer is used.
-            Since the foreach implementation is usually significantly faster than
-            the for-loop implementation on CUDA, we try to use it whenever possible
-            (all parameters are on CUDA). Else, we continue with the for-loop
-            implementation. (default: None)
+            If unspecified by the user (so foreach is None), we will try to use foreach
+            over the for-loop implementation on CUDA, since it is usually significantly 
+            more performant. (default: None)
         capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
