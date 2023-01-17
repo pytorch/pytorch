@@ -24,8 +24,7 @@
 #include <cfloat>
 #include <cmath>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -271,4 +270,3 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
 }
 
 }// at::native
-}// at
