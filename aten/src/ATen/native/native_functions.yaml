@@ -5020,6 +5020,27 @@
   device_check: NoCheck
   device_guard: False
 
+- func: sym_size.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: canonical
+  manual_cpp_binding: True
+
+- func: sym_numel(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: canonical
+  manual_cpp_binding: True
+
+- func: sym_storage_offset(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: canonical
+  manual_cpp_binding: True
+
 - func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5274,6 +5295,13 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+
+- func: sym_stride.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: canonical
+  manual_cpp_binding: True
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6804,6 +6832,7 @@
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
+    SparseCPU, SparseCUDA: sparse_coo_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.sparse_dim_out
 
