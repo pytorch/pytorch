@@ -4,7 +4,6 @@ from torch._C import _functions
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
-from torch.autograd.grad_mode import _DecoratorContextManager
 import functools
 import warnings
 from collections import OrderedDict
