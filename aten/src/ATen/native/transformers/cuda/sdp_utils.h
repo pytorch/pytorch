@@ -153,12 +153,12 @@ inline bool check_for_nested_inputs(sdp_params params, bool debug){
 }
 
 inline bool check_requires_grad(sdp_params params, bool debug) {
-  bool subclassedTensors =
+  bool any_tensors_are_subclass =
       at::areAnyTensorSubclassLike({params.query, params.key, params.value});
-  const bool inputs_require_grad = params.query.requires_grad() ||
+  const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((inputs_require_grad && gradmode_enabled) || subclassedTensors) {
+  if ((any_inputs_require_grad && gradmode_enabled) || any_tensors_are_subclass) {
     if (debug) {
       TORCH_WARN("Flash Attention does not currently support training.");
     }
