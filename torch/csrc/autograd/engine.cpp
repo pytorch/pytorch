@@ -753,6 +753,16 @@ static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
   return inputs;
 }
 
+static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
+  for (const auto& hook : fn.tensor_pre_hooks()) {
+    inputs = (*hook)(inputs);
+  }
+  for (const auto& hook : fn.retains_grad_hooks()) {
+    inputs = (*hook)(inputs);
+  }
+  return inputs;
+}
+
 static variable_list call_post_hooks(
     Node& fn,
     variable_list outputs,
@@ -881,8 +891,8 @@ static variable_list call_function(
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
-      call_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
-
+      call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
+  inputs = call_pre_hooks(fn, std::move(inputs));
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
@@ -941,12 +951,23 @@ void Engine::evaluate_function(
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
+    variable_list new_inputs = inputs.buffer;
+    if (!fn_info.needed_) {
+      // We always want to call tensor pre-hooks, but want to avoid calling it
+      // twice. needed_ = True indicates that we will call tensor pre-hooks
+      // later.
+      //
+      // See NOTE [Hooks ordering] for more context.
+      new_inputs = call_tensor_pre_hooks(
+          *func, InputBuffer::variables(std::move(inputs)));
+    }
     if (auto* capture_vec = fn_info.captures_.get()) {
+      const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
-        captured_grad = inputs[capture.input_idx_];
+        captured_grad = new_inputs[capture.input_idx_];
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
