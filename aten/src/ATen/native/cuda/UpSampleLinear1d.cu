@@ -19,8 +19,7 @@
 #include <ATen/ops/upsample_linear1d_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
@@ -228,5 +227,4 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, align_corners, scales);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
