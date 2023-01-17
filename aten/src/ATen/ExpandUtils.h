@@ -16,11 +16,14 @@
 #include <functional>
 #include <sstream>
 #include <tuple>
+#include <utility>
 
 namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
 TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
+TORCH_API SymDimVector
+infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b);
 
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -479,7 +482,7 @@ inline Tensor sum_to(
     Tensor tensor,
     const c10::SymIntArrayRef shape,
     bool always_return_non_view = false) {
-  return _sum_to(tensor, shape, always_return_non_view);
+  return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
@@ -488,7 +491,7 @@ inline Tensor sum_to(
     Tensor tensor,
     const IntArrayRef shape,
     bool always_return_non_view = false) {
-  return _sum_to(tensor, shape, always_return_non_view);
+  return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
 static inline bool is_expandable_to(
@@ -500,8 +503,8 @@ static inline bool is_expandable_to(
     return false;
   }
   for (const auto i : c10::irange(ndim)) {
-    auto size = shape[ndim - i - 1];
-    auto target = desired[target_dim - i - 1];
+    const auto& size = shape[ndim - i - 1];
+    const auto& target = desired[target_dim - i - 1];
     if (size != target && size != 1) {
       return false;
     }

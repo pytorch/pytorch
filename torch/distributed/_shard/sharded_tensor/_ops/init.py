@@ -11,16 +11,16 @@ def validate_param(param, param_name):
 @_sharded_op_impl(torch.nn.init.uniform_)
 def uniform_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the Tensor in sharded_tensor.local_shards with values drawn from the uniform
+    Fills the Tensor in tensor.local_shards with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
     Args:
-        sharded_tensor: tensor sharded across devices
+        tensor: tensor sharded across devices
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
-    validate_param(sharded_tensor, "sharded_tensor")
+    validate_param(sharded_tensor, "tensor")
     a = kwargs['a']
     validate_param(a, "a")
     b = kwargs['b']
@@ -33,16 +33,16 @@ def uniform_(types, args=(), kwargs=None, pg=None):
 @_sharded_op_impl(torch.nn.init.normal_)
 def normal_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the Tensors in sharded_tensor.local_shards with values drawn from the normal
+    Fills the Tensors in tensor.local_shards with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
     Args:
-        sharded_tensor: tensor sharded across devices
+        tensor: tensor sharded across devices
         mean: the mean of the normal distribution
         std: the standard deviation of the normal distribution
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
-    validate_param(sharded_tensor, "sharded_tensor")
+    validate_param(sharded_tensor, "tensor")
     mean = kwargs['mean']
     validate_param(mean, "mean")
     std = kwargs['std']
@@ -55,7 +55,7 @@ def normal_(types, args=(), kwargs=None, pg=None):
 @_sharded_op_impl(torch.nn.init.kaiming_uniform_)
 def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the Tensors in sharded_tensor.local_shards with values according to the method
+    Fills the Tensors in tensor.local_shards with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
     uniform distribution. The resulting tensor will have values sampled from
@@ -64,7 +64,7 @@ def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
         \text{bound} = \text{gain} \times \sqrt{\frac{3}{\text{fan\_mode}}}
     Also known as He initialization.
     Args:
-        sharded_tensor: tensor sharded across devices
+        tensor: tensor sharded across devices
         a: the negative slope of the rectifier used after this layer (only
             used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
@@ -76,7 +76,7 @@ def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
-    validate_param(sharded_tensor, "sharded_tensor")
+    validate_param(sharded_tensor, "tensor")
     a = kwargs['a']
     validate_param(a, "a")
     mode = kwargs['mode']
@@ -93,12 +93,12 @@ def constant_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the input ShardedTensor with the value \text{val}val.
     Args:
-        sharded_tensor: tensor sharded across devices
+        tensor: tensor sharded across devices
         val: the value to fill the tensor with
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
-    validate_param(sharded_tensor, "sharded_tensor")
+    validate_param(sharded_tensor, "tensor")
     val = kwargs['val']
     validate_param(val, "val")
     for shard in sharded_tensor.local_shards():

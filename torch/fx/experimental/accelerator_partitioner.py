@@ -1,5 +1,6 @@
 import operator
-from typing import Dict, List, Set, NamedTuple, Tuple
+from collections import deque
+from typing import Dict, List, Set, NamedTuple, Tuple, Deque
 
 import torch
 from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
@@ -118,7 +119,7 @@ def set_parents_and_children(partitions: List[Partition]) -> None:
 
 
 def reorganize_partitions(partitions: List[Partition]) -> None:
-    """Given a list of partitions, reorganzie partiton id,
+    """Given a list of partitions, reorganize partition id,
     its parents and its children for each partition
     """
     # Rearrange partition ids
@@ -275,9 +276,9 @@ def check_dependency(partition):
     this partition using bfs
     """
     visited: Set[Partition] = set([partition])
-    queue: List[Partition] = [partition]
+    queue: Deque[Partition] = deque([partition])
     while queue:
-        p = queue.pop(0)
+        p = queue.popleft()
         for child in p.children:
             if child == partition:
                 return True
@@ -641,7 +642,7 @@ class Partitioner:
         ) -> None:
             """Combining small partitions together to keep as less partitions as possible.
             Here is an example of the algorithm to do this:
-            Assume some partitions, we first sort them based on partiiton used memory size.
+            Assume some partitions, we first sort them based on partition used memory size.
             [(partition_4, 1), (partition_3, 1), (partition_2, 2), (partition_1, 7), (partition_0, 9)]
             The available memory is 10.
             step 1: self.find_partition_to_combine_based_on_size()
@@ -696,7 +697,7 @@ class Partitioner:
             return find_combination, partitions
 
         def reset_partition_in_sparse_nn(partition, new_partition=True):
-            """If crossing the boudary between non-embedding nodes and
+            """If crossing the boundary between non-embedding nodes and
             embedding nodes, create a new partition
             """
             if in_embedding_region:
@@ -723,7 +724,7 @@ class Partitioner:
                         return True
             return False
 
-        # Track embedding partitons and non-embedding partitions separately
+        # Track embedding partitions and non-embedding partitions separately
         embedding_partitions: List[Partition] = []
         non_embedding_partitions: List[Partition] = []
         # A Flag to check the boundary
@@ -803,7 +804,7 @@ class Partitioner:
         The cost is the total latency of running the whole fx module.
         In partitioner_utils.py, the cost model is built.
         The cost aware partition algorithm is:
-        #1. At every begining, each node is a partition.
+        #1. At every beginning, each node is a partition.
             Then we map all the partitions to the devices
             and calculate the cost
         #2. Then try to pre-combine any two of the partitions if the two
@@ -863,7 +864,7 @@ class Partitioner:
             1. Go through all the partition pairs and see
             if any pair of partitions can be combined.
             2. Calculate the cost after the combination.
-            3. Select the minimum cost and combine its cooresponding partition pair.
+            3. Select the minimum cost and combine its corresponding partition pair.
             """
             partition_to_latency_mapping = get_partition_to_latency_mapping(
                 self.partitions, node_to_latency_mapping
@@ -928,8 +929,8 @@ class Partitioner:
         the swapping.
         For example, we have nodes n0, n1, n2, n3 and n4.
         Using size_based_partition, n0 and n1 are in Partition p0.
-        n2, n3 and n4 in Partition p1. The current cost is esimated.
-        We first tried using n0 to swap with n2 from the other partiton.
+        n2, n3 and n4 in Partition p1. The current cost is estimated.
+        We first tried using n0 to swap with n2 from the other partition.
         Then we see that swapping n0 and n2 shows a lower cost
         than the current cost and it is the minimum among other pairs like
         (n0, None)(This means moving n0 to Partition without swapping other nodes),

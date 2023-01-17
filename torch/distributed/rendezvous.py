@@ -1,9 +1,9 @@
 try:
     from urllib.parse import urlparse, urlunparse
-except ImportError:
+except ImportError as e:
     raise ImportError(
         "urllib cannot be found, urlparse from python2 is no longer supported."
-    )
+    ) from e
 
 import numbers
 import os

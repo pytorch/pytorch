@@ -35,7 +35,7 @@ from torch.autograd.gradcheck import gradcheck
 
 from typing import List
 
-RUN_NVFUSER = RUN_CUDA
+RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
@@ -143,7 +143,7 @@ class TestCudaFuser(JitTestCase):
         disabled_ops = ("aten::batch_norm",
                         "aten::_batch_norm_impl_index",
                         "aten::_batch_norm_impl_index_backward",
-                        "aten::native_batch_norm_backward")
+                        "aten::native_batch_norm_backward",)
         for op in disabled_ops:
             disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
             if disabled_flag:
@@ -5197,8 +5197,18 @@ class TestEnableDisableCudaFuser(JitTestCase):
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_nvfuser_enabled(False)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCM test only")
+    def test_register_fuser_rocm(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
+
     def test_can_be_enabled_nvfuser(self):
-        expected = RUN_CUDA
+        if TEST_WITH_ROCM:
+            expected = False
+        else:
+            expected = RUN_CUDA
 
         self.assertEqual(expected, torch._C._jit_nvfuser_can_be_enabled())
 

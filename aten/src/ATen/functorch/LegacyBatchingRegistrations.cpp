@@ -144,38 +144,50 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
   return result;
 }
 
-Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
+Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return self.squeeze_(dim);
+    return self.squeeze_(dims);
   }
   auto* batched = maybeGetBatchedImpl(self);
   const auto bdim = batched->bdim();
   auto logical_dim = self.dim();
 
-  // If logically a scalar tensor, then Tensor.squeeze_(dim) is a no-op
   if (logical_dim == 0) {
+    TORCH_CHECK(
+        dims.size() == 0 || (dims.size() == 1 && dims[0] == 0),
+        "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
     return self;
   }
 
-  dim = maybe_wrap_dim(dim, logical_dim);
-  if (dim >= bdim) {
-    dim = dim + 1;
-    batched->value().squeeze_(dim);
-    batched->refreshTensorMetadata();
-    return self;
+  // Adjust any dimensions higher than the batch dimension
+  DimVector adjusted_dims(dims.begin(), dims.end());
+  int64_t updated_batch_idx = bdim;
+  for (auto &d : adjusted_dims) {
+    auto actual_dim = c10::maybe_wrap_dim(d, logical_dim);
+    if (actual_dim < bdim) {
+      d = actual_dim;
+      if (batched->value().sym_size(actual_dim) == 1) {
+        // A column before batch dimension will be dropped so adjust accordingly.
+        --updated_batch_idx;
+      }
+    } else {
+      // Since dimension to be squeezed is after the batch dimension adjust by one to account
+      // for the original batch dimension. In this case batch dimension won't move.
+      d = actual_dim + 1;
+    }
   }
 
-  // Tensor.squeeze_(0) is a no-op if dim 0 has a size other than 1
-  if (batched->value().size(dim) != 1) {
-    return self;
+  batched->value().squeeze_(adjusted_dims);
+  if (updated_batch_idx != bdim) {
+    batched->unsafe_set_bdim(updated_batch_idx);
   }
-
-  // dim < bdim, so we need to adjust bdim
-  batched->value().squeeze_(dim);
-  batched->unsafe_set_bdim(bdim - 1);
   batched->refreshTensorMetadata();
   return self;
+}
+
+Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
+  return squeeze_dims__batching_rule(self, {dim});
 }
 
 Tensor& squeeze__batching_rule(Tensor& self) {
@@ -733,8 +745,8 @@ Tensor new_empty_strided_batching_rule(
     optional<Device> device,
     optional<bool> pin_memory) {
 
-  auto size = c10::asIntArrayRefSlow(sym_size);
-  auto stride = c10::asIntArrayRefSlow(sym_stride);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
+  auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.new_empty_strided(
@@ -816,6 +828,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c needs special inplace rules
   m.impl("squeeze_", squeeze__batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
+  m.impl("squeeze_.dims", squeeze_dims__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("transpose_", transpose__batching_rule);
 

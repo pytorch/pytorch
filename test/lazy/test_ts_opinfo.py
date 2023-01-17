@@ -71,20 +71,28 @@ def init_lists():
         'linalg_pinv.atol_rtol_tensor',
         'logsumexp',
     ])
+    # For some ops, we don't support all variants. Here we use formatted_name
+    # to uniquely identify the variant.
+    SKIP_VARIANT_LIST = set([
+        'norm_nuc',
+        'min_reduction_with_dim'
+    ])
 
     return (LAZY_OPS_LIST,
             FALLBACK_LIST,
             SKIP_RUNTIME_ERROR_LIST,
             SKIP_INCORRECT_RESULTS_LIST,
             FUNCTIONAL_DECOMPOSE_LIST,
-            HAS_SYMINT_SUFFIX)
+            HAS_SYMINT_SUFFIX,
+            SKIP_VARIANT_LIST)
 
 (LAZY_OPS_LIST,
  FALLBACK_LIST,
  SKIP_RUNTIME_ERROR_LIST,
  SKIP_INCORRECT_RESULTS_LIST,
  FUNCTIONAL_DECOMPOSE_LIST,
- HAS_SYMINT_SUFFIX) = init_lists()
+ HAS_SYMINT_SUFFIX,
+ SKIP_VARIANT_LIST) = init_lists()
 
 torch.manual_seed(42)
 
@@ -166,6 +174,7 @@ class TestLazyOpInfo(TestCase):
           if op.name in LAZY_OPS_LIST
           and op.name not in SKIP_RUNTIME_ERROR_LIST
           and op.name not in FUNCTIONAL_DECOMPOSE_LIST
+          and op.formatted_name not in SKIP_VARIANT_LIST
           ], allowed_dtypes=(torch.float,))
     def test_dispatched_to_lazy(self, device, dtype, op):
         def get_name(op):

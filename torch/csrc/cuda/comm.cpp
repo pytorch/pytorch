@@ -180,12 +180,12 @@ tensor_list2d broadcast_coalesced(
 
   unique_type_checker type_checker;
   at::cuda::CUDAGuard device_guard(devices[0]);
-  for (auto& chunk : utils::take_tensors(tensors, buffer_size)) {
+  for (auto& chunk : torch::utils::take_tensors(tensors, buffer_size)) {
     auto type_id = chunk.type_id();
     type_checker.show(type_id);
     std::vector<at::Tensor> results;
     if (chunk.options().is_sparse()) {
-      auto flat_tuple = utils::flatten_sparse_tensors(chunk.tensors);
+      auto flat_tuple = torch::utils::flatten_sparse_tensors(chunk.tensors);
       auto broadcast_indices = broadcast(flat_tuple.first, devices);
       auto broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
@@ -194,20 +194,20 @@ tensor_list2d broadcast_coalesced(
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
-        for (const auto& var :
-             utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
+        for (const auto& var : torch::utils::unflatten_sparse_tensors(
+                 inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
-      auto results =
-          broadcast(utils::flatten_dense_tensors(chunk.tensors), devices);
+      auto results = broadcast(
+          torch::utils::flatten_dense_tensors(chunk.tensors), devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         device_guard.set_index(devices[i]);
         auto& device_outputs = outputs[i];
         for (auto& var :
-             utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
+             torch::utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
@@ -218,7 +218,7 @@ tensor_list2d broadcast_coalesced(
   // If we only saw a single tensor type, then we can skip expensive reordering
   if (!type_checker.unique) {
     for (auto& o : outputs)
-      utils::reorder_tensors_like(o, tensors);
+      torch::utils::reorder_tensors_like(o, tensors);
   }
   return outputs;
 }

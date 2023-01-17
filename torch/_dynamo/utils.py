@@ -19,26 +19,31 @@ import re
 import sys
 import time
 import types
+import typing
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache
-from typing import Any, Dict
+from functools import lru_cache, wraps
+from typing import Any, Dict, List
 
-import numpy as np
-import sympy
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +66,7 @@ def tabulate(rows, headers):
 
 
 def dynamo_profiled(func):
+    @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         datafn = (
@@ -81,13 +87,16 @@ def dynamo_profiled(func):
 
 
 def dynamo_timed(func):
+    @wraps(func)
     def time_wrapper(*args, **kwargs):
         key = func.__qualname__
         if key not in compilation_metrics:
             compilation_metrics[key] = []
         t0 = time.time()
         r = func(*args, **kwargs)
-        compilation_metrics[key].append(time.time() - t0)
+        latency = time.time() - t0
+        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+        compilation_metrics[key].append(latency)
         return r
 
     return time_wrapper
@@ -275,31 +284,51 @@ def istype(obj, allowed_types):
     return type(obj) is allowed_types
 
 
+def is_typing(value):
+    if sys.version_info < (3, 9):
+        return isinstance(value, typing._GenericAlias)
+    else:
+        return isinstance(value, typing._SpecialGenericAlias)
+
+
 def is_numpy_int_type(value):
-    return istype(
-        value,
-        (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        )
+    else:
+        return False
 
 
 def is_numpy_float_type(value):
-    return istype(
-        value,
-        (
-            np.float16,
-            np.float32,
-            np.float64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.float16,
+                np.float32,
+                np.float64,
+            ),
+        )
+    else:
+        return False
+
+
+def is_numpy_ndarray(value):
+    if HAS_NUMPY:
+        return istype(value, np.ndarray)
+    else:
+        return False
 
 
 def istensor(obj):
@@ -309,8 +338,7 @@ def istensor(obj):
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
-    if fake_tensors_available:
-        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
     return istype(obj, tensor_list)
 
 
@@ -339,13 +367,13 @@ def proxy_args_kwargs(args, kwargs):
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
-    except NotImplementedError:
+    except NotImplementedError as e:
         from .exc import unimplemented
         from .variables.base import typestr
 
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        )
+        ) from e
 
 
 @dataclasses.dataclass
@@ -389,7 +417,24 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    # TODO: this is questionable
+    if isinstance(x, torch._subclasses.FakeTensor):
+        # this func fails on fake tensors in __torch_dispatch__
+        return x
+
+    def torch_clone(x):
+        y = torch.clone(x)
+        if x.is_leaf:
+            y.requires_grad_(x.requires_grad)
+        if x.is_leaf and x.grad is not None:
+            y.grad = clone_input(x.grad)
+        return y
+
     with torch.no_grad():
+        if x.device.type == "xla":
+            # Access data_ptr() for a xla tensor will cause crash
+            return torch_clone(x)
+
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
@@ -411,12 +456,7 @@ def clone_input(x):
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            y = torch.clone(x)
-            if x.is_leaf:
-                y.requires_grad_(x.requires_grad)
-            if x.is_leaf and x.grad is not None:
-                y.grad = clone_input(x.grad)
-            return y
+            return torch_clone(x)
         return result
 
 
@@ -672,88 +712,26 @@ def rename_implicit(v):
     return v
 
 
-# FakeTensors were introduced after pytorch 1.12, so gate their use
-# to allow pytorch 1.12 to work
-fake_tensors_available = True
-try:
-    from torch._subclasses import (  # noqa: F401
-        FakeTensorMode,
-        UnsupportedFakeTensorException,
-    )
+from torch._subclasses import (  # noqa: F401
+    FakeTensorMode,
+    UnsupportedFakeTensorException,
+)
 
-    def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
-        fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
-        if tx is not None:
-            from torch._dynamo.guards import TensorReference
 
-            def _record(tensor_ref):
-                if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
+def wrap_fake_exception(fn):
+    try:
+        return fn()
+    except UnsupportedFakeTensorException as e:
+        from .exc import unimplemented
 
-            def _extract(symbol):
-                if isinstance(symbol, int):
-                    return None
-                sym_expr = symbol.get_pyobj().expr
-                if not isinstance(sym_expr, sympy.Symbol):
-                    return None
-                return sym_expr
+        msg = f"Unsupported: {e.reason} with fake tensor propagation."
+        log.warning(msg)
+        raise unimplemented(msg) from e
 
-            def _record_ref(e, index, symbol, kind):
-                sym_expr = _extract(symbol)
-                if sym_expr:
-                    tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                    _record(tensor_ref)
 
-            for index, symbol in enumerate(fake_tensor.size()):
-                _record_ref(e, index, symbol, "size")
-
-            for index, symbol in enumerate(fake_tensor.stride()):
-                _record_ref(e, index, symbol, "stride")
-
-            offset = fake_tensor.storage_offset()
-            _record_ref(e, None, offset, "storage_offset")
-
-        return fake_tensor
-
-    def wrap_fake_exception(fn):
-        try:
-            return fn()
-        except UnsupportedFakeTensorException as e:
-            from .exc import unimplemented
-
-            msg = f"Unsupported: {e.reason} with fake tensor propagation. Run with config.fake_tensor_propagation=False"
-            log.warning(msg)
-            raise unimplemented(msg)
-
-    def wrap_to_fake_tensor(e, fake_mode):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(
-                lambda: make_fake_tensor(
-                    e, fake_mode, static_shapes=config.dynamic_shapes is False
-                )
-            )
-        else:
-            return e
-
-    def wrap_to_fake_tensor_and_record(e, tx):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            static_shapes = config.dynamic_shapes is False
-            if type(e) is torch.nn.Parameter:
-                # Always static for params
-                static_shapes = True
-            return wrap_fake_exception(
-                lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
-            )
-        else:
-            return e
-
-    def deepcopy_to_fake_tensor(obj, fake_mode):
-        with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
-            return wrap_fake_exception(lambda: copy.deepcopy(obj))
-
-except ImportError:
-    fake_tensors_available = False
+def deepcopy_to_fake_tensor(obj, fake_mode):
+    with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
+        return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
 def rmse(ref, res):
@@ -771,6 +749,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    relax_numpy_equality=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -778,7 +757,16 @@ def same(
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         return len(ref) == len(res) and all(
-            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            same(
+                ai,
+                bi,
+                fp64_refi,
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+                relax_numpy_equality,
+            )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif isinstance(ref, dict):
@@ -796,19 +784,25 @@ def same(
                     tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
+                    relax_numpy_equality=relax_numpy_equality,
                 )
             ):
                 log.error(f"Accuracy failed for key name {k}")
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
+        assert not isinstance(ref, torch._subclasses.FakeTensor)
+        assert not isinstance(res, torch._subclasses.FakeTensor)
+
         if ref.is_sparse:
             assert res.is_sparse
             ref = ref.to_dense()
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype != res.dtype:
+                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
                 return torch.allclose(
@@ -825,10 +819,10 @@ def same(
                 # early exit that handles zero/nan better
                 # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
                 return True
-            res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
-            if res < 0.99:
-                log.warning(f"Similarity score={res.cpu().detach().item()}")
-            return res >= 0.99
+            score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
+            if score < 0.99:
+                log.warning(f"Similarity score={score.cpu().detach().item()}")
+            return score >= 0.99
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
@@ -843,15 +837,18 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
-                if fp64_ref.numel() < 1000 or (
-                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                if (
+                    fp64_ref.numel() < 1000
+                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                    or tol >= 2 * 1e-2
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-4)
+                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
@@ -865,7 +862,11 @@ def same(
     elif isinstance(ref, float):
         return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
+        if relax_numpy_equality:
+            ref = ref.item()
         return (type(ref) is type(res)) and (ref == res)
+    elif is_numpy_ndarray(ref):
+        return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -889,6 +890,7 @@ def same(
                 tol=tol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                relax_numpy_equality=relax_numpy_equality,
             )
             for key in ref.__dict__.keys()
         )
@@ -1016,7 +1018,11 @@ def get_fake_value(node, tx):
     from .exc import TorchRuntimeError, unimplemented, Unsupported
 
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def fake_wrapper(e):
+        if isinstance(e, torch.Tensor):
+            assert isinstance(e, FakeTensor)
+        return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
@@ -1045,13 +1051,20 @@ def get_fake_value(node, tx):
     except Unsupported:
         raise
     except RuntimeError as e:
-        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+        cause = e
+        if e.__cause__ is not None:
+            cause = e.__cause__
+        if isinstance(
+            cause, torch._subclasses.fake_tensor.DataDependentOutputException
+        ):
             if config.capture_scalar_outputs and node.target == "item":
                 return torch.zeros(size=(), dtype=args[0].dtype).item()
             else:
-                unimplemented(f"data dependent operator: {e.func}")
-        elif isinstance(e, torch._subclasses.fake_tensor.DynamicOutputShapeException):
-            unimplemented(f"dynamic shape operator: {e.func}")
+                unimplemented(f"data dependent operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
+        ):
+            unimplemented(f"dynamic shape operator: {cause.func}")
         raise TorchRuntimeError() from e
 
 
@@ -1081,6 +1094,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
@@ -1120,3 +1136,41 @@ def get_real_value(node, output_graph):
     except RuntimeError as e:
         raise TorchRuntimeError() from e
     return real_value
+
+
+def assert_no_fake_params_or_buffers(gm):
+    from torch._subclasses.fake_tensor import FakeTensorConfig
+
+    def stack_or_hint(t):
+        if FakeTensorConfig.debug:
+            import traceback
+
+            return f"FAKE TENSOR CREATION TRACEBACK: \n {traceback.format_list(t._debug_trace)}"
+        else:
+            return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
+    for name, buffer in gm.named_buffers():
+        assert not isinstance(
+            buffer, torch._subclasses.FakeTensor
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+    for name, param in gm.named_parameters():
+        assert not isinstance(
+            param, torch._subclasses.FakeTensor
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
+
+
+def fake_mode_from_tensors(inputs: List[Any]):
+    """
+    Takes a list of anything, unflattened is fine, returns a fake_mode
+    if any are fake. All fake modes on all fake tensors must be identical.
+    Returns None if no fake_mode is fine
+    """
+    flat_inputs, _ = tree_flatten(inputs)
+    fake_mode = None
+    for flat_input in flat_inputs:
+        if isinstance(flat_input, torch._subclasses.FakeTensor):
+            if fake_mode is None:
+                fake_mode = flat_input.fake_mode
+            else:
+                assert fake_mode is flat_input.fake_mode
+    return fake_mode

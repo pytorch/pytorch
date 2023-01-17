@@ -6,9 +6,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/mkldnn/Common.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
   static FunctionSchemaMap<NNCLoweringFunction> lowering_registry_;
@@ -1747,7 +1745,7 @@ int nnc_lowerings_lazy_registration() {
               int64_t i = 0;
               for (const auto& a : axes) {
                 if (i++ != dim) {
-                  indices.emplace_back(ExprHandle(a.node()));
+                  indices.emplace_back(a.node());
                 }
               }
 
@@ -2000,6 +1998,4 @@ NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
   return nullptr;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

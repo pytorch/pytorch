@@ -161,7 +161,7 @@ class ExtraCUDACopyPattern(Pattern):
     def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Extra CUDA Copy Pattern"
-        self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
+        self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initialize it on GPU."
         self.url = "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#create-tensors-directly-on-the-target-device"
         self.init_ops = {
             "aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"
@@ -300,9 +300,12 @@ class FP32MatMulPattern(Pattern):
 
     @property
     def skip(self):
-        # Anything less than sm_80 is not Ampere which doesn't support TF32
-        has_tf32 = all(
-            int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
+        if torch.version.hip is not None:
+            has_tf32 = False
+        else:
+            # Anything less than sm_80 is not Ampere which doesn't support TF32
+            has_tf32 = all(
+                int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
         return has_tf32 is False or super().skip or not self.prof.record_shapes
 
     def match(self, event: _ProfilerEvent):

@@ -249,5 +249,6 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):
         raise RuntimeError(f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}")
+    new_graph._codegen = gm.graph._codegen
     gm.graph = new_graph
     return gm

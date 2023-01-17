@@ -1,9 +1,11 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include <caffe2/torch/csrc/jit/backends/xnnpack/executor/xnn_executor.h>
 #include <xnnpack.h>
 #include <memory>
-#include <string>
 #include <vector>
 
 namespace torch {
@@ -16,7 +18,10 @@ class XNNCompiler {
   // Takes Flatbuffer Serialized XNNPack Model and rebuilds the xnn-subgraph
   // returns an executor object that holds the xnn runtime object which we
   // can then use to set inputs and run inference using the xnn graph.
-  static XNNExecutor compileModel(std::string ser_model);
+  static void compileModel(
+      const void* buffer_pointer,
+      size_t num_bytes,
+      XNNExecutor* executor);
 };
 
 } // namespace delegate

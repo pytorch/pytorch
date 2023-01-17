@@ -18,7 +18,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
@@ -42,29 +42,33 @@ SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
+VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
+VersionMap = Dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
-CUDA_GCC_VERSIONS = {
-    '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
-    '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 2, 1)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 2, 1)),
-    '11.4': ((6, 0, 0), (11, 5, 0)),
-    '11.5': ((6, 0, 0), (11, 5, 0)),
-    '11.6': ((6, 0, 0), (11, 5, 0)),
-    '11.7': ((6, 0, 0), (11, 5, 0)),
+# Or from include/crt/host_config.h in the CUDA SDK
+# The second value is the exclusive(!) upper bound, i.e. min <= version < max
+CUDA_GCC_VERSIONS: VersionMap = {
+    '11.0': (MINIMUM_GCC_VERSION, (10, 0)),
+    '11.1': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.2': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.3': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.4': ((6, 0, 0), (12, 0)),
+    '11.5': ((6, 0, 0), (12, 0)),
+    '11.6': ((6, 0, 0), (12, 0)),
+    '11.7': ((6, 0, 0), (12, 0)),
 }
 
-CUDA_CLANG_VERSIONS = {
-    '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (9, 0, 0)),
-    '11.2': ((6, 0, 0), (9, 0, 0)),
-    '11.3': ((6, 0, 0), (11, 0, 0)),
-    '11.4': ((6, 0, 0), (11, 0, 0)),
-    '11.5': ((6, 0, 0), (12, 0, 0)),
-    '11.6': ((6, 0, 0), (12, 0, 0)),
-    '11.7': ((6, 0, 0), (13, 0, 0)),
+MINIMUM_CLANG_VERSION = (3, 3, 0)
+CUDA_CLANG_VERSIONS: VersionMap = {
+    '11.1': (MINIMUM_CLANG_VERSION, (11, 0)),
+    '11.2': (MINIMUM_CLANG_VERSION, (12, 0)),
+    '11.3': (MINIMUM_CLANG_VERSION, (12, 0)),
+    '11.4': (MINIMUM_CLANG_VERSION, (13, 0)),
+    '11.5': (MINIMUM_CLANG_VERSION, (13, 0)),
+    '11.6': (MINIMUM_CLANG_VERSION, (14, 0)),
+    '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
 }
 
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
@@ -388,20 +392,19 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             _is_binary_build()):
         return
 
-    cuda_compiler_bounds = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
+    cuda_compiler_bounds: VersionMap = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
     if cuda_str_version not in cuda_compiler_bounds:
         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
-        min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
-        # Special case for 11.4.0, which has lower compiler bounds that 11.4.1
+        min_compiler_version, max_excl_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        # Special case for 11.4.0, which has lower compiler bounds than 11.4.1
         if "V11.4.48" in cuda_version_str and cuda_compiler_bounds == CUDA_GCC_VERSIONS:
-            max_compiler_version = (10, 0, 0)
+            max_excl_compiler_version = (11, 0)
         min_compiler_version_str = '.'.join(map(str, min_compiler_version))
-        max_compiler_version_str = '.'.join(map(str, max_compiler_version))
+        max_excl_compiler_version_str = '.'.join(map(str, max_excl_compiler_version))
 
-        version_bound_str = f'>={min_compiler_version_str}'
-        version_bound_str = f'{version_bound_str}, <={max_compiler_version_str}'
+        version_bound_str = f'>={min_compiler_version_str}, <{max_excl_compiler_version_str}'
 
         if compiler_version < TorchVersion(min_compiler_version_str):
             raise RuntimeError(
@@ -409,10 +412,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version_str}). '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
-        if compiler_version > TorchVersion(max_compiler_version_str):
+        if compiler_version >= TorchVersion(max_excl_compiler_version_str):
             raise RuntimeError(
                 f'The current installed version of {compiler_name} ({compiler_version}) is greater '
-                f'than the maximum required version by CUDA {cuda_str_version} ({max_compiler_version_str}). '
+                f'than the maximum required version by CUDA {cuda_str_version}. '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
 
@@ -426,7 +429,7 @@ class BuildExtension(build_ext, object):
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
-    minimum required compiler flags (e.g. ``-std=c++14``) as well as mixed
+    minimum required compiler flags (e.g. ``-std=c++17``) as well as mixed
     C++/CUDA compilation (and support for CUDA files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
@@ -530,12 +533,12 @@ class BuildExtension(build_ext, object):
         else:
             original_compile = self.compiler._compile
 
-        def append_std14_if_no_std_present(cflags) -> None:
+        def append_std17_if_no_std_present(cflags) -> None:
             # NVCC does not allow multiple -std to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
             cpp_format_prefix = '/{}:' if self.compiler.compiler_type == 'msvc' else '-{}='
             cpp_flag_prefix = cpp_format_prefix.format('std')
-            cpp_flag = cpp_flag_prefix + 'c++14'
+            cpp_flag = cpp_flag_prefix + 'c++17'
             if not any(flag.startswith(cpp_flag_prefix) for flag in cflags):
                 cflags.append(cpp_flag)
 
@@ -580,7 +583,7 @@ class BuildExtension(build_ext, object):
                     cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
-                append_std14_if_no_std_present(cflags)
+                append_std17_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -629,7 +632,7 @@ class BuildExtension(build_ext, object):
                 post_cflags = list(extra_postargs)
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
-            append_std14_if_no_std_present(post_cflags)
+            append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
             cuda_cflags = None
@@ -644,7 +647,7 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS + cuda_post_cflags
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
-                append_std14_if_no_std_present(cuda_post_cflags)
+                append_std17_if_no_std_present(cuda_post_cflags)
                 cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
                 cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
@@ -780,7 +783,7 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
-            append_std14_if_no_std_present(post_cflags)
+            append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
             cuda_cflags = None
@@ -907,6 +910,7 @@ def CppExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
@@ -954,6 +958,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
@@ -1001,14 +1006,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
-        >>> # xdoctest: +SKIP
-        >>> #include <ATen/ATen.h>
-        >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
+        #include <ATen/ATen.h>
+        at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
-        >>> # xdoctest: +SKIP
-        >>> #include <torch/extension.h>
-        >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
+        #include <torch/extension.h>
+        torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
     Currently open issue for nvcc bug: https://github.com/pytorch/pytorch/issues/69460
     Complete workaround code example: https://github.com/facebookresearch/pytorch3d/commit/cb170ac024a949f1f9614ffe6af1c38d972f7d48
@@ -1032,6 +1035,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> CUDAExtension(
         ...        name='cuda_extension',
         ...        sources=['extension.cpp', 'extension_kernel.cu'],
@@ -1078,8 +1082,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
         hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
-            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
-                                 hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            hipified_s_abs = (hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
+                              hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
+            # *never* absolute paths
+            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
 
         sources = list(hipified_sources)
 
@@ -1357,6 +1364,7 @@ def load_inline(name,
             causes issues.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from torch.utils.cpp_extension import load_inline
         >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
@@ -1989,7 +1997,7 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
@@ -2008,7 +2016,7 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
-                cuda_flags.append('-std=c++14')
+                cuda_flags.append('-std=c++17')
             if os.getenv("CC") is not None:
                 cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
     else:
@@ -2140,7 +2148,7 @@ def _write_ninja_file(path,
         # --generate-dependencies-with-compile was added in CUDA 10.2.
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
-        required_cuda_version = packaging.version.parse('10.2')
+        required_cuda_version = packaging.version.parse('11.0')
         has_cuda_version = torch.version.cuda is not None
         if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')

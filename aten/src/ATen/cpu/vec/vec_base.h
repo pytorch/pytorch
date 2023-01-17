@@ -807,6 +807,14 @@ template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const
   return c;
 }
 
+template <class T> Vectorized<T> inline operator>>(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = a[i] >> b[i];
+  }
+  return c;
+}
+
 template <typename T>
 inline Vectorized<T>& operator += (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a + b;
@@ -836,6 +844,12 @@ inline Vectorized<T>& operator *= (Vectorized<T>& a, const Vectorized<T>& b) {
 template <typename T>
 inline Vectorized<T>& operator <<= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a << b;
+  return a;
+}
+
+template <typename T>
+inline Vectorized<T>& operator >>= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a >> b;
   return a;
 }
 
@@ -998,6 +1012,29 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
+  }
+}
+
+template <typename T>
+inline Vectorized<T> flip(const Vectorized<T> & data) {
+  static constexpr int size = Vectorized<T>::size();
+  T output[size];
+  T buffer[size];
+  data.store(static_cast<void*>(buffer));
+  for (const auto i : c10::irange(size)) {
+    output[i] = buffer[size - i - 1];
+  }
+  return Vectorized<T>::loadu(static_cast<void*>(output));
+}
+
+// Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
+// dimension of `src` and `ld_dst` is the leading dimension of `dst`.
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      dst[j*ld_dst + i] = src[i*ld_src + j];
+    }
   }
 }
 

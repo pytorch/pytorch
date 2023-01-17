@@ -119,7 +119,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   explicit SequentialImpl(std::initializer_list<NamedAnyModule> named_modules) {
     modules_.reserve(named_modules.size());
     for (const auto& named_module : named_modules) {
-      // NOLINTNEXTLINE(performance-move-const-arg)
       push_back(
           std::move(named_module.name()), std::move(named_module.module()));
     }
@@ -386,7 +385,6 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
   /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
   /// It enables the following use case:
   /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
-  // NOLINTNEXTLINE(performance-move-const-arg)
   Sequential(std::initializer_list<NamedAnyModule> named_modules)
       : ModuleHolder(
             std::make_shared<SequentialImpl>(std::move(named_modules))) {}

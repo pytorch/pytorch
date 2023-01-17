@@ -18,6 +18,7 @@
 #endif
 
 #include <algorithm>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -134,7 +135,7 @@ class QSigmoid final {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid(qx, output_scale, output_zero_point);
+    return qnnpack_sigmoid(std::move(qx), output_scale, output_zero_point);
   }
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
