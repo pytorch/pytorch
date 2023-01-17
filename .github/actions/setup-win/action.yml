@@ -92,5 +92,10 @@ runs:
           Add-Content "$PS_PROFILE" "Set-Alias -Name python3 -Value $PYTHON"
         }
 
-        # Reload the profile to update the path
-        . "$PS_PROFILE" -ErrorAction "SilentlyContinue"
+        try {
+          # Reload the profile to update the path
+          . "$PS_PROFILE"
+        } catch {
+          # Print the current error but don't fail the step
+          Write-Host "Error while reloading PowerShell profile: $_"
+        }
