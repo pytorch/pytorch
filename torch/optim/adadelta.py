@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_foreach,
-                        _differentiable_doc, _foreach_doc, maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
@@ -167,7 +167,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
 
-    """.format(foreach=_foreach_doc, maximize=maximize_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def adadelta(

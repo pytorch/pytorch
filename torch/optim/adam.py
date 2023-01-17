@@ -3,7 +3,7 @@ from typing import cast, List, Optional, Dict
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        _dispatch_sqrt, _capturable_doc, _differentiable_doc, maximize_doc)
+                        _dispatch_sqrt, _capturable_doc, _differentiable_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
@@ -279,7 +279,7 @@ Adam.__doc__ = r"""Implements Adam algorithm.
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
-    """.format(maximize=maximize_doc, capturable=_capturable_doc, differentiable=_differentiable_doc)
+    """.format(maximize=_maximize_doc, capturable=_capturable_doc, differentiable=_differentiable_doc)
 
 
 def adam(params: List[Tensor],

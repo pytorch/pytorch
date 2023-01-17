@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
-                        _differentiable_doc, maximize_doc)
+                        _differentiable_doc, _maximize_doc)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -157,7 +157,7 @@ ASGD.__doc__ = r"""Implements Averaged Stochastic Gradient Descent.
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
 
-    """.format(maximize=maximize_doc, differentiable=_differentiable_doc)
+    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def asgd(
