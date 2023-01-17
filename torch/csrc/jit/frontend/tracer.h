@@ -179,8 +179,9 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
-  // NOLINTNEXTLINE(*-member-init, *.cplusplus.UninitializedObject)
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
+    // NOLINTNEXTLINE(*.cplusplus.UninitializedObject)
     if (state) {
       prev = state->warn;
       state->warn = false;
