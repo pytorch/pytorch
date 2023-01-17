@@ -26,20 +26,5 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-
-          if [[ -z "${CONDA_RUN:-}" ]]; then
-            # If no conda has been setup, try to use system python
-            python3 -m pip install requests==2.26.0
-            GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          else
-            # Windows miniconda, unfortunately, doesn't have a python3 binary, but
-            # its python is python3
-            if ${CONDA_RUN} which python3; then
-              PYTHON=python3
-            else
-              PYTHON=python
-            fi
-
-            GHA_WORKFLOW_JOB_ID=$(${CONDA_RUN} ${PYTHON} .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          fi
-          echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"
+          python3 -m pip install requests==2.26.0
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")

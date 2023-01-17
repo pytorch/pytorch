@@ -36,3 +36,33 @@ runs:
       shell: powershell
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
+
+    - name: Setup conda
+      shell: bash
+      run: |
+        # Windows conda is baked into the AMI at this location
+        CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
+
+        {
+          echo "CONDA_RUN=${CONDA} run --no-capture-output";
+          echo "CONDA_BUILD=${CONDA} run conda-build";
+          echo "CONDA_INSTALL=${CONDA} install";
+        } >> "${GITHUB_ENV}"
+
+    - name: Make conda Python available as Python3
+      shell: powershell
+      run: |
+        $Env:PATH += ";C:\Jenkins\Miniconda3"
+        # Add conda path to the powershell profile to make it persistent
+        Add-Content "$PSHOME\Microsoft.PowerShell_profile.ps1" '$Env:PATH += ";C:\Jenkins\Miniconda3"'
+
+        # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3 installation,
+        # which is Python 3 based. Its Python is default to Python 3. As an additional note, there is also
+        # Miniconda installation that is Python 2 based, and both can be installed if needed
+        If ((Get-Command python3).Source -eq "") {
+          $PYTHON = (Get-Command python).Source
+          Add-Content "$PSHOME\Microsoft.PowerShell_profile.ps1" "Set-Alias -Name python3 -Value $PYTHON"
+        }
+
+        # Reload the profile to update the path
+        . "$PsHome\Microsoft.PowerShell_profile.ps1"

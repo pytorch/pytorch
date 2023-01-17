@@ -28,40 +28,10 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
-      name: Setup dependencies
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-      with:
-        shell: bash
-        timeout_minutes: 10
-        max_attempts: 5
-        retry_wait_seconds: 30
-        command: |
-          set -eux
-
-          if [[ -z "${CONDA_RUN:-}" ]]; then
-            # If no conda has been setup, try to use system python
-            python3 -m pip install requests==2.26.0 pyyaml==6.0
-          else
-            # Windows miniconda, unfortunately, doesn't have a python3 binary, but
-            # its python is python3
-            if ${CONDA_RUN} which python3; then
-              echo "PYTHON=python3" >> "${GITHUB_ENV}"
-            else
-              echo "PYTHON=python" >> "${GITHUB_ENV}"
-            fi
-          fi
-
     - name: Parse ref
       shell: bash
       id: parse-ref
-      run: |
-        if [[ -z "${CONDA_RUN:-}" ]]; then
-          .github/scripts/parse_ref.py
-        else
-          ${CONDA_RUN} ${PYTHON} .github/scripts/parse_ref.py
-        fi
+      run: .github/scripts/parse_ref.py
 
     - name: Select all requested test configurations
       shell: bash
@@ -69,26 +39,12 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       id: filter
       run: |
-        if [[ -z "${CONDA_RUN:-}" ]]; then
-          .github/scripts/filter_test_configs.py \
-            --test-matrix "${{ inputs.test-matrix }}" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --tag "${{ steps.parse-ref.outputs.tag }}" \
-            --event-name "${{ github.event_name }}" \
-            --schedule "${{ github.event.schedule }}"
-        else
-          # Replace new lines in the test matrix JSON with space. The JSON structure remains
-          # the same. This is needed becaue Windows conda is rather dumb and breaks the command
-          # at new lines
-          TEST_MATRIX=$(echo "${{ inputs.test-matrix }}" | tr "\n" " ")
-
-          ${CONDA_RUN} ${PYTHON} .github/scripts/filter_test_configs.py \
-            --test-matrix "$TEST_MATRIX" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --tag "${{ steps.parse-ref.outputs.tag }}" \
-            --event-name "${{ github.event_name }}" \
-            --schedule "${{ github.event.schedule }}"
-        fi
+        .github/scripts/filter_test_configs.py \
+          --test-matrix "${{ inputs.test-matrix }}" \
+          --pr-number "${{ github.event.pull_request.number }}" \
+          --tag "${{ steps.parse-ref.outputs.tag }}" \
+          --event-name "${{ github.event_name }}" \
+          --schedule "${{ github.event.schedule }}"
 
     - name: Print the filtered test matrix
       shell: bash
