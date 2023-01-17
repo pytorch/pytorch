@@ -160,6 +160,7 @@ xfail_not_implemented = {
     "aten::less_equal_.Scalar",
     "aten::less_equal_.Tensor",
     "aten::linalg_cond.p_str",
+    "aten::linalg_eigh",
     "aten::linalg_eigh.eigvals",
     "aten::linalg_ldl_factor",
     "aten::linalg_lu_factor",
@@ -168,6 +169,7 @@ xfail_not_implemented = {
     "aten::linalg_matrix_rank.atol_rtol_tensor",
     "aten::linalg_matrix_rank.out_tol_tensor",
     "aten::linalg_matrix_rank.tol_tensor",
+    "aten::linalg_pinv",
     "aten::linalg_pinv.atol_rtol_float",
     "aten::linalg_pinv.out_rcond_tensor",
     "aten::linalg_pinv.rcond_tensor",
@@ -317,6 +319,7 @@ xfail_not_implemented = {
     "aten::var_mean.names_dim",
     "aten::where",
     "aten::where.Scalar",
+
 }
 
 
