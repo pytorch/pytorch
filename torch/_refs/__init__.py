@@ -5114,13 +5114,12 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
-@register_decomposition(aten.geometric)
+@register_decomposition(aten.cauchy)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-@register_decomposition(aten.cauchy)
 def cauchy(self, median=0, gamma=1, generator=None):
     assert generator is None
     return median + gamma * torch.tan(math.pi * (torch.rand_like(self) - 0.5))
