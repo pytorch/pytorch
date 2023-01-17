@@ -64,12 +64,13 @@ functorch.make_functional
 `functorch.make_functional <https://pytorch.org/functorch/1.13/generated/functorch.make_functional.html#functorch.make_functional>`_
 and
 `functorch.make_functional_with_buffers <https://pytorch.org/functorch/1.13/generated/functorch.make_functional_with_buffers.html#functorch.make_functional_with_buffers>`_.
+However, it is not a drop-in replacement.
 
 If you're in a hurry, you can use
 `helper functions in this gist <https://gist.github.com/zou3519/7769506acc899d83ef1464e28f22e6cf>`_
 that emulate the behavior of functorch.make_functional and functorch.make_functional_with_buffers.
-However, we recommend using :func:`torch.func.functional_call` directly because
-it is a more explicit API.
+We recommend using :func:`torch.func.functional_call` directly because it is a more explicit
+and flexible API.
 
 Concretely, functorch.make_functional returns a functional module and parameters.
 The functional module accepts parameters and inputs to the model as arguments.
@@ -138,6 +139,17 @@ And here's an example of how to compute jacobians of model parameters::
     # We set it to 1 to compute jacobians of params
     jacobians = jacrev(functional_call, argnums=1)(model, params, (inputs,))
 
+Note that it is important for memory consumption that you should only carry
+around a single copy of your parameters. ``model.named_parameters()`` does not copy
+the parameters. If in your model training you update the parameters of the model
+in-place, then the ``nn.Module`` that is your model has the single copy of the
+parameters and everything is OK.
+
+However, if you want to carry your parameters around in a dictionary and update
+them out-of-place, then there are two copies of parameters: the one in the
+dictionary and the one in the ``model``. In this case, you should change
+``model`` to not hold memory by converting it to the meta device via
+``model.to('meta')``.
 
 functorch.combine_state_for_ensemble
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -168,7 +180,13 @@ For example, here is an example of how to ensemble over a very simple model::
     # ------------------------------------
     # using torch.func (as of PyTorch 2.0)
     # ------------------------------------
-    base_model = models[0]
+    import copy
+
+    # Construct a version of the model with no memory by putting the Tensors on
+    # the meta device.
+    base_model = copy.deepcopy(models[0])
+    base_model.to('meta')
+
     params, buffers = torch.func.stack_module_state(models)
 
     # It is possible to vmap directly over torch.func.functional_call,
