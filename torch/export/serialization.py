@@ -85,6 +85,8 @@ class ExportInterpreter(Interpreter):
             ex_gm.parameters = "Skipped"
             ex_gm.buffers = "Skipped"
 
+        self.ex_sub_gm = {}
+
         self.ex_graph = ex_graph = ex_gm.graph
         ex_graph.inputs = []
         ex_graph.outputs = []
@@ -102,19 +104,23 @@ class ExportInterpreter(Interpreter):
 
     def _export_arg(self, arg: Any) -> ex.Argument:
 
-        def handle_fx_node(arg) -> Union[ex.TensorArgument, ex.SymIntArgument]:
+        def handle_fx_node(arg) -> Union[ex.TensorArgument, ex.SymIntArgument, ex.GraphModule]:
             assert isinstance(arg, torch.fx.Node)
             name = arg.name
             if name in self.ex_graph.symint_values:
                 return ex.SymIntArgument(name = name)
+            elif name in self.ex_sub_gm:
+                # graph module
+                return self.ex_sub_gm[name]
             else:
                 return ex.TensorArgument(name = name)
-
 
         if isinstance(arg, torch.fx.Node):
             ex_arg = handle_fx_node(arg)
             if isinstance(ex_arg, ex.SymIntArgument):
                 return ex.Argument(as_symint=ex_arg)
+            elif isinstance(ex_arg, ex.GraphModule):
+                return ex.Argument(as_gm=ex_arg)
             elif isinstance(ex_arg, ex.TensorArgument):
                 return ex.Argument(as_tensor=ex_arg)
 
@@ -155,6 +161,16 @@ class ExportInterpreter(Interpreter):
                     )
                 else:
                     raise RuntimeError(f"List of fx nodes have different arg types")
+
+            elif isinstance(arg, list):
+                assert len(arg) == 1, "This is the case for torch.cond"
+                operands = arg[0]
+                assert all(isinstance(operand, torch.fx.Node) for operand in operands), "All operands should be fx nodes"
+
+                ex_args = [handle_fx_node(a) for a in operands]
+
+                return ex.Argument(as_tensors = ex_args)
+
             else:
                 raise RuntimeError(f"Unsupported list/tuple argument type: {type(arg)}")
         else:
@@ -202,6 +218,17 @@ class ExportInterpreter(Interpreter):
         fx_node = self.current_node
         # special handling for multiple return values
 
+        if target is torch.ops.cond:
+            true_fn = args[1]
+            false_fn = args[2]
+            operands = args[3]
+
+            ex_true_gm = export_graphmodule(true_fn, operands)
+            ex_false_gm = export_graphmodule(false_fn, operands)
+
+            self.ex_sub_gm[fx_node.args[1].name] = ex_true_gm
+            self.ex_sub_gm[fx_node.args[2].name] = ex_false_gm
+
         def get_result_type(result: Any) -> str:
             if isinstance(result, torch.Tensor):
                 return "Tensor"
@@ -230,7 +257,6 @@ class ExportInterpreter(Interpreter):
                     output_fake_tensors[user_node.name] = user_node.meta.get("val", None)
             else:
                 output_fake_tensors[fx_node.name] = fx_node.meta.get("val", None)
-
 
             for name, fake_tensor in output_fake_tensors.items():
                 ivalue = ex.IValue(
@@ -299,13 +325,16 @@ class ExportInterpreter(Interpreter):
         result = super().output(target, args, kwargs)
 
         assert len(args) > 0, "output node should have at least one arg"
-        assert isinstance(result, (tuple, list)), type(result)
 
-        fx_node = self.current_node
-        assert len(fx_node.args) == 1, "fx_node's args should have one arg"
-        node_args = fx_node.args[0]
+        node_args = self.current_node.args
 
-        self.ex_graph.outputs = [ex.TensorArgument(name = str(arg)) for arg in node_args]
+        if  len(node_args) == 1 and isinstance(node_args[0], (tuple, list)):
+            # Dynamo is always returning a list of tensor, even if there is only one output
+            assert all(isinstance(arg, torch.fx.Node) for arg in node_args[0])
+            self.ex_graph.outputs = [ex.TensorArgument(name = str(arg)) for arg in node_args[0]]
+        else:
+            assert all(isinstance(arg, torch.fx.Node) for arg in node_args)
+            self.ex_graph.outputs = [ex.TensorArgument(name = str(arg)) for arg in node_args]
 
         # don't need to add them to ivalue, as they should been added in the producer node
 
@@ -313,3 +342,11 @@ class ExportInterpreter(Interpreter):
         # metadata = export_node_meta(self.current_node.meta),
 
         return result
+
+
+
+def export_graphmodule(gm: torch.fx.GraphModule, args, kwargs = {}) -> ex.GraphModule:
+    exporter = ExportInterpreter(gm)
+    exporter.run(*args)
+    return exporter.ex_gm
+

@@ -1,6 +1,6 @@
 import torch
 import torch._dynamo
-from torch.export.serialization import ExportInterpreter
+from torch.export.serialization import export_graphmodule
 from typing import List
 from torch.fx.experimental.proxy_tensor import make_fx
 from functorch.experimental.control_flow import cond, map
@@ -29,15 +29,10 @@ class ConditionOp(torch.nn.Module):
 
 
 model = ConditionOp().cuda()
-# gm, guard = torch._dynamo.export(model, *model.inp, aten_graph=True, tracing_mode="symbolic")
-gm = make_fx(model, tracing_mode="symbolic")(*model.inp)
+gm, guard = torch._dynamo.export(model, *model.inp, aten_graph=True, tracing_mode="symbolic")
 
-
-gm.graph.print_tabular()
+# gm.graph.print_tabular()
 gm.print_readable()
 
-exporter = ExportInterpreter(gm)
-exporter.run(*model.inp)
-
-pp.pprint(exporter.ex_gm)
-
+ex_gm = export_graphmodule(gm, model.inp)
+pp.pprint(ex_gm)
