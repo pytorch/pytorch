@@ -43,7 +43,7 @@ class NVFuserEnabler {
 
  public:
   static bool nvfuserCanBeEnabled() {
-#if defined(FBCODE_CAFFE2)
+#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     return false;
 #endif
     return at::globalContext().hasCUDA() &&
