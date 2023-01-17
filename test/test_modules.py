@@ -2,6 +2,7 @@
 
 from itertools import product
 from inspect import signature, isgenerator
+from collections import OrderedDict
 from copy import deepcopy
 import tempfile
 from operator import methodcaller
@@ -716,6 +717,34 @@ class TestModule(TestCase):
                                     "for this ModuleInfo entry.")
                 else:
                     raise e
+
+    def test_setattr_respects_property_setters(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, bar=None):
+                super().__init__()
+                self._bar = bar
+
+            @property
+            def bar(self):
+                return self._bar
+
+            @bar.setter
+            def bar(self, bar):
+                self._bar = bar
+
+        foo = Foo()
+        # Assigning a module with a property setter.
+        module_value = torch.nn.Module()
+        foo.bar = module_value
+        self.assertIs(foo.bar, module_value)
+        self.assertEqual(foo._modules, OrderedDict([("_bar", module_value)]))
+        # Assigning a parameter.
+        param_value = torch.nn.Parameter(torch.ones(2))
+        foo.bar = param_value
+        self.assertIs(foo.bar, param_value)
+        self.assertEqual(foo._parameters, OrderedDict([("_bar", param_value)]))
+        self.assertEqual(foo._modules, OrderedDict())
+
 
 instantiate_device_type_tests(TestModule, globals())
 
