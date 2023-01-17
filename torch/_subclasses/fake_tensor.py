@@ -48,8 +48,8 @@ class DataDependentOutputException(RuntimeError):
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
-    aten._nested_tensor_from_tensor_list.default,
-    aten._nested_tensor_from_tensor_list.out,
+    # aten._nested_tensor_from_tensor_list.default,
+    # aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
     aten.is_pinned.default,
     aten.to.device,
@@ -225,6 +225,8 @@ class FakeTensorConverter(object):
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
+        # if t.is_nested:
+        #     raise UnsupportedFakeTensorException("nested nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
@@ -450,6 +452,11 @@ def index_put_(fake_mode, func, *args, **kwargs):
     )
 
     return new_kwargs["input"]
+
+
+@register_op_impl(aten._nested_tensor_from_tensor_list.default)
+def nested_constructor(fake_mode, func, *args, **kwargs):
+    raise UnsupportedFakeTensorException("nested nyi in fake tensors")
 
 
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
@@ -769,6 +776,9 @@ class FakeTensorMode(TorchDispatchMode):
             torch.ops.aten.is_coalesced.default,
             torch.ops.aten.dense_dim.default,
             torch.ops.aten.sparse_dim.default,
+            torch.ops.aten._nested_tensor_size.default,
+            torch.ops.aten._nested_tensor_strides.default,
+            torch.ops.aten._nested_tensor_offsets_tensor.default,
         }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
@@ -782,6 +792,9 @@ class FakeTensorMode(TorchDispatchMode):
         )
 
         converter = self.fake_tensor_converter
+
+        if any([arg.is_nested if torch.is_tensor(arg) else False for arg in args]):
+            raise UnsupportedFakeTensorException("nested nyi with fake tensors")
 
         # If this is a lift, the input tensor is guaranteed to be a
         # constant, so we keep a copy of the original argument along so

@@ -33,13 +33,16 @@ class TensorCheck {
         requires_grad_(state.grad_mode_enabled && v.requires_grad()),
         dynamic_shapes_(dynamic_shapes) {
     auto ndim = v.ndimension();
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
-    sizes_.reserve(ndim);
-    strides_.reserve(ndim);
-    for (auto i : c10::irange(ndim)) {
-      sizes_.emplace_back(sizes[i]);
-      strides_.emplace_back(strides[i]);
+    // FIXME: add path for nested
+    if (!v.is_nested()) {
+      const auto& sizes = v.sizes();
+      const auto& strides = v.strides();
+      sizes_.reserve(ndim);
+      strides_.reserve(ndim);
+      for (auto i : c10::irange(ndim)) {
+        sizes_.emplace_back(sizes[i]);
+        strides_.emplace_back(strides[i]);
+      }
     }
   }
 
