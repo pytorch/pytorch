@@ -326,4 +326,14 @@ std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& o
   return result;
 }
 
+std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(const Scalar& self, TensorList exponent) {
+  check_foreach_api_restrictions(exponent);
+  std::vector<Tensor> result;
+  result.reserve(exponent.size());
+  for (const auto & t : exponent) {
+    result.emplace_back(at::pow(self, t));
+  }
+  return result;
+}
+
 }} // namespace at::native

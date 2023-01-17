@@ -8403,6 +8403,13 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
+    ForeachFuncInfo(
+        "pow",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+    ),
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
