@@ -9,6 +9,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
@@ -502,11 +503,6 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ntensors = self_ptr->size(0);
   TORCH_CHECK_INDEX(ntensors > 0, "You can only select when the NT is not empty.");
   int64_t ndims = static_cast<long>(sizes[0].size());
-  TORCH_CHECK(
-    positive_dim == 0 || positive_dim == 1,
-    "NestedTensor can only be selected along dimension 0 or 1",
-    "got dimension ", dim, " instead."
-  );
   if (positive_dim == 0) {
     TORCH_CHECK_INDEX(
         index >= -ntensors && index < ntensors,
@@ -534,13 +530,16 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
           size_ptr[dim_idx] = sizes[i][j];
           stride_ptr[dim_idx] = strides[i][j];
           ++dim_idx;
-        }
-        else {
+        } else {
           TORCH_CHECK_INDEX(
               index >= 0 && index < sizes[i][j],
               "index ",
               index,
-              " is out of bounds for irregular dimension 1 with size ",
+              " is out of bounds for dimension ",
+              j,
+              " of the ",
+              i,
+              "th constituent tensor with size ",
               sizes[i][j]);
           new_offsets[i] = offsets[i] + index * strides[i][j];
         }
@@ -684,35 +683,51 @@ Tensor squeeze_nested(const Tensor& self) {
   return self;
 }
 
-Tensor squeeze_dim_nested(const Tensor& self, int64_t dim) {
+Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
   auto self_ptr = get_nested_tensor_impl(self);
   int64_t ndim = self_ptr->dim();
-  int64_t wrapped_dim = at::maybe_wrap_dim(dim, ndim);
-  TORCH_CHECK(wrapped_dim > 0,
+  auto mask = at::dim_list_to_bitset(dims, ndim);
+  TORCH_CHECK(!mask.test(0),
   "squeeze(): For nested tensors, squeezing dimension 0 is not supported at the moment ",
   "if you need this feature, please open an issue on github describing your use case.");
   const Tensor& sizemat = self_ptr->get_nested_size_tensor();
   const Tensor& stridemat = self_ptr->get_nested_stride_tensor();
   // if tensor.size(dim) != 1 torch.squeeze will return the result, we do the same here
-  c10::optional<int64_t> size_dim = self_ptr->opt_size(dim);
-  if (!(size_dim.has_value() && size_dim.value() == 1)) {
+  for (const auto d : c10::irange(ndim)) {
+    if (mask.test(d)) {
+      c10::optional<int64_t> size_dim = self_ptr->opt_size(d);
+      if (!(size_dim.has_value() && *size_dim == 1)) {
+        mask.reset(d);
+      }
+    }
+  }
+
+  if (!mask.any()) {
     // detach to avoid triggering throw_error_if_base_and_tensor_are_same
     return self.detach();
   }
   // if ndim == 2 and we pass the above if statement we should have a
   // nested tensor of singleton tensors
-  TORCH_CHECK(ndim != 2,
+  TORCH_CHECK(ndim > static_cast<int64_t>(1 + dims.size()),
   "squeeze(): For nested tensors, squeezing a nested tensor of singleton tensors is not ",
   "supported at the moment, if you need this feature, please open an issue on github",
   "describing your use case.");
-  auto column_indices = sizemat.new_empty(ndim - 2);
+  const auto new_ndim = ndim - mask.count();
+  auto column_indices = sizemat.new_empty(new_ndim - 1);
   int64_t* column_indices_ptr = column_indices.data_ptr<int64_t>();
-  std::iota(column_indices_ptr, column_indices_ptr + wrapped_dim - 1, 0);
-  std::iota(column_indices_ptr + wrapped_dim - 1, column_indices_ptr + ndim - 2, wrapped_dim);
+  for (const auto d : c10::irange(1, ndim)) {
+    if (!mask.test(d)) {
+      *column_indices_ptr++ = d - 1;
+    }
+  }
   auto sizemat_squeezed = at::index_select(sizemat, 1, column_indices);
   auto stridemat_squeezed = at::index_select(stridemat, 1, column_indices);
   return create_nested_view_tensor(
       self, sizemat_squeezed, stridemat_squeezed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+}
+
+Tensor squeeze_dim_nested(const Tensor& self, int64_t dim) {
+  return squeeze_dim_nested(self, IntArrayRef{dim});
 }
 
 Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {

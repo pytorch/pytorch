@@ -86,7 +86,7 @@ class ProxyableClassMeta(type):
             return mul
         '''
 
-    From this example, we can see that contruction of a class (``TensorPair``)
+    From this example, we can see that construction of a class (``TensorPair``)
     defined with ``ProxyableClassMeta`` as metaclass can be recorded in symbolic
     tracing.
     """
@@ -221,14 +221,14 @@ class Tracer(TracerBase):
                 without needing to use fx.wrap(). Backward-compatibility for
                 this parameter is guaranteed.
 
-            autowrap_function (Tuple[Callable, ...]): defaults to `()`,
+            autowrap_functions (Tuple[Callable, ...]): defaults to `()`,
                 Python functions that should be wrapped automatically without
-                needing to use fx.wrap(). Backward compabilibility for this
+                needing to use fx.wrap(). Backward compatibility for this
                 parameter is guaranteed.
 
             param_shapes_constant (bool): When this flag is set,  calls to shape,
                 size and a few other shape like attributes of a module's parameter
-                will be evaluted directly, rather than returning a new Proxy value
+                will be evaluated directly, rather than returning a new Proxy value
                 for an attribute access. Backward compatibility for this parameter
                 is guaranteed.
         """
@@ -451,7 +451,7 @@ class Tracer(TracerBase):
 
             attr (str): The name of the attribute being queried
             attr_val (Any): The value of the attribute
-            parametr_proxy_cache (Dict[str, Any]): A cache of attr names to proxies
+            parameter_proxy_cache (Dict[str, Any]): A cache of attr names to proxies
 
         Return:
 

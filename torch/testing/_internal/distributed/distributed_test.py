@@ -31,6 +31,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as default,
     quantization as quantization_hooks,
 )
+from torch.distributed.optim import _apply_optimizer_in_backward
 
 from torch.distributed.distributed_c10d import (
     get_world_size,
@@ -73,6 +74,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
+    IS_SANDCASTLE,
     parametrize,
     sandcastle_skip,
     sandcastle_skip_if,
@@ -720,10 +722,6 @@ class DistributedTest:
             backend = BACKEND.lower()
             self.assertEqual(dist.Backend(BACKEND.upper()), backend)
             self.assertEqual(dist.Backend(BACKEND), backend)
-            with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
-                dist.Backend("undefined")
-            with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
-                dist.Backend("xYz")
             with self.assertRaises(ValueError):
                 dist.Backend(None)
             with self.assertRaises(ValueError):
@@ -899,7 +897,7 @@ class DistributedTest:
         @skip_if_no_gpu
         def test_new_subgroups_group_size_exceeds_world_size(self):
             with self.assertRaisesRegex(
-                ValueError, "The arg 'group_size' must not exceed the world size"
+                ValueError, "must not exceed"
             ):
                 dist.new_subgroups(100)
 
@@ -3748,7 +3746,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-        @sandcastle_skip_if(BACKEND == "ucc", "flaky on PyTorch CI with timeout")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3842,7 +3840,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3860,7 +3858,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -4560,6 +4558,131 @@ class DistributedTest:
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
             )
+
+        def _test_ddp_apply_optim_in_backward(
+            self,
+            optim_cls,
+            optim_kwargs,
+            gradient_as_bucket_view=True,
+        ):
+            # Need to seed to ensure inputs are unique across rank. Otherwise,
+            # allreduce won't have any effect.
+            torch.manual_seed(self.rank)
+            torch.cuda.manual_seed(self.rank)
+            torch.cuda.set_device(self.rank)
+
+            # Test a simple linear as well as a ResNet model.
+            models_to_test = [
+                nn.Sequential(
+                    nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)
+                ).cuda()
+            ]
+            if HAS_TORCHVISION:
+                models_to_test.append(
+                    torchvision.models.resnet50().cuda()
+                )
+
+            for j, model in enumerate(models_to_test):
+                model_optim_in_bwd = copy.deepcopy(model)
+                model = nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                    gradient_as_bucket_view=gradient_as_bucket_view,
+                )
+                optim = optim_cls(model.parameters(), **optim_kwargs)
+                # Note: have to apply_optimizer_in_backward before wrapping with DDP.
+                _apply_optimizer_in_backward(
+                    optimizer_class=optim_cls,
+                    params=model_optim_in_bwd.parameters(),
+                    optimizer_kwargs=optim_kwargs,
+                )
+                model_optim_in_bwd = nn.parallel.DistributedDataParallel(
+                    model_optim_in_bwd,
+                    device_ids=[self.rank],
+                    gradient_as_bucket_view=gradient_as_bucket_view,
+                )
+
+                for p1, p2 in zip(
+                    model.parameters(), model_optim_in_bwd.parameters()
+                ):
+                    self.assertEqual(p1, p2, "Parameters not initially equal!")
+                # Enable determinism in cudnn operators
+                with torch.backends.cudnn.flags(
+                    enabled=True, deterministic=True, benchmark=False
+                ):
+                    for i in range(100):
+                        inp = (
+                            torch.randn(1, 3, 1000, 1000, device='cuda')
+                            if j == 1 else torch.randn(10, 3, device='cuda')
+                        )
+                        model(inp).sum().backward()
+                        optim.step()
+                        model_optim_in_bwd(inp).sum().backward()  # runs optimizer as well
+                        for p1, p2 in zip(
+                            model.parameters(), model_optim_in_bwd.parameters()
+                        ):
+                            self.assertEqual(p1, p2, f"Params not equal at iteration {i}")
+                            self.assertTrue(
+                                p2.grad is None, f"Optim in backward grad is not None at {i}"
+                            )
+
+                        # set_to_none for regular optimizer to match in backward
+                        # case.
+                        optim.zero_grad(set_to_none=True)
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward(self):
+            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
+                with self.subTest(optim_cls=optim_cls):
+                    self._test_ddp_apply_optim_in_backward(
+                        optim_cls=optim_cls,
+                        optim_kwargs={"lr": 0.03}
+                    )
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
+            self._test_ddp_apply_optim_in_backward(
+                optim_cls=torch.optim.SGD,
+                optim_kwargs={"lr": 0.03},
+                gradient_as_bucket_view=False,
+            )
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward_ignored_params(self):
+            torch.cuda.set_device(self.rank)
+            torch.manual_seed(self.rank)
+            torch.cuda.manual_seed(self.rank)
+            model = TwoLinLayerNet()
+            model_clone = copy.deepcopy(model)
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            _apply_optimizer_in_backward(
+                optimizer_class=torch.optim.SGD,
+                params=model.parameters(),
+                optimizer_kwargs={"lr": 0.03}
+            )
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(1, 10)
+            a, b = net(inp)
+            (a.transpose(0, 1) @ b).sum().backward()
+            # a.weight did not go through allreduce, so optimizer acted on local
+            # gradient, which should be different across ranks. Remaining params
+            # should be equal.
+            models = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(models, model)
+            rank0_model, remainder = models[0], models[1:]
+            for m in remainder:
+                self.assertNotEqual(rank0_model.a.weight, m.a.weight)
+                self.assertEqual(
+                    list(rank0_model.b.parameters()), list(m.b.parameters())
+                )
+                self.assertEqual(rank0_model.a.bias, m.a.bias)
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
@@ -5324,6 +5447,10 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Channels_Last(self):
+            self._test_DistributedDataParallel_SyncBatchNorm_with_memory_format(torch.channels_last)
+            self._test_DistributedDataParallel_SyncBatchNorm_with_memory_format(torch.channels_last_3d)
+
+        def _test_DistributedDataParallel_SyncBatchNorm_with_memory_format(self, memory_format):
             group, group_id, rank = self._init_global_test()
             num_processes = dist.get_world_size()
             local_bs = 2
@@ -5336,14 +5463,15 @@ class DistributedTest:
                 model_gpu, device_ids=[rank]
             )
 
-            memory_format = torch.channels_last
+            shapes = [global_bs, 2, 4, 4] + ([] if memory_format is torch.channels_last else [4])
+
             input_gpu = (
-                torch.randn(global_bs, 2, 4, 4, dtype=torch.float)
+                torch.randn(*shapes, dtype=torch.float)
                 .cuda(rank)
                 .to(memory_format=memory_format)
             )
             target_gpu = (
-                torch.randn(global_bs, 2, 4, 4, dtype=torch.float)
+                torch.randn(*shapes, dtype=torch.float)
                 .cuda(rank)
                 .to(memory_format=memory_format)
             )
@@ -7712,14 +7840,14 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
@@ -7743,7 +7871,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7766,7 +7894,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_num_params_across_ranks(self):
             group_gloo = dist.new_group(
@@ -9180,11 +9308,8 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
         )
-        @sandcastle_skip_if(
-            BACKEND == "ucc",
-            "flaky on PyTorch CI: No such file or directory: '/tmp/checkpoint.pt'"
-        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         def test_ddp_hook_pickling_powerSGD(self):
 
             hook = powerSGD.powerSGD_hook

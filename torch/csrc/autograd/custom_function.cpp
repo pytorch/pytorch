@@ -131,19 +131,23 @@ void _process_forward_mode_AD(
   for (const auto i : c10::irange(num_outputs)) {
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
+    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
+    bool is_differentiable =
+        (non_differentiable.count(out_tensor_impl) == 0 &&
+         isDifferentiableType(raw_outputs[i].value().scalar_type()));
     const auto& out_grad = forward_grads[i];
-    if (!out.defined()) {
+    if (!out.defined() || !is_differentiable) {
       TORCH_CHECK(
           !out_grad.defined(),
           "Function's jvp returned a gradient at position ",
           i,
           ", but "
-          " the corresponding forward output is not a differentiable Tensor");
+          " the corresponding forward output is not a differentiable Tensor."
+          "You should return None at that position instead.");
       continue;
     }
 
     TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
-    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
 
@@ -278,7 +282,7 @@ optional_variable_list _process_backward_mode_ad(
                          bool is_differentiable) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
-        if (is_input) {
+        if (is_input && !is_modified) {
           var = _view_as_self_with_no_grad(var);
         }
         return;

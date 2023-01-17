@@ -1308,7 +1308,7 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
         from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
 
     if self.type().dim() is None:
-        return _unimplemented("index_fill", "input rank not accesible")
+        return _unimplemented("index_fill", "input rank not accessible")
     self_dim = self.type().dim()
     dim_value = _parse_arg(dim, "i")
     unsqueezed_index = _unsqueeze_helper(
@@ -1638,7 +1638,7 @@ def args_have_same_dtype(args):
 # TODO(justinchuby): Delete these setters, users should set the vars directly.
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "remove its usage and avoid setting internal variables directly",
 )
 def _set_opset_version(opset_version: int):
@@ -1647,7 +1647,7 @@ def _set_opset_version(opset_version: int):
 
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "remove its usage and avoid setting internal variables directly",
 )
 def _set_operator_export_type(operator_export_type):
@@ -1658,7 +1658,7 @@ def _set_operator_export_type(operator_export_type):
 # onnx_shape_inference = True by default.
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "remove its usage and avoid setting internal variables directly",
 )
 def _set_onnx_shape_inference(onnx_shape_inference: bool):

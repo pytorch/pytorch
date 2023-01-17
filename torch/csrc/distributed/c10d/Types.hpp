@@ -8,22 +8,25 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Tensor.h>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10d {
 
 // Base class for supplementary data potentially needed by ReduceOps
 struct TORCH_API _SupplementBase : torch::CustomClassHolder {
-  virtual ~_SupplementBase() {}
+  virtual ~_SupplementBase() = default;
 };
 
 // Supplementary data specific to NCCL PREMUL_SUM
 // The point of use in ProcessGroupNCCL knows how to unpack it.
 struct NCCLPreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
-  std::vector<at::Tensor> tensor_factors;
+  at::Tensor tensor_factor;
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(std::vector<at::Tensor> f) : tensor_factors{std::move(f)} {}
+  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
+    TORCH_CHECK_EQ(tensor_factor.numel(), 1);
+  }
 };
 
 // Other ReduceOps that need different supplementary data can also
@@ -43,7 +46,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     UNUSED = 9
   };
 
-  ReduceOp() {}
+  ReduceOp() = default;
 
   ReduceOp(RedOpType op) : op_(op) {
     TORCH_INTERNAL_ASSERT(
@@ -60,7 +63,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     }
   }
 
-  // The heap resource supplement_, if it exists, is managed by a shared_ptr,
+  // The heap resource supplement_, if it exists, is managed by a c10::intrusive_ptr,
   // so constructors and operator= can be simple
   ReduceOp(const ReduceOp& other) :
     op_(other.op_), supplement_(other.supplement_) {}
@@ -82,6 +85,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     return *this == static_cast<std::uint8_t>(other);
   }
 
+  // todo(crcrpar): Handle `RedOpType::PREMUL_SUM` with its scaling factor.
   bool operator==(const ReduceOp& other) {
     return *this == other.op_;
   }

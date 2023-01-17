@@ -1,4 +1,7 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include <torch/csrc/jit/backends/xnnpack/serialization/schema_generated.h>
 #include <cstddef>
@@ -17,15 +20,18 @@ class XNNSerializer {
  public:
   // Constructors
   // initial buffersize of 1024 which will grow
-  // automatically
+  // automatically, constant buffer and buffer sizes initialized with dummy
+  // values as 0 index is reserved for non-constant tensors
   XNNSerializer() : XNNSerializer(1024) {}
 
   explicit XNNSerializer(size_t bufferSize)
       : _builder(bufferSize),
         _nodes(),
         _values(),
-        _constantBuffer(),
-        _bufferSizes() {}
+        _constantBuffer({CreateBuffer(
+            _builder,
+            {})}), // index 0 is reserved for non-const data
+        _bufferSizes({0}) {}
 
   // Serializing Nodes
 
@@ -43,7 +49,7 @@ class XNNSerializer {
       uint32_t xnn_datatype,
       size_t num_dims,
       std::vector<size_t> dims,
-      void* data,
+      size_t buffer_data_idx,
       uint32_t external_id,
       uint32_t flags,
       uint32_t id_out);
@@ -51,7 +57,14 @@ class XNNSerializer {
   // finish and serialize xnngraph returning serialized data
   std::string finishAndSerialize(
       std::vector<uint32_t> input_ids,
-      std::vector<uint32_t> output_ids);
+      std::vector<uint32_t> output_ids,
+      size_t num_extern_ids);
+
+  // decoupled data serialization with tensor values. This way constant tensor
+  // data can be referenced by multiple intermediate tensors. This call
+  // serializes the num_bytes of the data_ptr and returns the index it was
+  // placed in.
+  size_t serializeData(const uint8_t* data_ptr, size_t num_bytes);
 
  private:
   // xnnpack version we are serializing
@@ -61,10 +74,10 @@ class XNNSerializer {
   flatbuffers_fbsource::FlatBufferBuilder _builder;
 
   // Vector of the serialized xnnpack nodes
-  std::vector<flatbuffers_fbsource::Offset<Node>> _nodes;
+  std::vector<flatbuffers_fbsource::Offset<XNode>> _nodes;
 
   // Vector of the serialized xnnpack values
-  std::vector<flatbuffers_fbsource::Offset<Value>> _values;
+  std::vector<flatbuffers_fbsource::Offset<XValue>> _values;
 
   std::vector<flatbuffers_fbsource::Offset<Buffer>> _constantBuffer;
   std::vector<uint32_t> _bufferSizes;

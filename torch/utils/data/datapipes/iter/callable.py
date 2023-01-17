@@ -154,8 +154,8 @@ def _collate_helper(conversion, item):
             try:
                 import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
-            except Exception:
-                raise Exception("unable to import default collation function from the TorchArrrow")
+            except Exception as e:
+                raise Exception("unable to import default collation function from the TorchArrow") from e
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])
@@ -183,7 +183,9 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         collate_fn: Customized collate function to collect and combine data or a batch of data.
             Default function collates to Tensor(s) based on data type.
 
-    Example: Convert integer data to float Tensor
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Convert integer data to float Tensor
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
         ...     def __init__(self, start, end):
         ...         super(MyIterDataPipe).__init__()
@@ -203,7 +205,6 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
         ...
-        >>> # xdoctest: +SKIP
         >>> collated_ds = CollateIterDataPipe(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]

@@ -184,8 +184,8 @@ class PassManager:
             `this_before_that_pass_constraint` for example.
     """
 
-    passes: List[Callable] = []
-    constraints: List[Callable] = []
+    passes: List[Callable]
+    constraints: List[Callable]
     _validated: bool = False
 
     def __init__(
@@ -193,10 +193,8 @@ class PassManager:
         passes=None,
         constraints=None,
     ):
-        if passes:
-            self.passes = passes
-        if constraints:
-            self.constraints = constraints
+        self.passes = passes or []
+        self.constraints = constraints or []
 
     @classmethod
     def build_from_passlist(cls, passes):

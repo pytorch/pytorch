@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/native/ReduceOps.h>
@@ -22,7 +23,7 @@
 #include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 using namespace vec;
 
@@ -184,7 +185,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
         // NOLINTNEXTLINE(bugprone-argument-comment)
         /*identity=*/1);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
           iter,
           [=](scalar_t a, scalar_t b)
@@ -228,9 +229,6 @@ static void norm_kernel_tensor_iterator_impl(
     return;
   }
 
-  bool use_fast_path = is_reduce_lastdim(iter) && iter.dtype(0) == iter.input_dtype()
-      && (iter.input_dtype() == kFloat || iter.input_dtype() == kBFloat16);
-
   // In the dispatch code blocks below, reduction kernels accumulate results as
   // the type `acc_t`. When `scalar_t` is complex, `acc_t` is the downgraded
   // real number type. Otherwise, `acc_t` and `scalar_t` are the same type.
@@ -253,10 +251,17 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 2) {
-    if (use_fast_path) {
+    // If we can vectorize over the last dimension and the dtype
+    // of the output is the same as that of the input,
+    // then we go through the vectorised path.
+    if (is_reduce_lastdim(iter) &&
+        iter.dtype(0) == iter.input_dtype() &&
+        (iter.input_dtype() == kFloat ||
+         iter.input_dtype() == kDouble ||
+         iter.input_dtype() == kBFloat16)) {
       AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
         // use float as accumulate type for BFloat16
-        using acc_t = vec_scalar_t<scalar_t>;
+        using acc_t = at::opmath_type<scalar_t>;
         binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
           scalar_t* result_data = (scalar_t*)result_data_bytes;
           scalar_t* self_data = (scalar_t*)self_data_bytes;
@@ -333,20 +338,9 @@ static void and_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
-#if defined(CPU_CAPABILITY_ZVECTOR)
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
           return a & b;
         },
-#else
-        [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          Vectorized<uint8_t> c = Vectorized<uint8_t>();
-
-          for (decltype(c.size()) i = 0; i != Vectorized<uint8_t>::size(); i++) {
-            c[i] = (a[i] && b[i]) ? 1 : 0;
-          }
-          return c;
-        },
-#endif
         /*ident=*/true);
   } else {
     binary_kernel_reduce_vec(
@@ -380,20 +374,9 @@ static void or_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
-#if defined(CPU_CAPABILITY_ZVECTOR)
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
           return a | b;
         },
-#else
-        [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          Vectorized<uint8_t> c = Vectorized<uint8_t>();
-
-          for (decltype(c.size()) i = 0; i != Vectorized<uint8_t>::size(); i++) {
-            c[i] = (a[i] || b[i]) ? 1 : 0;
-          }
-          return c;
-        },
-#endif
         /*ident=*/false);
   } else {
     binary_kernel_reduce_vec(
@@ -514,4 +497,4 @@ REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
-}}  // namespace at::native
+}  // namespace at::native

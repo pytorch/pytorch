@@ -50,8 +50,6 @@ def make_unspec_cls(cls):
 UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
-unittest.expectedFailure(UnspecReproTests.test_batch_norm_act_unspec)
-
 
 @patch.object(torch._dynamo.config, "specialize_int_float", False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
@@ -67,6 +65,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 "b": xy,
                 "c": np_y[0][0] / 68,
                 "d": np_x.sum(),
+                "e": np_x + np_y,
             }, x + np_y.sum() + z
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
@@ -103,7 +102,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
-        self.assertTrue(same(res1, res2))
+        self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):
@@ -139,7 +138,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
@@ -223,6 +222,23 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
+
+    def test_specializing_numpy_float_in_control_flow(self):
+        # np.float is unspecialized by default,
+        # but it should be specialized when used in control flow.
+        def fn(x, y):
+            if y > 1.0:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        for t in [np.float16, np.float32, np.float64]:
+            y = t(1.23)
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
 
 
 if __name__ == "__main__":

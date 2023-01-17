@@ -15,8 +15,7 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/copysign.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -383,10 +382,13 @@ void logical_xor_kernel(TensorIterator& iter) {
 
 void rshift_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
-    cpu_kernel(iter,
-      [](scalar_t a, scalar_t b) -> scalar_t {
-        return a >> b;
-      });
+    cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return a >> b;
+        },
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a >> b;
+        });
   });
 }
 
@@ -1270,5 +1272,4 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

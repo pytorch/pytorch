@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 namespace detail {
 template <typename T>
@@ -178,7 +176,7 @@ void IRVerifier::visit(ForPtr v) {
 }
 
 void IRVerifier::visit(BlockPtr v) {
-  for (StmtPtr s : v->stmts()) {
+  for (const StmtPtr& s : v->stmts()) {
     if (s->get_parent() != v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }
@@ -204,6 +202,4 @@ void verify(ExprHandle e) {
   verify(e.node());
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

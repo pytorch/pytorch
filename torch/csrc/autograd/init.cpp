@@ -60,13 +60,14 @@ struct DisableAutocast {
 
 struct EnableTorchFunction {
   EnableTorchFunction()
-      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+      : old_(at::impl::PythonTorchFunctionTLS::get_disabled_state()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ENABLED);
   }
   ~EnableTorchFunction() {
-    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
-  bool old_;
+  at::impl::TorchFunctionDisabledState old_;
 };
 
 struct EnablePythonDispatcher {
@@ -279,8 +280,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   m.def("_supported_activities", []() {
     std::set<ActivityType> activities{ActivityType::CPU};
-#if defined(USE_KINETO) && !defined(LIBKINETO_NOCUPTI)
-    if (at::getNumGPUs() > 0 && !at::hasHIP()) {
+#if defined(USE_KINETO) && \
+    (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+    if (at::getNumGPUs() > 0) {
       activities.insert(ActivityType::CUDA);
     }
 #endif
@@ -343,7 +345,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_RestorePythonTLSSnapshot")
       .def(py::init<>());
 
-  // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
   py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
@@ -527,6 +528,26 @@ static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (GradMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -725,6 +746,8 @@ static PyObject* len_torch_dispatch_stack(
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
+    {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
+    {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,
      METH_NOARGS,

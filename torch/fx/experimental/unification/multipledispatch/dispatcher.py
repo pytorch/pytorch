@@ -121,6 +121,7 @@ class Dispatcher(object):
 
     def register(self, *types, **kwargs):
         """ register dispatcher with new implementation
+        >>> # xdoctest: +SKIP
         >>> f = Dispatcher('f')
         >>> @f.register(int)
         ... def inc(x):
@@ -172,6 +173,7 @@ class Dispatcher(object):
 
     def add(self, signature, func):
         """ Add new types/method pair to dispatcher
+        >>> # xdoctest: +SKIP
         >>> D = Dispatcher('add')
         >>> D.add((int, int), lambda x, y: x + y)
         >>> D.add((float, float), lambda x, y: x + y)
@@ -251,17 +253,17 @@ class Dispatcher(object):
         types = tuple([type(arg) for arg in args])
         try:
             func = self._cache[types]
-        except KeyError:
+        except KeyError as e:
             func = self.dispatch(*types)
             if not func:
                 raise NotImplementedError(
                     'Could not find signature for %s: <%s>' %
-                    (self.name, str_signature(types)))
+                    (self.name, str_signature(types))) from e
             self._cache[types] = func
         try:
             return func(*args, **kwargs)
 
-        except MDNotImplementedError:
+        except MDNotImplementedError as e:
             funcs = self.dispatch_iter(*types)
             next(funcs)  # burn first
             for func in funcs:
@@ -273,7 +275,7 @@ class Dispatcher(object):
             raise NotImplementedError(
                 "Matching functions for "
                 "%s: <%s> found, but none completed successfully" % (
-                    self.name, str_signature(types),),)
+                    self.name, str_signature(types),),) from e
 
     def __str__(self):
         return "<dispatched %s>" % self.name
