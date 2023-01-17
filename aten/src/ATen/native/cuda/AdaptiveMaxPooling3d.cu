@@ -23,8 +23,7 @@
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -482,5 +481,4 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
         });
   }
  }
-} // at::native
-} // at
+} // namespace at::native
