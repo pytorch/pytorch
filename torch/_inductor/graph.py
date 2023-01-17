@@ -293,7 +293,6 @@ class GraphLowering(torch.fx.Interpreter):
 
             try:
                 out = lowerings[target](*args, **kwargs)
-                breakpoint()
                 return out
             except Exception as e:
                 log.exception("Error from lowering")

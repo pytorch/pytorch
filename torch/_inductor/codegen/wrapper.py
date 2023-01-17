@@ -49,6 +49,7 @@ def make_buffer_allocation(buffer):
     dtype = buffer.get_dtype()
     shape = tuple(buffer.get_size())
     stride = tuple(buffer.get_stride())
+    # breakpoint()
     return (
         f"{buffer.get_name()} = empty_strided("
         f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "

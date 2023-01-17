@@ -538,16 +538,17 @@ if HAS_SYMPY:
     # NB: This inherits from Dummy, not Symbol, because Symbols with the same
     # name get interned.  This is bad for us as we want the metadata
     # to vary across different invocations and not leak.
-    class Symbol(sympy.Dummy):
-        __slots__: List[str] = ['sources', 'stack']
-        sources: List[Source]
-        stack: Optional[str]
+    Symbol = sympy.Symbol
+    # class Symbol(sympy.Dummy):
+    #     __slots__: List[str] = ['sources', 'stack']
+    #     sources: List[Source]
+    #     stack: Optional[str]
 
-        def __new__(cls, *args, **kwargs):
-            self = super().__new__(cls, *args, **kwargs)
-            self.sources = []
-            self.stack = None
-            return self
+    #     def __new__(cls, *args, **kwargs):
+    #         self = super().__new__(cls, *args, **kwargs)
+    #         self.sources = []
+    #         self.stack = None
+    #         return self
 
 
     class ShapeGuardPrinter(StrPrinter):
@@ -703,8 +704,8 @@ class ShapeEnv(object):
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
         r = self.duck_int(val)
-        if isinstance(r, Symbol):
-            r.sources.append(source)
+        # if isinstance(r, Symbol):
+        #     r.sources.append(source)
         return r
 
     # Given a concrete integer value, return the duck sized symbol associated

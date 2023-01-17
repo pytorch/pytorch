@@ -267,6 +267,7 @@ class SizeVarAllocator(object):
                     and solutions[0]
                     and "/" not in str(solutions[0])
                 ):
+                    breakpoint()
                     self.replacements[free[-1]] = solutions[0]
             except NotImplementedError:
                 pass
@@ -351,7 +352,7 @@ class SizeVarAllocator(object):
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
             multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            # self.guard_equals(multiple * denominator, numerator)
             return True
         return False
 

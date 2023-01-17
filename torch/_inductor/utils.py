@@ -244,7 +244,8 @@ def sympy_str(expr: sympy.Expr):
 
 
 def sympy_symbol(name):
-    return sympy.Symbol(name, integer=True, positive=True)
+    from torch.fx.experimental.symbolic_shapes import Symbol
+    return Symbol(name, integer=True, positive=True)
 
 
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
