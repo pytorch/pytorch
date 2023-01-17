@@ -530,9 +530,15 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-struct ValInfo {
-  Val* variable;
-  // More properties coming in future PRs
+// Information for a single variable. Possible values that this variable can
+// take is: start, start + step, start + 2 * step, ... (< stop), which is
+// similar to the loop variable of for loop:
+//   for variable in range(start, stop, step)
+struct VarInfo {
+  Val* variable = nullptr;
+  Val* start = nullptr;
+  Val* stop = nullptr;
+  Val* step = nullptr;
 };
 
 // Simplify expressions with the given information of variables.
@@ -549,13 +555,9 @@ struct ValInfo {
 // scalars, regardless of if it is inside `variables` or not.
 // See note [Reordering associative and commutative operators] for detailed
 // information about this reordering.
-//
-// Currently implemented simplifications:
-// - Constant folding
-// - Associative and commutative operator reordering
 TORCH_CUDA_CU_API Val* simplifyExpr(
     Val* value,
-    const std::list<ValInfo>& variables = {});
+    const std::list<VarInfo>& variables = {});
 
 } // namespace cuda
 } // namespace fuser

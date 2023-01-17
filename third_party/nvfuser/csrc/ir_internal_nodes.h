@@ -2117,6 +2117,12 @@ class TORCH_CUDA_CU_API NamedScalar : public Val {
     return name_;
   }
 
+  //! Check if this is something like T0.size[1]
+  bool isTensorSize() const;
+
+  //! Check if this is something like T0.stride[1]
+  bool isTensorStride() const;
+
   //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
   //! WARNING: Only works with Fusion container at the moment
   static NamedScalar* getParallelDim(ParallelType p_type);

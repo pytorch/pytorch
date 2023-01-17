@@ -8,6 +8,7 @@
 #include <lower_magic_zero.h>
 #include <utils.h>
 
+#include <cmath>
 #include <functional>
 #include <list>
 #include <memory>
@@ -133,6 +134,46 @@ std::unique_ptr<debug_print::NoOpLogger> createLogger(Val* value) {
 } // namespace debug_print
 
 namespace {
+
+// An ordered mapping of variable -> VarInfo
+class VarInfoMap {
+ public:
+  VarInfoMap(const std::list<VarInfo>& variables) {
+    var_info_map_.reserve(variables.size());
+    var_order_.reserve(variables.size());
+    set_.reserve(variables.size());
+    for (const auto& info : variables) {
+      var_order_.emplace_back(info.variable);
+      set_.emplace(info.variable);
+      var_info_map_[info.variable] = info;
+    }
+  }
+
+  // Get the order of variables
+  const std::vector<Val*>& order() const {
+    return var_order_;
+  }
+
+  // Get the info of a variable
+  const VarInfo& info(Val* var) const {
+    return var_info_map_.at(var);
+  }
+
+  // Check if this mapping has information about the given variable
+  bool has(Val* var) const {
+    return set_.count(var);
+  }
+
+  // Get the set of variables that has information
+  const std::unordered_set<Val*>& set() const {
+    return set_;
+  }
+
+ private:
+  std::unordered_map<Val*, VarInfo> var_info_map_;
+  std::vector<Val*> var_order_;
+  std::unordered_set<Val*> set_;
+};
 
 bool hasSimilarType(DataType t1, DataType t2) {
   if (t1 == t2) {
@@ -464,22 +505,17 @@ class FlattenedAssocCommOp : public Expr {
   // and b < c. So in this example, this function will return [v2, v1].
   // Tensors are always considered as variables and they are always considered
   // as the rightmost.
-  std::vector<Val*> sortedInputs(const std::list<ValInfo>& variables) {
-    std::unordered_set<Val*> variables_set;
-    variables_set.reserve(variables.size());
-    for (auto v : variables) {
-      variables_set.emplace(v.variable);
-    }
+  std::vector<Val*> sortedInputs(const VarInfoMap& var_info) {
     std::vector<Val*> sorted_inputs(inputs().begin(), inputs().end());
     std::unordered_map<Val*, std::unordered_set<Val*>> dependency;
     dependency.reserve(sorted_inputs.size());
     for (auto v : sorted_inputs) {
-      dependency[v] = getSubexprDependency(v, variables_set);
+      dependency[v] = getSubexprDependency(v, var_info.set());
     }
     auto compare = [&](Val* v1, Val* v2) {
-      // Find all variables in variables_set that v1 and v2 depends on. The
-      // input (v1 or v2) that exclusively has the right most variable in
-      // variables_set will be to the right of the other input.
+      // Find all variables in var_info that v1 and v2 depends on. The input (v1
+      // or v2) that exclusively has the right most variable in var_info.order()
+      // will be to the right of the other input.
       bool v1_is_left_of_v2 = false;
       auto deps1 = dependency.at(v1);
       auto deps2 = dependency.at(v2);
@@ -489,11 +525,10 @@ class FlattenedAssocCommOp : public Expr {
       if (hasTensor(deps1)) {
         return false;
       }
-      for (auto v : variables) {
-        if (deps1.count(v.variable) > 0 && deps2.count(v.variable) == 0) {
+      for (auto v : var_info.order()) {
+        if (deps1.count(v) > 0 && deps2.count(v) == 0) {
           v1_is_left_of_v2 = false;
-        } else if (
-            deps2.count(v.variable) > 0 && deps1.count(v.variable) == 0) {
+        } else if (deps2.count(v) > 0 && deps1.count(v) == 0) {
           v1_is_left_of_v2 = true;
         }
       }
@@ -642,9 +677,9 @@ Val* flatten(Val* value) {
 
 // Recursively convert expressions like FlattenedAdd(a, b, c, d) into
 // AddOp(AddOp(AddOp(a, b), c), d))
-Val* unflatten(Val* value, const std::list<ValInfo>& variables);
+Val* unflatten(Val* value, const VarInfoMap& var_info);
 
-Val* unflattenRule(Val* value, const std::list<ValInfo>& variables) {
+Val* unflattenRule(Val* value, const VarInfoMap& var_info) {
   auto def = value->definition();
   if (def == nullptr) {
     return value;
@@ -663,14 +698,14 @@ Val* unflattenRule(Val* value, const std::list<ValInfo>& variables) {
     // Handle flattened op:
     // Convert flattened op into original binary ops
     TORCH_INTERNAL_ASSERT(fop->inputs().size() >= 2);
-    auto sorted_inputs = fop->sortedInputs(variables);
+    auto sorted_inputs = fop->sortedInputs(var_info);
     // We need to recursively unflatten all inputs, because we might have
     // nested flattened expressions like
     // FlattenedAdd(a, b, FlattenedMul(c, d, e))
-    Val* lhs = unflatten(sorted_inputs.at(0), variables);
+    Val* lhs = unflatten(sorted_inputs.at(0), var_info);
     int64_t next = 1;
-    while (next < (int)sorted_inputs.size()) {
-      auto rhs = unflatten(sorted_inputs.at(next), variables);
+    while (next < (int64_t)sorted_inputs.size()) {
+      auto rhs = unflatten(sorted_inputs.at(next), var_info);
       auto output = IrBuilder::newScalar(*value->getDataType());
       IrBuilder::create<BinaryOp>(fop->getOpType(), output, lhs, rhs);
       lhs = output;
@@ -681,10 +716,9 @@ Val* unflattenRule(Val* value, const std::list<ValInfo>& variables) {
   return value;
 }
 
-Val* unflatten(Val* value, const std::list<ValInfo>& variables) {
-  using namespace std::placeholders;
+Val* unflatten(Val* value, const VarInfoMap& var_info) {
   return recurseDown(
-      value, [&variables](Val* val) { return unflattenRule(val, variables); });
+      value, [&var_info](Val* val) { return unflattenRule(val, var_info); });
 }
 
 } // namespace assoc_comm
@@ -954,7 +988,9 @@ namespace prove {
 // - x can be either zero or non-zero, it is just a symbolic number that depends
 // - x is zero
 
-bool isNonNegative(Val* value) {
+bool isPositive(Val* value, const VarInfoMap& var_info);
+
+bool isNonNegative(Val* value, const VarInfoMap& var_info) {
   value = foldConstants(value);
   if (value->getInt().has_value() && *value->getInt() >= 0) {
     return true;
@@ -962,27 +998,43 @@ bool isNonNegative(Val* value) {
   if (value->getDouble().has_value() && *value->getDouble() >= 0.0) {
     return true;
   }
+  if (isPositive(value, var_info)) {
+    return true;
+  }
   if (auto ns = dynamic_cast<NamedScalar*>(value)) {
     if (ns->getParallelDim().has_value() ||
-        ns->getParallelIndex().has_value()) {
+        ns->getParallelIndex().has_value() || ns->isTensorSize() ||
+        ns->isTensorStride()) {
       return true;
     }
+  }
+  value = maybeUnwrapMagicZero(value);
+  if (var_info.has(value)) {
+    return isNonNegative(var_info.info(value).start, var_info) &&
+        isNonNegative(var_info.info(value).step, var_info);
   }
   if (auto fop = dynamic_cast<FOp*>(value->definition())) {
     auto op = fop->getOpType();
     if (op == BinaryOpType::Add || op == BinaryOpType::Mul) {
       for (auto inp : fop->inputs()) {
-        if (!isNonNegative(inp)) {
+        if (!isNonNegative(inp, var_info)) {
           return false;
         }
       }
       return true;
     }
+  } else if (auto bop = dynamic_cast<BinaryOp*>(value->definition())) {
+    auto op = bop->getBinaryOpType();
+    if (op == BinaryOpType::Mod || op == BinaryOpType::Div ||
+        op == BinaryOpType::CeilDiv) {
+      return isNonNegative(bop->lhs(), var_info) &&
+          isPositive(bop->rhs(), var_info);
+    }
   }
   return false;
 }
 
-bool isPositive(Val* value) {
+bool isPositive(Val* value, const VarInfoMap& var_info) {
   value = foldConstants(value);
   if (value->getInt().has_value() && *value->getInt() > 0) {
     return true;
@@ -1000,16 +1052,16 @@ bool isPositive(Val* value) {
     if (op == BinaryOpType::Add) {
       bool has_positive = false;
       for (auto inp : fop->inputs()) {
-        if (isPositive(inp)) {
+        if (isPositive(inp, var_info)) {
           has_positive = true;
-        } else if (!isNonNegative(inp)) {
+        } else if (!isNonNegative(inp, var_info)) {
           return false;
         }
       }
       return has_positive;
     } else if (op == BinaryOpType::Mul) {
       for (auto inp : fop->inputs()) {
-        if (!isPositive(inp)) {
+        if (!isPositive(inp, var_info)) {
           return false;
         }
       }
@@ -1019,7 +1071,7 @@ bool isPositive(Val* value) {
   return false;
 }
 
-bool isNonZero(Val* value) {
+bool isNonZero(Val* value, const VarInfoMap& var_info) {
   value = foldConstants(value);
   if (value->getInt().has_value() && *value->getInt() != 0) {
     return true;
@@ -1027,12 +1079,12 @@ bool isNonZero(Val* value) {
   if (value->getDouble().has_value() && *value->getDouble() != 0.0) {
     return true;
   }
-  if (isPositive(value)) {
+  if (isPositive(value, var_info)) {
     return true;
   }
   if (auto fop = toFlattenedMul(value->definition())) {
     for (auto inp : fop->inputs()) {
-      if (!isNonZero(inp)) {
+      if (!isNonZero(inp, var_info)) {
         return false;
       }
     }
@@ -1064,7 +1116,7 @@ namespace rules {
 // a / 1 -> a
 // x - x -> 0
 // ...
-Val* eliminateTrivialComputation(Val* value) {
+Val* eliminateTrivialComputation(Val* value, const VarInfoMap& var_info) {
   auto folded = foldConstants(value);
   if (folded != value) {
     return folded;
@@ -1133,7 +1185,8 @@ Val* eliminateTrivialComputation(Val* value) {
       auto lhs = foldConstants(bop->lhs());
       auto rhs = foldConstants(bop->rhs());
       bool divisor_is_1 = (rhs->getInt() == 1 || rhs->getDouble() == 1.0);
-      if (divisor_is_1 || (prove::isNonZero(rhs) && lhs->getInt() == 0)) {
+      if (divisor_is_1 ||
+          (prove::isNonZero(rhs, var_info) && lhs->getInt() == 0)) {
         return lhs;
       }
     } else if (bop->getBinaryOpType() == BinaryOpType::Sub) {
@@ -1147,12 +1200,79 @@ Val* eliminateTrivialComputation(Val* value) {
   return value;
 }
 
+// If x can be proved to be non-negative, then replace x >= 0 as true, replace
+// x < 0 as false
+// If x can be proved to be positive, then replace x >= 0 and x > 0 as true,
+// replace x <= 0 and x < 0 as false
+// If x can be proved to be nonzero, then replace x != 0 as true, replace x == 0
+// as false
+// if x->sameAs(y), then replace x == y as true, replace x != y as false
+Val* eliminateTrivialPredicate(Val* value, const VarInfoMap& var_info) {
+  if (!value->isABool()) {
+    return value;
+  }
+  if (auto bop = dynamic_cast<BinaryOp*>(value->definition())) {
+    auto op = bop->getBinaryOpType();
+    if (bop->lhs()->sameAs(bop->rhs())) {
+      if (op == BinaryOpType::Eq) {
+        return value->fusion()->trueVal();
+      } else if (op == BinaryOpType::NE) {
+        return value->fusion()->falseVal();
+      }
+    }
+    if (bop->rhs()->isZeroInt()) {
+      if (op == BinaryOpType::GE &&
+          prove::isNonNegative(bop->lhs(), var_info)) {
+        return value->fusion()->trueVal();
+      } else if (
+          op == BinaryOpType::GT && prove::isPositive(bop->lhs(), var_info)) {
+        return value->fusion()->trueVal();
+      } else if (
+          op == BinaryOpType::NE && prove::isNonZero(bop->lhs(), var_info)) {
+        return value->fusion()->trueVal();
+      } else if (
+          op == BinaryOpType::LT &&
+          prove::isNonNegative(bop->lhs(), var_info)) {
+        return value->fusion()->falseVal();
+      } else if (
+          op == BinaryOpType::LE && prove::isPositive(bop->lhs(), var_info)) {
+        return value->fusion()->falseVal();
+      } else if (
+          op == BinaryOpType::Eq && prove::isNonZero(bop->lhs(), var_info)) {
+        return value->fusion()->falseVal();
+      }
+    } else if (bop->lhs()->isZeroInt()) {
+      if (op == BinaryOpType::LE &&
+          prove::isNonNegative(bop->rhs(), var_info)) {
+        return value->fusion()->trueVal();
+      } else if (
+          op == BinaryOpType::LT && prove::isPositive(bop->rhs(), var_info)) {
+        return value->fusion()->trueVal();
+      } else if (
+          op == BinaryOpType::NE && prove::isNonZero(bop->rhs(), var_info)) {
+        return value->fusion()->trueVal();
+      } else if (
+          op == BinaryOpType::GT &&
+          prove::isNonNegative(bop->rhs(), var_info)) {
+        return value->fusion()->falseVal();
+      } else if (
+          op == BinaryOpType::GE && prove::isPositive(bop->rhs(), var_info)) {
+        return value->fusion()->falseVal();
+      } else if (
+          op == BinaryOpType::Eq && prove::isNonZero(bop->rhs(), var_info)) {
+        return value->fusion()->falseVal();
+      }
+    }
+  }
+  return value;
+}
+
 // Apply rule L to replace x % y with 0 if x can be proved to be a multiple of y
 // Also, according to rule M, if x can be factorized as x = k * y, then x / y
 // can be simplified as x / y = (k * y) / y = k * (y / y) = k
-Val* simplifyDivisibleDivMod(Val* value) {
+Val* simplifyDivisibleDivMod(Val* value, const VarInfoMap& var_info) {
   if (auto bop = dynamic_cast<BinaryOp*>(value->definition())) {
-    if (prove::isNonZero(bop->rhs())) {
+    if (prove::isNonZero(bop->rhs(), var_info)) {
       if (bop->getBinaryOpType() == BinaryOpType::Mod) {
         if (prove::isMultipleOf(bop->lhs(), bop->rhs())) {
           return IrBuilder::newConstant(0, *value->getDataType());
@@ -1172,12 +1292,15 @@ Val* simplifyDivisibleDivMod(Val* value) {
 
 } // namespace rules
 
-#define RUN_PASS(pass_name)                               \
-  simplified = recurseDown(simplified, rules::pass_name); \
+#define RUN_PASS(pass_name)                                    \
+  simplified = recurseDown(simplified, [&var_info](Val* val) { \
+    return rules::pass_name(val, var_info);                    \
+  });                                                          \
   logger->record(#pass_name, simplified)
 
-Val* simplifyExpr(Val* value, const std::list<ValInfo>& variables) {
+Val* simplifyExpr(Val* value, const std::list<VarInfo>& variables) {
   FusionGuard fg(value->fusion());
+  const VarInfoMap var_info(variables);
   auto logger = debug_print::createLogger(value);
 
   auto simplified = assoc_comm::flatten(value);
@@ -1187,6 +1310,7 @@ Val* simplifyExpr(Val* value, const std::list<ValInfo>& variables) {
   while (old_simplified != simplified) {
     old_simplified = simplified;
     RUN_PASS(eliminateTrivialComputation);
+    RUN_PASS(eliminateTrivialPredicate);
     RUN_PASS(simplifyDivisibleDivMod);
   }
 

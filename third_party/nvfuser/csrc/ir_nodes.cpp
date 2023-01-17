@@ -16,6 +16,7 @@
 #include <c10/util/irange.h>
 
 #include <complex>
+#include <regex>
 #include <sstream>
 
 namespace torch {
@@ -2941,6 +2942,16 @@ bool NamedScalar::sameAs(const Statement* other) const {
     return false;
   }
   return other->as<NamedScalar>()->name().compare(name()) == 0;
+}
+
+bool NamedScalar::isTensorSize() const {
+  static const std::regex r(R"(T\d+\.size\[\d+\])");
+  return std::regex_match(name(), r);
+}
+
+bool NamedScalar::isTensorStride() const {
+  static const std::regex r(R"(T\d+\.stride\[\d+\])");
+  return std::regex_match(name(), r);
 }
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {

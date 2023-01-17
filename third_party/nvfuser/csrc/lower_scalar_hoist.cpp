@@ -189,15 +189,16 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
 
 namespace {
 
-std::list<ValInfo> getLoopIndices(const std::vector<kir::ForLoop*>& loops) {
-  std::list<ValInfo> variables;
+std::list<VarInfo> getLoopIndices(const std::vector<kir::ForLoop*>& loops) {
+  std::list<VarInfo> variables;
   for (auto loop : loops) {
     if (loop->isTrivial()) {
       if (loop->iter_domain()->isThread()) {
         variables.push_front({loop->index()});
       }
     } else {
-      variables.push_back({loop->index()});
+      variables.push_back(
+          {loop->index(), loop->start(), loop->simplifiedStop(), loop->step()});
     }
   }
   return variables;

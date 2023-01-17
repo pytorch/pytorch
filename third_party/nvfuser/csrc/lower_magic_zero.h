@@ -26,6 +26,11 @@ TORCH_CUDA_CU_API bool isMagicZero(const Val* val);
 //! Specifically, this returns true if val is defined as "x + magic_zero".
 bool isProtectedWithMagicZero(const Val* val);
 
+//! Check if val is protected with magic zero, if yes, unwrap it.
+//! maybeUnwrapMagicZero(i1) -> i1
+//! maybeUnwrapMagicZero(i2 + magic_zero) -> i2
+Val* maybeUnwrapMagicZero(Val* val);
+
 // Determine if we may run into over reuse of predicates or registers in the
 // compiler. If the loop can be unrolled and the index and domain are not
 // "simple" we likely want the loop protected.

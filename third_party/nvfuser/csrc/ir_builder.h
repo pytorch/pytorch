@@ -62,6 +62,7 @@ class TORCH_CUDA_CU_API IrBuilder {
   static Val* andExpr(Val* lhs, Val* rhs);
   static Val* orExpr(Val* lhs, Val* rhs);
   static Val* eqExpr(Val* lhs, Val* rhs);
+  static Val* neExpr(Val* lhs, Val* rhs);
   static Val* gtExpr(Val* lhs, Val* rhs);
   static Val* ltExpr(Val* lhs, Val* rhs);
   static Val* leExpr(Val* lhs, Val* rhs);

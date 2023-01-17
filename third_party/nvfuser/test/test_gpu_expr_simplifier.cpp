@@ -34,7 +34,7 @@ TEST_F(NVFuserTest, FusionAssociativeAndCommutativeReordering_CUDA) {
       mul(mul(add(add(mul(c, d), add(add(e, f), three)), three),
               add(add(add(add(a, b), three), five), c)),
           a);
-  std::vector<ValInfo> variables(6);
+  std::vector<VarInfo> variables(6);
   variables[0].variable = a;
   variables[1].variable = b;
   variables[2].variable = c;
@@ -245,6 +245,141 @@ TEST_F(NVFuserTest, FusionSimplifyDivisibleDivMod_CUDA) {
       add(mul(mul(a, b), three), mul(mul(b, a), six)),
       mul(mul(three, b), a),
       three);
+}
+
+TEST_F(NVFuserTest, FusionSignProve_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+  auto assertProvedPositive =
+      [&fusion](Val* x, const std::list<VarInfo>& variables = {}) {
+        auto proved =
+            (simplifyExpr(IrBuilder::gtExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::geExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::ltExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::leExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::leExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == false) &&
+            (simplifyExpr(IrBuilder::ltExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == false) &&
+            (simplifyExpr(IrBuilder::geExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == false) &&
+            (simplifyExpr(IrBuilder::gtExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == false);
+        TORCH_CHECK(proved, "Unable to prove ", x->toInlineString(), " > 0");
+      };
+  auto assertProvedNonNegative =
+      [&fusion](Val* x, const std::list<VarInfo>& variables = {}) {
+        auto proved =
+            (simplifyExpr(IrBuilder::geExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::leExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::ltExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == false) &&
+            (simplifyExpr(IrBuilder::gtExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == false);
+        TORCH_CHECK(proved, "Unable to prove ", x->toInlineString(), " >= 0");
+      };
+  auto assertProvedNonZero =
+      [&fusion](Val* x, const std::list<VarInfo>& variables = {}) {
+        auto proved =
+            (simplifyExpr(IrBuilder::neExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::neExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == true) &&
+            (simplifyExpr(IrBuilder::eqExpr(x, fusion.zeroVal()), variables)
+                 ->getBool() == false) &&
+            (simplifyExpr(IrBuilder::eqExpr(fusion.zeroVal(), x), variables)
+                 ->getBool() == false);
+        TORCH_CHECK(proved, "Unable to prove ", x->toInlineString(), " != 0");
+      };
+
+  assertProvedPositive(NamedScalar::getParallelDim(ParallelType::TIDx));
+  assertProvedPositive(NamedScalar::getParallelDim(ParallelType::TIDy));
+  assertProvedPositive(NamedScalar::getParallelDim(ParallelType::TIDz));
+  assertProvedNonNegative(NamedScalar::getParallelDim(ParallelType::TIDx));
+  assertProvedNonNegative(NamedScalar::getParallelDim(ParallelType::TIDy));
+  assertProvedNonNegative(NamedScalar::getParallelDim(ParallelType::TIDz));
+  assertProvedNonZero(NamedScalar::getParallelDim(ParallelType::TIDx));
+  assertProvedNonZero(NamedScalar::getParallelDim(ParallelType::TIDy));
+  assertProvedNonZero(NamedScalar::getParallelDim(ParallelType::TIDz));
+
+  assertProvedNonNegative(NamedScalar::getParallelIndex(ParallelType::TIDx));
+  assertProvedNonNegative(NamedScalar::getParallelIndex(ParallelType::TIDy));
+  assertProvedNonNegative(NamedScalar::getParallelIndex(ParallelType::TIDz));
+
+  auto zero = fusion.zeroVal();
+  auto one = fusion.oneVal();
+  auto two = IrBuilder::newConstant(2, DataType::Int);
+
+  assertProvedPositive(one);
+  assertProvedPositive(two);
+  assertProvedNonNegative(one);
+  assertProvedNonNegative(two);
+  assertProvedNonZero(one);
+  assertProvedNonZero(two);
+
+  assertProvedNonNegative(
+      IrBuilder::create<NamedScalar>("T123.size[3]", DataType::Int));
+  assertProvedNonNegative(
+      IrBuilder::create<NamedScalar>("T123.stride[3]", DataType::Int));
+
+  auto a = IrBuilder::newScalar(DataType::Int);
+  VarInfo ainfo{a, zero, two, one};
+  auto b = IrBuilder::newScalar(DataType::Int);
+  VarInfo binfo{b, zero, two, one};
+  auto c = IrBuilder::newScalar(DataType::Int);
+  VarInfo cinfo{c, zero, two, one};
+  auto d = IrBuilder::newScalar(DataType::Int);
+  VarInfo dinfo{d, zero, two, one};
+  auto variables = {ainfo, binfo, cinfo, dinfo};
+
+  assertProvedNonNegative(a, variables);
+  assertProvedNonNegative(b, variables);
+  assertProvedNonNegative(c, variables);
+  assertProvedNonNegative(d, variables);
+  assertProvedNonNegative(add(a, b), variables);
+  assertProvedNonNegative(add(a, add(b, c)), variables);
+  assertProvedNonNegative(mul(add(a, d), add(b, c)), variables);
+  assertProvedNonNegative(mul(add(a, two), add(b, c)), variables);
+
+  assertProvedPositive(add(add(a, two), add(b, c)), variables);
+  assertProvedNonZero(add(add(a, two), add(b, c)), variables);
+
+  assertProvedNonNegative(
+      cpp_div(add(d, one), add(add(a, two), add(b, c))), variables);
+  assertProvedNonNegative(
+      mod(add(d, one), add(add(a, two), add(b, c))), variables);
+}
+
+TEST_F(NVFuserTest, FusionEquivalenceSimplification_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto assertProvedEquiv = [](Val* x, Val* y) {
+    auto proved = (simplifyExpr(IrBuilder::eqExpr(x, y))->getBool() == true) &&
+        (simplifyExpr(IrBuilder::neExpr(x, y))->getBool() == false);
+    TORCH_CHECK(
+        proved,
+        "Unable to prove ",
+        x->toInlineString(),
+        " == ",
+        y->toInlineString());
+  };
+
+  auto a = IrBuilder::create<NamedScalar>("a", DataType::Int);
+  auto b = IrBuilder::create<NamedScalar>("b", DataType::Int);
+  auto c = IrBuilder::create<NamedScalar>("c", DataType::Int);
+
+  assertProvedEquiv(a, a);
+  assertProvedEquiv(mul(a, b), mul(b, a));
+  assertProvedEquiv(mod(mul(a, c), b), mod(mul(c, a), b));
 }
 
 } // namespace jit
