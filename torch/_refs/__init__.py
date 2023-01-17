@@ -5087,6 +5087,17 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+@register_decomposition(aten.log_normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def log_normal(self, mean=1, std=2, generator=None):
+    assert generator is None
+    return torch.exp(std * torch.randn_like(self) + mean)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5162,6 +5173,7 @@ triu_ = _make_inplace(triu)
 true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
+log_normal_ = _make_inplace(log_normal)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
