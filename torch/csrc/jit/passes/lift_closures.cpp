@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -48,7 +50,7 @@ void liftClosure(Node* closure) {
   closure_tuple->addInput(closure->output());
   closure_tuple->addInput(pack_context->output());
   closure_tuple->output()->setType(
-      TupleType::create({closure->output()->type(), context_type}));
+      TupleType::create({closure->output()->type(), std::move(context_type)}));
   closure->eraseBlock(0);
   closure->g_(attr::Subgraph, std::move(subgraph));
   runCleanupPasses(closure->g(attr::Subgraph));

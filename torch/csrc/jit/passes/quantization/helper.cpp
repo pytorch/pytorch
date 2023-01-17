@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -336,7 +338,7 @@ void cloneMethod(
   const auto this_method_name =
       c10::QualifiedName(*module.type()->name(), new_method_name);
   auto copied = module._ivalue()->compilation_unit()->create_function(
-      this_method_name, graph);
+      this_method_name, std::move(graph));
   module.type()->addMethod(copied);
   copied->setSchema(schema);
 }

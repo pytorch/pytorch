@@ -25,7 +25,9 @@ std::string nameFromRoot(
   }
   auto parent = scope->parent();
   while (!parent->isRoot()) {
-    out = std::string((*name_func)(parent)).append(layer_separator).append(out);
+    out = std::string((*name_func)(std::move(parent)))
+              .append(layer_separator)
+              .append(out);
     parent = parent->parent();
   }
   return out;
@@ -51,23 +53,23 @@ std::string createFullScopeName(
 }
 
 std::string variableName(torch::jit::ScopePtr scope) {
-  return parseNameFromScope(scope).second;
+  return parseNameFromScope(std::move(scope)).second;
 }
 
 std::string variableNameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator) {
-  return nameFromRoot(scope, layer_separator, &variableName);
+  return nameFromRoot(std::move(scope), layer_separator, &variableName);
 }
 
 std::string className(torch::jit::ScopePtr scope) {
-  return parseNameFromScope(scope).first;
+  return parseNameFromScope(std::move(scope)).first;
 }
 
 std::string classNameFromRoot(
     torch::jit::ScopePtr scope,
     const std::string& layer_separator) {
-  return nameFromRoot(scope, layer_separator, &className);
+  return nameFromRoot(std::move(scope), layer_separator, &className);
 }
 
 bool isCompatibleScope(torch::jit::ScopePtr scope) {
@@ -180,7 +182,7 @@ void ScopedNodeNameGenerator::CreateNodeName(Node* n) {
     auto name = GetFullScopeName(n->scope());
     name += layer_separator_;
     name += n->kind().toUnqualString();
-    node_names_[n] = CreateUniqueName(base_node_name_counts_, name);
+    node_names_[n] = CreateUniqueName(base_node_name_counts_, std::move(name));
   }
   n->s_(Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute), node_names_[n]);
 }
@@ -190,7 +192,7 @@ std::string ScopedNodeNameGenerator::GetFullScopeName(ScopePtr scope) {
     auto full_scope_name =
         ONNXScopeName::variableNameFromRoot(scope, layer_separator_);
     full_scope_names_[scope] =
-        CreateUniqueName(base_scope_name_counts_, full_scope_name);
+        CreateUniqueName(base_scope_name_counts_, std::move(full_scope_name));
   }
   return full_scope_names_[scope];
 }

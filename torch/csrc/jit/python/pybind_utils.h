@@ -559,7 +559,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
     }
 
     // Check if the obj is a ScriptObject.
-    if (auto script_obj = as_object(object)) {
+    if (auto script_obj = as_object(std::move(object))) {
       auto ptr = script_obj.value()._ivalue();
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());

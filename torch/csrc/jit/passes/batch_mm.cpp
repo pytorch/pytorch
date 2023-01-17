@@ -14,6 +14,7 @@
 #include <ATen/ATen.h>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -408,7 +409,8 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
       }
     }
   }
-  return std::make_pair(postprocess(lhses), postprocess(rhses));
+  return std::make_pair(
+      postprocess(std::move(lhses)), postprocess(std::move(rhses)));
 }
 
 void BatchMMSide(Block* block, AliasDb& alias_db) {
