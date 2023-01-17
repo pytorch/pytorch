@@ -56,11 +56,12 @@ runs:
         # Add conda path to the powershell profile to make it persistent
         Add-Content "$PSHOME\Microsoft.PowerShell_profile.ps1" '$Env:PATH += ";C:\Jenkins\Miniconda3"'
 
+        $PYTHON = (Get-Command python).Source
+        $PYTHON3 = (Get-Command python3).Source
         # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3 installation,
         # which is Python 3 based. Its Python is default to Python 3. As an additional note, there is also
         # Miniconda installation that is Python 2 based, and both can be installed if needed
-        If ((Get-Command python3).Source -eq "") {
-          $PYTHON = (Get-Command python).Source
+        If (("$PYTHON3" -eq "") -and ("$PYTHON" -ne "")) {
           Add-Content "$PSHOME\Microsoft.PowerShell_profile.ps1" "Set-Alias -Name python3 -Value $PYTHON"
         }
 
