@@ -1217,7 +1217,9 @@ Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t
 // Should just use narrow_copy_out, but this API is used internally at Meta:
 // https://github.com/pytorch/pytorch/pull/87045#issuecomment-1309353561
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  auto output = at::empty_like(self);
+  // narrow_copy_dense_cpu_out always resize output's size, so there only create
+  // a zero size tensor.
+  auto output = at::empty({0}, self.options());
   return narrow_copy_dense_cpu_out(self, dim, start, length, output);
 }
 
@@ -2900,11 +2902,11 @@ static inline Tensor sparse_compressed_transpose(
       [&self]() { return self.row_indices(); });
 
   const auto n_batch_dim = compressed_inds.dim() - 1;
-  const auto n_dense_dim = self.dim() - n_batch_dim - 2;
+  const auto dense_dim = self.dim() - n_batch_dim - 2;
 
   // In theory it works, but missing to_dense coverage to test
   TORCH_CHECK(
-      n_dense_dim == 0,
+      dense_dim == 0,
       "transpose(): hybrid sparse compressed tensors with dense dimensions are not supported");
 
   // Classify transpose "type"
@@ -2992,7 +2994,7 @@ static inline Tensor sparse_compressed_transpose(
         // blocked: the blocks are nested under the sparse dims so they must be
         // transposed as well.
         [&]() {
-          return self.values().transpose(-2 - n_dense_dim, -1 - n_dense_dim);
+          return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
   return at::native::_sparse_compressed_tensor_unsafe(
@@ -3801,22 +3803,58 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
+
+// Clones a tensor by cloning the underlying storage that it came from,
+// which allows us to replicate the exact strides/storage_offset in the cloned tensor.
+// Note [*_scatter ops preserve strides]
+// In order for functionalization to preserve stride correctness, the *_scatter
+// operators that it calls must preserve the striding behavior of their inputs.
+// Specifically, the output of *_scatter(base, mutated_view, ...)
+// should have identical size/stride/storage_offset to "base".
+at::Tensor clone_preserve_strides(const at::Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.has_storage());
+  // In cases where the input tensor has internal memory overlap, we cannot actually
+  // preserve the strides/storage_offset of the input tensor, because
+  // *_scatter ops will try to copy_() into the cloned tensor.
+  // However, this should **never** show up in functionalized user code;
+  // most aten ops that try to mutate a tensor with internal memory overlap would error anyway.
+  //
+  // The one place that this does come up is in autograd - if there's a select_scatter
+  // in the forward, then autograd will generate one for the backward.
+  // If the input to the select_scatter is grad_output, then this could be an expanded tensor
+  // with internal overlap.
+  if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
+    return self.clone();
+  }
+  auto dtype_size = self.dtype().itemsize();
+  auto nbytes = self.storage().sym_nbytes();
+  TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+  auto numel = nbytes / dtype_size;
+  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto clone = self_full_size.clone();
+  auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
+  return out;
+}
+
+
 at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
-    auto output = self.clone();
+    // See Note [*_scatter ops preserve strides]
+    auto output = clone_preserve_strides(self);
     auto slice = output.slice(dim, start, end, step);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
 }
 at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
-    auto output = self.clone();
+    auto output = clone_preserve_strides(self);
     auto slice = output.select_symint(dim, index);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
 }
 at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64_t offset, int64_t dim1, int64_t dim2) {
-    auto output = self.clone();
+    // See Note [*_scatter ops preserve strides]
+    auto output = clone_preserve_strides(self);
     auto slice = output.diagonal(offset, dim1, dim2);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
@@ -3825,7 +3863,8 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
 at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // See Note [as_strided_scatter backward support]
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
-    auto output = self.clone();
+    // See Note [*_scatter ops preserve strides]
+    auto output = clone_preserve_strides(self);
     auto slice = output.as_strided_symint(size, stride, std::move(storage_offset));
     TORCH_CHECK(slice.sym_sizes() == src.sym_sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sym_sizes(), ", slice size = ", slice.sym_sizes());
     slice.copy_(src);
