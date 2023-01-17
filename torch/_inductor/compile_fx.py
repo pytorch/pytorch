@@ -126,9 +126,9 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = (
-        fake_mode_from_tensors(example_inputs) or torch._subclasses.FakeTensorMode()
-    )
+    fake_mode = fake_mode_from_tensors(
+        example_inputs
+    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
 
     with V.set_fake_mode(fake_mode):
         pattern_matcher.fx_passes(gm)
