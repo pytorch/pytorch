@@ -352,12 +352,12 @@
 
 - name: ROCm
   patterns:
-  - **rocm**
-  - **hip**
+  - '**rocm**'
+  - '**hip**'
   approved_by:
   - jeffdaily
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
