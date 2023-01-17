@@ -2,7 +2,7 @@
 
 // This file provides implementations of InlineDeviceGuard and
 // InlineOptionalDeviceGuard.
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) && CUDA_VERSION >= 12000
 #include <ATen/cuda/detail/CUDAHooks.h>
 #endif
 #include <c10/core/Device.h>
