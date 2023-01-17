@@ -84,7 +84,7 @@ inline void init(scalar_t* out, int64_t size, const c10::optional<Scalar>& initi
 
 // overload with `include_self`, used by scatter_reduce
 template <typename scalar_t, ReductionType reduce>
-inline void init(scalar_t* out, int64_t size, bool include_self) {
+inline void init(scalar_t* out, int64_t size, bool include_self = false) {
   using acc_t = vec_scalar_t<scalar_t>;
   if (!include_self) {
     acc_t val = init_value<scalar_t, reduce>();
