@@ -1903,13 +1903,6 @@ def uniform(
     )
 
 
-@register_decomposition(aten.cauchy_)
-def cauchy_(self, median=0, gamma=1, generator=None):
-    assert generator is None
-    M_PI = 3.141592653589793238462643383279502
-    return self.copy_(median + gamma * torch.tan(M_PI * (torch.rand_like(self) - 0.5)))
-
-
 # aten/src/ATen/native/UpSample.cpp compute_output_size
 def upsample_compute_output_size(input_size, output_size, scale_factors):
     spatial_dimensions = len(input_size) - 2
