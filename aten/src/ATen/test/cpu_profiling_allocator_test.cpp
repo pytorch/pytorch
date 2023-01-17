@@ -164,6 +164,12 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, false));
   ASSERT_TRUE(ref_output.equal(output));
+
+  // Returning the same pointers is not a guarantee when the default
+  // allocator is used. It looks like the underlying memory pointer
+  // can change as long as output and ref_output remain equal. This
+  // has already been confirmed in the previous two tests
+  #ifdef C10_MOBILE
   // Furthermore profiling allocator should return the same pointers
   // back for the intermediate tensors
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -173,7 +179,6 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
   ASSERT_TRUE(ref_output.equal(output));
 
-  #ifdef C10_MOBILE
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
