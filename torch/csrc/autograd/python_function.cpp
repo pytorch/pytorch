@@ -871,11 +871,13 @@ static PyObject* get_base_setup_context() {
   if (!module)
     return nullptr;
 
-  auto function = THPObjectPtr(PyObject_GetAttrString(module, "_SingleLevelFunction"));
+  auto function =
+      THPObjectPtr(PyObject_GetAttrString(module, "_SingleLevelFunction"));
   if (!function)
     return nullptr;
 
-  // setup_context gets "leaked" - we return a new reference and hold onto it forever.
+  // setup_context gets "leaked" - we return a new reference and hold onto it
+  // forever.
   auto setup_context = PyObject_GetAttrString(function, "setup_context");
   if (!setup_context)
     return nullptr;
@@ -935,7 +937,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   // autograd.Function may optionally override a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
   // Determine if this is the case.
-  auto cls_setup_context = THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+  auto cls_setup_context =
+      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
   if (!cls_setup_context) {
     return nullptr;
   }
