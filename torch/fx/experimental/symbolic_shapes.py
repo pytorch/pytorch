@@ -24,7 +24,6 @@ try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
-    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -211,19 +210,6 @@ class SymNode:
 
 
 if HAS_SYMPY:
-    # NOTE [ SymPy eval and assumptions ]
-    # In eval, we only return values in cases where we always want to evaluate.
-    # In other cases, the result will just be FloorDiv(a, b), which needs to be
-    # evaluated later if necessary.
-    #
-    # We also define is_real=True and provide _eval_* methods to make the SymPy
-    # assumptions system aware of Python floordiv semantics. For instance, this
-    # ensures that correct assumptions are propagated when working with SymPy
-    # Symbols. Two integer Symbols should return an integer result.
-    #
-    # https://peps.python.org/pep-0238/#semantics-of-floor-division
-    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
-    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -233,61 +219,21 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
-        # Default return type. For instance, this applies when both arguments
-        # are Symbols without any assumptions.
-        # See NOTE [ SymPy eval and assumptions ]
-        is_real = True
-
-        @property
-        def base(self):
-            return self.args[0]
-
-        @property
-        def divisor(self):
-            return self.args[1]
-
         def _sympystr(self, printer):
-            base = printer.parenthesize(self.base, self.precedence)
-            divisor = printer.parenthesize(self.divisor, self.precedence)
-            return f"{base}//{divisor}"
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer.parenthesize(lhs, self.precedence)
+            rhs_str = printer.parenthesize(rhs, self.precedence)
+            return f"{lhs_str}//{rhs_str}"
 
-        # Assumptions based on argument types.
-        # See NOTE [ SymPy eval and assumptions ]
-        def _eval_is_real(self):
-            return fuzzy_or([self.base.is_real, self.divisor.is_real])
-
-        def _eval_is_integer(self):
-            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
-
-        # Automatic evaluation.
-        # See NOTE [ SymPy eval and assumptions ]
         @classmethod
         def eval(cls, base, divisor):
-            def check_supported_type(x):
-                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
-                    raise TypeError(
-                        f"unsupported operand type(s) for //: "
-                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                        f", expected integer or real")
-
-            check_supported_type(base)
-            check_supported_type(divisor)
-
-            # We don't provide the same error message as in Python because SymPy
-            # makes it difficult to check the types.
-            if divisor.is_zero:
-                raise ZeroDivisionError("division by zero")
-
-            # We don't cast the return type as in Python because SymPy makes it
-            # difficult to check the types.
-            if base.is_zero:
-                return sympy.S.Zero
+            if base == 0:
+                return sympy.Integer(0)
             if divisor == 1:
-                return sympy.floor(base)
+                return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
-            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
-                return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
@@ -296,7 +242,6 @@ if HAS_SYMPY:
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
-
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
