@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp.api import MixedPrecision
+from torch.distributed.fsdp import MixedPrecision
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
@@ -29,7 +29,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestMixedPrecision(FSDPTest):
-    """Tests composable FSDP with mixed precision."""
+    """Tests ``fully_shard`` with mixed precision."""
 
     @property
     def world_size(self):

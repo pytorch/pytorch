@@ -37,8 +37,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFSDPModelCheckpointing(FSDPTest):
-    """Tests composable FSDP model checkpointing."""
+class TestModelCheckpointing(FSDPTest):
+    """Tests ``fully_shard`` model checkpointing."""
 
     @property
     def world_size(self) -> int:

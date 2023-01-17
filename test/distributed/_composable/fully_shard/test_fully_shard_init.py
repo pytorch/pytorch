@@ -33,8 +33,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFSDPInitialization(FSDPTest):
-    """Tests composable FSDP initialization."""
+class TestInitialization(FSDPTest):
+    """Tests ``fully_shard`` initialization."""
 
     @property
     def world_size(self) -> int:

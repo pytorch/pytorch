@@ -30,8 +30,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFSDPOptimStateDict(FSDPTest):
-    """Tests composable FSDP optimizer state checkpointing."""
+class TestOptimStateCheckpointing(FSDPTest):
+    """Tests ``fully_shard`` optimizer state checkpointing."""
 
     @property
     def world_size(self) -> int:

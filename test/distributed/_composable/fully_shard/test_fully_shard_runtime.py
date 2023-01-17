@@ -41,8 +41,8 @@ class FSDPWrapMode(Enum):
     MANUAL_WRAP = auto()
 
 
-class TestFSDPRuntime(FSDPTest):
-    """Tests composable FSDP runtime."""
+class TestRuntime(FSDPTest):
+    """Tests ``fully_shard`` runtime (forward/backward/optimizer)."""
 
     @property
     def world_size(self) -> int:
