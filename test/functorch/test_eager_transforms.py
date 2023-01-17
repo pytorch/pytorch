@@ -3352,6 +3352,25 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = stack_module_state(models)
 
+    def test_stack_module_state_leaf(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        params, buffers = stack_module_state(models)
+        for param in params.values():
+            self.assertTrue(param.requires_grad)
+            self.assertTrue(param.is_leaf)
+
+    def test_stack_module_state_mismatch_error(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[0].weight.requires_grad_(False)
+        with self.assertRaisesRegex(RuntimeError, "same .requires_grad"):
+            params, buffers = stack_module_state(models)
+
     def test_stack_module_state_error(self):
         in_features = 2
         out_features = 2
