@@ -1012,7 +1012,7 @@ class QUInt2x4Storage(_LegacyStorage):
     def _dtype(self):
         return torch.quint2x4
 
-_storage_classes: Set[_LegacyStorage] = {
+_storage_classes = {
     UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
