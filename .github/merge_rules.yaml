@@ -350,6 +350,17 @@
   - Lint
   - pull
 
+- name: ROCm
+  patterns:
+  - **rocm**
+  - **hip**
+  approved_by:
+  - jeffdaily
+  mandatory_checks_name:
+  - Facebook CLA Check
+  - Lint
+  - pull
+
 - name: superuser
   patterns:
   - '*'

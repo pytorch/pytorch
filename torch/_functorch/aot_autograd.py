@@ -486,7 +486,11 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         abt = aliased_base_tensor
         # Don't unnecessarily call as_strided if nothing changed; as_strided's
         # backward is poorly implemented and slow
-        if abt.size() != b.size() or abt.stride() != b.stride() or abt.storage_offset() != b.storage_offset():
+        if abt is not b and (
+            abt.size() != b.size() or
+            abt.stride() != b.stride() or
+            abt.storage_offset() != b.storage_offset()
+        ):
             reshaped_base_tensor = aliased_base_tensor.as_strided(
                 b.size(), b.stride(), b.storage_offset()
             )
