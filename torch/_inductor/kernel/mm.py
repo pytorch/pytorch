@@ -95,15 +95,22 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    # don't expand inp to make sure fused addmm from cublasLt is used
+    if not use_triton_template(layout):
+        choices = [aten_addmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
+        return autotune_select_algorithm(choices, [inp, mat1, mat2], layout)
 
+    # TODO this is not quite fair benchmarking because we won't use fused cublasLt addmm
     # options to tune from
-    choices = [aten_addmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
+    choices = [
+        aten_addmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)
+    ]
     if use_triton_template(layout):
         for config in mm_configs():
             choices.append(
                 mm_template.generate(
-                    (inp, mat1, mat2),
+                    (inp_expanded, mat1, mat2),
                     layout,
                     **mm_options(config, k, layout),
                     prefix_args=1,
@@ -111,4 +118,4 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 )
             )
 
-    return autotune_select_algorithm(choices, [inp, mat1, mat2], layout)
+    return autotune_select_algorithm(choices, [inp_expanded, mat1, mat2], layout)

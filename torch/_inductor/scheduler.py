@@ -8,7 +8,6 @@ import pprint
 import textwrap
 from typing import Dict, List, Optional, Set
 
-import numpy as np
 import sympy
 
 import torch
@@ -347,7 +346,7 @@ class SchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         self.allocate()
 
-    def codegen(self, index_vars):
+    def ranges_from_index_vars(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -356,6 +355,10 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
+        return var_ranges
+
+    def codegen(self, index_vars):
+        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)
@@ -504,13 +507,17 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        a_first = np.logical_or(
-            stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
-        ).all()
-        b_first = np.logical_or(
-            stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
-        ).all()
+        stride_len_a = [sl[a] for sl in stride_lengths]
+        stride_len_b = [sl[b] for sl in stride_lengths]
 
+        # equivalent to
+        # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
+        a_first = all(
+            sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
+        b_first = all(
+            sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
         if a_first and not b_first:
             return -1
         if b_first and not a_first:
@@ -519,10 +526,10 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
         # otherwise contiguous
         return cmp(b, a)
 
-    order = list(reversed(range(stride_lengths.shape[1])))
+    order = list(reversed(range(len(stride_lengths[0]))))
     if len(priority_idx) > 0:
         # if we have priority node, only use that node's order
-        stride_lengths = stride_lengths[priority_idx]
+        stride_lengths = [stride_lengths[pi] for pi in priority_idx]
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
     return order

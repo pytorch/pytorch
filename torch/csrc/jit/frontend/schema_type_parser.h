@@ -20,9 +20,8 @@ struct TORCH_API SchemaTypeParser {
   c10::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
   TypePtr parseRefinedTensor();
 
-  SchemaTypeParser(Lexer& L, bool parse_complete_tensor_types) : L(L) {
-    complete_tensor_types = parse_complete_tensor_types;
-  }
+  SchemaTypeParser(Lexer& L, bool parse_complete_tensor_types)
+      : complete_tensor_types(parse_complete_tensor_types), L(L) {}
 
  private:
   c10::optional<bool> tryToParseRequiresGrad();

@@ -346,7 +346,14 @@ void Engine::thread_init(
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
+
+#if defined(USE_CUDA)
+  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
+    set_device(device);
+  }
+#else
   set_device(device);
+#endif
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
@@ -642,7 +649,6 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
-    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
@@ -736,7 +742,6 @@ void GraphTask::set_exception(
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
-    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->setError(std::move(eptr));
   }
 }
