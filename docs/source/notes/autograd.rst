@@ -878,7 +878,14 @@ earlier hooks.
 Special hooks
 ^^^^^^^^^^^^^
 
-:meth:`torch.autograd.graph.register_multi_grad_hook` is implemented using hooks registered
+:func:`torch.autograd.graph.register_multi_grad_hook` is implemented using hooks registered
 to Tensors. Each individual Tensor hook is fired following the Tensor hook ordering
 defined above and the registered multi-grad hook is called when the last Tensor gradient
 is computed.
+
+:meth:`torch.nn.modules.module.register_module_full_backward_hook` is implemented using hooks
+registered to Node. As the forward is computed, hooks are registered to grad_fn corresponding
+to the inputs and outputs of the module. Because a module may take multiple inputs and return
+multiple outputs, a dummy custom autograd Function is first applied to the inputs of the module
+before forward and the outputs of the module before the output of forward is returned to ensure
+that those tensors share a single grad_fn, which we can then attach our hooks to.
