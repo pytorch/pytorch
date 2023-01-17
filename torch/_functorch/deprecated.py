@@ -27,7 +27,7 @@ def get_warning(api, new_api=None, replace_newlines=False):
 
 def warn_deprecated(api, new_api=None):
     warning = get_warning(api, new_api, replace_newlines=True)
-    warnings.warn(warning)
+    warnings.warn(warning, stacklevel=2)
 
 
 def setup_docs_annotations(functorch_api, torch_func_api=None, new_api_name=None):
