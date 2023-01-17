@@ -3,7 +3,6 @@ from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import itertools
 import operator
-import builtins
 import math
 import functools
 import threading
@@ -15,7 +14,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, sym_float, sym_int  # noqa: F401
+from torch import SymInt, SymFloat, sym_float, sym_int, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 log = logging.getLogger(__name__)
@@ -265,8 +264,8 @@ magic_methods = {
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
-    'min': lambda a, b: sympy.Min(a, b),
-    'max': lambda a, b: sympy.Max(a, b),
+    'sym_min': lambda a, b: sympy.Min(a, b),
+    'sym_max': lambda a, b: sympy.Max(a, b),
     'sym_sqrt': lambda a: sympy.sqrt(a),
 }
 
@@ -278,9 +277,8 @@ unary_magic_methods = {
     'sym_sqrt',
 }
 
-magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
 always_int_magic_methods = {"ceil", "floor"}
@@ -301,9 +299,10 @@ def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     def binary_magic_impl(self, other):
-        if method in magic_methods_on_builtins:
-            op = getattr(builtins, method)
+        if method in magic_methods_on_submodule:
+            op = getattr(sys.modules[__name__], method)
         else:
+            assert method not in magic_methods_on_math
             op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
