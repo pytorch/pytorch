@@ -206,10 +206,13 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
           if [[ $TEST_CONFIG == 'xla' ]]; then
-            # Spare one CPU for the runner
-            MAX_CPUS_COUNT=$(($(nproc) - 1))
-
-          docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+            # Spare one CPU for the runner to avoid crashing it
+            MAX_CPU_COUNT=$(($(nproc) - 1))
+            # https://docs.docker.com/config/containers/resource_constraints/
+            docker exec --cpus="${MAX_CPU_COUNT}" -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          else
+            docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          fi
 
       - name: Print remaining test logs
         shell: bash
