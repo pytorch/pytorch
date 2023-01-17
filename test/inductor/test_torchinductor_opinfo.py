@@ -401,7 +401,7 @@ inductor_override_kwargs = {
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
-    #"randn": {"assert_equal": False},
+    "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
