@@ -5125,20 +5125,6 @@ def geometric(self, p, generator=None):
     return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
 
 
-@register_decomposition(aten.geometric)
-@out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
-@register_decomposition(aten.cauchy)
-def cauchy(self, median=0, gamma=1, generator=None):
-    assert generator is None
-    return self.copy_(
-        median + gamma * torch.tan(math.pi * (torch.rand_like(self) - 0.5))
-    )
-
-
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5215,7 +5201,6 @@ true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
 geometric_ = _make_inplace(geometric)
-cauchy_ = _make_inplace(cauchy)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
