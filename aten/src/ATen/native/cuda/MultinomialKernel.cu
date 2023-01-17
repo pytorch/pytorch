@@ -26,7 +26,7 @@
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -457,4 +457,4 @@ void multinomial_with_replacement_kernel_impl(
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-}}
+} // namespace at::native
