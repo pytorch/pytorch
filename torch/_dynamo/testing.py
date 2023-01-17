@@ -37,11 +37,16 @@ def named_parameters_for_optimized_module(mod):
     return mod._orig_mod.named_parameters
 
 
+def named_buffers_for_optimized_module(mod):
+    assert isinstance(mod, eval_frame.OptimizedModule)
+    return mod._orig_mod.named_buffers
+
+
 def remove_optimized_module_prefix(name):
     prefix = "_orig_mod."
     assert name.startswith(prefix)
     name = name[len(prefix) :]
-    return torch.distributed.fsdp._common_utils.clean_tensor_name(name)
+    return name
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -67,6 +72,12 @@ def collect_results(model, prediction, loss, example_inputs):
         params[name] = param_copy
     results.append(grads)
     results.append(params)
+    buffers = dict()
+    for name, buffer in model.named_buffers():
+        if isinstance(model, eval_frame.OptimizedModule):
+            name = remove_optimized_module_prefix(name)
+        buffers[name] = buffer
+    results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
             for inp in example:

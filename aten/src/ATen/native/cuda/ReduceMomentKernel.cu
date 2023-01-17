@@ -8,7 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename scalar_t, typename out_t=scalar_t>
 void std_var_kernel_impl(TensorIterator& iter, int32_t correction, bool take_sqrt) {
@@ -70,4 +70,4 @@ static void mean_kernel_cuda(TensorIterator& iter) {
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

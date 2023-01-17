@@ -1634,10 +1634,8 @@ function(add_onnx_tensorrt_subdir)
   set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
   set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
   set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
-  if(FIND_CUDA_MODULE_DEPRECATED)
-    # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
-    set(CMAKE_VERSION "3.9.0")
-  endif()
+  # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
+  set(CMAKE_VERSION "3.9.0")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
   set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
 endfunction()
@@ -1683,15 +1681,7 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
-  if(NOT MSVC)
-    set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
-  endif()
-
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
-  endif()
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
@@ -1699,16 +1689,12 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 
-  if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
-                                   " -D__CUDA_NO_HALF_OPERATORS__"
-                                   " -D__CUDA_NO_HALF_CONVERSIONS__"
-                                   " -D__CUDA_NO_HALF2_OPERATORS__"
-                                   " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-  else()
-    message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
-  endif()
+  message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                                 " -D__CUDA_NO_HALF_OPERATORS__"
+                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
+                                 " -D__CUDA_NO_HALF2_OPERATORS__"
+                                 " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
   string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")

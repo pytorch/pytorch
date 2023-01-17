@@ -297,10 +297,12 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
+    "torch/csrc/jit/passes/fold_linear_bn.cpp",
     "torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.cpp",
     "torch/csrc/jit/passes/frozen_concat_linear.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
+    "torch/csrc/jit/passes/frozen_linear_folding.cpp",
     "torch/csrc/jit/passes/frozen_linear_transpose.cpp",
     "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
@@ -936,6 +938,26 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 
     return _libtorch_python_sources
 
+# List of non-globed source used to build ATen core internally
+aten_cpu_non_globed_sources = [
+    "aten/src/ATen/detail/CUDAHooksInterface.cpp",
+    "aten/src/ATen/detail/HIPHooksInterface.cpp",
+    "aten/src/ATen/detail/MPSHooksInterface.cpp",
+    "aten/src/ATen/detail/ORTHooksInterface.cpp",
+    "aten/src/ATen/record_function.cpp",
+    "aten/src/ATen/Dispatch.cpp",
+    "aten/src/ATen/SequenceNumber.cpp",
+]
+
+aten_cpu_non_globed_headers = [
+    "aten/src/ATen/CPUGeneratorImpl.h",
+    "aten/src/ATen/NumericUtils.h",
+    "aten/src/ATen/detail/CUDAHooksInterface.h",
+    "aten/src/ATen/detail/MPSHooksInterface.h",
+    "aten/src/ATen/detail/HIPHooksInterface.h",
+    "aten/src/ATen/detail/ORTHooksInterface.h",
+]
+
 aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/AccumulateType.cpp",
     "aten/src/ATen/LegacyBatchedTensorImpl.cpp",
@@ -959,7 +981,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/ParallelThreadPoolNative.cpp",
     "aten/src/ATen/PythonTorchFunctionTLS.cpp",
     "aten/src/ATen/ScalarOps.cpp",
-    "aten/src/ATen/SequenceNumber.cpp",
     "aten/src/ATen/SparseTensorImpl.cpp",
     "aten/src/ATen/SparseCsrTensorImpl.cpp",
     "aten/src/ATen/SparseTensorUtils.cpp",
@@ -1010,9 +1031,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/union_type.cpp",
     "aten/src/ATen/cpu/FlushDenormal.cpp",
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
-    "aten/src/ATen/detail/CUDAHooksInterface.cpp",
-    "aten/src/ATen/detail/HIPHooksInterface.cpp",
-    "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
     "aten/src/ATen/native/ComparisonUtils.cpp",
@@ -1046,13 +1064,11 @@ aten_cpu_source_non_codegen_list = [
     # empty_with_tail_padding into an op and use dispatcher with it. But exposing it as an op
     # has limited use and hence does not seem to really make sense.
     "aten/src/ATen/native/utils/Factory.cpp",
-    "aten/src/ATen/record_function.cpp",
-    "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
     "aten/src/ATen/native/verbose_wrapper.cpp",
-]
+] + aten_cpu_non_globed_sources
 
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
@@ -1121,6 +1137,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
+    "aten/src/ATen/native/cpu/SampledAddmmKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]

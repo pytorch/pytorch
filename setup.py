@@ -536,6 +536,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
+        if cmake_cache_vars['BUILD_EXECUTORCH']:
+            report('-- Building Executorch')
 
         if cmake_cache_vars['USE_ITT']:
             report('-- Using ITT')
@@ -770,6 +772,9 @@ class clean(setuptools.Command):
                         break
                     # Ignore lines which begin with '#'.
                 else:
+                    # Don't remove absolute paths from the system
+                    wildcard = wildcard.lstrip('./')
+
                     for filename in glob.glob(wildcard):
                         try:
                             os.remove(filename)
@@ -1018,7 +1023,7 @@ def main():
         if os.path.exists(triton_pin_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['torchtriton==2.0.0+' + triton_pin[:10], 'jinja2']
+                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.

@@ -211,7 +211,9 @@ class SideEffects:
     ):
         obj = object_new(user_cls)
         variable = variable_cls(
-            obj, mutable_local=AttributeMutationNew(None, cls_source), **options
+            obj,
+            mutable_local=AttributeMutationNew(None, cls_source),
+            **options,
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)

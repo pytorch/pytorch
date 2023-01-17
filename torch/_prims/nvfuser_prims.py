@@ -398,6 +398,7 @@ def register_full():
         dtype=None,
         layout=None,
         device=None,
+        pin_memory=False,
         requires_grad=False,
     ):
         strides = make_contiguous_strides_for(size)
@@ -434,7 +435,7 @@ def register_full():
     nvprim_impl.impl(name, _prim_impl)
     nvprim_meta_impl.impl(name, _meta_impl)
 
-    prim_packet = getattr(torch.ops.nvprims, name)
+    prim_packet = getattr(torch._ops.ops.nvprims, name)
     prim = prim_packet.default
     nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
     for p in (prim_packet, prim):
@@ -540,7 +541,7 @@ def register_native_batch_norm():
         )
 
     nvprim_impl.impl(name, _prim_impl)
-    prim_packet = torch.ops.nvprims.native_batch_norm
+    prim_packet = torch._ops.ops.nvprims.native_batch_norm
     prim = prim_packet.default
 
     def _native_batch_norm_ref(
@@ -648,7 +649,7 @@ def register_rand_like():
     nvprim_impl.impl(name, _prim_impl)
     nvprim_meta_impl.impl(name, _meta_rand_like)
 
-    prim_packet = getattr(torch.ops.nvprims, name)
+    prim_packet = getattr(torch._ops.ops.nvprims, name)
     prim = prim_packet.default
 
     nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
@@ -686,8 +687,10 @@ def register_var_mean():
                 inp.shape[i] if i not in dim else 1 for i in range(inp.ndim)
             ]
             broadcast_dims = [i for i in range(inp.ndim) if i not in dim]
-            var = torch.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
-            mean = torch.ops.nvprims.broadcast_in_dim(
+            var = torch._ops.ops.nvprims.broadcast_in_dim(
+                var, output_shape, broadcast_dims
+            )
+            mean = torch._ops.ops.nvprims.broadcast_in_dim(
                 mean, output_shape, broadcast_dims
             )
         return (var, mean)
@@ -700,7 +703,7 @@ def register_var_mean():
     nvprim_impl.impl(name, _prim_impl)
     nvprim_meta_impl.impl(name, _meta_var_mean)
 
-    prim_packet = torch.ops.nvprims.var_mean
+    prim_packet = torch._ops.ops.nvprims.var_mean
     prim = prim_packet.main
 
     def _unbiased_overload_impl(inp, unbiased):
@@ -731,8 +734,10 @@ def register_var_mean():
             output_shape = [a.shape[i] if i not in dim else 1 for i in range(a.ndim)]
             broadcast_dims = [i for i in range(a.ndim) if i not in dim]
             var, mean = var_mean
-            var = torch.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
-            mean = torch.ops.nvprims.broadcast_in_dim(
+            var = torch._ops.ops.nvprims.broadcast_in_dim(
+                var, output_shape, broadcast_dims
+            )
+            mean = torch._ops.ops.nvprims.broadcast_in_dim(
                 mean, output_shape, broadcast_dims
             )
             var_mean = (var, mean)
@@ -779,7 +784,7 @@ def register_view():
 
     nvprim_impl.impl(name, _prim_impl)
 
-    prim_packet = torch.ops.nvprims.view
+    prim_packet = torch._ops.ops.nvprims.view
     prim = prim_packet.default
 
     def _view_no_original_shape_overload_impl(a, shape):
@@ -807,13 +812,13 @@ def register_nvprims():
     register_full()
 
     for name in nvprim_names:
-        main_prim = getattr(torch.ops.prims, name)
+        main_prim = getattr(torch._ops.ops.prims, name)
 
         nvprim.define(main_prim.schema)
         nvprim_impl.impl(name, main_prim.prim_impl)
         nvprim_meta_impl.impl(name, main_prim.prim_meta_impl)
 
-        prim_packet = getattr(torch.ops.nvprims, name)
+        prim_packet = getattr(torch._ops.ops.nvprims, name)
         prim = prim_packet.default
 
         nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
