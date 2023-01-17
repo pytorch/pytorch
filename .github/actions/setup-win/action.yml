@@ -49,11 +49,10 @@ runs:
           echo "CONDA_INSTALL=${CONDA} install";
         } >> "${GITHUB_ENV}"
 
-
     - name: Setup Python3
       shell: bash
       run: |
-        set -x
+        set +e
 
         PYTHON3=$(${CONDA_RUN} which python3)
         HAS_PYTHON3=$?
@@ -71,7 +70,7 @@ runs:
 
           if [[ "${HAS_PYTHON}" == "0" ]]; then
             PYTHON3=$(echo "${PYTHON}" | sed "s/python/python3/")
-            # It's difficult to setup alias across GitHub action steps, so we just add a softlink
+            # It's difficult to setup alias across GitHub action steps, so I just add a softlink
             # here pointing to Python
             ln -s "${PYTHON}" "${PYTHON3}"
 
