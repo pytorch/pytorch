@@ -1598,6 +1598,11 @@ class Module:
             type(self).__name__, name))
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
+        # Check if a property setter exists. If it does, use it.
+        class_attr = getattr(self.__class__, name, None)
+        if isinstance(class_attr, property) and class_attr.fset is not None:
+            return class_attr.fset(self, value)
+
         def remove_from(*dicts_or_sets):
             for d in dicts_or_sets:
                 if name in d:
