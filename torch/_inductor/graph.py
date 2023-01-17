@@ -248,7 +248,7 @@ class GraphLowering(torch.fx.Interpreter):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
         if config.static_weight_shapes and (
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
-        ):
+        ) and not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             # print(len(self.graph_inputs), self.num_static_inputs)
             sizes, strides = self.static_sizes_strides(example)
@@ -293,6 +293,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             try:
                 out = lowerings[target](*args, **kwargs)
+                breakpoint()
                 return out
             except Exception as e:
                 log.exception("Error from lowering")
