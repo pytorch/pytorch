@@ -14,7 +14,7 @@ namespace at {
 struct TORCH_API ORTHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~ORTHooksInterface() {}
+  virtual ~ORTHooksInterface() = default;
 
   virtual std::string showConfig() const {
     TORCH_CHECK(false, "Cannot query detailed ORT version information.", ORT_HELP);

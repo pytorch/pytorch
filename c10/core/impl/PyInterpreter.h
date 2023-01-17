@@ -122,7 +122,7 @@ struct C10_API PyInterpreter;
 // another word consider doing this!
 
 struct C10_API PyInterpreterVTable {
-  virtual ~PyInterpreterVTable() {}
+  virtual ~PyInterpreterVTable() = default;
 
   // Report the name of this interpreter
   virtual std::string name() const = 0;
@@ -206,6 +206,26 @@ struct C10_API PyInterpreter {
   // destructors would be disarmed here only begin the destruction process
   // on process shutdown (long after the dlclose has occurred).
   void disarm() noexcept;
+};
+
+// PyInterpreterStatus describes what the state of its interpreter tag
+// is, relative to the thread currently holding the GIL.
+enum class PyInterpreterStatus {
+  // We just allocated the Tensor, it hasn't escaped to other threads,
+  // we know that it definitely hasn't been tagged to be associated
+  // with an interpreter.
+  DEFINITELY_UNINITIALIZED,
+  // We queried the interpreter field and it looked uninitialized.  But
+  // another thread may have raced with us to tag it with some other
+  // interpreter id.  So we will have to do a CEX to make sure we can
+  // actually nab it.
+  MAYBE_UNINITIALIZED,
+  // We queried the interpreter field and it was tagged to belong to us.
+  // This means we have sole write access (as we hold the GIL for this
+  // interpreter)
+  TAGGED_BY_US,
+  // Someone else tagged this.  We can't use this TensorImpl from Python.
+  TAGGED_BY_OTHER,
 };
 
 } // namespace impl
