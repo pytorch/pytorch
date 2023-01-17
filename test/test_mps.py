@@ -1598,6 +1598,19 @@ class TestMPS(TestCase):
 
         self.assertEqual(x_cpu, x.cpu())
 
+    def test_cpu_to_strided_mps_copy(self):
+        # https://github.com/pytorch/pytorch/issues/86975
+
+        a1 = torch.Tensor([[1, 2], [3, 4], [5, 6]]).to(torch.device("mps"))
+        b1 = torch.Tensor([-1, -1])
+        a1[1:, 1] = b1
+
+        a2 = torch.Tensor([[1, 2], [3, 4], [5, 6]]).to(torch.device("mps"))
+        b2 = torch.Tensor([-1, -1]).to(torch.device("mps"))
+        a2[1:, 1] = b2
+
+        self.assertEqual(a1, a2)
+
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
         NUM_SAMPLES = 60
@@ -6990,7 +7003,6 @@ class TestViewOpsMPS(TestCase):
         self.assertRaises(RuntimeError, lambda: tensor.view(7, -1))
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
 
-    # RuntimeError: Invalid device for storage: mps
     def test_contiguous(self, device="mps"):
         x = torch.randn(1, 16, 5, 5, device=device)
         self.assertTrue(x.is_contiguous())

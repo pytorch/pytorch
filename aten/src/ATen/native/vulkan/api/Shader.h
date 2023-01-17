@@ -45,17 +45,9 @@ class ShaderLayout final {
 };
 
 struct ShaderInfo final {
-  enum class Type { GLSL, SPIRV } type;
-
-  union {
-    struct {
-      const char* src; // Null-terminated
-      uint32_t unused; // padding
-    } glsl;
-    struct {
-      const uint32_t* bin;
-      uint32_t size;
-    } spirv;
+  struct {
+    const uint32_t* bin;
+    uint32_t size;
   } src_code;
 
   std::string kernel_name{""};
@@ -171,8 +163,7 @@ class ShaderCache final {
 
   struct Hasher {
     inline size_t operator()(const ShaderInfo& source) const {
-      return c10::get_hash(
-          source.type, source.src_code.spirv.bin, source.src_code.spirv.size);
+      return c10::get_hash(source.src_code.bin, source.src_code.size);
     }
   };
 

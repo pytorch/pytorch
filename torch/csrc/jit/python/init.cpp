@@ -119,8 +119,7 @@
 #include <tuple>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using c10::AliasInfo;
 using c10::Argument;
@@ -1719,6 +1718,8 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
       .def_property_readonly(
+          "real_type", [](Argument& self) { return self.real_type(); })
+      .def_property_readonly(
           "N",
           [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
@@ -1995,5 +1996,5 @@ void initJITBindings(PyObject* module) {
   atexit.attr("register")(
       py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit
