@@ -259,6 +259,11 @@ local_repository(
 )
 
 local_repository(
+    name = "unused_kineto_dynolog",
+    path = "third_party/kineto/libkineto/third_party/dynolog",
+)
+
+local_repository(
     name = "unused_kineto_googletest",
     path = "third_party/kineto/libkineto/third_party/googletest",
 )
