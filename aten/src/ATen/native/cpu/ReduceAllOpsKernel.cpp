@@ -14,7 +14,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -228,4 +228,4 @@ REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
 REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel);
 
-}}
+} // namespace at::native
