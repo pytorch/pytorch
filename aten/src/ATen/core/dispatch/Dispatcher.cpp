@@ -260,7 +260,6 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
-    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)

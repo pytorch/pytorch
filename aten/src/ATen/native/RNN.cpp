@@ -342,13 +342,9 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_ih=*/std::move(scale_ih),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_hh=*/std::move(scale_hh),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_ih=*/std::move(zero_point_ih),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_hh=*/std::move(zero_point_hh));
 }
 

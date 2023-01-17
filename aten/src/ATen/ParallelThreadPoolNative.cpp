@@ -83,7 +83,6 @@ void launch(std::function<void()> func) {
   // NOLINTNEXTLINE(modernize-avoid-bind)
   internal::launch_no_thread_state(std::bind([](
     std::function<void()> f, ThreadLocalState thread_locals) {
-      // NOLINTNEXTLINE(performance-move-const-arg)
       ThreadLocalStateGuard guard(std::move(thread_locals));
       f();
     },

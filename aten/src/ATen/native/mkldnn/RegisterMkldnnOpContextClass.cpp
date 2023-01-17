@@ -27,11 +27,8 @@ TORCH_LIBRARY(mkldnn, m) {
                 std::move(std::get<2>(state)),
                 std::move(std::get<3>(state)),
                 std::move(std::get<4>(state)),
-                // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
                 std::move(std::get<5>(state)),
-                // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
                 std::move(std::get<6>(state)),
-                // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
                 std::move(std::get<7>(state)));
           });
 

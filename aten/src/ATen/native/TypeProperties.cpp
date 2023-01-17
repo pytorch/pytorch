@@ -169,7 +169,7 @@ ScalarType result_type(ITensorListRef tensors) {
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
   // NOLINTNEXTLINE(performance-move-const-arg)
   std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
-  return native::result_type(tensors);
+  return native::result_type(std::move(tensors));
 }
 
 ScalarType result_type(const Tensor &tensor, const Scalar& other) {

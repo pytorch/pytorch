@@ -645,13 +645,11 @@ bool hasThreadLocalCallbacks() {
 
 CallbackHandle addThreadLocalCallback(
     RecordFunctionCallback cb) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
   return LocalCallbackManager::get().addCallback(std::move(cb));
 }
 
 CallbackHandle addGlobalCallback(
     RecordFunctionCallback cb) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
   return GlobalCallbackManager::get().addCallback(std::move(cb));
 }
 
