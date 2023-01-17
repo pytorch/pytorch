@@ -31,7 +31,7 @@ static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
 //   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
-//   2. Accumuate the gard to RPC context.
+//   2. Accumuate the guard to RPC context.
 //   3. Call post hooks of the original AccumulateGrad.
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
@@ -46,11 +46,10 @@ class DistAccumulateGradCaptureHook
     ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
     // It's intended that pre/post hooks are still called even if the grad is
-    // undenfined here.
+    // undefined here.
     for (const auto& hook : accumulateGrad_->pre_hooks()) {
       inputGrads = (*hook)(inputGrads);
     }
-
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
