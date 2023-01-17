@@ -145,6 +145,15 @@ def generate_single_level_function(interpreter, autograd_function):
     )
     return Generated
 
+# wrap_outputs_maintaining_identity handles outputs from the vmap,
+# backward (vjp), and jvp staticmethod. The way it distinguishes
+# between the vmap case and the {backward, jvp} case is if the out_dims
+# are specified or not.
+#
+# NB: we cannot use out_dims=None as the deciding factor. This because
+# out_dims=None can still happen in the vmap staticmethod! What the
+# user is saying in that case is that their output does not have a
+# dimension that is being vmapped over, which is valid.
 NO_OUT_DIMS = "not specified"
 
 # NOTE [mark_dirty object identity check]
@@ -248,7 +257,7 @@ def has_overriden_vmap_rule(autograd_function):
     return autograd_function.vmap is not torch.autograd.Function.vmap
 
 
-def validate_vmap_returns_two(result):
+def validate_vmap_returns_tuple_of_two_elements(result):
     base_error_msg = (
         "Expected the vmap staticmethod to have two returns, an output "
         "and out_dims with pytree structure compatible with the output. "
@@ -299,7 +308,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
 
     with interpreter.lower():
         result = autograd_function.vmap(info, in_dims, *unwrapped_operands)
-    validate_vmap_returns_two(result)
+    validate_vmap_returns_tuple_of_two_elements(result)
     unwrapped_output, out_dims = result
 
     # See NOTE [mark_dirty object identity check]
