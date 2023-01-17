@@ -64,7 +64,8 @@ void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
 // UTIL
 
 bool dispatch_mode_enabled() {
-  return TorchDispatchModeTLS::stack_len() > 0;
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
+      TorchDispatchModeTLS::stack_len() > 0;
 }
 
 } // namespace impl

@@ -69,7 +69,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // interpreter.
   for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
     if (ivalue.isTensor()) {
-      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
+      auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
       if (interpreter) {
         (*interpreter)->dispatch(op, stack);
         return;
@@ -81,7 +81,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         if (nv.isNone()) {
           continue;
         }
-        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
+        auto* interpreter = nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter) {
           (*interpreter)->dispatch(op, stack);
           return;
