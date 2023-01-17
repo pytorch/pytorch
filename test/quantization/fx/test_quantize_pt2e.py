@@ -117,12 +117,22 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             # self.checkScriptable(model_graph, [[sample_input]], True)
 
     @skipIfNoQNNPACK
-    def test_rnn(self):
-        print("running rnn test")
+    def test_lstm(self):
         with override_quantized_engine("qnnpack"):
             qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
-            module_type_strs = ['LSTM']
+            module_type_strs = ["LSTM"]
             module_types = [torch.nn.LSTM]
+            niter = 10
+            sample_input = torch.tensor([[100, -155],
+                                         [-155, 100],
+                                         [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+            self._test_rnn_impl(qconfigs, RNNDynamicModel, module_type_strs, module_types, sample_input)
+
+    def test_gru(self):
+        with override_quantized_engine("qnnpack"):
+            qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
+            module_type_strs = ["GRU"]
+            module_types = [torch.nn.GRU]
             niter = 10
             sample_input = torch.tensor([[100, -155],
                                          [-155, 100],
