@@ -2,6 +2,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -152,7 +153,12 @@ inline bool check_for_nested_inputs(sdp_params params, bool debug){
 }
 
 inline bool check_requires_grad(sdp_params params, bool debug) {
-  if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+  bool any_tensors_are_subclass =
+      at::areAnyTensorSubclassLike({params.query, params.key, params.value});
+  const bool any_inputs_require_grad = params.query.requires_grad() ||
+      params.key.requires_grad() || params.value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  if ((any_inputs_require_grad && gradmode_enabled) || any_tensors_are_subclass) {
     if (debug) {
       TORCH_WARN("Flash Attention does not currently support training.");
     }
