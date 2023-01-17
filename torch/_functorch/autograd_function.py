@@ -227,26 +227,30 @@ class VmapInfo(NamedTuple):
     randomness: str
 
 
+def has_overriden_vmap_rule(autograd_function):
+    return autograd_function.vmap is not torch.autograd.Function.vmap
+
+
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
-    if getattr(autograd_function, 'generate_vmap_rule', False):
-        if hasattr(autograd_function, "vmap"):
+    if autograd_function.generate_vmap_rule:
+        if has_overriden_vmap_rule(autograd_function):
             # TODO: link docs when they're ready.
             # https://github.com/pytorch/pytorch/issues/90224
             raise RuntimeError(
                 f"You tried to vmap over {autograd_function.__name__}, but "
-                f"it has both generate_vmap_rule=True and a vmap staticmethod "
-                f"defined on it. Please set generate_vmap_rule=False or delete "
-                f"the vmap staticmethod to avoid ambiguity.")
+                f"it has both generate_vmap_rule=True and an overriden vmap "
+                f"staticmethod. Please set generate_vmap_rule=False or delete "
+                f"the overriden vmap staticmethod to avoid ambiguity.")
         return custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands)
 
-    if not hasattr(autograd_function, "vmap"):
+    if not has_overriden_vmap_rule(autograd_function):
         # TODO: link docs when they're ready.
         # https://github.com/pytorch/pytorch/issues/90224
         raise RuntimeError(
             f"You tried to vmap over {autograd_function.__name__}, but "
-            f"it does not have a vmap rule defined. Please add a vmap "
-            f"staticmethod to it or set generate_vmap_rule=True.")
+            f"it does not have vmap support. Please override and implement the "
+            f"vmap staticmethod or set generate_vmap_rule=True.")
 
     current_level = interpreter.level()
     info = VmapInfo(
