@@ -526,6 +526,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if dtype in (torch.float16, torch.bfloat16):
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
+
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
