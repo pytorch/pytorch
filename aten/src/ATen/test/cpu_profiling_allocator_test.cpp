@@ -178,7 +178,6 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
   ASSERT_TRUE(ref_output.equal(output));
-  #endif
 
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.
