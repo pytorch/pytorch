@@ -3037,7 +3037,7 @@ class TestComposability(TestCase):
 
         x = torch.randn(3, device=device)
         transform = getattr(functorch, transform)
-        with self.assertRaisesRegex(RuntimeError, 'must have a setup_context'):
+        with self.assertRaisesRegex(RuntimeError, 'must override the setup_context'):
             transform(MySin.apply)(x)
 
     @parametrize('transform', [

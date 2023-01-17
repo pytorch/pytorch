@@ -871,6 +871,31 @@ THPObjectPtr make_ctx_input_output_tuple(
 
 } // namespace
 
+static PyObject* THPFunction_setup_context = nullptr;
+
+static PyObject* get_base_setup_context() {
+  if (THPFunction_setup_context != nullptr) {
+    return THPFunction_setup_context;
+  }
+
+  auto module = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
+  if (!module)
+    return nullptr;
+
+  auto function =
+      THPObjectPtr(PyObject_GetAttrString(module, "_SingleLevelFunction"));
+  if (!function)
+    return nullptr;
+
+  // setup_context gets "leaked" - we return a new reference and hold onto it
+  // forever.
+  auto setup_context = PyObject_GetAttrString(function, "setup_context");
+  if (!setup_context)
+    return nullptr;
+  THPFunction_setup_context = setup_context;
+  return THPFunction_setup_context;
+}
+
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
@@ -920,10 +945,19 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
-  // autograd.Function may optionally contain a setup_context staticmethod.
+  // autograd.Function may optionally override a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
-  bool has_separate_setup_context_fn =
-      PyObject_HasAttrString(cls, "setup_context");
+  // Determine if this is the case.
+  auto cls_setup_context =
+      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+  if (!cls_setup_context) {
+    return nullptr;
+  }
+  auto orig_setup_context = get_base_setup_context();
+  if (!orig_setup_context) {
+    return nullptr;
+  }
+  auto overridden_setup_context = cls_setup_context.get() != orig_setup_context;
 
   auto num_args = PyTuple_GET_SIZE(inputs);
 
@@ -935,7 +969,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn)
       return nullptr;
-    if (has_separate_setup_context_fn) {
+    if (overridden_setup_context) {
       // call forward followed by setup_context
       output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
       if (!output) {
