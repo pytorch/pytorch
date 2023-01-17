@@ -60,7 +60,7 @@ void nested_op_dense_kernelLauncher(
 {
   dim3 grid;
   grid.x = batch_size;
-  const auto stream = at::cuda::getDefaultCUDAStream();
+  const auto stream = at::cuda::getCurrentCUDAStream();
 
   op_dense_esuhm<<<grid, BLOCK_DIM, 0, stream>>>(
       input,

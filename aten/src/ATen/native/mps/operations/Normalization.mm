@@ -10,8 +10,7 @@
 #include <ATen/native/layer_norm.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void get_shapes(MPSShape* input_shape_readonly,
                 NSMutableArray<NSNumber*>* &input_shape,
@@ -1269,5 +1268,4 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(
 
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

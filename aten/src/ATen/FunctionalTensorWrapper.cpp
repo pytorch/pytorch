@@ -146,10 +146,14 @@ functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_st
 void FunctionalTensorWrapper::commit_update() {
   auto storage_impl = functional_storage_impl();
   storage_impl->add_update(value_, view_metas_);
-  // Invariant: commit_update() is called during an inplace operation.
-  // Tensor inputs to the operation are synced before runnig the op,
-  // so the current tensor must be up-to-date with its alias at this point.
-  generation_ = storage_impl->generation();
+  // As an optimization, we used to mark the tensor here as "up-to-date",
+  // That way, code like:
+  //   x = torch.ones(1'000'000)
+  //   x[0].add_(1)
+  // doesn't result in an unnecessary materialization of the base.
+  // This optimization results in the slice temporarily haven't incorrect
+  // stride/storage_offset though, and DCE should handle that optimization anyway.
+  // generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_up_to_date() const {
@@ -287,7 +291,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
+    auto r = pyobj_slot_.load_pyobj_interpreter()->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
