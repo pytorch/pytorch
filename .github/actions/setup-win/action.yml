@@ -49,53 +49,35 @@ runs:
           echo "CONDA_INSTALL=${CONDA} install";
         } >> "${GITHUB_ENV}"
 
-    - name: Make conda Python available as Python3
-      shell: powershell
+
+    - name: Setup Python3
+      shell: bash
       run: |
-        # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles
-        $PS_PROFILE = "$PSHOME\Microsoft.PowerShell_profile.ps1"
+        set -x
 
-        $Env:PATH += ";C:\Jenkins\Miniconda3"
-        # Add conda path to the powershell profile to make it persistent
-        Add-Content "$PS_PROFILE" '$Env:PATH += ";C:\Jenkins\Miniconda3"'
+        PYTHON3=$(${CONDA_RUN} which python3)
+        HAS_PYTHON3=$?
 
-        try {
-          $PYTHON = (Get-Command python).Source
-        } catch {
-          $PYTHON = ""
-        }
+        if [[ "${HAS_PYTHON3}" == "0" ]]; then
+          echo "Found Python3 at ${PYTHON3}, adding it into GITHUB_PATH"
+          echo "${PYTHON3}" >> "${GITHUB_PATH}"
+        else
+          # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3
+          # installation, which is Python 3 based. Its Python is default to Python 3. Further, there
+          # is also the Miniconda installation that is Python 2 based, and both can be installed if
+          # needed.  In both cases, Python binary is just called python
+          PYTHON=$(${CONDA_RUN} which python)
+          HAS_PYTHON=$?
 
-        If ("$PYTHON" -eq "") {
-          Write-Host "Found no Python in $Env:PATH. Double check that Miniconda3 is setup correctly in the Windows AMI"
-        }
-        Else {
-          Write-Host "Found Python command at $PYTHON"
-        }
+          if [[ "${HAS_PYTHON}" == "0" ]]; then
+            PYTHON3=$(echo "${PYTHON}" | sed "s/python/python3/")
+            # It's difficult to setup alias across GitHub action steps, so we just add a softlink
+            # here pointing to Python
+            ln -s "${PYTHON}" "${PYTHON3}"
 
-        try {
-          $PYTHON3 = (Get-Command python3).Source
-        } catch {
-          $PYTHON3 = ""
-        }
-
-        If ("$PYTHON3" -eq "") {
-          # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3 installation,
-          # which is Python 3 based. Its Python is default to Python 3. As an additional note, there is also
-          # Miniconda installation that is Python 2 based, and both can be installed if needed
-          Write-Host "Found no Python 3 in $Env:PATH. This is expected for Miniconda3, and the command will be an alias to Python"
-        }
-        Else {
-          Write-Host "Found Python 3 command at $PYTHON3"
-        }
-
-        If (("$PYTHON3" -eq "") -and ("$PYTHON" -ne "")) {
-          Add-Content "$PS_PROFILE" "Set-Alias -Name python3 -Value $PYTHON"
-        }
-
-        try {
-          # Reload the profile to update the path
-          . "$PS_PROFILE"
-        } catch {
-          # Print the current error but don't fail the step
-          Write-Host "Error while reloading PowerShell profile: $_"
-        }
+            PYTHON_PATH=$(dirname "${PYTHON}")
+            echo "${PYTHON_PATH}" >> "${GITHUB_PATH}"
+          else
+            echo "Found no Python using ${CONDA_RUN}"
+          fi
+        fi
