@@ -181,15 +181,15 @@ class Future(object):
 def _jit_set_num_profiled_runs(num: _size) -> _size: ...
 
 # Defined in torch/csrc/jit/passes/mobile_optimizer_type.h
-class MobileOptimizerType:
+class _MobileOptimizerType:
     ...
 
-CONV_BN_FUSION: MobileOptimizerType
-INSERT_FOLD_PREPACK_OPS: MobileOptimizerType
-REMOVE_DROPOUT: MobileOptimizerType
-FUSE_ADD_RELU: MobileOptimizerType
-HOIST_CONV_PACKED_PARAMS: MobileOptimizerType
-VULKAN_AUTOMATIC_GPU_TRANSFER: MobileOptimizerType
+CONV_BN_FUSION: _MobileOptimizerType
+INSERT_FOLD_PREPACK_OPS: _MobileOptimizerType
+REMOVE_DROPOUT: _MobileOptimizerType
+FUSE_ADD_RELU: _MobileOptimizerType
+HOIST_CONV_PACKED_PARAMS: _MobileOptimizerType
+VULKAN_AUTOMATIC_GPU_TRANSFER: _MobileOptimizerType
 
 def fork(*args: Any, **kwargs: Any) -> Future: ...
 def wait(fut: Future) -> Any: ...
@@ -221,13 +221,13 @@ def _jit_get_operation(op_name: str) -> Tuple[Callable, List[str]]: ...
 def _get_operation_overload(op_name: str, op_overload_name: str) -> Tuple[Callable, Callable, List[Any]]: ...
 def _get_schema(op_name: str, overload_name: str) -> FunctionSchema: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule',
-                                  optimization_blocklist: Set[MobileOptimizerType],
+                                  optimization_blocklist: Set[_MobileOptimizerType],
                                   preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _clone_module_with_class(module: 'torch.jit.ScriptModule',
                              ignored_methods: List[AnyStr],
                              ignored_attributes: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_vulkan_optimize_for_mobile(module: 'torch.jit.ScriptModule',
-                                         optimization_blocklist: Set[MobileOptimizerType],
+                                         optimization_blocklist: Set[_MobileOptimizerType],
                                          preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_metal_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                          preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
