@@ -98,7 +98,7 @@ class TestMatmulCuda(TestCase):
     def test_cublas_addmm_alignment(self):
         dtype = torch.half
         device = 'cuda'
-        A = torch.rand((5120*2560 + 1), requires_grad=True, dtype=torch.half, device='cuda')
+        A = torch.rand((5120*2560 + 1), requires_grad=True, dtype=dtype, device=device)
         A = A[1:].reshape(5120, 2560)
         # check that heuristic does not fail on 2-byte alignment
         X = torch.rand((26, 1, 2560), requires_grad=True, dtype=dtype, device=device)
