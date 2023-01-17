@@ -1328,3 +1328,7 @@ import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
 from torch.func import vmap
+
+# dynamic registration of sparse triton kernels
+from torch.sparse import _register_impls
+_register_impls(torch.library.Library("aten", "IMPL"))
