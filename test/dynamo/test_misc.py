@@ -3270,6 +3270,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_torch_package_working_with_inductor_trace(self):
+        # from torch._dynamo.test_case import run_tests
+
         inputs = [torch.randn([2, 2]), torch.randn([2, 2])]
 
         optimized_model = torch._dynamo.optimize(backend="inductor")(
@@ -3292,7 +3294,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize(backend="inductor")(
             loaded_model
-        )
+        )(*inputs)
 
 
 class CustomFunc1(torch.autograd.Function):
