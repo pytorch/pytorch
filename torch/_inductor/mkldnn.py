@@ -513,7 +513,9 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 
 
 def create_unary_module(node: torch.fx.node):
-    assert node.op == "call_function", "The current node should be a function node"
+    assert (
+        node.op == "call_function" or node.op == "call_method"
+    ), "The current node should be a function/method node"
     unary_map = {
         F.relu: nn.ReLU,
         F.sigmoid: nn.Sigmoid,
@@ -524,8 +526,21 @@ def create_unary_module(node: torch.fx.node):
         F.gelu: nn.GELU,
         F.relu6: nn.ReLU6,
         F.silu: nn.SiLU,
+        torch.relu: nn.ReLU,
+        torch.sigmoid: nn.Sigmoid,
+        torch.tanh: nn.Tanh,
+        torch.Tensor.relu: nn.ReLU,
+        torch.Tensor.sigmoid: nn.Sigmoid,
+        torch.Tensor.tanh: nn.Tanh,
     }
-    return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
+    name_method_map = {
+        "relu": torch.Tensor.relu,
+        "sigmoid": torch.Tensor.sigmoid,
+        "tanh": torch.Tensor.tanh,
+    }
+    if node.op == "call_function":
+        return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
+    return unary_map[name_method_map[node.target]](*(node.args[1:]), **(node.kwargs))
 
 
 def fuse_unary(gm: torch.fx.GraphModule):
@@ -545,7 +560,7 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 ):  # Output of computation_node is used by other nodes
                     continue
                 computation_node = modules[node.args[0].target]
-                if node.op == "call_function":
+                if node.op == "call_function" or node.op == "call_method":
                     # make sure unary function's inputs only one fx.node(others should be constant value).
                     if any(isinstance(v, torch.fx.Node) for v in node.args[1:]) or any(
                         isinstance(v, torch.fx.Node) for _, v in node.kwargs.items()
@@ -778,6 +793,12 @@ unary_ops = [
     F.gelu,
     F.relu6,
     F.silu,
+    torch.relu,
+    torch.sigmoid,
+    torch.tanh,
+    torch.Tensor.relu,
+    torch.Tensor.sigmoid,
+    torch.Tensor.tanh,
 ]
 
 
