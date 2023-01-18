@@ -115,6 +115,7 @@ int THPCppFunction_clear(PyObject* self) {
 }
 
 void THPCppFunction_dealloc(PyObject* self) {
+  PyObject_GC_UnTrack(self);
   THPCppFunction_clear(self);
   ((THPCppFunction*)self)->cdata.~shared_ptr();
   Py_TYPE(self)->tp_free(self);
