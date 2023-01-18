@@ -2828,7 +2828,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuDevicePrimaryCtxSetFlags",
             ("hipDevicePrimaryCtxSetFlags", CONV_CONTEXT, API_DRIVER),
         ),
-        ("cuDeviceGet", ("hipGetDevice", CONV_DEVICE, API_DRIVER)),
+        ("cuDeviceGet", ("hipDeviceGet", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetName", ("hipDeviceGetName", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetCount", ("hipGetDeviceCount", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetAttribute", ("hipDeviceGetAttribute", CONV_DEVICE, API_DRIVER)),
@@ -8268,6 +8268,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 # put it as API_CAFFE2
 C10_MAPPINGS = collections.OrderedDict(
     [
+        ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cuda::compat::", ("hip::compat::", API_C10)),
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),
