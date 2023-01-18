@@ -245,6 +245,10 @@ def sympy_str(expr: sympy.Expr):
 
 def sympy_symbol(name):
     from torch.fx.experimental.symbolic_shapes import Symbol
+    # We should not be relying on the fact that sympy_symbol("s1") == sympy_symbol("s1")
+    # As all symbols representing symbolic shapes should be allocated before Inductor
+    # this should never trigger.
+    assert name[0] != "s"
     return Symbol(name, integer=True, positive=True)
 
 
