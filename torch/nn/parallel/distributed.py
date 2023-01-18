@@ -1,15 +1,15 @@
-import sys
 import copy
-from dataclasses import dataclass
-from typing import Callable, Any, Type
-from enum import Enum, auto
 import inspect
 import itertools
 import logging
 import os
+import sys
 import warnings
 import weakref
 from contextlib import contextmanager
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum, auto
+from typing import Callable, Any, Type
 
 import torch
 import torch.distributed as dist
@@ -79,6 +79,11 @@ def _find_tensors(obj):
         return itertools.chain(*map(_find_tensors, obj))
     if isinstance(obj, dict):
         return itertools.chain(*map(_find_tensors, obj.values()))
+    if is_dataclass(obj):
+        return itertools.chain(
+            *map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
+        )
+
     return []
 
 
