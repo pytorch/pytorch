@@ -124,7 +124,9 @@ def run_dynamo(model, inputs, tokenizer):
 def run_dynamo_onnx(model, inputs, tokenizer):
     save_model_path = "bloom_dynamo.onnx"
     opset_version = 16
-    onnx_model = fx_onnx.export_without_kwargs(model, opset_version, **inputs, use_binary_format=False)
+    onnx_model = fx_onnx.export_without_kwargs(
+        model, opset_version, **inputs, use_binary_format=False
+    )
     onnx.save(onnx_model, save_model_path)
 
     outs = run_ort(save_model_path, inputs)
