@@ -21,6 +21,6 @@ python benchmarks/dynamo/huggingface.py --output huggingface.csv --accuracy $FLA
 # shellcheck disable=SC2086 # Intended splitting of FLAG
 python benchmarks/dynamo/timm_models.py --output timm_models.csv --accuracy $FLAG 2>&1 | tee timm_models.log
 cat torchbench.log huggingface.log timm_models.log | tee sweep.log
-gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $FLAG (TORCHDYNAMO_DYNAMIC_SHAPES=$TORCHDYNAMO_DYNAMIC_SHAPES) - $(git rev-parse HEAD) $DATE" sweep.log | tee -a sweep.log
+gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $FLAG - $(git rev-parse HEAD) $DATE" sweep.log | tee -a sweep.log
 python "$(dirname "$BASH_SOURCE")"/parse_logs.py sweep.log > final.csv
 gh gist create final.csv
