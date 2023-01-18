@@ -25,7 +25,8 @@ def get_warning(api, new_api=None, replace_newlines=False):
         f"integration, functorch.{api} is deprecated as of PyTorch \n"
         f"2.0 and will be deleted in a future version of PyTorch >= 2.3. \n"
         f"Please use {new_api} instead; see the PyTorch 2.0 release notes \n"
-        f"and/or the torch.func migration guide for more details."
+        f"and/or the torch.func migration guide for more details \n"
+        f"https://pytorch.org/docs/master/func.migrating.html"
     )
     if replace_newlines:
         warning = warning.replace("\n", "")
@@ -42,10 +43,10 @@ def setup_docs(functorch_api, torch_func_api=None, new_api_name=None):
     if torch_func_api is None:
         torch_func_api = getattr(_impl, api_name)
 
-    warning = get_warning(api_name, new_api_name) + "\n"
+    warning = get_warning(api_name, new_api_name)
     warning_note = "\n.. warning::\n\n" + textwrap.indent(warning, "    ")
     warning_note = textwrap.indent(warning_note, "    ")
-    functorch_api.__doc__ = warning_note + torch_func_api.__doc__
+    functorch_api.__doc__ = torch_func_api.__doc__ + warning_note
 
 def vmap(
         func: Callable,
