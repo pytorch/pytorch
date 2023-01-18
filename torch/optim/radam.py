@@ -285,12 +285,9 @@ def _single_tensor_radam(
                 * rho_inf
                 / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
             )
-            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-            if differentiable:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
-            else:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
+            exp_avg_sq_with_eps = exp_avg_sq.add(eps)
+            denom = exp_avg_sq_with_eps.sqrt()
+            adaptive_lr = math.sqrt(bias_correction2) / denom
             param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
         else:
             param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
@@ -350,7 +347,8 @@ def _multi_tensor_radam(
     ]
     unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
-    exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
+    exp_avg_sq_with_eps = torch._foreach_add(exp_avg_sqs, eps)
+    exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq_with_eps)
     bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
     denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
     step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)])
