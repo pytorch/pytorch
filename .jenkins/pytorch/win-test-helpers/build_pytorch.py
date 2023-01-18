@@ -231,6 +231,8 @@ subprocess.run('echo ' + str(os.environ), shell=True)
 subprocess.run('env', shell=True)
 
 subprocess.run('conda run -n test_env' + " python setup.py bdist_wheel", shell=True)
+
+'''
 subprocess.run("sccache --show-stats", shell=True)
 subprocess.run('conda run -n test_env' + ' python -c \"import os, glob; os.system(\'python -mpip install \'' +
     ' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"', shell=True)
@@ -261,3 +263,5 @@ subprocess.run('sccache --show-stats --stats-format json | jq .stats > sccache-s
     os.environ['BUILD_ENVIRONMENT'] + '-' + os.environ['OUR_GITHUB_JOB_ID'] + '.json', shell=True)
 
 subprocess.run('sccache --stop-server', shell=True)
+
+'''
