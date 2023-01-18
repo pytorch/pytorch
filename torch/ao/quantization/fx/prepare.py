@@ -105,7 +105,6 @@ from .custom_config import (
 from torch._subclasses import FakeTensor
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
-from collections import defaultdict
 
 
 __all__ = [
@@ -128,7 +127,7 @@ def _attach_meta_to_node_if_not_exist(model: GraphModule):
     """
     for node in model.graph.nodes:
         if not hasattr(node, "meta"):
-            node.meta: Dict[str, Any] = {}
+            node.meta = {}
 
 def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -1123,10 +1122,8 @@ def insert_observers_for_model(
             node.name, (None, None, None, None, None))
         input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
         output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
-        node.meta["target_dtype_info"]: Dict[
-            str,
-            Optional[Tuple[Union[torch.dtype, type], bool]]
-        ] = _get_target_activation_dtype_for_node(
+        # Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]
+        node.meta["target_dtype_info"] = _get_target_activation_dtype_for_node(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
             named_modules, cache_for_no_tensor_check)
