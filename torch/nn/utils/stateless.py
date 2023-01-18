@@ -8,11 +8,9 @@ __all__ = ["functional_call"]
 
 # We avoid typing module here because module attributes are declared as Union[Parameter, Tensor] by default
 # and using other types causes mypy errors
-
-
 def _change_class(module, params_and_buffers) -> None:
     cls = module.__class__
-    attr_to_path: Dict[str, str] = module._attr_to_path
+    attr_to_path : Dict[str, str] = module._attr_to_path
 
     def _getattribute(self, name: str) -> Any:
         if name in attr_to_path:
