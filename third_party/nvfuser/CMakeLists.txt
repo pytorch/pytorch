@@ -157,7 +157,7 @@ if(NOT MSVC)
 endif()
 target_include_directories(${NVFUSER_CODEGEN}
                            PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>)
-set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
+set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 17)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # --- build nvfuser_python library
