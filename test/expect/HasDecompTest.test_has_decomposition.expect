@@ -554,11 +554,8 @@ aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
-aten::addbmm_
-aten::addmm_
 aten::addmv
 aten::addmv.out
-aten::addmv_
 aten::addr_
 aten::affine_grid_generator
 aten::affine_grid_generator.out
@@ -592,7 +589,6 @@ aten::avg_pool3d_backward
 aten::avg_pool3d_backward.grad_input
 aten::baddbmm
 aten::baddbmm.out
-aten::baddbmm_
 aten::bartlett_window
 aten::bartlett_window.out
 aten::bartlett_window.periodic
@@ -623,14 +619,6 @@ aten::bincount
 aten::bincount.out
 aten::binomial
 aten::binomial.out
-aten::bitwise_and_.Tensor
-aten::bitwise_left_shift_.Tensor
-aten::bitwise_left_shift_.Tensor_Scalar
-aten::bitwise_not_
-aten::bitwise_or_.Tensor
-aten::bitwise_right_shift_.Tensor
-aten::bitwise_right_shift_.Tensor_Scalar
-aten::bitwise_xor_.Tensor
 aten::blackman_window
 aten::blackman_window.out
 aten::blackman_window.periodic
@@ -703,7 +691,6 @@ aten::cummin
 aten::cummin.out
 aten::cumprod
 aten::cumprod.out
-aten::cumprod_
 aten::deg2rad
 aten::deg2rad.out
 aten::deg2rad_
@@ -740,8 +727,6 @@ aten::fft_rfftfreq
 aten::fft_rfftfreq.out
 aten::fill.Scalar_out
 aten::fill.Tensor_out
-aten::fill_.Scalar
-aten::fill_.Tensor
 aten::fractional_max_pool2d
 aten::fractional_max_pool2d.output
 aten::fractional_max_pool2d_backward
@@ -758,8 +743,6 @@ aten::full_like
 aten::full_like.out
 aten::gather
 aten::gather.out
-aten::gcd_
-aten::gelu_
 aten::geometric
 aten::geometric.out
 aten::geometric_
@@ -787,7 +770,6 @@ aten::hann_window
 aten::hann_window.out
 aten::hann_window.periodic
 aten::hann_window.periodic_out
-aten::hardsigmoid_
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct
@@ -798,15 +780,12 @@ aten::hspmm
 aten::hspmm.out
 aten::i0
 aten::i0.out
-aten::i0_
 aten::index.Tensor
 aten::index.Tensor_out
 aten::index_put
 aten::index_put.out
-aten::index_put_
 aten::index_reduce
 aten::index_reduce.out
-aten::index_reduce_
 aten::indices
 aten::indices_copy
 aten::indices_copy.out
@@ -829,7 +808,6 @@ aten::kaiser_window.periodic
 aten::kaiser_window.periodic_out
 aten::kthvalue
 aten::kthvalue.values
-aten::lcm_
 aten::lift_fresh_copy
 aten::lift_fresh_copy.out
 aten::linalg_cholesky_ex
@@ -873,8 +851,6 @@ aten::logaddexp2
 aten::logaddexp2.out
 aten::logcumsumexp
 aten::logcumsumexp.out
-aten::logical_not_
-aten::logit_
 aten::logit_backward.grad_input
 aten::lstm_mps_backward
 aten::lstm_mps_backward.out
@@ -1116,7 +1092,6 @@ aten::reflection_pad3d_backward
 aten::reflection_pad3d_backward.grad_input
 aten::renorm
 aten::renorm.out
-aten::renorm_
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d
@@ -1144,8 +1119,6 @@ aten::round
 aten::round.decimals
 aten::round.decimals_out
 aten::round.out
-aten::round_
-aten::round_.decimals
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
@@ -1164,16 +1137,10 @@ aten::scatter.value
 aten::scatter.value_out
 aten::scatter.value_reduce
 aten::scatter.value_reduce_out
-aten::scatter_.reduce
-aten::scatter_.src
-aten::scatter_.value
-aten::scatter_.value_reduce
 aten::scatter_add
 aten::scatter_add.out
-aten::scatter_add_
 aten::scatter_reduce.two
 aten::scatter_reduce.two_out
-aten::scatter_reduce_.two
 aten::searchsorted.Scalar
 aten::searchsorted.Scalar_out
 aten::searchsorted.Tensor

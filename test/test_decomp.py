@@ -669,6 +669,12 @@ class HasDecompTest(TestCase):
     def test_has_decomposition(self):
 
         def can_appear_in_trace(op) -> bool:
+            has_tensor_arg = any(
+                "Tensor" in str(a.type)
+                for a in itertools.chain(op._schema.arguments, op._schema.returns))
+            if not has_tensor_arg:
+                return False
+
             try:
                 # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
                 return not has_key(op, DispatchKey.CompositeImplicitAutograd)
