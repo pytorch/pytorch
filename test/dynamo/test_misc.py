@@ -1951,7 +1951,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
