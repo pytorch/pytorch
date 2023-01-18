@@ -404,9 +404,6 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        # Note: for as_strided given a size(stride), we should
-                        # make sure it's input has same size(stride) with eager model
-                        # to avoid asserting failed error.
                         if user.target in (
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
