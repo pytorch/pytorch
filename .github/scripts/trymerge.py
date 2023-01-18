@@ -15,6 +15,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    NamedTuple,
     Optional,
     Pattern,
     Tuple,
@@ -37,12 +38,10 @@ from trymerge_explainer import (
     get_revert_message,
 )
 
-class JobCheckState:
-    def __init__(self, name: str, url: str, status: Optional[str], classification: Optional[str] = None):
-        self.name: str = name
-        self.url: str = url
-        self.status: Optional[str] = status
-        self.classification: Optional[str] = classification
+class JobCheckState(NamedTuple):
+    name: str
+    url: str
+    status: Optional[str]
 
 
 class WorkflowCheckState:
