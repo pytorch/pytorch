@@ -350,6 +350,7 @@ class FileSystemWriter(StorageWriter):
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         # There's no storage input in the local plan
+        os.makedirs(self.path, exist_ok=True)
         return plan
 
     def prepare_global_plan(
