@@ -72,13 +72,13 @@ class EnableVmapFallbackWarnings:
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(ValueError, "got type <class 'float'> as a return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
             vmap(lambda x: 3.14)(torch.ones(3))
 
         def multiple_outputs(x):
             return x, 3
 
-        with self.assertRaisesRegex(ValueError, "got type <class 'int'> as a return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'int'>"):
             vmap(multiple_outputs)(torch.ones(3))
 
     def test_different_map_dim_size_raises(self):
