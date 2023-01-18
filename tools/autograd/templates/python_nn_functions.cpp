@@ -67,7 +67,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
   if (opt_memory_format.has_value()) {
-    PyTuple_SET_ITEM(tuple.get(), 3, torch::utils::getTHPMemoryFormat(opt_memory_format.value()).release().ptr());
+    PyTuple_SET_ITEM(tuple.get(), 3, torch::utils::getTHPMemoryFormat(opt_memory_format.value()));
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 3, Py_None);

@@ -9,7 +9,6 @@ set(LAZY_TEST_SRCS
   ${LAZY_TEST_ROOT}/test_misc.cpp
   ${LAZY_TEST_ROOT}/test_permutation_util.cpp
   ${LAZY_TEST_ROOT}/test_shape.cpp
-  ${LAZY_TEST_ROOT}/test_symbolic_shape.cpp
   ${LAZY_TEST_ROOT}/test_trie_cache.cpp
   ${LAZY_TEST_ROOT}/test_util.cpp
 )

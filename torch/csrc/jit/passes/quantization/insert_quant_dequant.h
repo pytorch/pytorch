@@ -35,5 +35,12 @@ TORCH_API Module InsertQuantDeQuant(
     bool debug,
     QuantType quant_type = QuantType::STATIC);
 
+TORCH_API Module InsertQuantDeQuantOnDevicePTQ(
+    Module& module,
+    const std::string& method_name,
+    bool inplace,
+    bool debug,
+    QuantType quant_type = QuantType::STATIC);
+
 } // namespace jit
 } // namespace torch

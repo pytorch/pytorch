@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <structmember.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -430,7 +431,9 @@ static bool PyTensorType_Check(PyObject* obj) {
 
 void py_set_default_tensor_type(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  TORCH_CHECK_TYPE(PyTensorType_Check(obj), "invalid type object");
+  TORCH_CHECK_TYPE(
+      PyTensorType_Check(obj),
+      "invalid type object: only floating-point types are supported as the default type");
   PyTensorType* type = (PyTensorType*)obj;
   if (type->is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(*type);
@@ -439,13 +442,19 @@ void py_set_default_tensor_type(PyObject* obj) {
 }
 
 void py_set_default_dtype(PyObject* obj) {
-  TORCH_CHECK_TYPE(THPDtype_Check(obj), "invalid dtype object");
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(obj),
+      "invalid dtype object: only floating-point types are supported as the default type");
   auto scalar_type = ((THPDtype*)obj)->scalar_type;
   set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
 }
 
 c10::DispatchKey get_default_dispatch_key() {
   return backendToDispatchKey(default_backend);
+}
+
+at::Device get_default_device() {
+  return at::Device(c10::backendToDeviceType(default_backend));
 }
 
 ScalarType get_default_scalar_type() {

@@ -4,7 +4,7 @@ This module contains utility method for mobile model optimization and lint.
 
 import torch
 from enum import Enum
-from torch._C import MobileOptimizerType
+from torch._C import _MobileOptimizerType as MobileOptimizerType
 from typing import Optional, Set, List, AnyStr
 
 class LintCode(Enum):
@@ -64,7 +64,10 @@ def optimize_for_mobile(
             optimization_blocklist,
             preserved_methods_str)
     elif backend == 'vulkan':
-        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods_str)
+        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(
+            script_module._c,
+            optimization_blocklist,
+            preserved_methods_str)
     elif backend == 'metal':
         optimized_cpp_module = torch._C._jit_pass_metal_optimize_for_mobile(script_module._c, preserved_methods_str)
     else:

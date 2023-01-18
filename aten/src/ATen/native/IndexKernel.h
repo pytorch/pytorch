@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/ArrayRef.h>
 
 namespace at {
 class Tensor;

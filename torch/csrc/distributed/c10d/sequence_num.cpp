@@ -1,6 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <c10/util/Optional.h>
-#include <c10d/sequence_num.hpp>
+#include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 #include <c10/util/Logging.h>
 
@@ -31,7 +31,7 @@ void SequenceNum::increment() {
 // Implemented without above get() and increment() so we don't repeatedly lock
 // and unblock.
 uint64_t SequenceNum::getAndIncrement() {
-  uint64_t curVal;
+  uint64_t curVal = 0;
   std::lock_guard<std::mutex> lock(lock_);
   TORCH_CHECK(num_ != c10::nullopt);
   curVal = *num_;

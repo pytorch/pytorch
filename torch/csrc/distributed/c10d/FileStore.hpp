@@ -5,13 +5,13 @@
 #include <mutex>
 #include <unordered_map>
 
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace c10d {
 
 class TORCH_API FileStore : public Store {
  public:
-  explicit FileStore(const std::string& path, int numWorkers);
+  explicit FileStore(std::string  path, int numWorkers);
 
   virtual ~FileStore();
 
@@ -51,6 +51,7 @@ class TORCH_API FileStore : public Store {
 
   int numWorkers_;
   const std::string cleanupKey_;
+  const std::string refCountKey_;
   const std::string regularPrefix_;
   const std::string deletePrefix_;
 

@@ -11,10 +11,14 @@ class MacOsJob:
         non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
 
         extra_name_list = [name for name, exist in self.extra_props.items() if exist]
-        full_job_name_list = non_phase_parts + extra_name_list + [
-            'build' if self.is_build else None,
-            'test' if self.is_test else None,
-        ]
+        full_job_name_list = (
+            non_phase_parts
+            + extra_name_list
+            + [
+                "build" if self.is_build else None,
+                "test" if self.is_test else None,
+            ]
+        )
 
         full_job_name = "_".join(list(filter(None, full_job_name_list)))
 
@@ -41,10 +45,8 @@ WORKFLOW_DATA = [
         "10_13",
         is_build=True,
         is_test=True,
-        extra_props=tuple({
-            "lite_interpreter": True
-        }.items()),
-    )
+        extra_props=tuple({"lite_interpreter": True}.items()),
+    ),
 ]
 
 

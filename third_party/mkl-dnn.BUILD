@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//third_party:substitution.bzl", "template_rule")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
 
 _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_${DNNL_CPU_THREADING_RUNTIME}": "#define DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_OMP",
@@ -9,6 +9,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_WITH_SYCL": "/* #undef DNNL_WITH_SYCL */",
     "#cmakedefine DNNL_WITH_LEVEL_ZERO": "/* #undef DNNL_WITH_LEVEL_ZERO */",
     "#cmakedefine DNNL_SYCL_CUDA": "/* #undef DNNL_SYCL_CUDA */",
+    "#cmakedefine DNNL_SYCL_HIP": "/* #undef DNNL_SYCL_HIP */",
     "#cmakedefine DNNL_ENABLE_STACK_CHECKER": "#undef DNNL_ENABLE_STACK_CHECKER",
     "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
@@ -53,9 +54,9 @@ template_rule(
     out = "third_party/oneDNN/include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "2",
-        "@DNNL_VERSION_MINOR@": "6",
-        "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "52b5f107dd9cf10910aaa19cb47f3abf9b349815",
+        "@DNNL_VERSION_MINOR@": "7",
+        "@DNNL_VERSION_PATCH@": "3",
+        "@DNNL_VERSION_HASH@": "7710bdc92064a08b985c5cbdb09de773b19cba1f",
     },
 )
 
@@ -99,7 +100,7 @@ cc_library(
         "-fno-strict-overflow",
         "-fopenmp",
     ] + select({
-        "@//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
+        "@pytorch//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
         "//conditions:default": ["-DDNNL_CPU_RUNTIME=2"],
     }),
     includes = [
@@ -118,7 +119,7 @@ cc_library(
     deps = [
         "@mkl",
     ] + select({
-        "@//tools/config:thread_sanitizer": [],
+        "@pytorch//tools/config:thread_sanitizer": [],
         "//conditions:default": ["@tbb"],
     }),
 )

@@ -1,10 +1,11 @@
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 import torch
 import torch.optim._functional as F
 
 from torch import Tensor
 
-__all__ : List[str] = []
+__all__: List[str] = []
 
 # Define a TorchScript compatible Functional Adadelta Optimizer
 # where we use these optimizer in a functional way.
@@ -47,15 +48,15 @@ class _FunctionalAdadelta(object):
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
     def step(self, gradients: List[Optional[Tensor]]):
-        params = self.param_group['params']
+        params = self.param_group["params"]
         params_with_grad = []
         grads = []
         square_avgs = []
         acc_deltas = []
-        lr = self.defaults['lr']
-        rho = self.defaults['rho']
-        eps = self.defaults['eps']
-        weight_decay = self.defaults['weight_decay']
+        lr = self.defaults["lr"]
+        rho = self.defaults["rho"]
+        eps = self.defaults["eps"]
+        weight_decay = self.defaults["weight_decay"]
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -72,22 +73,28 @@ class _FunctionalAdadelta(object):
                 if param not in self.state:
                     self.state[param] = {}
                     state = self.state[param]
-                    state['step'] = torch.tensor(0.0)
-                    state['square_avg'] = torch.zeros_like(param, memory_format=torch.preserve_format)
-                    state['acc_delta'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                    state["step"] = torch.tensor(0.0)
+                    state["square_avg"] = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                    )
+                    state["acc_delta"] = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                    )
 
                 state = self.state[param]
-                square_avgs.append(state['square_avg'])
-                acc_deltas.append(state['acc_delta'])
+                square_avgs.append(state["square_avg"])
+                acc_deltas.append(state["acc_delta"])
 
         with torch.no_grad():
-            F.adadelta(params_with_grad,
-                       grads,
-                       square_avgs,
-                       acc_deltas,
-                       lr=lr,
-                       rho=rho,
-                       eps=eps,
-                       weight_decay=weight_decay,
-                       foreach=self.foreach,
-                       maximize=self.maximize)
+            F.adadelta(
+                params_with_grad,
+                grads,
+                square_avgs,
+                acc_deltas,
+                lr=lr,
+                rho=rho,
+                eps=eps,
+                weight_decay=weight_decay,
+                foreach=self.foreach,
+                maximize=self.maximize,
+            )

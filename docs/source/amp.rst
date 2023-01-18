@@ -26,7 +26,7 @@ However, :class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` are modu
 As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed precision training/inference" on CPU with
 datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
 
-For CUDA and CPU, APIs are also provided seperately:
+For CUDA and CPU, APIs are also provided separately:
 
 * ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``.
 * ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``. For CPU, only lower precision floating point datatype of ``torch.bfloat16`` is supported for now.
@@ -294,7 +294,6 @@ CPU Ops that can autocast to ``float32``
 ``cholesky_solve``,
 ``inverse``,
 ``lu_solve``,
-``matrix_rank``,
 ``orgqr``,
 ``inverse``,
 ``ormqr``,

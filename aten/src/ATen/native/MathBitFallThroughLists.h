@@ -54,7 +54,6 @@ namespace at {
 #define TENSOR_UTILITIES_AND_CONSTRUCTORS(m) \
   m.impl("empty_like", torch::CppFunction::makeFallthrough()); \
   m.impl("empty.memory_format", torch::CppFunction::makeFallthrough()); \
-  m.impl("empty.SymInt", torch::CppFunction::makeFallthrough()); \
   m.impl("empty.out", torch::CppFunction::makeFallthrough()); \
   m.impl("empty_strided", torch::CppFunction::makeFallthrough()); \
   m.impl("full_like", torch::CppFunction::makeFallthrough()); \

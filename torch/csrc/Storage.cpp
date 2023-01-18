@@ -99,6 +99,8 @@ static PyObject* THPStorage_pynew(
     } else if (device.type() == at::kMPS) {
       allocator = at::mps::GetMPSAllocator();
 #endif
+    } else if (device.type() == at::DeviceType::XPU) {
+      allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
     } else {
@@ -172,10 +174,9 @@ static PyObject* THPStorage_pynew(
       THPUtils_setError(
           THPStorageStr
           "(): tried to construct a storage from a sequence (%s), "
-          "but one of the items was of type %s instead of %s",
+          "but one of the items was of type %s instead of int",
           THPUtils_typename(sequence),
-          THPUtils_typename(item.get()),
-          THPUtils_typeTraits<uint8_t>::python_type_str);
+          THPUtils_typename(item.get()));
       return nullptr;
     }
     return (PyObject*)self.release();
@@ -216,7 +217,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
     int64_t len = self->cdata->nbytes() / sizeof(uint8_t);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
+    if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
+        0)
       return nullptr;
     if (step != 1) {
       THPUtils_setError(
@@ -262,9 +264,8 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   HANDLE_TH_ERRORS
   if (!THPByteUtils_checkReal(value)) {
     THPUtils_setError(
-        "can only set storage content with a %s, but got "
+        "can only set storage content with a int types, but got "
         "%s instead",
-        THPUtils_typeTraits<uint8_t>::python_type_str,
         THPUtils_typename(value));
     return -1;
   }
@@ -279,7 +280,8 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
     int64_t len = self->cdata->nbytes() / sizeof(uint8_t);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
+    if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
+        0)
       return -1;
     if (step != 1) {
       THPUtils_setError(
@@ -389,7 +391,7 @@ bool THPStorage_init(PyObject* module) {
 }
 
 void THPStorage_postInit(PyObject* module) {
-  THPStorageClass = PyObject_GetAttrString(module, "_UntypedStorage");
+  THPStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPStorageClass)
     throw python_error();
 }

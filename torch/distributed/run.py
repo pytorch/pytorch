@@ -82,7 +82,7 @@ Single-node multi-worker
 
 ::
 
-    >>> torchrun
+    torchrun
         --standalone
         --nnodes=1
         --nproc_per_node=$NUM_TRAINERS
@@ -101,7 +101,7 @@ port automatically instead of manually assgining different ports for each run.
 
 ::
 
-    >>> torchrun
+    torchrun
         --rdzv_backend=c10d
         --rdzv_endpoint=localhost:0
         --nnodes=1
@@ -114,7 +114,7 @@ Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failur
 
 ::
 
-    >>> torchrun
+    torchrun
         --nnodes=$NUM_NODES
         --nproc_per_node=$NUM_TRAINERS
         --max_restarts=3
@@ -135,7 +135,7 @@ Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
 
 ::
 
-    >>> torchrun
+    torchrun
         --nnodes=1:4
         --nproc_per_node=$NUM_TRAINERS
         --max_restarts=3
@@ -294,6 +294,7 @@ Important Notices
 
 ::
 
+ >>> # xdoctest: +SKIP("stub")
  >>> import torch.distributed as dist
  >>> dist.init_process_group(backend="gloo|nccl")
 
@@ -551,9 +552,10 @@ def get_args_parser() -> ArgumentParser:
         default="127.0.0.1",
         type=str,
         action=env,
-        help="Address of the master node (rank 0). It should be either the IP address or the "
-        "hostname of rank 0. For single node multi-proc training the --master_addr can simply be "
-        "127.0.0.1; IPv6 should have the pattern `[0:0:0:0:0:0:0:1]`.",
+        help="Address of the master node (rank 0) that only used for static rendezvous. It should "
+        "be either the IP address or the hostname of rank 0. For single node multi-proc training "
+        "the --master_addr can simply be 127.0.0.1; IPv6 should have the pattern "
+        "`[0:0:0:0:0:0:0:1]`.",
     )
     parser.add_argument(
         "--master_port",
@@ -561,7 +563,16 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training.",
+        "training. It is only used for static rendezvous.",
+    )
+    parser.add_argument(
+        "--local_addr",
+        default=None,
+        type=str,
+        action=env,
+        help="Address of the local node. If specified, will use the given address for connection. "
+        "Else, will look up the local node address instead. Else, it will be default to local "
+        "machine's FQDN.",
     )
 
     #
@@ -604,13 +615,13 @@ def determine_local_world_size(nproc_per_node: str):
     try:
         logging.info(f"Using nproc_per_node={nproc_per_node}.")
         return int(nproc_per_node)
-    except ValueError:
+    except ValueError as e:
         if nproc_per_node == "cpu":
             num_proc = os.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
-                raise ValueError("Cuda is not available.")
+                raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
         elif nproc_per_node == "auto":
@@ -621,7 +632,7 @@ def determine_local_world_size(nproc_per_node: str):
                 num_proc = os.cpu_count()
                 device_type = "cpu"
         else:
-            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}")
+            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
         log.info(
             f"Using nproc_per_node={nproc_per_node},"
@@ -655,6 +666,12 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     assert 0 < min_nodes <= max_nodes
     assert args.max_restarts >= 0
+
+    if hasattr(args, "master_addr") and args.rdzv_backend != "static":
+        log.warning(
+            "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
+            "is not specified."
+        )
 
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
@@ -692,6 +709,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
         log_dir=args.log_dir,
+        local_addr=args.local_addr,
     )
 
     with_python = not args.no_python

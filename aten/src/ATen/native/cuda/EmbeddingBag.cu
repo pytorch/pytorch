@@ -26,6 +26,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -33,8 +34,7 @@
 #include <thrust/iterator/reverse_iterator.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #if !CUB_SUPPORTS_SCAN_BY_KEY()
 template<typename index_t>
@@ -335,6 +335,14 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
                    const Tensor &offsets_, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
+  TORCH_CHECK(indices_.dim() == 1 || indices_.dim() == 2,
+      "input has to be a 1D or 2D Tensor, but got Tensor of dimension ",
+      indices_.dim());
+  if (indices_.dim() == 1) {
+    TORCH_CHECK(offsets_.dim() == 1,
+        "offsets has to be a 1D Tensor, but got Tensor of dimension ",
+        offsets_.dim());
+  }
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
@@ -457,14 +465,6 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   }
 }
 
-template <typename scalar_t>
-__inline__ __device__
-static scalar_t warpReduceSum(scalar_t val) {
-  for (int offset = C10_WARP_SIZE/2; offset > 0; offset /= 2)
-    val += WARP_SHFL_DOWN(val, offset);
-  return val;
-}
-
 template <typename scalar_t, typename index_t>
 __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const scalar_t* grad, int64_t grad_stride0, int64_t grad_stride1,
@@ -495,7 +495,7 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
             weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];
       }
     }
-    result = warpReduceSum<accscalar_t>(result);
+    result = cuda_utils::WarpReduceSum<accscalar_t>(result);
     if (thread_in_warp == 0) {
       output[sample_idx] = result;
     }
@@ -559,5 +559,4 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   return output;
 }
 
-}
-}
+} // namespace at::native

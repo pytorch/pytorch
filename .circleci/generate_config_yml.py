@@ -70,6 +70,7 @@ class Header(object):
         for line in filter(None, lines):
             output_filehandle.write(line + "\n")
 
+
 def _for_all_items(items, functor) -> None:
     if isinstance(items, list):
         for item in items:
@@ -77,6 +78,7 @@ def _for_all_items(items, functor) -> None:
     if isinstance(items, dict) and len(items) == 1:
         item_type, item = next(iter(items.items()))
         functor(item_type, item)
+
 
 def filter_master_only_jobs(items):
     def _is_main_or_master_item(item):
@@ -116,6 +118,7 @@ def filter_master_only_jobs(items):
     _for_all_items(items, _save_requires_if_master)
     return _do_filtering(items)
 
+
 def generate_required_docker_images(items):
     required_docker_images = set()
 
@@ -130,6 +133,7 @@ def generate_required_docker_images(items):
 
     _for_all_items(items, _requires_docker_image)
     return required_docker_images
+
 
 def gen_build_workflows_tree():
     build_workflows_functions = [

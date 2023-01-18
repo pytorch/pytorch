@@ -19,15 +19,16 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     # consuming all CPU cores.
     torch.set_num_threads(1)
 
-    torch.cuda.set_device(device_id)
+    if device == "cuda":
+        torch.cuda.set_device(device_id)
+    elif device == "xpu":
+        torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
 
-    # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
-    # logic of this function.
-    while not done_event.is_set():
+    def do_one_step():
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
-            continue
+            return
         idx, data = r
         if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
@@ -42,8 +43,13 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
                 break
             except queue.Full:
                 continue
-        del r  # save memory
 
+    # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
+    # logic of this function.
+    while not done_event.is_set():
+        # Make sure that we don't preserve any object from one iteration
+        # to the next
+        do_one_step()
 
 def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):

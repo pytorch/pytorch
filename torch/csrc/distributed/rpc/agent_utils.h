@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {

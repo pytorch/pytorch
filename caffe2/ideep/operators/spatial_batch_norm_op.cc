@@ -30,10 +30,10 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
     const auto& bias = Input(BIAS);
     auto* Y = Output(OUTPUT);
 
-    DCHECK_EQ(scale.ndims(), 1);
-    DCHECK_EQ(bias.ndims(), 1);
-    DCHECK_EQ(scale.get_dim(0), X.get_dim(1));
-    DCHECK_EQ(bias.get_dim(0), X.get_dim(1));
+    TORCH_DCHECK_EQ(scale.ndims(), 1);
+    TORCH_DCHECK_EQ(bias.ndims(), 1);
+    TORCH_DCHECK_EQ(scale.get_dim(0), X.get_dim(1));
+    TORCH_DCHECK_EQ(bias.get_dim(0), X.get_dim(1));
 
     if (is_test_) {
       const auto& est_mean = Input(EST_MEAN);

@@ -96,7 +96,6 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 
 // Used for desugaring uses of the torch.cuda module. All the CUDA APIs with
 // torch.cuda.* are resolved using CUDAPythonModuleValue.
-#if !defined(USE_ROCM)
 struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
   explicit CUDAPythonModuleValue(py::object mod)
       : PythonValue(std::move(mod)) {}
@@ -106,7 +105,6 @@ struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
       GraphFunction& m,
       const std::string& field) override;
 };
-#endif
 
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
@@ -260,11 +258,10 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
   explicit SugaredDict(
       std::shared_ptr<ModuleValue> self,
       std::shared_ptr<SugaredTupleValue> keys,
-      std::shared_ptr<SugaredTupleValue> modules) {
-    self_ = std::move(self);
-    keys_ = std::move(keys);
-    modules_ = std::move(modules);
-  }
+      std::shared_ptr<SugaredTupleValue> modules)
+      : self_(std::move(self)),
+        keys_(std::move(keys)),
+        modules_(std::move(modules)) {}
 
   std::string kind() const override {
     return "ModuleDict";

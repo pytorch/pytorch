@@ -761,9 +761,9 @@ Computes the `multivariate log-gamma function
 .. math::
     \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
+where :math:`C = \log(\pi) \cdot \frac{p (p - 1)}{4}` and :math:`\Gamma(-)` is the Gamma function.
 
-All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise the behavior is undefiend.
 """ + """
 
 Args:

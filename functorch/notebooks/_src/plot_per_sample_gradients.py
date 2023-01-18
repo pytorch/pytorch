@@ -12,7 +12,6 @@ and optimization research.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functools import partial
 torch.manual_seed(0)
 
 # Here's a simple CNN

@@ -18,7 +18,8 @@ Tensor cumsum(
       input_arg.dim() <= 4, "Vulkan cumsum expects input dimension <= 4!");
 
   TORCH_CHECK(
-      batch_size(input_arg) == 1, "Vulkan cumsum expects batch size <= 1!");
+      get_dim<Dim4D::Batch>(input_arg) == 1,
+      "Vulkan cumsum expects batch size <= 1!");
 
   TORCH_CHECK(dim < 4, "Vulkan cumsum expects dim < 4!");
 
@@ -35,7 +36,7 @@ Tensor cumsum(
   vTensor v_output{
       context,
       input_arg.sizes(),
-      input_arg.options(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {

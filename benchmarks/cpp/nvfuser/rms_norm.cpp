@@ -24,7 +24,6 @@ static void setupRMSNorm(Fusion* fusion, DataType dtype) {
 
   FusionGuard fg(fusion);
 
-  const int kReductionAxis = 2;
   const float kEps = 1e-6;
 
   Double* eps_ptr = IrBuilder::create<Double>(kEps);
@@ -61,7 +60,6 @@ static void NvFuserScheduler_RMSNorm(
       dtype == DataType::BFloat16);
 
   std::vector<int64_t> input_shape{8, benchmark_state.range(0), 1024};
-  const float kEps = 1e-6;
 
   // inputs
   at::manual_seed(0);

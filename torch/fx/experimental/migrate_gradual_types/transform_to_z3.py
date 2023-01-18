@@ -34,10 +34,13 @@ try:
             return False, counter
 
         elif isinstance(constraint, BinConstraintT):
-            assert constraint.op == op_eq
-            lhs, counter = transform_var(constraint.lhs, counter, dimension_dict)
-            rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
-            return (lhs == rhs), counter
+            if constraint.op == op_eq:
+                lhs, counter = transform_var(constraint.lhs, counter, dimension_dict)
+                rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
+                return (lhs == rhs), counter
+
+            else:
+                raise NotImplementedError('Method not yet implemented')
 
         elif isinstance(constraint, BinConstraintD):
             if constraint.op == op_eq:
@@ -79,8 +82,12 @@ try:
 
                     elif isinstance(constraint.rhs, int):
                         return z3.Or([lhs.arg(0) == 0, z3.And([lhs.arg(0) == 1, lhs.arg(1) != rhs.arg(1)])]), counter
+
                 else:
-                    raise NotImplementedError
+                    return z3.Or([z3.And([lhs.arg(0) == 0, rhs.arg(0) != 0]),
+                                  z3.And([lhs.arg(0) != 0, rhs.arg(0) == 0]),
+                                  z3.And([lhs.arg(0) != 0, rhs.arg(0) != 0, lhs.arg(1) != rhs.arg(1)])]), counter
+
 
             elif constraint.op == op_leq:
                 # if the dimensions are not dyn, this will come into effect
@@ -240,6 +247,7 @@ try:
         # print(*new_constraints.conjucts, sep='\n')
 
         transformed, counter = transform_to_z3(new_constraints, counter, dimension_dict)
+        # print(transformed)
         return transformed
 
     def iterate_till_fixed_point(constraints, counter):
@@ -282,6 +290,7 @@ try:
         # transform precision, matching, consistency till obtaining a fixed point
         new_constraints, counter = iterate_till_fixed_point(new_constraints, counter)
 
+
         # since the function returns a list of one element, we get the first element
         # we are only interested in the RHS in this case because the LHS just stores
         # the result
@@ -302,7 +311,7 @@ try:
 
         negation_transformed_condition_constraint = z3.Not(transformed_condition_constraint)
 
-        return z3.And([transformed, transformed_condition_constraint]), \
+        return z3.And([transformed, transformed_condition_constraint]),\
             z3.And([transformed, negation_transformed_condition_constraint])
 
 
@@ -322,23 +331,17 @@ try:
         transformed_positive, transformed_negative = \
             transform_all_constraints_trace_time(tracer_root, graph, node, counter)
 
-
         s = z3.Solver()
         s.add(transformed_positive)
-
         if user_constraints is not None:
             s.add(user_constraints)
-
         condition = s.check()
 
         s = z3.Solver()
         s.add(transformed_negative)
-
         if user_constraints is not None:
             s.add(user_constraints)
-
         negation = s.check()
-
         return condition, negation
 
 except ImportError:

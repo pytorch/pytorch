@@ -1,6 +1,7 @@
 #ifndef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/core/Tensor.h>
 
 //
 // This file is here so as to provide an implementation even in cases where

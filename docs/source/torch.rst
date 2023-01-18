@@ -17,6 +17,7 @@ Tensors
     is_nonzero
     set_default_dtype
     get_default_dtype
+    set_default_device
     set_default_tensor_type
     numel
     set_printoptions
@@ -47,6 +48,10 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    sparse_csr_tensor
+    sparse_csc_tensor
+    sparse_bsr_tensor
+    sparse_bsc_tensor
     asarray
     as_tensor
     as_strided
@@ -86,6 +91,7 @@ Indexing, Slicing, Joining, Mutating Ops
     argwhere
     cat
     concat
+    concatenate
     conj
     chunk
     dsplit
@@ -102,6 +108,7 @@ Indexing, Slicing, Joining, Mutating Ops
     movedim
     moveaxis
     narrow
+    narrow_copy
     nonzero
     permute
     reshape
@@ -377,6 +384,7 @@ Pointwise Ops
     sin
     sinc
     sinh
+    softmax
     sqrt
     square
     sub
@@ -533,6 +541,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unflatten
     vander
     view_as_real
     view_as_complex
@@ -557,7 +566,6 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
-    eig
     geqrf
     ger
     inner
@@ -565,13 +573,11 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
-    lstsq
     lu
     lu_solve
     lu_unpack
     matmul
     matrix_power
-    matrix_rank
     matrix_exp
     mm
     mv
@@ -612,6 +618,16 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    sym_float
+    sym_int
+
+Optimizations
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compile
 
 Operator Tags
 ------------------------------------
@@ -631,3 +647,14 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. automodule:: torch.autograd
+.. currentmodule:: torch.autograd
+
+Engine Configuration
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_multithreading_enabled

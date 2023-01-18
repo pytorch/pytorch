@@ -9,13 +9,13 @@ from urllib.parse import urlparse
 import torch
 import torch.distributed as dist
 
-
 logger = logging.getLogger(__name__)
 
 
 _init_counter = 0
 _init_counter_lock = threading.Lock()
 
+__all__ = ["is_available"]
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -76,6 +76,9 @@ if is_available():
     )
 
     rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
+
+    __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
+    __all__ = __all__ + api.__all__ + backend_registry.__all__
 
     def init_rpc(
         name,

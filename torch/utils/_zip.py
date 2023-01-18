@@ -30,8 +30,8 @@ def remove_prefix(text, prefix):
         return text[len(prefix):]
     return text
 
-def write_to_zip(file_path, strip_file_path, zf):
-    stripped_file_path = remove_prefix(file_path, strip_file_dir + "/")
+def write_to_zip(file_path, strip_file_path, zf, prepend_str=""):
+    stripped_file_path = prepend_str + remove_prefix(file_path, strip_file_dir + "/")
     path = Path(stripped_file_path)
     if path.name in DENY_LIST:
         return
@@ -42,11 +42,14 @@ if __name__ == "__main__":
     parser.add_argument("paths", nargs="*", help="Paths to zip.")
     parser.add_argument("--install_dir", help="Root directory for all output files")
     parser.add_argument("--strip_dir", help="The absolute directory we want to remove from zip")
+    parser.add_argument("--prepend_str", help="A string to prepend onto all paths of a file in the zip", default="")
     parser.add_argument("--zip_name", help="Output zip name")
+
     args = parser.parse_args()
 
     zip_file_name = args.install_dir + '/' + args.zip_name
     strip_file_dir = args.strip_dir
+    prepend_str = args.prepend_str
     zf = ZipFile(zip_file_name, mode='w')
 
     for p in args.paths:
@@ -54,6 +57,6 @@ if __name__ == "__main__":
             files = glob.glob(p + "/**/*.py", recursive=True)
             for file_path in files:
                 # strip the absolute path
-                write_to_zip(file_path, strip_file_dir + "/", zf)
+                write_to_zip(file_path, strip_file_dir + "/", zf, prepend_str=prepend_str)
         else:
-            write_to_zip(p, strip_file_dir + "/", zf)
+            write_to_zip(p, strip_file_dir + "/", zf, prepend_str=prepend_str)

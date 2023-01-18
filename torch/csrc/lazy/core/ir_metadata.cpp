@@ -47,6 +47,18 @@ struct ScopeContext {
 
 thread_local ScopeContext g_scope_context;
 
+std::string GetCurrentScope() {
+  std::string scope;
+  for (auto& scope_entry : g_scope_context.scopes) {
+    if (scope.empty()) {
+      scope = scope_entry.name;
+    } else {
+      scope += "/" + scope_entry.name;
+    }
+  }
+  return scope;
+}
+
 void PushScope(const std::string& name) {
   size_t id = g_scope_context.next_id;
   g_scope_context.scopes.push_back(
@@ -61,7 +73,10 @@ void PopScope() {
 }
 
 void ResetScopeContext() {
-  TORCH_CHECK(g_scope_context.scopes.size() == 0);
+  if (g_scope_context.scopes.size() != 0) {
+    TORCH_CHECK(
+        false, "Expecting scope to be empty but it is " + GetCurrentScope());
+  }
   g_scope_context.next_id = 1;
 }
 } // namespace
@@ -76,18 +91,6 @@ ScopePusher::~ScopePusher() {
 
 void ScopePusher::ResetScopes() {
   ResetScopeContext();
-}
-
-std::string GetCurrentScope() {
-  std::string scope;
-  for (auto& scope_entry : g_scope_context.scopes) {
-    if (scope.empty()) {
-      scope = scope_entry.name;
-    } else {
-      scope += "/" + scope_entry.name;
-    }
-  }
-  return scope;
 }
 
 MetaData GetMetaDataIfDebugging() {

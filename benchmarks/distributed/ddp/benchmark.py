@@ -87,7 +87,7 @@ def run_benchmark(benchmark, ranks, opts):
     measurements = []
     if dist.get_rank() in set(ranks):
         if not opts:
-            opts = dict()
+            opts = {}
         measurements = benchmark_process_group(group, benchmark, **opts)
     dist.destroy_process_group(group)
     dist.barrier()

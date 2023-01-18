@@ -6,11 +6,12 @@
 
 namespace at { namespace native {
 
-inline int64_t storage_size_for(IntArrayRef size, IntArrayRef stride) {
+template <typename T>
+inline T storage_size_for(ArrayRef<T> size, ArrayRef<T> stride) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(size.size() == stride.size(),
       "storage_size_for(size, stride) requires that size and stride ",
       "have the same size as a precondition.");
-  int64_t storage_size = 1;
+  T storage_size = 1;
   for (const auto dim : c10::irange(size.size())) {
     if (size[dim] == 0) {
       storage_size = 0;

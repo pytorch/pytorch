@@ -2,6 +2,7 @@
 // ${generated_comment}
 
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalInverses.h>
 #include <torch/library.h>
@@ -38,7 +39,8 @@ constexpr auto exclude_keys_for_meta_dispatch =
 
 
 inline Tensor to_meta(const Tensor& t) {
-    return at::native::empty_strided_meta(t.sizes(), t.strides(),
+    if (!t.defined()) return t;
+    return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
 }
@@ -50,10 +52,11 @@ inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
   return c10::nullopt;
 }
 
-inline std::vector<Tensor> to_meta(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_meta(t_list[i]);
+inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto& tensor : t_list) {
+    outputs.push_back(to_meta(tensor));
   }
   return outputs;
 }

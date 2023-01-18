@@ -110,7 +110,7 @@ class ToCopy : public torch::lazy::TsNode {
     kwarguments.emplace_back("memory_format", memory_format);
     torch::lazy::TSOpVector _to_copy_out =
         torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
-    CHECK_EQ(_to_copy_out.size(), 1);
+    TORCH_CHECK_EQ(_to_copy_out.size(), 1);
 
     return _to_copy_out;
   }

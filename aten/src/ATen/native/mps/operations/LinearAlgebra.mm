@@ -13,8 +13,7 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /*
  * Helper functions to be used for mm/addmm for detecting the Transpositions
@@ -100,6 +99,9 @@ Tensor& mm_out_mps_impl(
     Tensor& output) {
   using namespace mps;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK(self.scalar_type() == ScalarType::Double
+              || self.scalar_type() == ScalarType::Float
+              || self.scalar_type() == ScalarType::Half, "MPS device does not support mm for non-float inputs");
 
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
@@ -122,17 +124,11 @@ Tensor& mm_out_mps_impl(
 
   MPSStream* stream = getCurrentMPSStream();
 
-  bool transpose_mat1            = false;
-  bool transpose_mat2            = false;
-
-  prepare_matrices_for_broadcasting(NULL, self, other, NULL, NULL, transpose_mat1, transpose_mat2);
-
   mps::MPSGraphCache *cache_ = mps::MPSGraphCache::getInstance();
 
   @autoreleasepool {
 
-    string key = "mm_out_mps_impl" + getTensorsStringKey({self, other})
-                                   + ":" + to_string(transpose_mat1) + ":" + to_string(transpose_mat2);
+    string key = "mm_out_mps_impl" + getTensorsStringKey({self, other});
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -144,31 +140,25 @@ Tensor& mm_out_mps_impl(
           MPSGraph *mpsGraph = mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor *selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
-          MPSGraphTensor *otherTensor =  mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
+          MPSGraphTensor *selfTensor = nil;
+          MPSGraphTensor *otherTensor = nil;
+          MPSGraphTensor *outputTensor = nil;
 
-          MPSGraphTensor* t1 = nil;
-          MPSGraphTensor* t2 = nil;
+          if(self.numel() == 0 || other.numel() == 0) {
 
-          if(transpose_mat1)
-            t1 = [mpsGraph transposeTensor:selfTensor
-                                 dimension:-1
-                             withDimension:-2
-                                      name:nil];
-          else
-            t1 = selfTensor;
+            outputTensor = [mpsGraph constantWithScalar:0.
+                                                  shape:getMPSShape(output_sizes)
+                                                   dataType:getMPSDataType(output.scalar_type())];
 
-          if(transpose_mat2)
-            t2 = [mpsGraph transposeTensor:otherTensor
-                                 dimension:-1
-                             withDimension:-2
-                                      name:nil];
-          else
-            t2 = otherTensor;
+          }
+          else {
 
-          MPSGraphTensor* outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:t1
-                                                                         secondaryTensor:t2
-                                                                                    name:nil];
+            selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
+            otherTensor =  mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
+            outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:selfTensor
+                                                           secondaryTensor:otherTensor
+                                                                      name:nil];
+          }
 
           newCachedGraph->selfTensor_ = selfTensor;
           newCachedGraph->otherTensor_ = otherTensor;
@@ -178,14 +168,21 @@ Tensor& mm_out_mps_impl(
       });
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    Placeholder selfPlaceholder = Placeholder();
+    Placeholder otherPlaceholder = Placeholder();
+    if(!(self.numel() == 0 || other.numel() == 0)) {
+      selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
+      otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    }
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
+
+    if(!(self.numel() == 0 || other.numel() == 0))
+      feeds = @{
+        selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+        otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData()
+      };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
@@ -208,6 +205,9 @@ Tensor& addmm_out_mps_impl(
 
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK(self.scalar_type() == ScalarType::Double
+              || self.scalar_type() == ScalarType::Float
+              || self.scalar_type() == ScalarType::Half, "MPS device does not support addmm for non-float input");
 
   TensorArg args[]{{output, "out", 0}, {bias, "self", 1}, {self, "mat1", 2}, {other, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -239,8 +239,6 @@ Tensor& addmm_out_mps_impl(
   }
 
   MPSStream* stream = getCurrentMPSStream();
-
-  MPSGraph* mpsGraph = make_mps_graph();
 
   bool transpose_mat1_times_mat2 = false;
   bool transpose_mat1            = false;
@@ -366,6 +364,10 @@ Tensor& bmm_out_mps_impl(
   Tensor & result) {
   using namespace mps;
 
+  TORCH_CHECK(batch1.scalar_type() == ScalarType::Double
+              || batch1.scalar_type() == ScalarType::Float
+              || batch1.scalar_type() == ScalarType::Half, "MPS device does not support bmm for non-float inputs");
+
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     return result;
   }
@@ -443,6 +445,10 @@ Tensor& addbmm_or_baddbmm_out_mps_impl(
   TORCH_CHECK(batch1.is_mps());
   TORCH_CHECK(batch2.is_mps());
   TORCH_CHECK(result.is_mps());
+
+  TORCH_CHECK(batch1.scalar_type() == ScalarType::Double
+              || batch1.scalar_type() == ScalarType::Float
+              || batch1.scalar_type() == ScalarType::Half, "MPS device does not support addbmm or baddbmm for non-float inputs");
 
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -590,5 +596,4 @@ Tensor &addbmm_mps_(Tensor& self, const Tensor& batch1, const Tensor& batch2, co
   return addbmm_out_mps(self, batch1, batch2, beta, alpha, self);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

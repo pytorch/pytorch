@@ -17,6 +17,7 @@
 #include <c10/util/SmallVector.h>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 using namespace c10;
 
 // Check that no bytes are wasted and everything is well-aligned.
@@ -125,7 +126,7 @@ void SmallVectorBase<Size_T>::grow_pod(
     size_t MinSize,
     size_t TSize) {
   size_t NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
-  void* NewElts;
+  void* NewElts = nullptr;
   if (BeginX == FirstEl) {
     NewElts = std::malloc(NewCapacity * TSize);
     if (NewElts == nullptr) {

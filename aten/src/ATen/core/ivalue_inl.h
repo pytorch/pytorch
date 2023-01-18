@@ -7,6 +7,7 @@
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
@@ -185,10 +186,18 @@ inline c10::Storage IValue::toStorage() const& {
   return c10::Storage(toIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Stream IValue::toStream() && {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::Stream IValue::toStream() const& {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
@@ -214,6 +223,38 @@ inline at::Generator IValue::toGenerator() && {
 inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
+}
+inline c10::SymInt IValue::toSymInt() && {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
+inline c10::SymInt IValue::toSymInt() const& {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt(toIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
+inline c10::SymFloat IValue::toSymFloat() && {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
+}
+inline c10::SymFloat IValue::toSymFloat() const& {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat(toIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
 }
 
 namespace ivalue {
@@ -498,6 +539,7 @@ struct TORCH_API TupleElements {
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
+      TORCH_CHECK(idx < elementsVector_.size(), "TupleElements: invalid index Index = ", idx, "; Length = ", elementsVector_.size());
       return elementsVector_.at(idx);
     }
   }
@@ -1101,6 +1143,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
+    streams.reserve(devices_.size());
     for (const c10::Device& device : devices_) {
       streams.push_back(impl_.getStreamFromGlobalPool(device));
     }
@@ -1446,6 +1489,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return !type_.holds_strong_ref();
   }
 
+  bool is_empty_strong_compilation_ref() const {
+    return type_.holds_empty_strong_ref();
+  }
+
  private:
   void resizeObject(size_t slot);
   WeakOrStrongTypePtr type_;
@@ -1463,7 +1510,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
-  virtual ~PyObjectHolder(){};
+  virtual ~PyObjectHolder()= default;
 };
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {
@@ -1585,6 +1632,7 @@ DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
+DEFINE_TO(c10::SymFloat, toSymFloat)
 
 template <class T>
 struct _fake_type {};
@@ -1671,8 +1719,8 @@ template <typename T>
 static T createVectorLikeFromList(const c10::detail::ListImpl* impl) {
   T result;
   result.reserve(impl->list.size());
-  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<typename T::value_type>());
+  for (const auto & i : impl->list) {
+    result.push_back(i.to<typename T::value_type>());
   }
   return result;
 }
@@ -1978,11 +2026,11 @@ inline IValue::IValue(c10::impl::GenericList v)
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -1990,8 +2038,33 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-inline IValue::IValue(c10::SymIntArrayRef v) : IValue(at::ArrayRef<c10::SymInt>(v.data(), v.size())) {}
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(at::ArrayRef<T> v) : IValue() {
+  auto vi = c10::asIntArrayRefSlowOpt(v);
+  if (vi.has_value()) {
+    // This list is entirely integers; ensure it is typed as
+    // an IntList so toIntList works
+    *this = IValue(*vi);
+  } else {
+    // This list has SymInts; type it as a SymInt
+    *this = IValue(impl::toList<c10::SymInt>(c10::List<c10::SymInt>()));
+    auto list = to<c10::List<c10::SymInt>>();
+    list.reserve(v.size());
+    for (const auto& e : v) {
+      list.push_back(e);
+    }
+  }
+}
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(at::OptionalArrayRef<T> mb_v) : IValue() {
+  if (!mb_v.has_value()) return;
+  *this = IValue(*mb_v);
+}
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(const std::vector<T>& v) : IValue() {
+  *this = IValue(at::ArrayRef<T>(v));
+}
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -1999,7 +2072,7 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
   if (v.has_value()) {
     *this = IValue(std::move(*v));
@@ -2012,6 +2085,25 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   list.reserve(v.size());
   for (auto& e : v) {
     list.push_back(std::move(e));
+  }
+}
+
+template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
+inline IValue::IValue(c10::IListRef<T> v) : IValue() {
+  constexpr bool boxed_type_constructs_ivalue =
+      std::is_constructible<IValue, typename c10::IListRef<T>::boxed_type>::value;
+  // First, we try to use the boxed value.
+  // If we fail (either it's not in the boxed state, or its boxed type
+  // can not construct an IValue), we fallback to copying the list.
+  if (boxed_type_constructs_ivalue && v.isBoxed()) {
+    *this = IValue(impl::toList(v.toBoxed()));
+  } else {
+    c10::List<T> list;
+    list.reserve(v.size());
+    for (const auto& t : v) {
+      list.push_back(t);
+    }
+    *this = IValue(impl::toList(std::move(list)));
   }
 }
 
@@ -2068,7 +2160,7 @@ inline IValue IValue::make_capsule(
 template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
-IValue::IValue(c10::intrusive_ptr<T> custom_class) {
+IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
   auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
@@ -2082,7 +2174,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
-  tag = Tag::Object;
+
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)

@@ -3,6 +3,8 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 
+#include <utility>
+
 namespace at {
 namespace native {
 
@@ -63,17 +65,7 @@ Tensor empty_per_channel_affine_quantized(
   return new_qtensor(
       size,
       options,
-      quantizer);
-}
-
-Tensor empty_symint_unknown_quantized(
-    c10::SymIntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-      return at::native::empty_unknown_quantized(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
+      std::move(quantizer));
 }
 
 Tensor empty_unknown_quantized(
@@ -95,7 +87,7 @@ Tensor empty_unknown_quantized(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
   QuantizerPtr quantizer = make_unknown_quantizer(typeMetaToScalarType(options.dtype()));
-  return new_qtensor(size, options, quantizer);
+  return new_qtensor(size, options, std::move(quantizer));
 }
 
 Tensor empty_strided_unknown_quantized(

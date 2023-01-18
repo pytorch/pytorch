@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <random>
+#include <c10/core/SymInt.h>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #ifndef _USE_MATH_DEFINES
@@ -11,6 +12,18 @@
 #endif
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+
+// We intentionally test self assignment/move in this file, suppress warnings
+// on them
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wself-move"
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
+#endif
 
 using std::cout;
 using namespace at;
@@ -179,4 +192,5 @@ TEST(TestScalar, TestFormatting) {
   ASSERT_EQ("false", format(Scalar(false)));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<double>(2.0, 3.1))));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
+  ASSERT_EQ("4", format(Scalar(Scalar(4).toSymInt())));
 }
