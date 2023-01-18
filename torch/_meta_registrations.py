@@ -1279,7 +1279,18 @@ def meta_embedding_bag(
         else:
             offset2bag = offsets.new_empty(0)
         bag_size = offsets.new_empty(num_bags)
-        max_indices = offsets.new_empty(bag_size.size())
+        # This part of the logic comes from make_max_indices_out in EmbeddingBag.cpp
+        numBags = offsets.shape[0]
+        if mode == MODE_MAX:
+            if include_last_offset:
+                check(
+                    numBags >= 1,
+                    lambda: "include_last_offset: numBags should be at least 1",
+                )
+                numBags -= 1
+            max_indices = offsets.new_empty(numBags, weight.shape[1])
+        else:
+            max_indices = offsets.new_empty(bag_size.size())
     return output, offset2bag, bag_size, max_indices
 
 
