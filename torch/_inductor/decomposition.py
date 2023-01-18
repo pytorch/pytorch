@@ -53,6 +53,12 @@ decompositions = get_decompositions(
         aten.hardtanh_backward,
         aten.im2col,
         aten.index_select,
+        aten.index_add,
+        aten.index_add_,
+        aten.index_copy,
+        aten.index_copy_,
+        aten.index_fill,
+        aten.index_fill_,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
@@ -82,7 +88,6 @@ decompositions = get_decompositions(
         aten.nll_loss_backward,
         aten.nll_loss_forward,
         aten.norm,
-        aten.reflection_pad2d_backward,
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
@@ -107,8 +112,6 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
         aten.bucketize,
     ]
 )
@@ -525,7 +528,7 @@ Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
-extra_random_decomps = get_decompositions([aten.native_dropout])
+extra_random_decomps = get_decompositions([aten.native_dropout, aten.uniform_])
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
 )

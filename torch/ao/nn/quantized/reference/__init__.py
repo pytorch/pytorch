@@ -12,6 +12,7 @@ __all__ = [
     'LSTMCell',
     'GRUCell',
     'LSTM',
+    'GRU',
     'Embedding',
     'EmbeddingBag',
 ]
