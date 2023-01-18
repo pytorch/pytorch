@@ -2001,8 +2001,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             if old_tensor_type is None:
                 raise AssertionError(
                     f"Could not find a non-sparse tensor with {torch.get_default_dtype()},"
-                    f"{torch._C._get_default_device()} in {torch._tensor_classes}\n"
-                    f"{'\n'.join(reasons)}"
+                    f"{torch._C._get_default_device()} in {torch._tensor_classes}  :  "
+                    f"{'|'.join(reasons)}"
                 )
             try:
                 torch.set_default_tensor_type(tensor_type)
