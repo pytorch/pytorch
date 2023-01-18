@@ -66,6 +66,7 @@ class TestMemoryTracker(TestCase):
         self.assertEqual(len(tracker.memories_reserved), tracker._op_index)
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
+        self.assertTrue(hasattr(tracker, "_num_cuda_retries"))
 
 
 if __name__ == "__main__":
