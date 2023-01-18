@@ -1,12 +1,26 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/Dispatch.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <algorithm>
 #include <vector>
@@ -19,7 +33,7 @@ DEFINE_DISPATCH(qcat_relu_nhwc_stub);
 
 namespace {
 
-bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
+bool is_cat_nhwc_fast_path(const MaterializedITensorListRef& qxs, int64_t dim) {
   TORCH_CHECK(qxs.size() > 0);
   bool is_fast_path = dim == 1;
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
@@ -35,21 +49,21 @@ bool is_valid_quantization_scheme(const Tensor& t) {
   return (qtype == kPerTensorAffine) || (qtype == kPerTensorSymmetric);
 }
 
-bool all_inputs_sharing_qparams(TensorList qxs) {
+bool all_inputs_sharing_qparams(const MaterializedITensorListRef& qxs) {
   bool is_valid = true;
   for (const auto i : c10::irange(1, qxs.size())) {
-    is_valid |= qxs[0].is_quantized();
-    is_valid |= qxs[i].is_quantized() == qxs[0].is_quantized();
-    is_valid |= qxs[i].qscheme() == qxs[0].qscheme();
-    is_valid |= qxs[i].dtype() == qxs[0].dtype();
-    if (qxs[0].qscheme() == kPerTensorAffine) {
-      is_valid |= qxs[i].q_scale() == qxs[0].q_scale();
-      is_valid |= qxs[i].q_zero_point() == qxs[0].q_zero_point();
-    } else if (qxs[0].qscheme() == kPerChannelAffine) {
-      is_valid |= qxs[i].q_per_channel_scales().equal(qxs[0].q_per_channel_scales());
-      is_valid |= qxs[i].q_per_channel_zero_points().equal(qxs[0].q_per_channel_zero_points());
+    is_valid |= qxs[0].get().is_quantized();
+    is_valid |= qxs[i].get().is_quantized() == qxs[0].get().is_quantized();
+    is_valid |= qxs[i].get().qscheme() == qxs[0].get().qscheme();
+    is_valid |= qxs[i].get().dtype() == qxs[0].get().dtype();
+    if (qxs[0].get().qscheme() == kPerTensorAffine) {
+        is_valid |= qxs[i].get().q_scale() == qxs[0].get().q_scale();
+      is_valid |= qxs[i].get().q_zero_point() == qxs[0].get().q_zero_point();
+    } else if (qxs[0].get().qscheme() == kPerChannelAffine) {
+        is_valid |= qxs[i].get().q_per_channel_scales().equal(qxs[0].get().q_per_channel_scales());
+      is_valid |= qxs[i].get().q_per_channel_zero_points().equal(qxs[0].get().q_per_channel_zero_points());
     } else {
-      TORCH_CHECK(false, "Unrecognized qscheme:", toString(qxs[0].qscheme()));
+        TORCH_CHECK(false, "Unrecognized qscheme:", toString(qxs[0].get().qscheme()));
     }
   }
   return is_valid;
@@ -61,7 +75,7 @@ bool all_inputs_sharing_qparams(TensorList qxs) {
  */
 template <bool ReLUFused>
 Tensor quantized_cat_impl(
-    const c10::List<Tensor>& qxs,
+    const MaterializedITensorListRef& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point) {
@@ -73,8 +87,8 @@ Tensor quantized_cat_impl(
     }
   }
 
-  const auto x_dtype = qxs.get(0).scalar_type();
-  const auto x_qscheme = qxs.get(0).qscheme();
+  const auto x_dtype = qxs[0].get().scalar_type();
+  const auto x_qscheme = qxs[0].get().qscheme();
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
@@ -97,6 +111,15 @@ Tensor quantized_cat_impl(
     }
   });
   return qy;
+}
+
+template <bool ReLUFused>
+Tensor quantized_cat_impl(
+    ITensorListRef qxs,
+    int64_t dim,
+    double scale,
+    int64_t zero_point) {
+  return quantized_cat_impl<ReLUFused>(qxs.materialize(), dim, scale, zero_point);
 }
 
 template <bool ReLUFused = false>
@@ -134,28 +157,29 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::cat_relu_out"), TORCH_FN(qcat_out<true>));
 }
 
-Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {
-  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+Tensor cat_quantized_cpu(const ITensorListRef& qxs, int64_t dim) {
+  auto materialized = qxs.materialize();
+  TORCH_CHECK(is_valid_quantization_scheme(materialized[0]),
               "Only per-tensor quantization is supported in 'cat'!");
   TORCH_CHECK(
-      all_inputs_sharing_qparams(qxs),
+      all_inputs_sharing_qparams(materialized),
       "All inputs should share the same quantization parameters.");
-  check_cat_no_zero_dim(qxs);
-  dim = legacy_cat_wrap_dim(dim, qxs);
-  double _scale = qxs[0].q_scale();
-  int64_t _zero_point = qxs[0].q_zero_point();
-  return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
+  check_cat_no_zero_dim(materialized);
+  dim = legacy_cat_wrap_dim(dim, materialized);
+  double _scale = materialized[0].get().q_scale();
+  int64_t _zero_point = materialized[0].get().q_zero_point();
+  return quantized_cat_impl<false>(materialized, dim, _scale, _zero_point);
 }
 
-Tensor& cat_out_quantized_cpu(TensorList qxs, int64_t dim, Tensor& out) {
-  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+Tensor& cat_out_quantized_cpu(const ITensorListRef& qxs, int64_t dim, Tensor& out) {
+  auto materialized = qxs.materialize();
+  TORCH_CHECK(is_valid_quantization_scheme(materialized[0]),
               "Only per-tensor quantization is supported in 'cat'!")
   TORCH_CHECK(is_valid_quantization_scheme(out),
               "Only per-tensor quantization is supported in 'cat'!")
-  check_cat_no_zero_dim(qxs);
-  dim = legacy_cat_wrap_dim(dim, qxs);
-  auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
-                                        out.q_zero_point());
+  check_cat_no_zero_dim(materialized);
+  dim = legacy_cat_wrap_dim(dim, materialized);
+  auto out_ = quantized_cat_impl<false>(qxs, dim, out.q_scale(), out.q_zero_point());
   at::native::copy_(out, out_, /*non_blocking=*/false);
   return out;
 }

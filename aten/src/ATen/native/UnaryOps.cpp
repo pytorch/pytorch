@@ -1,26 +1,174 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Parallel.h>
-#include <ATen/native/Math.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/ComplexHelper.h>
 
-#include <algorithm>
-#include <cmath>
-#include <functional>
-#include <numeric>
-#include <vector>
+#include <c10/util/MathConstants.h>
 
-#include <map>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_conj_native.h>
+#include <ATen/ops/_conj_physical.h>
+#include <ATen/ops/_conj_physical_native.h>
+#include <ATen/ops/_neg_view_native.h>
+#include <ATen/ops/abs.h>
+#include <ATen/ops/abs_native.h>
+#include <ATen/ops/absolute_native.h>
+#include <ATen/ops/acos.h>
+#include <ATen/ops/acos_native.h>
+#include <ATen/ops/acosh.h>
+#include <ATen/ops/acosh_native.h>
+#include <ATen/ops/angle.h>
+#include <ATen/ops/angle_native.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/arccos_native.h>
+#include <ATen/ops/arccosh_native.h>
+#include <ATen/ops/arcsin_native.h>
+#include <ATen/ops/arcsinh_native.h>
+#include <ATen/ops/arctan_native.h>
+#include <ATen/ops/arctanh_native.h>
+#include <ATen/ops/asin.h>
+#include <ATen/ops/asin_native.h>
+#include <ATen/ops/asinh.h>
+#include <ATen/ops/asinh_native.h>
+#include <ATen/ops/atan.h>
+#include <ATen/ops/atan_native.h>
+#include <ATen/ops/atanh.h>
+#include <ATen/ops/atanh_native.h>
+#include <ATen/ops/bitwise_not_native.h>
+#include <ATen/ops/can_cast.h>
+#include <ATen/ops/ceil_native.h>
+#include <ATen/ops/conj_native.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/conj_physical_native.h>
+#include <ATen/ops/cos_native.h>
+#include <ATen/ops/cosh_native.h>
+#include <ATen/ops/deg2rad.h>
+#include <ATen/ops/deg2rad_native.h>
+#include <ATen/ops/digamma.h>
+#include <ATen/ops/digamma_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/erf.h>
+#include <ATen/ops/erf_native.h>
+#include <ATen/ops/erfc.h>
+#include <ATen/ops/erfc_native.h>
+#include <ATen/ops/erfinv.h>
+#include <ATen/ops/erfinv_native.h>
+#include <ATen/ops/exp2.h>
+#include <ATen/ops/exp2_native.h>
+#include <ATen/ops/exp_native.h>
+#include <ATen/ops/expm1.h>
+#include <ATen/ops/expm1_native.h>
+#include <ATen/ops/fix_native.h>
+#include <ATen/ops/floor_native.h>
+#include <ATen/ops/frac_native.h>
+#include <ATen/ops/frexp.h>
+#include <ATen/ops/frexp_native.h>
+#include <ATen/ops/i0.h>
+#include <ATen/ops/i0_native.h>
+#include <ATen/ops/imag_native.h>
+#include <ATen/ops/lgamma.h>
+#include <ATen/ops/lgamma_native.h>
+#include <ATen/ops/log10_native.h>
+#include <ATen/ops/log1p.h>
+#include <ATen/ops/log1p_native.h>
+#include <ATen/ops/log2_native.h>
+#include <ATen/ops/log_native.h>
+#include <ATen/ops/logical_not.h>
+#include <ATen/ops/logical_not_native.h>
+#include <ATen/ops/logit.h>
+#include <ATen/ops/logit_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/mvlgamma.h>
+#include <ATen/ops/mvlgamma_native.h>
+#include <ATen/ops/nan_to_num.h>
+#include <ATen/ops/nan_to_num_native.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/neg_native.h>
+#include <ATen/ops/negative_native.h>
+#include <ATen/ops/polygamma.h>
+#include <ATen/ops/polygamma_native.h>
+#include <ATen/ops/positive_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/rad2deg.h>
+#include <ATen/ops/rad2deg_native.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/real_native.h>
+#include <ATen/ops/reciprocal_native.h>
+#include <ATen/ops/resolve_conj_native.h>
+#include <ATen/ops/resolve_neg_native.h>
+#include <ATen/ops/round.h>
+#include <ATen/ops/round_native.h>
+#include <ATen/ops/rsqrt_native.h>
+#include <ATen/ops/select.h>
+#include <ATen/ops/sgn_native.h>
+#include <ATen/ops/sigmoid.h>
+#include <ATen/ops/sigmoid_native.h>
+#include <ATen/ops/sign_native.h>
+#include <ATen/ops/signbit_native.h>
+#include <ATen/ops/sin_native.h>
+#include <ATen/ops/sinc.h>
+#include <ATen/ops/sinc_native.h>
+#include <ATen/ops/sinh_native.h>
+#include <ATen/ops/special_airy_ai_native.h>
+#include <ATen/ops/special_bessel_j0_native.h>
+#include <ATen/ops/special_bessel_j1_native.h>
+#include <ATen/ops/special_bessel_y0_native.h>
+#include <ATen/ops/special_bessel_y1_native.h>
+#include <ATen/ops/special_digamma_native.h>
+#include <ATen/ops/special_entr_native.h>
+#include <ATen/ops/special_erf_native.h>
+#include <ATen/ops/special_erfc_native.h>
+#include <ATen/ops/special_erfcx_native.h>
+#include <ATen/ops/special_erfinv_native.h>
+#include <ATen/ops/special_exp2_native.h>
+#include <ATen/ops/special_expit_native.h>
+#include <ATen/ops/special_expm1_native.h>
+#include <ATen/ops/special_gammaln_native.h>
+#include <ATen/ops/special_i0_native.h>
+#include <ATen/ops/special_i0e_native.h>
+#include <ATen/ops/special_i1_native.h>
+#include <ATen/ops/special_i1e_native.h>
+#include <ATen/ops/special_log1p_native.h>
+#include <ATen/ops/special_log_ndtr_native.h>
+#include <ATen/ops/special_logit_native.h>
+#include <ATen/ops/special_modified_bessel_i0_native.h>
+#include <ATen/ops/special_modified_bessel_i1_native.h>
+#include <ATen/ops/special_modified_bessel_k0_native.h>
+#include <ATen/ops/special_modified_bessel_k1_native.h>
+#include <ATen/ops/special_multigammaln_native.h>
+#include <ATen/ops/special_ndtr_native.h>
+#include <ATen/ops/special_ndtri_native.h>
+#include <ATen/ops/special_polygamma_native.h>
+#include <ATen/ops/special_psi_native.h>
+#include <ATen/ops/special_round_native.h>
+#include <ATen/ops/special_scaled_modified_bessel_k0_native.h>
+#include <ATen/ops/special_scaled_modified_bessel_k1_native.h>
+#include <ATen/ops/special_sinc_native.h>
+#include <ATen/ops/special_spherical_bessel_j0_native.h>
+#include <ATen/ops/sqrt_native.h>
+#include <ATen/ops/square_native.h>
+#include <ATen/ops/tan_native.h>
+#include <ATen/ops/tanh_native.h>
+#include <ATen/ops/trunc.h>
+#include <ATen/ops/trunc_native.h>
+#include <ATen/ops/view_as_real.h>
+#endif
+
+#include <cmath>
 
 namespace at {
 
@@ -157,6 +305,21 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
   func_stub(device_type(), *this);                                      \
 }
 
+// This macro is as optional as the one above. torch.(ceil|floor|round|trunc) are no-ops for integers
+// See gh-70918
+#define CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(func_out, func_stub)                                \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/false)) {                                      \
+    result.copy_(self);                                                 \
+  } else {                                                              \
+    func_stub(device_type(), *this);                                    \
+  }                                                                     \
+}
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(ceil_out, ceil_stub)
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(floor_out, floor_stub)
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(round_out, round_stub)
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(trunc_out, trunc_stub)
+
 CREATE_UNARY_TORCH_IMPL_FUNC(acos_out, acos_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(acosh_out, acosh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(asin_out, asin_stub)
@@ -164,7 +327,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(asinh_out, asinh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(atan_out, atan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(atanh_out, atanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not_out, bitwise_not_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(ceil_out, ceil_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(cos_out, cos_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh_out, cosh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma_out, digamma_stub)
@@ -174,7 +336,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(erfinv_out, erfinv_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp_out, exp_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp2_out, exp2_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(expm1_out, expm1_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(floor_out, floor_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(frac_out, frac_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(i0_out, i0_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(lgamma_out, lgamma_stub)
@@ -184,7 +345,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(log1p_out, log1p_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(log2_out, log2_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(neg_out, neg_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal_out, reciprocal_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(round_out, round_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt_out, rsqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid_out, sigmoid_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sign_out, sign_stub)
@@ -201,7 +361,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_log_ndtr_out, special_log_ndtr_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_airy_ai_out, special_airy_ai_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j0_out, special_bessel_j0_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j1_out, special_bessel_j1_stub)
@@ -723,8 +882,7 @@ constexpr double QUARTER = 0.25;
 }
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
-  TORCH_CHECK((self > HALF * (p - 1)).all().item<bool>(),
-              "All elements must be greater than (p-1)/2");
+  TORCH_CHECK(self.scalar_type() != kBool, "The input tensor may not be a boolean tensor.");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
 }
 

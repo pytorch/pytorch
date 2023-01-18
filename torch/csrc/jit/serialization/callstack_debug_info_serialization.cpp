@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 const int64_t kInvalidSourceRangeTag = -1;
@@ -46,7 +45,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
     elements.emplace_back(
         serialize(cs_ptr->callee().value(), source_range_tags));
   } else {
-    elements.emplace_back(c10::IValue());
+    elements.emplace_back();
   }
   auto fn_name = cs_ptr->function_name();
   if (!fn_name.empty()) {
@@ -184,8 +183,8 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   }
   const auto& tup_elems = iv.toTupleRef().elements();
   TORCH_CHECK(tup_elems.size() == 2);
-  std::string type_name = tup_elems[0].toString()->string();
-  std::string instance_name = tup_elems[1].toString()->string();
+  std::string type_name = tup_elems[0].toStringRef();
+  std::string instance_name = tup_elems[1].toStringRef();
   // type_name might be empty string ""
   // In that case type_ptr should be just nullptr
   auto type_ptr = cu->get_class(type_name);
@@ -248,5 +247,4 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
   return callstack_ptrs;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

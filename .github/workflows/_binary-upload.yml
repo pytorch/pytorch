@@ -70,7 +70,9 @@ on:
         description: Conda PyTorchBot token
 jobs:
   build:
-    runs-on: linux.2xlarge
+    runs-on: ubuntu-22.04
+    container:
+      image: continuumio/miniconda3:4.12.0
     env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -86,40 +88,20 @@ jobs:
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
-      # Needed for conda builds
-      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       ANACONDA_USER: pytorch
-      AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       GITHUB_TOKEN: ${{ secrets.github-token }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: List the env
-        shell: bash
-        run: env
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        uses: ./.github/actions/chown-workspace
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: ./.github/actions/setup-ssh
         with:
-          github-secret: ${{ secrets.github-token }}
+          no-sudo: true
 
-      - name: Download Build Artifacts with S3
-        uses: seemethere/download-artifact-s3@v4
-        if: ${{ inputs.use_s3 }}
-        with:
-          name: ${{ inputs.build_name }}
-          path: "${{ runner.temp }}/artifacts/"
-
-      - name: Download Build Artifacts without S3
-        uses: actions/download-artifact@v2
-        if: ${{ !inputs.use_s3 }}
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
@@ -130,6 +112,7 @@ jobs:
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        shell: bash -e -l {0}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -143,36 +126,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
+          BUILD_NAME: ${{ inputs.build_name }}
         run: |
-          docker run --rm -i \
-            -e ANACONDA_API_TOKEN \
-            -e AWS_ACCESS_KEY_ID \
-            -e AWS_SECRET_ACCESS_KEY \
-            -e DRY_RUN \
-            -e PACKAGE_TYPE \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_CHANNEL \
-            -e UPLOAD_SUBFOLDER \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -v "${GITHUB_WORKSPACE}:/v" \
-            -w /v \
-            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
-            bash -c '.circleci/scripts/binary_upload.sh'
-
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+            set -ex
+            bash .circleci/scripts/binary_upload.sh

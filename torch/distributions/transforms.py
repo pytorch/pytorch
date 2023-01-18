@@ -24,6 +24,7 @@ __all__ = [
     'ExpTransform',
     'IndependentTransform',
     'LowerCholeskyTransform',
+    'PositiveDefiniteTransform',
     'PowerTransform',
     'ReshapeTransform',
     'SigmoidTransform',
@@ -95,6 +96,11 @@ class Transform(object):
         else:
             raise ValueError('cache_size must be 0 or 1')
         super(Transform, self).__init__()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_inv"] = None
+        return state
 
     @property
     def event_dim(self):
@@ -965,6 +971,25 @@ class LowerCholeskyTransform(Transform):
 
     def _inverse(self, y):
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
+
+
+class PositiveDefiniteTransform(Transform):
+    """
+    Transform from unconstrained matrices to positive-definite matrices.
+    """
+    domain = constraints.independent(constraints.real, 2)
+    codomain = constraints.positive_definite  # type: ignore[assignment]
+
+    def __eq__(self, other):
+        return isinstance(other, PositiveDefiniteTransform)
+
+    def _call(self, x):
+        x = LowerCholeskyTransform()(x)
+        return x @ x.mT
+
+    def _inverse(self, y):
+        y = torch.linalg.cholesky(y)
+        return LowerCholeskyTransform().inv(y)
 
 
 class CatTransform(Transform):

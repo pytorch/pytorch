@@ -1,4 +1,5 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
@@ -37,7 +38,7 @@ at::Tensor MakeTensorFromComputationData(
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name,
     BackendDevice device,
-    c10::ArrayRef<Node*> post_order,
+    c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status) {
   return getBackend()->CreateLoweringContext(
       name, device, post_order, emit_status);

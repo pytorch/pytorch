@@ -40,11 +40,6 @@ int64_t roundDownPow2OrMultipleOf(const int64_t x, const int64_t multiple) {
   return std::max(std::max(round_down_multiple, round_down_pow2), (int64_t)1);
 }
 
-// Div x by y, but min at 1
-int64_t safeDiv(const int64_t x, const int64_t y) {
-  return std::max(x / y, (int64_t)1);
-}
-
 int64_t clamp(const int64_t val, const int64_t min_val, const int64_t max_val) {
   return std::min(std::max(val, min_val), max_val);
 }
@@ -54,20 +49,20 @@ int64_t clamp(const int64_t val, const int64_t min_val, const int64_t max_val) {
 void reduceProductTo(int64_t& z, int64_t& y, int64_t& x, const int64_t max) {
   TORCH_INTERNAL_ASSERT(max > 1);
   if (z * y * x > max) {
-    z = safeDiv(z, 2);
+    z = scheduler_utils::safeDiv(z, 2);
   }
   if (z * y * x > max) {
-    y = safeDiv(y, 2);
+    y = scheduler_utils::safeDiv(y, 2);
   }
   if (z * y * x > max) {
-    x = safeDiv(x, 2);
+    x = scheduler_utils::safeDiv(x, 2);
   }
   if (z * y * x > max) {
     reduceProductTo(x, y, z, max);
   }
 }
 
-ReductionParams innerReductionHeuristic(
+std::shared_ptr<ReductionParams> innerReductionHeuristic(
     const int64_t total_reduction_numel,
     const int64_t total_iteration_numel,
     const int64_t inner_most_dimension_numel,
@@ -382,21 +377,21 @@ ReductionParams innerReductionHeuristic(
     // require iterating over this entire function.
   }
 
-  ReductionParams rparams;
-  rparams.fastest_dim = true;
-  rparams.cross_block_inner_reduction = true;
-  rparams.block_dim_inner_reduction = ParallelType::TIDx;
-  rparams.cross_grid_inner_reduction = gridim > 1;
-  rparams.multiple_reds_per_blk = bdimy > 1;
+  auto rparams = std::make_shared<ReductionParams>();
+  rparams->fastest_dim = true;
+  rparams->cross_block_inner_reduction = true;
+  rparams->block_dim_inner_reduction = ParallelType::TIDx;
+  rparams->cross_grid_inner_reduction = gridim > 1;
+  rparams->multiple_reds_per_blk = bdimy > 1;
   bool pad_bdimx = bdimx > 16 &&
       bdimx * bdimy <
           (int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   // If barely just covering reduction dim, don't pad to the next warp
   pad_bdimx = pad_bdimx &&
       bdimx * inner_reduction_unroll_factor != inner_most_dimension_numel;
-  rparams.pad_inner_reduction_to_warp = pad_bdimx;
+  rparams->pad_inner_reduction_to_warp = pad_bdimx;
 
-  if (rparams.pad_inner_reduction_to_warp) {
+  if (rparams->pad_inner_reduction_to_warp) {
     // Adjust bdimx based on padding
     auto min_warp_size =
         (int64_t)at::cuda::getCurrentDeviceProperties()->warpSize;
@@ -405,24 +400,24 @@ ReductionParams innerReductionHeuristic(
         : bdimx + min_warp_size - bdimx % min_warp_size;
   }
 
-  rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
-  rparams.vectorize_inner_reduction = vectorize;
+  rparams->unroll_factor_inner_reduction = inner_reduction_unroll_factor;
+  rparams->vectorize_inner_reduction = vectorize;
 
-  if (rparams.multiple_reds_per_blk) {
-    rparams.block_dim_iter_dom = ParallelType::TIDy;
+  if (rparams->multiple_reds_per_blk) {
+    rparams->block_dim_iter_dom = ParallelType::TIDy;
   }
 
-  rparams.unroll_factor_iter_dom = iter_unroll_factor;
+  rparams->unroll_factor_iter_dom = iter_unroll_factor;
 
-  rparams.schedule_3D = total_reduction_numel != inner_most_dimension_numel;
+  rparams->schedule_3D = total_reduction_numel != inner_most_dimension_numel;
   // Outer reduction domain
-  if (rparams.schedule_3D) {
-    rparams.cross_grid_outer_reduction = grodim > 1;
+  if (rparams->schedule_3D) {
+    rparams->cross_grid_outer_reduction = grodim > 1;
     if (bdimz > 1) {
-      rparams.block_dim_outer_reduction = ParallelType::TIDz;
-      rparams.cross_block_outer_reduction = true;
+      rparams->block_dim_outer_reduction = ParallelType::TIDz;
+      rparams->cross_block_outer_reduction = true;
     }
-    rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
+    rparams->unroll_factor_outer_reduction = outer_reduction_unroll_factor;
   }
 
   int64_t gdimx = LaunchParams::UNINITIALIZED_VAL;
@@ -433,38 +428,38 @@ ReductionParams innerReductionHeuristic(
   // gdimx assigned to grdim. Otherwise it's helpful to pull godim into gdimx in
   // case it's larger than gdimy can hold, as not doing so can thrash the cache.
 
-  if (rparams.cross_grid_inner_reduction) {
-    rparams.grid_dim_inner_reduction = ParallelType::BIDx;
-    rparams.split_grid_dim_inner_reduction = true;
+  if (rparams->cross_grid_inner_reduction) {
+    rparams->grid_dim_inner_reduction = ParallelType::BIDx;
+    rparams->split_grid_dim_inner_reduction = true;
     gdimx = std::min(gridim, scheduler_utils::x_grid_limit);
 
-    rparams.grid_dim_iter_dom = ParallelType::BIDy;
+    rparams->grid_dim_iter_dom = ParallelType::BIDy;
     if (godim > scheduler_utils::y_grid_limit) {
-      rparams.split_grid_dim_iter_dom = true;
+      rparams->split_grid_dim_iter_dom = true;
       gdimy = std::min(godim, scheduler_utils::y_grid_limit);
     }
 
   } else {
-    rparams.grid_dim_iter_dom = ParallelType::BIDx;
+    rparams->grid_dim_iter_dom = ParallelType::BIDx;
     if (gdimx > scheduler_utils::x_grid_limit) {
-      rparams.split_grid_dim_iter_dom = true;
+      rparams->split_grid_dim_iter_dom = true;
       gdimx = godim;
     }
   }
 
-  if (rparams.cross_grid_outer_reduction) {
-    if (rparams.cross_block_inner_reduction) {
-      rparams.grid_dim_outer_reduction = ParallelType::BIDz;
+  if (rparams->cross_grid_outer_reduction) {
+    if (rparams->cross_block_inner_reduction) {
+      rparams->grid_dim_outer_reduction = ParallelType::BIDz;
       gdimz = std::min(grodim, scheduler_utils::z_grid_limit);
-      rparams.split_grid_dim_outer_reduction = true;
+      rparams->split_grid_dim_outer_reduction = true;
     } else {
-      rparams.grid_dim_outer_reduction = ParallelType::BIDy;
+      rparams->grid_dim_outer_reduction = ParallelType::BIDy;
       gdimy = std::min(grodim, scheduler_utils::y_grid_limit);
-      rparams.split_grid_dim_outer_reduction = true;
+      rparams->split_grid_dim_outer_reduction = true;
     }
   }
 
-  rparams.lparams = LaunchParams(
+  rparams->lparams = LaunchParams(
       gdimx,
       gdimy,
       gdimz,
@@ -483,20 +478,20 @@ ReductionParams innerReductionHeuristic(
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "block(" << bdimx << ", " << bdimy << ", " << bdimz << ")"
               << std::endl;
-    std::cerr << rparams.toString() << std::endl;
+    std::cerr << rparams->toString() << std::endl;
   }
 
   // If 3d, check if it's supported by the scheduler, otherwise force 1D
   // schedule
-  if (rparams.schedule_3D) {
-    if (rparams.multiple_reds_per_blk &&
-        (rparams.cross_grid_inner_reduction ||
-         rparams.cross_grid_outer_reduction)) {
+  if (rparams->schedule_3D) {
+    if (rparams->multiple_reds_per_blk &&
+        (rparams->cross_grid_inner_reduction ||
+         rparams->cross_grid_outer_reduction)) {
       if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
         std::cerr << "\n===== UNSUPPORTED REDUCTION HEURISTIC ========\n";
-        std::cerr << rparams.multiple_reds_per_blk << ", "
-                  << (rparams.unroll_factor_inner_reduction > 1) << ", "
-                  << rparams.cross_grid_inner_reduction << std::endl;
+        std::cerr << rparams->multiple_reds_per_blk << ", "
+                  << (rparams->unroll_factor_inner_reduction > 1) << ", "
+                  << rparams->cross_grid_inner_reduction << std::endl;
       }
       return innerReductionHeuristic(
           total_reduction_numel,
@@ -511,7 +506,7 @@ ReductionParams innerReductionHeuristic(
   return rparams;
 }
 
-ReductionParams OuterReductionHeuristic(
+std::shared_ptr<ReductionParams> outerReductionHeuristic(
     const int64_t total_reduction_numel,
     const int64_t total_iteration_numel,
     const int64_t n_tensor_inputs,
@@ -684,16 +679,17 @@ ReductionParams OuterReductionHeuristic(
   bdimx = roundUpPow2OrMultipleOf(bdimx, 8);
 
   // Fill bdimy with left over threads
-  bdimy =
-      std::min(safeDiv(target_threads_in_block, bdimx), total_reduction_numel);
+  bdimy = std::min(
+      scheduler_utils::safeDiv(target_threads_in_block, bdimx),
+      total_reduction_numel);
 
   bdimy = roundDownPow2OrMultipleOf(bdimy, 8);
 
   // Move parallelization into unrolling the reduction dimension if
   // parallelizing iteration dimension didn't take the available unroll factor.
   if (iter_unroll_factor < max_unroll && rDimAvail() > 2) {
-    inner_reduction_unroll_factor =
-        std::min(rDimAvail(), safeDiv(max_unroll, iter_unroll_factor));
+    inner_reduction_unroll_factor = std::min(
+        rDimAvail(), scheduler_utils::safeDiv(max_unroll, iter_unroll_factor));
 
     inner_reduction_unroll_factor =
         scheduler_utils::lastPow2(inner_reduction_unroll_factor);
@@ -731,7 +727,8 @@ ReductionParams OuterReductionHeuristic(
     // Empiercally found stride shouldn't exceed 256kiB boundaries in a block
     int64_t kMaxStride = 128 * 1024;
 
-    int64_t max_remainder_size = safeDiv(kMaxStride, bytes_stride_remainder);
+    int64_t max_remainder_size =
+        scheduler_utils::safeDiv(kMaxStride, bytes_stride_remainder);
 
     int64_t grdim_for_stride = ceilDiv(
         total_reduction_numel,
@@ -771,13 +768,13 @@ ReductionParams OuterReductionHeuristic(
   // Always disabled for now.
   // bool flip_grid = gidim > 1 && gidim < 8;
   const bool flip_grid = false;
-  ReductionParams rparams;
+  auto rparams = std::make_shared<ReductionParams>();
   // cross grid implies cross block
-  rparams.cross_block_inner_reduction = bdimy > 1 || grdim > 1;
-  rparams.cross_grid_inner_reduction = grdim > 1;
-  if (rparams.cross_grid_inner_reduction) {
-    rparams.split_grid_dim_inner_reduction = true;
-    rparams.grid_dim_inner_reduction =
+  rparams->cross_block_inner_reduction = bdimy > 1 || grdim > 1;
+  rparams->cross_grid_inner_reduction = grdim > 1;
+  if (rparams->cross_grid_inner_reduction) {
+    rparams->split_grid_dim_inner_reduction = true;
+    rparams->grid_dim_inner_reduction =
         flip_grid ? ParallelType::BIDx : ParallelType::BIDy;
     if (flip_grid) {
       gdimx = std::min(grdim, scheduler_utils::x_grid_limit);
@@ -785,17 +782,17 @@ ReductionParams OuterReductionHeuristic(
       gdimy = std::min(grdim, scheduler_utils::y_grid_limit);
     }
   }
-  rparams.multiple_reds_per_blk = bdimx > 1 || iter_unroll_factor > 1;
+  rparams->multiple_reds_per_blk = bdimx > 1 || iter_unroll_factor > 1;
 
-  if (rparams.multiple_reds_per_blk) {
-    rparams.block_dim_iter_dom = ParallelType::TIDx;
+  if (rparams->multiple_reds_per_blk) {
+    rparams->block_dim_iter_dom = ParallelType::TIDx;
   }
 
-  rparams.grid_dim_iter_dom =
+  rparams->grid_dim_iter_dom =
       flip_grid ? ParallelType::BIDy : ParallelType::BIDx;
   if (gidim > (flip_grid ? scheduler_utils::y_grid_limit
                          : scheduler_utils::x_grid_limit)) {
-    rparams.split_grid_dim_iter_dom = true;
+    rparams->split_grid_dim_iter_dom = true;
     if (flip_grid) {
       gdimy = scheduler_utils::y_grid_limit;
     } else {
@@ -803,29 +800,29 @@ ReductionParams OuterReductionHeuristic(
     }
   }
 
-  rparams.flip_grid = flip_grid;
+  rparams->flip_grid = flip_grid;
 
-  if (rparams.cross_block_inner_reduction) {
-    if (rparams.block_dim_iter_dom == ParallelType::TIDx) {
-      rparams.block_dim_inner_reduction = ParallelType::TIDy;
+  if (rparams->cross_block_inner_reduction) {
+    if (rparams->block_dim_iter_dom == ParallelType::TIDx) {
+      rparams->block_dim_inner_reduction = ParallelType::TIDy;
     } else {
-      rparams.block_dim_inner_reduction = ParallelType::TIDx;
+      rparams->block_dim_inner_reduction = ParallelType::TIDx;
     }
   }
 
-  rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
+  rparams->unroll_factor_inner_reduction = inner_reduction_unroll_factor;
 
-  rparams.unroll_factor_iter_dom = iter_unroll_factor;
+  rparams->unroll_factor_iter_dom = iter_unroll_factor;
   if (iter_unroll_factor > 1) {
-    rparams.vectorize_iter_dom = vectorize;
+    rparams->vectorize_iter_dom = vectorize;
   }
 
-  rparams.lparams = LaunchParams(
+  rparams->lparams = LaunchParams(
       gdimx,
       gdimy,
       LaunchParams::UNINITIALIZED_VAL,
-      rparams.multiple_reds_per_blk ? bdimx : bdimy,
-      rparams.multiple_reds_per_blk ? bdimy : LaunchParams::UNINITIALIZED_VAL,
+      rparams->multiple_reds_per_blk ? bdimx : bdimy,
+      rparams->multiple_reds_per_blk ? bdimy : LaunchParams::UNINITIALIZED_VAL,
       LaunchParams::UNINITIALIZED_VAL);
 
   if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
@@ -836,14 +833,14 @@ ReductionParams OuterReductionHeuristic(
               << "n_tensor_inputs: " << n_tensor_inputs << "\n"
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "block(" << bdimx << ", " << bdimy << ", 1)" << std::endl;
-    std::cerr << rparams.toString() << std::endl;
+    std::cerr << rparams->toString() << std::endl;
   }
   return rparams;
 }
 
 } // namespace
 
-ReductionParams reductionHeuristic(
+std::shared_ptr<ReductionParams> reductionHeuristic(
     const int64_t total_reduction_numel,
     const int64_t total_iteration_numel,
     const int64_t inner_most_dimension_numel,
@@ -861,7 +858,7 @@ ReductionParams reductionHeuristic(
         vectorize_factor);
   } else {
     // 3D schedules not enabled for outer reductions
-    return OuterReductionHeuristic(
+    return outerReductionHeuristic(
         total_reduction_numel,
         total_iteration_numel,
         n_tensor_inputs,
@@ -870,7 +867,7 @@ ReductionParams reductionHeuristic(
   }
 }
 
-TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
+TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs,
     HeuristicSummary* data_cache) {
@@ -881,7 +878,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   return getReductionHeuristics(fusion, runtime_info, data_cache);
 }
 
-TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
+TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
     HeuristicSummary* data_cache) {
@@ -911,8 +908,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
 
   TORCH_INTERNAL_ASSERT(
       red_expr->getExprType() != c10::nullopt &&
-          (red_expr->getExprType().value() == ExprType::ReductionOp ||
-           red_expr->getExprType().value() == ExprType::WelfordOp),
+          ir_utils::isReductionOp(red_expr),
       "TensorView doesn't have a reduction.");
 
   auto properties =
@@ -928,7 +924,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
           data_cache, [&reduction_tv]() {
             return std::make_unique<std::vector<TensorView*>>(
                 scheduler_utils::getInputsOutputsWithInnerDim(
-                    reduction_tv, true));
+                    reduction_tv, true, true));
           });
 
   auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
@@ -938,7 +934,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
           data_cache, [&reduction_tv]() {
             return std::make_unique<std::vector<TensorView*>>(
                 scheduler_utils::getInputsOutputsWithInnerDim(
-                    reduction_tv, false));
+                    reduction_tv, false, false));
           });
 
   auto& unrollable_inputs_outputs = unrollable_inputs_outputs_entry.get();
@@ -958,7 +954,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   }
 
   // Try expanding vectorization to contig merged domains
-  vectorize_factor = scheduler_utils::expandVectorizationToContigMergedDomains(
+  vectorize_factor = vectorize_helper::expandVectorizationToContigMergedDomains(
       fusion,
       runtime_info,
       vectorizable_inputs_outputs,
@@ -1002,9 +998,8 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   // Cache inputs if unrolled
   auto cached_inputs = scheduler_utils::cacheInputs(fusion, unroll);
 
-  // Cache and fork  outputs
-  std::vector<std::pair<TensorView*, TensorView*>> cached_outputs =
-      scheduler_utils::cacheAndForkOutputs(fusion, unroll);
+  // Cache and fork outputs
+  auto cached_outputs = scheduler_utils::cacheAndForkOutputs(fusion, unroll);
 
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
@@ -1015,6 +1010,8 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
 
   TORCH_INTERNAL_ASSERT(reduction_tvs.size());
 
+  // Registry assumes the reference tv is the first reduction_tv, if this
+  // changes registry needs to change.
   auto reduction_tv = reduction_tvs[0];
 
   auto dim_analysis = scheduler_utils::canonicalDimReduction(

@@ -180,7 +180,7 @@ using EnforceNotMet = ::c10::Error;
  * With further usages like `CAFFE_ENFORCE_THAT(IsVector(Input(0).dims()))`
  *
  * Convenient wrappers for binary operations like CAFFE_ENFORCE_EQ are provided
- * too. Please use them instead of CHECK_EQ and friends for failures in
+ * too. Please use them instead of TORCH_CHECK_EQ and friends for failures in
  * user-provided input.
  */
 

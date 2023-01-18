@@ -12,7 +12,7 @@ void APMeterOp<float, CPUContext>::BufferPredictions(
     // Initialize the buffer
     buffers_.resize(D, std::vector<BufferDataType>(buffer_size_));
   }
-  DCHECK_EQ(buffers_.size(), D);
+  TORCH_DCHECK_EQ(buffers_.size(), D);
 
   // Fill atmose buffer_size_ data at a time, so truncate the input if needed
   if (N > buffer_size_) {
@@ -48,12 +48,12 @@ bool APMeterOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(LABEL);
 
   // Check dimensions
-  DCHECK_EQ(X.dim(), 2);
+  TORCH_DCHECK_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  DCHECK_EQ(label.dim(), 2);
-  DCHECK_EQ(label.dim32(0), N);
-  DCHECK_EQ(label.dim32(1), D);
+  TORCH_DCHECK_EQ(label.dim(), 2);
+  TORCH_DCHECK_EQ(label.dim32(0), N);
+  TORCH_DCHECK_EQ(label.dim32(1), D);
   auto* Y = Output(0, {D}, at::dtype<float>());
 
   const auto* Xdata = X.data<float>();

@@ -141,7 +141,7 @@ def verify_reusing_compiled_graph(mod, exception_msg_pattern, ncase=10):
             raise e  # reraise the exception
         exception_message = str(e)
         if not re.search(exception_msg_pattern, exception_message):
-            raise RuntimeError(f"Expection message does not match the required pattern: {exception_message}")
+            raise RuntimeError(f"Exception message does not match the required pattern: {exception_message}") from e
         else:
             # We are done for the test case that expects an exception
             return

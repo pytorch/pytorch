@@ -21,9 +21,7 @@ void parseOperators(
       num_args = op_item[2].toInt();
     }
     function->append_operator(
-        op_item[0].toString()->string(),
-        op_item[1].toString()->string(),
-        num_args);
+        op_item[0].toStringRef(), op_item[1].toStringRef(), num_args);
   }
   function->initialize_operators(
       (module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK));

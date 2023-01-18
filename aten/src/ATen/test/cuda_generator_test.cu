@@ -21,8 +21,8 @@ using namespace at;
 
 __global__ void testEngineReproducibility(){
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  at::Philox4_32_10 engine1(0, idx, 4);
-  at::Philox4_32_10 engine2(0, idx, 4);
+  at::Philox4_32 engine1(0, idx, 4);
+  at::Philox4_32 engine2(0, idx, 4);
   assert(engine1() == engine2());
 }
 
@@ -45,11 +45,11 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineReproducibility) {
 }
 
 __global__ void testEngineOffset1(){
-  at::Philox4_32_10 engine1(123, 1, 0);
+  at::Philox4_32 engine1(123, 1, 0);
   // Note: offset is a multiple of 4.
   // So if you want to skip 8 values, offset would
   // be 2, since 2*4=8.
-  at::Philox4_32_10 engine2(123, 1, 2);
+  at::Philox4_32 engine2(123, 1, 2);
   for(int i = 0; i < 8; i++){
     // Note: instead of using the engine() call 8 times
     // we could have achieved the same functionality by
@@ -81,8 +81,8 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset1) {
 
 __global__ void testEngineOffset2(){
   unsigned long long increment_val = ::ldexp(1.0, 64);
-  at::Philox4_32_10 engine1(123, 0, increment_val);
-  at::Philox4_32_10 engine2(123, increment_val, increment_val);
+  at::Philox4_32 engine1(123, 0, increment_val);
+  at::Philox4_32 engine2(123, increment_val, increment_val);
 
   engine2.incr_n(increment_val);
   engine2.incr();
@@ -110,8 +110,8 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset2) {
 
 __global__ void testEngineOffset3(){
   unsigned long long increment_val = ::ldexp(1.0, 64);
-  at::Philox4_32_10 engine1(123, 0, increment_val);
-  at::Philox4_32_10 engine2(123, 1, 0);
+  at::Philox4_32 engine1(123, 0, increment_val);
+  at::Philox4_32 engine2(123, 1, 0);
   engine1.incr();
   assert(engine1() == engine2());
 }
@@ -136,8 +136,8 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset3) {
 }
 
 __global__ void testEngineThreadIndex(){
-  at::Philox4_32_10 engine1(123456, 0, 4);
-  at::Philox4_32_10 engine2(123456, 1, 4);
+  at::Philox4_32 engine1(123456, 0, 4);
+  at::Philox4_32 engine2(123456, 1, 4);
   assert(engine1() != engine2());
 }
 

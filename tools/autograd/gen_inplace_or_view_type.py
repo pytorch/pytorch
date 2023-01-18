@@ -16,12 +16,16 @@ from torchgen.api.types import (
     BaseCType,
     Binding,
     boolT,
+    ConstRefCType,
     CType,
     DispatcherSignature,
     intArrayRefT,
     longT,
     OptionalCType,
     symIntArrayRefT,
+    SymIntT,
+    # See Note [Nested Arg Types]
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -55,6 +59,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "view_as_real",
     "_conj",
     "_neg_view",
+    "_nested_view_from_buffer",
 ]
 
 VIEW_FUNCTIONS = {
@@ -249,6 +254,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
         for r in cpp.argument(
             a,
             method=False,
+            symint=True,
             cpp_no_default_args=set(),
             faithful=False,
             has_tensor_options=False,
@@ -321,9 +327,12 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     known_view_arg_simple_types: List[CType] = [
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
+        BaseCType(SymIntT),
+        OptionalCType(BaseCType(SymIntT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
+        ConstRefCType(BaseCType(tensorT)),
     ]
     for unpacked_binding in unpacked_bindings:
         arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
@@ -338,7 +347,6 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 "over by value, also add a test in pytorch/xla/test/test_operations.py where this code "
                 "is exercised."
             )
-
         if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(
             symIntArrayRefT
         ):
@@ -354,6 +362,13 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 arg=arg, val=arg_value, default="0"
             )
             updated_unpacked_args.append(arg_value)
+        elif (
+            arg == "nested_size_" or arg == "nested_strides_"
+        ) and arg_type == ConstRefCType(BaseCType(tensorT)):
+            # [NOTE] [Nested Arg Types]
+            # This is temporary. Nested tensors will be migrating to use SymInts and
+            # nested_size and nested_strides will no longer be tensors.
+            updated_unpacked_args.append(arg[:-1])
         else:
             updated_unpacked_args.append(arg)
 
@@ -494,7 +509,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
             for a in f.func.schema_order_arguments()
         ]
     )
@@ -514,7 +529,7 @@ def inplace_or_view_method_definition(
     ):
         return None
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+        return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=gen_formals(f),
         type_definition_body=emit_inplace_or_view_body(fn),
@@ -581,7 +596,8 @@ def gen_inplace_or_view_type(
         [fn for fn in fns_with_infos if use_derived(fn)],
         key_fn=lambda fn: fn.func.root_name,
         base_env={
-            "generated_comment": f"@generated from {template_path}/ADInplaceOrViewType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/ADInplaceOrViewType.cpp",
         },
         env_callable=gen_inplace_or_view_type_env,
         num_shards=2,

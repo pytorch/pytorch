@@ -4,7 +4,6 @@
 #import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.h>
 #import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLModelWrapper.h>
 #import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLTensorSpec.h>
-#import <torch/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.h>
 #import <torch/script.h>
 
 #import <CoreML/CoreML.h>
@@ -15,6 +14,24 @@
 #import <Foundation/NSProcessInfo.h>
 #endif
 
+// This is a utility macro that can be used to throw an exception when a CoreML
+// API function produces a NSError. The exception will contain a message with
+// useful info extracted from the NSError.
+#define COREML_THROW_IF_ERROR(error, preamble)                                   \
+  do {                                                                           \
+    if C10_LIKELY(error) {                                                       \
+      throw c10::Error(                                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},                 \
+          c10::str(                                                              \
+              preamble,                                                          \
+              " Error details: ",                                                \
+              " Localized_description: ", error.localizedDescription.UTF8String, \
+              " Domain: ", error.domain.UTF8String,                              \
+              " Code: ", error.code,                                             \
+              " User Info: ", error.userInfo.description.UTF8String));           \
+    }                                                                            \
+  } while (false)
+
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -23,9 +40,6 @@ namespace coreml {
 using c10::impl::GenericDict;
 using c10::impl::GenericList;
 using c10::IValue;
-
-static const int32_t kSampleThreshold = static_cast<int32_t>(1.0 / 1000.0 * static_cast<double>(RAND_MAX));
-static const int32_t kSampleEvery = 500;
 
 struct CoreMLConfig {
   std::string backend = "CPU";
@@ -74,9 +88,14 @@ GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatu
       tensor.data_ptr<float>(),
       (float*)val.multiArrayValue.dataPointer,
       count * sizeof(float));
-    outputs.push_back(tensor);
+    outputs.push_back(std::move(tensor));
   }
-  return c10::impl::toList(outputs);
+  if(output_specs.size() > 1){
+    c10::List<c10::List<torch::Tensor>> output_res;
+    output_res.push_back(std::move(outputs));
+    return c10::impl::toList(std::move(output_res));
+  }
+  return c10::impl::toList(std::move(outputs));
 }
 
 class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
@@ -86,17 +105,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     const c10::Dict<IValue, IValue> model_dict = processed.toGenericDict();
     const std::string& extra = model_dict.at("extra").toStringRef();
     const std::string& model = model_dict.at("model").toStringRef();
-    const std::string& sha256 = model_dict.at("hash").toStringRef();
-
-    const int32_t load_id = std::rand();
-    const int32_t instance_key = std::rand();
-    size_t mem_limit = 0;
-
-    PTMCoreMLObserver *observer = coreMLObserverConfig().getCoreMLObserver();
-    if (observer) {
-      mem_limit = observer->getRemainingMemory();
-      observer->onEnterCompileModel(instance_key, load_id);
-    }
+    const std::string& modelID = model_dict.at("hash").toStringRef();
 
     CoreMLConfig config;
     std::vector<TensorSpec> input_specs;
@@ -108,27 +117,21 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       input_specs = extra_json["inputs"].get<std::vector<TensorSpec>>();
       output_specs = extra_json["outputs"].get<std::vector<TensorSpec>>();
     } catch (std::exception& exn) {
-      if (observer) {
-        observer->onExitCompileModel(instance_key, false, true);
-      }
       TORCH_CHECK(false, "Parsing model dict failed!");
     }
 
     if (!type_validity(input_specs) || !type_validity(output_specs)) {
-      if (observer) {
-        observer->onExitCompileModel(instance_key, false, true);
-      }
       TORCH_CHECK(false, "Compiling model failed, only float type tensors supported");
     }
 
-    NSURL *modelURL = [PTMCoreMLCompiler compileModel:model modelID:sha256];
-    MLModel *cpuModel = modelURL ? [PTMCoreMLCompiler loadCPUModelAtURL:modelURL] : nil;
+    if (![PTMCoreMLCompiler compileModel:model modelID:modelID]) {
+      TORCH_CHECK(false, "Compiling MLModel failed");
+    }
+
+    MLModel *cpuModel = [PTMCoreMLCompiler loadModel:modelID backend:"cpu" allowLowPrecision:NO];
 
     if (!cpuModel) {
-      if (observer) {
-        observer->onExitCompileModel(instance_key, false, true);
-      }
-      TORCH_CHECK(false, "Compiling MLModel for CPU failed!");
+      TORCH_CHECK(false, "Loading MLModel failed");
     }
 
     NSMutableArray *orderedFeatures = [NSMutableArray array];
@@ -142,19 +145,12 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     [executor autorelease];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-      MLModel *configuredModel = [PTMCoreMLCompiler loadModelAtURL:modelURL backend:config.backend allowLowPrecision:config.allow_low_precision];
+      MLModel *configuredModel = [PTMCoreMLCompiler loadModel:modelID backend:config.backend allowLowPrecision:config.allow_low_precision];
       executor.model = configuredModel ?: cpuModel;
     });
 
-    if (observer) {
-      bool should_log = load_id < kSampleThreshold;
-      observer->onExitCompileModel(instance_key, true, should_log);
-    }
-
     MLModelWrapper model_wrapper = MLModelWrapper(executor);
     model_wrapper.outputs = output_specs;
-    model_wrapper.load_id = load_id;
-    model_wrapper.mem_limit = mem_limit;
 
     auto model_wrapper_ptr = c10::make_intrusive<MLModelWrapper>(model_wrapper);
     auto handle = IValue::make_capsule(model_wrapper_ptr);
@@ -166,30 +162,14 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
 
   GenericList execute(IValue handle, GenericList inputs) override {
     const auto model_wrapper = c10::static_intrusive_pointer_cast<MLModelWrapper>(handle.toCapsule());
-    const int32_t instance_key = std::rand();
-    const int32_t load_id = model_wrapper->load_id;
-    const size_t mem_limit = model_wrapper->mem_limit;
-    int32_t inferences = model_wrapper->inferences;
-
-    PTMCoreMLObserver *observer = coreMLObserverConfig().getCoreMLObserver();
-    if (observer) {
-      observer->onEnterExecuteModel(instance_key, load_id, mem_limit, inferences);
-    }
 
     PTMCoreMLExecutor *executor = model_wrapper->executor;
     [executor setInputs:inputs];
 
-    id<MLFeatureProvider> outputsProvider = [executor forward];
-
-    model_wrapper->inferences = ++inferences;
-
-    if (observer) {
-      // Check if this inference session is logged. If so, log every N inferences
-      bool succeeded = outputsProvider != nil;
-      bool should_log = load_id < kSampleThreshold && inferences > 1;
-      should_log = should_log && (inferences % kSampleEvery == 0);
-      should_log = should_log || succeeded;
-      observer->onExitExecuteModel(instance_key, inferences, succeeded, should_log);
+    NSError *error;
+    id<MLFeatureProvider> outputsProvider = [executor forward:&error];
+    if (!outputsProvider) {
+      COREML_THROW_IF_ERROR(error, "Error running CoreML inference");
     }
 
     return pack_outputs(model_wrapper->outputs, outputsProvider);
@@ -210,7 +190,7 @@ static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
 
 struct PTMCoreMLContext : public ContextInterface {
   void setModelCacheDirectory(std::string dir) override {
-    [PTMCoreMLCompiler setModelCacheDirectory:dir];
+    [PTMCoreMLCompiler setCacheDirectory:dir];
   }
 };
 

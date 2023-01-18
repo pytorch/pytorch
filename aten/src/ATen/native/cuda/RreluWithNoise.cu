@@ -14,10 +14,10 @@
 #endif
 
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename scalar_t, int unroll_factor, typename F>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined USE_ROCM
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void rrelu_with_noise_cuda_kernel(
@@ -192,4 +192,4 @@ Tensor& rrelu_with_noise_cuda_(
       self, noise, lower, upper, training, generator, self);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

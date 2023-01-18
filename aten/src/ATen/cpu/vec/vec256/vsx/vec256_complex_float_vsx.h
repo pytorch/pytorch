@@ -196,7 +196,7 @@ class Vectorized<ComplexFlt> {
           vec_vsx_ld(offset16, reinterpret_cast<const float*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -319,6 +319,10 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> log10() const {
     auto ret = log();
     return ret.elwise_mult(log10e_inv);
+  }
+
+  Vectorized<ComplexFlt> log1p() const {
+    return map(std::log1p);
   }
 
   Vectorized<ComplexFlt> el_swapped() const {
@@ -565,10 +569,6 @@ class Vectorized<ComplexFlt> {
     TORCH_CHECK(false,"not supported for complex numbers");
   }
   Vectorized<ComplexFlt> erfc() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> log1p() const {
     TORCH_CHECK(false,"not supported for complex numbers");
   }
 

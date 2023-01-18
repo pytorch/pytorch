@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -41,7 +42,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   /// Insert the parameter along with the key into ParameterDict
   /// The parameter is set to be require grad by default
   Tensor& insert(std::string key, Tensor param) {
-    return register_parameter(key, param, param.requires_grad());
+    bool requires_grad = param.requires_grad();
+    return register_parameter(std::move(key), std::move(param), requires_grad);
   }
 
   /// Remove key from the ParameterDict and return its value, throw exception

@@ -162,20 +162,20 @@ TEST(IrTest, DimensionIsDynamicTest) {
   auto size1 =
       std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
 
-  ASSERT_EQ(true, size0->isDynamic());
-  ASSERT_EQ(false, size1->isDynamic());
+  ASSERT_EQ(true, size0->isSymbolic());
+  ASSERT_EQ(false, size1->isSymbolic());
 
   auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
       MakeNode<SizeAdd>(Value{size0}, Value{size1}));
-  ASSERT_EQ(true, add_dim->isDynamic());
+  ASSERT_EQ(true, add_dim->isSymbolic());
 
   add_dim = std::dynamic_pointer_cast<SizeAdd>(
       MakeNode<SizeAdd>(Value{size1}, Value{size1}));
-  ASSERT_EQ(false, add_dim->isDynamic());
+  ASSERT_EQ(false, add_dim->isSymbolic());
 
   auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
       MakeNode<SizeMul>(Value{size0}, Value{size0}));
-  ASSERT_EQ(true, mul_dim->isDynamic());
+  ASSERT_EQ(true, mul_dim->isSymbolic());
 }
 
 } // namespace lazy

@@ -66,18 +66,25 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     }
   };
 
-  auto allowPasC = [this](TensorView* from, TensorView* to) {
+  auto allowC2P = [this](TensorView* from, TensorView* to) {
     if (selector_ == nullptr) {
       return true;
     }
-    return selector_->allowPasC(from, to);
+    return selector_->allowC2P(from, to);
   };
 
-  auto allowCasP = [this](TensorView* from, TensorView* to) {
+  auto allowP2C = [this](TensorView* from, TensorView* to) {
     if (selector_ == nullptr) {
       return true;
     }
-    return selector_->allowCasP(from, to);
+    return selector_->allowP2C(from, to);
+  };
+
+  auto allowSibling = [this](TensorView* from, TensorView* to) {
+    if (selector_ == nullptr) {
+      return true;
+    }
+    return selector_->allowSibling(from, to);
   };
 
   while (!candidates.empty()) {
@@ -91,8 +98,19 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     }
     replayed.emplace(next_hop.to);
 
+    for (auto sibling_tv : ir_utils::siblingTvsOf(next_hop.to)) {
+      if (replayed.count(sibling_tv) ||
+          !allowSibling(next_hop.to, sibling_tv)) {
+        continue;
+      }
+      insertNextHop(NextHopWithInfo(
+          NextHop(NextHopType::SIBLING, next_hop.to, sibling_tv),
+          next_hop_info.info_to,
+          computeInfoSibling(next_hop.to, sibling_tv, next_hop_info.info_to)));
+    }
+
     for (auto consumer_tv : ir_utils::consumerTvsOf(next_hop.to)) {
-      if (replayed.count(consumer_tv) || !allowCasP(next_hop.to, consumer_tv)) {
+      if (replayed.count(consumer_tv) || !allowP2C(next_hop.to, consumer_tv)) {
         continue;
       }
       insertNextHop(NextHopWithInfo(
@@ -102,7 +120,7 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     }
 
     for (auto producer_tv : ir_utils::producerTvsOf(next_hop.to)) {
-      if (replayed.count(producer_tv) || !allowPasC(next_hop.to, producer_tv)) {
+      if (replayed.count(producer_tv) || !allowC2P(next_hop.to, producer_tv)) {
         continue;
       }
       insertNextHop(NextHopWithInfo(
@@ -117,16 +135,21 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
   if (path_.empty()) {
     compute_spanning_tree();
   }
+  propagator->setUp();
   for (const auto& next_hop : path_) {
     switch (next_hop.type) {
+      case NextHopType::SIBLING:
+        propagator->propagateSibling(next_hop.from, next_hop.to);
+        break;
       case NextHopType::C_AS_P:
-        propagator->propagateTvCasP(next_hop.from, next_hop.to);
+        propagator->propagateP2C(next_hop.from, next_hop.to);
         break;
       case NextHopType::P_AS_C:
-        propagator->propagateTvPasC(next_hop.from, next_hop.to);
+        propagator->propagateC2P(next_hop.from, next_hop.to);
         break;
     }
   }
+  propagator->tearDown();
 }
 
 MaxRootDomainInfoSpanningTree::RootDomainInfo::operator bool() const {
@@ -370,6 +393,47 @@ MaxRootDomainInfoSpanningTree::getReferenceRootIDInfo(
     }
   }
   return std::make_shared<RootDomainInfo>(std::move(result));
+}
+
+// Given the preserved reference root ID info of a tensor, compute
+// the corresponding info in its sibling. Since info has nothing to do with
+// replay state, so sibling info is always identical by definition.
+std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree::
+    computeInfoSibling(
+        TensorView* from,
+        TensorView* to,
+        std::shared_ptr<Information> from_info) const {
+  return from_info;
+}
+
+void SpanningTreePrinter::propagateC2P(TensorView* from, TensorView* to) {
+  stream_ << "propagateC2P" << std::endl;
+  stream_ << "  from: " << from->toString() << std::endl;
+  stream_ << "  to: " << to->toString() << std::endl;
+}
+
+void SpanningTreePrinter::propagateP2C(TensorView* from, TensorView* to) {
+  stream_ << "propagateP2C" << std::endl;
+  stream_ << "  from: " << from->toString() << std::endl;
+  stream_ << "  to: " << to->toString() << std::endl;
+}
+
+void SpanningTreePrinter::propagateSibling(TensorView* from, TensorView* to) {
+  stream_ << "propagateSibling" << std::endl;
+  stream_ << "  from: " << from->toString() << std::endl;
+  stream_ << "  to: " << to->toString() << std::endl;
+}
+
+bool SetSelector::allowC2P(TensorView* from, TensorView* to) {
+  return selected_.count(to) > 0;
+}
+
+bool SetSelector::allowP2C(TensorView* from, TensorView* to) {
+  return selected_.count(to) > 0;
+}
+
+bool SetSelector::allowSibling(TensorView* from, TensorView* to) {
+  return true;
 }
 
 } // namespace cuda

@@ -122,10 +122,10 @@ Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
-  TORCH_CHECK(mask.numel() == dY.numel(),
+  TORCH_CHECK(mask.sym_numel() == dY.sym_numel(),
       "`mask` and `dY` are not the same size: ",
-      "`mask` is size ", mask.numel(), " and `dY` is size ", dY.numel());
-  if (dY.numel() <= 0) {
+      "`mask` is size ", mask.sym_numel(), " and `dY` is size ", dY.sym_numel());
+  if (dY.sym_numel() <= 0) {
     return dY;
   }
   // Note: no additional kernels needed, since mask is pre-computed

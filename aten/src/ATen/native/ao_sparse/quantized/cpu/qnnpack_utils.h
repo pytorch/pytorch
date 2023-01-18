@@ -19,7 +19,7 @@ struct TORCH_API PackedLinearWeightQnnp
   PackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
   explicit PackedLinearWeightQnnp(const BCSRSerializationType& serialized);
   c10::optional<at::Tensor> orig_bias_;
-  // Seperate copy of bias exist so that we can fill in zeros when
+  // Separate copy of bias exist so that we can fill in zeros when
   // optional bias does not exist. This is to compy with qnnpack operator that
   // expects bias to be present.
   // In case bias is present bias_ is just a reference to orig_bias_

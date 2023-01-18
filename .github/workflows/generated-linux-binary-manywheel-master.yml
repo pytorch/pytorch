@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  manywheel-py3_7-cuda10_2-build:
+  manywheel-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -40,19 +40,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
+      build_name: manywheel-py3_7-cuda11_6
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_7-cuda10_2-test:  # Testing
+  manywheel-py3_7-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda10_2-build
+    needs: manywheel-py3_7-cuda11_6-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -60,12 +60,12 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
+      build_name: manywheel-py3_7-cuda11_6
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:

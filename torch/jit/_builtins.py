@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 _builtin_table: Optional[Dict[int, str]] = None
 
-_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg, torch._C._sparse, torch._C._special)  # type: ignore[attr-defined] # noqa: B950
+_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._sparse, torch._C._special)  # type: ignore[attr-defined] # noqa: B950
 
 _builtin_ops = [
     # Pairs of (function, op_name)

@@ -69,6 +69,64 @@ TensorView* variance(
   return y;
 }
 
+TORCH_CUDA_CU_API VarMeanResult variance_mean(
+    TensorView* x,
+    const std::vector<int>& dims,
+    int64_t correction,
+    bool keepdim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+
+  TORCH_CHECK(
+      correction >= 0, "correction must be non-negative, but got ", correction);
+
+  // There are compilation errors for half precision
+  auto dtype = x->getDataType().value();
+  TORCH_CHECK(
+      !(dtype == DataType::Half || dtype == DataType::BFloat16),
+      "variance_mean is not supported for ",
+      dtype,
+      " please upcast to float");
+
+  if (isComplexType(x->getDataType().value())) {
+    // There are compilation errors:
+    // __tmp_kernel1.cu(6727): error: namespace "CudaCodeGen::std" has no member
+    // "imagf"
+    // __tmp_kernel1.cu(6753): error: namespace "CudaCodeGen::std" has no member
+    // "realf"
+    TORCH_CHECK(false, "var_mean is not supported for complex types.");
+    auto out_real = variance_mean(real(x), dims, correction, keepdim);
+    auto out_imag = variance_mean(imag(x), dims, correction, keepdim);
+    // variance of a complex tensor is the sum of real and imaginary variances
+    // and is real mean of a complex tensor is complex complex(out_real.mean,
+    // out_imag.mean) It seems construction of a complex tensor from two real
+    // tensors is not supported yet
+    return {add(out_real.var, out_imag.var), nullptr};
+  }
+
+  const int kNumberOfDims =
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
+  auto num_features = numFeatures(x, dims, kNumberOfDims);
+  if (correction > 0) {
+    num_features =
+        sub(num_features, IrBuilder::create<Int>(x->container(), correction));
+  }
+
+  auto welford_out = Welford(x, dims);
+  auto mean = welford_out.avg;
+  auto var = mul(welford_out.var_sum, reciprocal(num_features));
+
+  if (keepdim) {
+    std::vector<bool> is_broadcast(kNumberOfDims, false);
+    for (auto dim : dims) {
+      is_broadcast[dim] = true;
+    }
+    var = broadcast(var, is_broadcast);
+    mean = broadcast(mean, is_broadcast);
+  }
+
+  return {var, mean};
+}
+
 TensorView* standard_deviation(
     TensorView* x,
     const std::vector<int>& dims,
@@ -529,8 +587,10 @@ ForwardNormResult batch_norm(
     auto invstd_bcast = broadcast(unbiased_invstd, broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
-    mean = TensorViewBuilder().shape({0}).build();
-    invstd = TensorViewBuilder().shape({0}).build();
+    // on CPU, but not on CUDA. We need to make sure we have the same
+    // behavior as with eager mode on CUDA.
+    mean = running_mean;
+    invstd = unbiased_invstd;
     y = mul(x_sub_mean, invstd_bcast);
   }
 
@@ -782,8 +842,10 @@ ForwardNormResult instance_norm(
         broadcast(unbiased_invstd, channels_only_broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
-    mean = TensorViewBuilder().shape({0}).build();
-    invstd = TensorViewBuilder().shape({0}).build();
+    // on CPU, but not on CUDA. We need to make sure we have the same
+    // behavior as with eager mode on CUDA.
+    mean = running_mean;
+    invstd = unbiased_invstd;
     y = mul(x_sub_mean, invstd_bcast);
   }
 

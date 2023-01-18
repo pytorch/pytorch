@@ -16,7 +16,6 @@ constexpr DynamicTypeBits kDynamicAnyTypeBit = DYNAMIC_TYPE_BIT(30);
 
 constexpr DynamicTypeBits kDynamicNoneTypeBit = DYNAMIC_TYPE_BIT(1);
 constexpr DynamicTypeBits kDynamicIntTypeBit = DYNAMIC_TYPE_BIT(3);
-constexpr DynamicTypeBits kDynamicSymIntTypeBit = DYNAMIC_TYPE_BIT(23);
 constexpr DynamicTypeBits kDynamicFloatTypeBit = DYNAMIC_TYPE_BIT(4);
 constexpr DynamicTypeBits kDynamicComplexTypeBit = DYNAMIC_TYPE_BIT(5);
 constexpr DynamicTypeBits kDynamicListTypeBit = DYNAMIC_TYPE_BIT(7);
@@ -29,7 +28,6 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(Bool, DYNAMIC_TYPE_BIT(2), 1)                                            \
   _(Int, kDynamicIntTypeBit, 1)                                              \
   _(Float, kDynamicFloatTypeBit, 1)                                          \
-  _(SymInt, kDynamicSymIntTypeBit, 1)                                        \
   _(Complex, kDynamicComplexTypeBit, 1)                                      \
   _(Number,                                                                  \
     (kDynamicIntTypeBit | kDynamicFloatTypeBit | kDynamicComplexTypeBit),    \
@@ -63,6 +61,7 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
 #define FORALL_DYNAMIC_TYPES_FAKE(_) \
   _(ScalarType, kDynamicIntTypeBit, 1)                                \
   _(Layout, kDynamicIntTypeBit, 1)                                        \
+  _(SymInt, kDynamicIntTypeBit, 1)                                        \
   _(MemoryFormat, kDynamicIntTypeBit, 1)
 
 #define FORWARD_DECL_TYPE(NAME, _, __) struct NAME ## Type;

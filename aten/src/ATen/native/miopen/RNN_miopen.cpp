@@ -1,14 +1,27 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RNN.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/miopen_rnn.h>
+#include <ATen/ops/miopen_rnn_native.h>
+#include <ATen/ops/miopen_rnn_backward_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #if !AT_ROCM_ENABLED()
 

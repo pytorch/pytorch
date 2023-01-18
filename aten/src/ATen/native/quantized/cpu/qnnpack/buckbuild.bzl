@@ -272,7 +272,6 @@ def define_qnnpack(third_party, labels = []):
             "src/max-pooling.c",
             "src/operator-delete.c",
             "src/operator-run.c",
-            "src/pack_block_sparse.cc",
             "src/sigmoid.c",
             "src/softargmax.c",
             "src/tanh.c",

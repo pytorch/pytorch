@@ -85,9 +85,16 @@ new_local_repository(
 )
 
 new_local_repository(
+    name = "cutlass",
+    build_file = "//third_party:cutlass.BUILD",
+    path = "third_party/cutlass",
+)
+
+new_local_repository(
     name = "fbgemm",
     build_file = "//third_party:fbgemm/BUILD.bazel",
     path = "third_party/fbgemm",
+    repo_mapping = {"@cpuinfo" : "@org_pytorch_cpuinfo"}
 )
 
 new_local_repository(
@@ -103,8 +110,8 @@ new_local_repository(
 )
 
 new_local_repository(
-    name = "cpuinfo",
-    build_file = "//third_party:cpuinfo.BUILD",
+    name = "org_pytorch_cpuinfo",
+    build_file = "//third_party:cpuinfo/BUILD.bazel",
     path = "third_party/cpuinfo",
 )
 

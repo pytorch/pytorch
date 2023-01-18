@@ -15,6 +15,19 @@ __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList
 T = TypeVar('T', bound=Module)
 
 
+# Copied from torch.nn.modules.module, required for a cusom __repr__ for ModuleList
+def _addindent(s_, numSpaces):
+    s = s_.split('\n')
+    # don't do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = '\n'.join(s)
+    s = first + '\n' + s
+    return s
+
+
 class Container(Module):
 
     def __init__(self, **kwargs: Any) -> None:
@@ -100,7 +113,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx) -> Union['Sequential', T]:
+    def __getitem__(self, idx: Union[slice, int]) -> Union['Sequential', T]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -117,6 +130,9 @@ class Sequential(Module):
         else:
             key = self._get_item_by_idx(self._modules.keys(), idx)
             delattr(self, key)
+        # To preserve numbering
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -134,6 +150,53 @@ class Sequential(Module):
             raise ValueError('add operator supports only objects '
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
+
+    def __iadd__(self, other) -> 'Sequential':
+        if isinstance(other, Sequential):
+            offset = len(self)
+            for i, module in enumerate(other):
+                self.add_module(str(i + offset), module)
+            return self
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of Sequential class, but {} is given.'.format(
+                                 str(type(other))))
+
+    def __mul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            combined = Sequential()
+            offset = 0
+            for _ in range(other):
+                for module in self:
+                    combined.add_module(str(offset), module)
+                    offset += 1
+            return combined
+
+    def __rmul__(self, other: int) -> 'Sequential':
+        return self.__mul__(other)
+
+    def __imul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            len_original = len(self)
+            offset = len(self)
+            for _ in range(other - 1):
+                for i in range(len_original):
+                    self.add_module(str(i + offset), self._modules[str(i)])
+                offset += len_original
+            return self
 
     @_copy_to_script_wrapper
     def __dir__(self):
@@ -225,7 +288,7 @@ class ModuleList(Module):
         return str(idx)
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: int) -> Union[Module, 'ModuleList']:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, 'ModuleList']:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -262,6 +325,38 @@ class ModuleList(Module):
             combined.add_module(str(i), module)
         return combined
 
+    def __repr__(self):
+        """A custom repr for ModuleList that compresses repeated module representations"""
+        list_of_reprs = [repr(item) for item in self]
+        if len(list_of_reprs) == 0:
+            return self._get_name() + '()'
+
+        start_end_indices = [[0, 0]]
+        repeated_blocks = [list_of_reprs[0]]
+        for i, r in enumerate(list_of_reprs[1:], 1):
+            if r == repeated_blocks[-1]:
+                start_end_indices[-1][1] += 1
+                continue
+
+            start_end_indices.append([i, i])
+            repeated_blocks.append(r)
+
+        lines = []
+        main_str = self._get_name() + '('
+        for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
+            local_repr = f"({start_id}): {b}"  # default repr
+
+            if start_id != end_id:
+                n = end_id - start_id + 1
+                local_repr = f"({start_id}-{end_id}): {n} x {b}"
+
+            local_repr = _addindent(local_repr, 2)
+            lines.append(local_repr)
+
+        main_str += '\n  ' + '\n  '.join(lines) + '\n'
+        main_str += ')'
+        return main_str
+
     @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(ModuleList, self).__dir__()
@@ -287,6 +382,11 @@ class ModuleList(Module):
         """
         self.add_module(str(len(self)), module)
         return self
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
 
     def extend(self, modules: Iterable[Module]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
@@ -387,7 +487,7 @@ class ModuleDict(Module):
         r"""Remove key from the ModuleDict and return its module.
 
         Args:
-            key (string): key to pop from the ModuleDict
+            key (str): key to pop from the ModuleDict
         """
         v = self[key]
         del self[key]
@@ -679,7 +779,7 @@ class ParameterDict(Module):
         `default` defaults to `None`.
 
         Args:
-            key (string): key to set default for
+            key (str): key to set default for
             default (Any): the parameter set to the key
         """
 
@@ -697,7 +797,7 @@ class ParameterDict(Module):
         r"""Remove key from the ParameterDict and return its parameter.
 
         Args:
-            key (string): key to pop from the ParameterDict
+            key (str): key to pop from the ParameterDict
         """
         v = self[key]
         del self[key]
@@ -719,7 +819,7 @@ class ParameterDict(Module):
         Otherwise return default if provided, None if not.
 
         Args:
-            key (string): key to get from the ParameterDict
+            key (str): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
         return self[key] if key in self else default

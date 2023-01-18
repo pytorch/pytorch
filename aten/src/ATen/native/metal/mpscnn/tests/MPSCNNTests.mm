@@ -25,6 +25,44 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   }
   return diff.abs().max().item<float>() < (0.01 + 2e-2 * maxValue);
 }
+
+bool checkHardShrink(const at::Tensor& ref, const at::Tensor& out, const float clamp_thresh) {
+  float* ref_ptr = ref.data_ptr<float>();
+  float* out_ptr = out.data_ptr<float>();
+  float ref_max = ref.abs().max().item<float>();
+  float out_max = out.abs().max().item<float>();
+  float max_val = std::fmax(ref_max, out_max);
+  float kTolerance = 1e-2;
+
+  float abs_clamp_thresh = std::abs(clamp_thresh);
+
+  for (int i = 0; i < ref.numel(); ++i) {
+    float ref_val = ref_ptr[i];
+    float out_val = out_ptr[i];
+
+    float abs_diff = std::abs(ref_val - out_val);
+
+    // For values near the clamp threshold, results may be ambiguous.
+    float distance_from_thresh = std::abs(std::abs(ref_val) - abs_clamp_thresh);
+    if (distance_from_thresh < kTolerance * abs_clamp_thresh) {
+      if (out_val != 0.0f) {
+        if (abs_diff >= kTolerance * max_val) {
+          return false;
+        }
+      }
+    }
+    else if (std::abs(ref_val) < std::abs(abs_clamp_thresh)) {
+      if (out_val != 0.0f) {
+        return false;
+      }
+    }
+    else if (abs_diff >= kTolerance * max_val) {
+      return false;
+    }
+  }
+    return true;
+}
+
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b}) && a.strides().vec() == b.strides().vec();
 }
@@ -272,6 +310,44 @@ bool test_hardswish() {
     auto Y2 = at::hardswish(X2).cpu();
     return almostEqual(Y1, Y2);
   });
+}
+
+bool test_hardshrink_() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  bool result = true;
+  for (const auto lambd_value : {0.42, 1.0, 4.2, 13.7}) {
+    bool b = TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X =
+          (at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;
+      auto X2 = X.metal();
+      auto Y1 = X.hardshrink(lambd_value);
+      auto Y2 = X2.hardshrink(lambd_value).cpu();
+      return checkHardShrink(Y1, Y2, lambd_value);
+    });
+    if (!b) {
+      result = false;
+    }
+  }
+  return result;
+}
+
+bool test_hardshrink() {
+  __block std::vector<int64_t> size{3, 3, 44, 44};
+  bool result = true;
+  for (const auto lambd_value : {0.42, 1.0, 4.2, 13.7}) {
+    bool b = TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X =
+          (at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) - 0.5) * 20;
+      auto X2 = X.metal();
+      auto Y1 = at::hardshrink(X, lambd_value);
+      auto Y2 = at::hardshrink(X2, lambd_value).cpu();
+      return checkHardShrink(Y1, Y2, lambd_value);
+    });
+    if (!b) {
+      result = false;
+    }
+  }
+  return result;
 }
 
 bool test_leaky_relu_() {

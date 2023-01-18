@@ -4,11 +4,39 @@
 
 // cuSparse Generic API added in CUDA 10.1
 // Windows support added in CUDA 11.0
-// ROCm is not enabled
 #if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && ((CUSPARSE_VERSION >= 10300) || (CUSPARSE_VERSION >= 11000 && defined(_WIN32)))
 #define AT_USE_CUSPARSE_GENERIC_API() 1
 #else
 #define AT_USE_CUSPARSE_GENERIC_API() 0
+#endif
+
+// cuSparse Generic API descriptor pointers were changed to const in CUDA 12.0
+#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && \
+    (CUSPARSE_VERSION < 12000)
+#define AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS() 1
+#else
+#define AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS() 0
+#endif
+
+#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && \
+    (CUSPARSE_VERSION >= 12000)
+#define AT_USE_CUSPARSE_CONST_DESCRIPTORS() 1
+#else
+#define AT_USE_CUSPARSE_CONST_DESCRIPTORS() 0
+#endif
+
+// hipSparse Generic API ROCm 5.2
+#if defined(USE_ROCM) && ROCM_VERSION >= 50200
+#define AT_USE_HIPSPARSE_GENERIC_52_API() 1
+#else
+#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
+#endif
+
+// hipSparse Generic API ROCm 5.1
+#if defined(USE_ROCM) && ROCM_VERSION >= 50100
+#define AT_USE_HIPSPARSE_GENERIC_API() 1
+#else
+#define AT_USE_HIPSPARSE_GENERIC_API() 0
 #endif
 
 // cuSparse Generic API spsv function was added in CUDA 11.3.0

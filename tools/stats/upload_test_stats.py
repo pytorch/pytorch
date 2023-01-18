@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
+    is_rerun_disabled_tests,
     unzip,
     upload_to_s3,
 )
@@ -35,9 +36,18 @@ def parse_xml_report(
     job_id = get_job_id(report)
     print(f"Found job id: {job_id}")
 
-    root = ET.parse(report)
+    test_cases: List[Dict[str, Any]] = []
 
-    test_cases = []
+    root = ET.parse(report)
+    # TODO: unlike unittest, pytest-flakefinder used by rerun disabled tests for test_ops
+    # includes skipped messages multiple times (50 times by default). This slows down
+    # this script too much (O(n)) because it tries to gather all the stats. This should
+    # be fixed later in the way we use pytest-flakefinder. A zipped test report from rerun
+    # disabled test is only few MB, but will balloon up to a much bigger XML file after
+    # extracting from a dozen to few hundred MB
+    if is_rerun_disabled_tests(root):
+        return test_cases
+
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
@@ -118,10 +128,16 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
 
 def get_pytest_parallel_times() -> Dict[Any, Any]:
-    pytest_parallel_times = {}
+    pytest_parallel_times: Dict[Any, Any] = {}
     for report in Path(".").glob("**/python-pytest/**/*.xml"):
         invoking_file = report.parent.name
+
         root = ET.parse(report)
+        # TODO: Skip test reports from rerun disabled tests, same reason as mentioned
+        # above
+        if is_rerun_disabled_tests(root):
+            continue
+
         assert len(list(root.iter("testsuite"))) == 1
         for test_suite in root.iter("testsuite"):
             pytest_parallel_times[
@@ -165,6 +181,23 @@ def get_tests(
         pytest_parallel_times = get_pytest_parallel_times()
 
         return test_cases, pytest_parallel_times
+
+
+def get_tests_for_circleci(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> Tuple[List[Dict[str, Any]], Dict[Any, Any]]:
+    # Parse the reports and transform them to JSON
+    test_cases = []
+    for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
+        test_cases.extend(
+            parse_xml_report(
+                "testcase", xml_report, workflow_run_id, workflow_run_attempt
+            )
+        )
+
+    pytest_parallel_times = get_pytest_parallel_times()
+
+    return test_cases, pytest_parallel_times
 
 
 def get_invoking_file_times(
@@ -261,7 +294,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
     parser.add_argument(
         "--workflow-run-id",
-        type=int,
         required=True,
         help="id of the workflow to get artifacts from",
     )
@@ -276,10 +308,23 @@ if __name__ == "__main__":
         required=True,
         help="Head branch of the workflow",
     )
-    args = parser.parse_args()
-    test_cases, pytest_parallel_times = get_tests(
-        args.workflow_run_id, args.workflow_run_attempt
+    parser.add_argument(
+        "--circleci",
+        action="store_true",
+        help="If this is being run through circleci",
     )
+    args = parser.parse_args()
+
+    print(f"Workflow id is: {args.workflow_run_id}")
+
+    if args.circleci:
+        test_cases, pytest_parallel_times = get_tests_for_circleci(
+            args.workflow_run_id, args.workflow_run_attempt
+        )
+    else:
+        test_cases, pytest_parallel_times = get_tests(
+            args.workflow_run_id, args.workflow_run_attempt
+        )
 
     # Flush stdout so that any errors in rockset upload show up last in the logs.
     sys.stdout.flush()

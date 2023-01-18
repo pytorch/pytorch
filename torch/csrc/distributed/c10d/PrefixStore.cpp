@@ -1,11 +1,10 @@
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <utility>
 
 namespace c10d {
 
-PrefixStore::PrefixStore(
-    const std::string& prefix,
-    c10::intrusive_ptr<Store> store)
-    : prefix_(prefix), store_(store) {}
+PrefixStore::PrefixStore(std::string prefix, c10::intrusive_ptr<Store> store)
+    : prefix_(std::move(prefix)), store_(std::move(store)) {}
 
 std::string PrefixStore::joinKey(const std::string& key) {
   return prefix_ + "/" + key;
@@ -77,6 +76,10 @@ const std::chrono::milliseconds& PrefixStore::getTimeout() const noexcept {
 
 void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
   store_->setTimeout(timeout);
+}
+
+c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
+  return store_;
 }
 
 } // namespace c10d

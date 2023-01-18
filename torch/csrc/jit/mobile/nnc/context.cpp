@@ -169,6 +169,7 @@ c10::IValue Function::serialize() const {
 
   // input_specs_
   std::vector<c10::IValue> input_specs;
+  input_specs.reserve(input_specs_.size());
   for (const auto& input_spec : input_specs_) {
     input_specs.emplace_back(input_spec.serialize());
   }
@@ -176,6 +177,7 @@ c10::IValue Function::serialize() const {
 
   // output_specs_
   std::vector<c10::IValue> output_specs;
+  output_specs.reserve(output_specs_.size());
   for (const auto& output_spec : output_specs_) {
     output_specs.emplace_back(output_spec.serialize());
   }
@@ -186,6 +188,7 @@ c10::IValue Function::serialize() const {
 
   // sym_shape_positions_
   std::vector<c10::IValue> sym_shape_pos_vec;
+  sym_shape_pos_vec.reserve(sym_shape_positions_.size());
   for (const auto& sym_shape_pos : sym_shape_positions_) {
     sym_shape_pos_vec.emplace_back(
         Tup({sym_shape_pos.input_idx_, sym_shape_pos.dim_idx_}));

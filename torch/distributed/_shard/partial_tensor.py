@@ -60,6 +60,7 @@ class _PartialTensor(torch.Tensor):
     Examples:
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
+        >>> # xdoctest: +SKIP
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
         >>> tensor = torch.cat([tensor, tensor + 2])
         >>> tensor
@@ -235,7 +236,7 @@ class _PartialTensor(torch.Tensor):
         # Need to disable all dispatch to print args and kwargs appropriately.
         guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
         try:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 raise RuntimeError(
                     f"torch function '{func.__name__}', with args: {args} and "
                     f"kwargs: {kwargs} not supported for PartialTensor!")
