@@ -1,5 +1,4 @@
 import copy
-import dataclasses
 import inspect
 import itertools
 import logging
@@ -82,7 +81,7 @@ def _find_tensors(obj):
         return itertools.chain(*map(_find_tensors, obj.values()))
     if is_dataclass(obj):
         return itertools.chain(
-            *map(_find_tensors, [getattr(obj, f.name) for f in fields(obj)])
+            *map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
         )
 
     return []
