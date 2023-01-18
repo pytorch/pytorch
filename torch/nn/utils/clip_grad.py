@@ -1,5 +1,5 @@
 import warnings
-from typing import Union, Iterable, List, Dict, Tuple
+from typing import Union, Iterable, List, Dict, Tuple, Optional
 
 import torch
 from torch import Tensor
@@ -12,7 +12,7 @@ __all__ = ['clip_grad_norm_', 'clip_grad_norm', 'clip_grad_value_']
 
 def clip_grad_norm_(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0,
-        error_if_nonfinite: bool = False, foreach: bool = None) -> torch.Tensor:
+        error_if_nonfinite: bool = False, foreach: Optional[bool] = None) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
@@ -87,7 +87,7 @@ def clip_grad_norm_(
 
 def clip_grad_norm(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.,
-        error_if_nonfinite: bool = False) -> torch.Tensor:
+        error_if_nonfinite: bool = False, foreach: Optional[bool] = None) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     .. warning::
@@ -96,10 +96,10 @@ def clip_grad_norm(
     """
     warnings.warn("torch.nn.utils.clip_grad_norm is now deprecated in favor "
                   "of torch.nn.utils.clip_grad_norm_.", stacklevel=2)
-    return clip_grad_norm_(parameters, max_norm, norm_type, error_if_nonfinite)
+    return clip_grad_norm_(parameters, max_norm, norm_type, error_if_nonfinite, foreach)
 
 
-def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach: bool = None) -> None:
+def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach: Optional[bool] = None) -> None:
     r"""Clips gradient of an iterable of parameters at specified value.
 
     Gradients are modified in-place.
