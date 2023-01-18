@@ -18,8 +18,7 @@
 
 #include <Python.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -229,6 +228,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "current_stream",
       "default_stream",
       "current_device",
+      "_exchange_device",
       "set_device",
       "device_index",
       "device_count",
@@ -1372,5 +1372,4 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

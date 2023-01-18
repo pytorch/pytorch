@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Callable, cast, Dict, Tuple, Union
+from typing import Callable, cast, Dict, Tuple, Union, Optional
 
 import torch
 
@@ -110,7 +110,7 @@ def operator_dispatch(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
-    custom_dispatch_ops: Dict[str, Callable[..., object]],
+    custom_dispatch_ops: Optional[Dict[str, Callable[..., object]]] = None,
 ) -> object:
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
@@ -118,7 +118,7 @@ def operator_dispatch(
 
     # STEP 0. See if threre're user defined custom aten operator
     # implementations. Custom operators take the highest priority
-    if str(op_call) in custom_dispatch_ops:
+    if custom_dispatch_ops is not None and str(op_call) in custom_dispatch_ops:
         # dispatch to user defined custom distributed tensor ops
         return custom_dispatch_ops[str(op_call)](*args, **kwargs)
 
