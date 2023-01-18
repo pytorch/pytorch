@@ -1996,7 +1996,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                         f"{t.dtype == torch.get_default_dtype}; "
                         f"device {str(t.device)} == {torch._C._get_default_device()} -> "
                         f"{str(t.device) == torch._C._get_default_device()}; "
-                        f"non-sparse str(t.layout).lower() -> {'sparse' not in str(t.layout.lower())}"
+                        f"non-sparse str(t.layout).lower() -> {'sparse' not in str(t.layout).lower()}"
                     )
             if old_tensor_type is None:
                 raise AssertionError(
