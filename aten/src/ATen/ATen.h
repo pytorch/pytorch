@@ -1,9 +1,7 @@
 #pragma once
 
-#if !defined(_MSC_VER) && __cplusplus < 201703L
-#if !defined(__GNUC__) || __GNUC__ < 7
-#error C++17 or later compatible compiler is required to use ATen.
-#endif
+#if !defined(_MSC_VER) && __cplusplus < 201402L
+#error C++14 or later compatible compiler is required to use ATen.
 #endif
 
 #include <ATen/Context.h>
