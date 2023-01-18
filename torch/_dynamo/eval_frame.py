@@ -10,7 +10,6 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from importlib import import_module
 from typing import Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
@@ -350,8 +349,8 @@ def _optimize_catch_errors(
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
-    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
-        compiler_str = "inductor"
+    if hasattr(compiler_fn, "compiler_name"):
+        compiler_str = compiler_fn.compiler_name
     elif isinstance(compiler_fn, str):
         compiler_str = compiler_fn
     else:
@@ -360,22 +359,9 @@ def get_compiler_fn(compiler_fn):
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
-@functools.lru_cache(1)
 def lookup_backend(compiler_fn):
     """Expand backend strings to functions"""
-    if compiler_fn == "inductor":
-        if torch.cuda.is_available():
-            if (
-                torch.backends.cuda.matmul.allow_tf32 is False
-                and torch.cuda.get_device_capability() >= (8, 0)
-            ):
-                warnings.warn(
-                    "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
-                    "Consider setting `torch.set_float32_matmul_precision('high')`"
-                )
-
-        compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
-    elif isinstance(compiler_fn, str):
+    if isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
         compiler_fn = BACKENDS[compiler_fn]
@@ -432,15 +418,11 @@ def optimize(
         return _NullDecorator()
     if sys.platform == "win32":
         warnings.warn(
-            "Windows is not currently supported, "
-            + f"{config.dynamo_import}.optimize() will do nothing"
+            "Windows is not currently supported, torch.compile() will do nothing"
         )
         return _NullDecorator()
     if sys.version_info >= (3, 11):
-        warnings.warn(
-            "Python 3.11+ not yet supported, "
-            f"{config.dynamo_import}.optimize() will do nothing"
-        )
+        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
