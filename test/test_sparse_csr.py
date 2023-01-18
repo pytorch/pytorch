@@ -2487,6 +2487,7 @@ class TestSparseCSR(TestCase):
             self.assertIs(actual, sample.input)
             self.assertEqual(actual, expect)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
         if op.name not in UNARY_EWISE_CSR_ALLOW_AUTOGRAD:
