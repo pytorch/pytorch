@@ -100,23 +100,13 @@ class reverse_iterator
   }
 
   constexpr reference operator*() const {
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
     _Iterator iter = current;
     return *--iter;
-#else
-    // Only works for random access iterators if we're not C++14 :(
-    return *(current - 1);
-#endif
   }
 
   constexpr pointer operator->() const {
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
     _Iterator iter = current;
     return _S_to_pointer(--iter);
-#else
-    // Only works for random access iterators if we're not C++14 :(
-    return _S_to_pointer(current - 1);
-#endif
   }
 
   constexpr reverse_iterator& operator++() {
