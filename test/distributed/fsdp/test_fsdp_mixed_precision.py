@@ -936,7 +936,6 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
         ).cuda()
-        c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
 
         # For submodules with different precisions, right now current design
@@ -1014,6 +1013,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs["model_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_y"].dtype, torch.float32)
+
 
 if __name__ == "__main__":
     run_tests()
