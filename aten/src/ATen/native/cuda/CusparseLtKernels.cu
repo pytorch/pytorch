@@ -302,7 +302,7 @@ Tensor _cusparselt_create_meta(const Tensor& mask) {
         uint16_t meta_val = _mask_to_meta(pos0, pos1, pos2, pos3);
         // std::cout << " Want: " << (meta_val << (4 * k)) << std::endl;
         // std::cout << std::endl;
-        result_val += (meta_val << (4 * (3 - k)));
+        result_val = (result_val | (meta_val << (4 * k)));
       }
       // PyTorch doesn't have a uint16_t dtype, so we're using the signed equivalent.
       // However, we don't want to actually convert or overflow. We just want to store the
