@@ -25,10 +25,7 @@ from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import (
-    get_dtype_size,
-    has_incompatible_cudagraph_ops,
-)
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
