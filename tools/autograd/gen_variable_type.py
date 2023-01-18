@@ -257,7 +257,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "take",
     "fill_",
     "exp",
-    "exp2",
     "nonzero",
     "mean",
     "std_mean",
