@@ -942,16 +942,15 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+TEST_WITH_TORCHINDUCTOR = False
+# os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
+TEST_WITH_TORCHDYNAMO = False
+# os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
-    # TODO: Remove this; this is grandfathered in because we suppressed errors
-    # on test suite previously
-    torch._dynamo.config.suppress_errors = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True

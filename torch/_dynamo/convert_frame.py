@@ -218,7 +218,7 @@ def augment_exc_message(exc, msg="\n"):
     if (
         hasattr(exc, "real_stack")
         and len(exc.real_stack) > 0
-        and not (config.verbose and config.suppress_errors)
+        and not (config.verbose)
     ):
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
 
@@ -239,13 +239,6 @@ def augment_exc_message(exc, msg="\n"):
             "this script to find the smallest traced graph which reproduces this error.\n"
         )
 
-    if not config.suppress_errors:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
-
     old_msg = "" if len(exc.args) == 0 else exc.args[0]
     new_msg = old_msg + msg
     exc.args = (new_msg,) + exc.args[1:]
@@ -259,11 +252,6 @@ def exception_handler(e, code, frame=None):
         e.record_filename = record_filename
 
     augment_exc_message(e)
-    # Only log the exception if we are going to suppress it
-    # if aren't suppressing it, a higher level except block will handle it
-    if config.suppress_errors:
-        log.error(format_error_msg(e, code, record_filename, frame))
-
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
@@ -483,9 +471,8 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
         except (NotImplementedError, Unsupported):
             log.info("converting frame raised unsupported, leaving it unconverted")
         except Exception:
-            if not config.suppress_errors:
-                raise
-            log.info("converting frame raised error, suppressing error")
+            log.info("converting frame raised error")
+            raise
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]

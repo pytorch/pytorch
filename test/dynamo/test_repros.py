@@ -1326,7 +1326,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
         @torch._dynamo.skip
         def fn():

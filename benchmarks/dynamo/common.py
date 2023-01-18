@@ -1881,9 +1881,6 @@ def run(runner, args, original_dir=None):
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
             args.device_index = "0"
 
-        # Stricter check to disable fallbacks
-        args.suppress_errors = False
-
     if args.device_index is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
@@ -1948,8 +1945,6 @@ def run(runner, args, original_dir=None):
 
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
-
-    torch._dynamo.config.suppress_errors = args.suppress_errors
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
