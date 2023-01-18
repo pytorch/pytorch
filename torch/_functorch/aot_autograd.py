@@ -1440,10 +1440,6 @@ def describe_input(i, aot_config):
         return f"input {i - aot_config.num_params_buffers}"
 
 
-once_differentiable_with_aot_autograd_err_msg = torch.autograd.function.once_differentiable_with_error_msg(
-    error_msg="torch.compile with aot_autograd does not currently support double backward"
-)
-
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
@@ -1671,7 +1667,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             return tuple(fw_outs[0:num_forward_returns])
 
         @staticmethod
-        @once_differentiable_with_aot_autograd_err_msg
         def backward(ctx, *all_flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
@@ -1707,22 +1702,39 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
             del contiguous_args
-            if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
-                context = disable_autocast_manager if disable_amp else nullcontext
-                with context(), track_graph_compiling(aot_config, "backward"):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
-                    )
 
-            ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(
-                CompiledFunction.compiled_bw,
-                all_args,
-                steal_args=True,
-                disable_amp=disable_amp,
-            )
-            return tuple(out)
+            class CustomDelayedError(torch.autograd.Function):
+                # This custom autograd Function ensures that the backward graph is
+                # properly connected, but errors when the user performs double backward.
+                #
+                # See comment for why once_differentiable is not sufficient:
+                # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
+                @staticmethod
+                def forward(ctx, *all_args):
+                    all_args_list = list(all_args)
+                    if CompiledFunction.compiled_bw is None:
+                        # TODO - pass in fake tensors ?
+                        context = disable_autocast_manager if disable_amp else nullcontext
+                        with context(), track_graph_compiling(aot_config, "backward"):
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, all_args_list
+                            )
+
+                    ctx.maybe_clear_saved_tensors()
+                    out = call_func_with_args(
+                        CompiledFunction.compiled_bw,
+                        all_args_list,
+                        steal_args=True,
+                        disable_amp=disable_amp,
+                    )
+                    return tuple(out)
+
+                @staticmethod
+                def backward(ctx, *args):
+                    raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+
+            out = CustomDelayedError.apply(*all_args)
+            return out
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
