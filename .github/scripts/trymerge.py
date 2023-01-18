@@ -1492,7 +1492,7 @@ def merge(pr_num: int, repo: GitRepo,
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
     if not has_required_labels(pr):
-        raise RuntimeError(LABEL_ERR_MSG)
+        raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
     else:
         delete_all_label_err_comments(pr)
 
