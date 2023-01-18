@@ -330,6 +330,7 @@ sizes_strides_methods = {
     'is_non_overlapping_and_dense': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
 }
 
+# TODO: Deduplicate this with torch/_prims_common/__init__.py
 def eval_is_non_overlapping_and_dense(sizes, strides):
     dim = len(sizes)
 

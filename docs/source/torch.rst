@@ -621,13 +621,19 @@ Utilities
 
 Symbolic Numbers
 ----------------
+.. autoclass:: SymInt
+    :members:
+
+.. autoclass:: SymFloat
+    :members:
+
+.. autoclass:: SymBool
+    :members:
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    SymInt
-    SymFloat
-    SymBool
     sym_float
     sym_int
     sym_max
