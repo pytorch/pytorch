@@ -50,8 +50,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'sym_int', 'sym_float', 'compile', 'vmap'
-]
+    'sym_int', 'sym_float', 'compile', 'vmap']
 
 ################################################################################
 # Load the extension module
@@ -375,7 +374,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunctionSubclass', 'Generator']:
+                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
@@ -1221,11 +1220,13 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 
 class _TorchCompileInductorWrapper:
+    compiler_name = "inductor"
+
     def __init__(self, mode, passes):
         from torch._dynamo.eval_frame import lookup_backend
         from torch._inductor.config import InductorConfigContext
 
-        self.compile_fn = lookup_backend("inductor")
+        self.compile_fn = lookup_backend(self.compiler_name)
         self.cm = InductorConfigContext(mode if mode is not None else passes)
         self._torchdynamo_orig_callable = self.compile_fn
 

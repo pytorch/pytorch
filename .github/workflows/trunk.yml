@@ -78,7 +78,7 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_6-py3_10-gcc7-sm86-build:
-    name: cuda11.6-py3.10-gcc7-sm86
+    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
@@ -96,7 +96,7 @@ jobs:
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-sm86-test:
-    name: cuda11.6-py3.10-gcc7-sm86
+    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_6-py3_10-gcc7-sm86-build
     with:
@@ -273,12 +273,12 @@ jobs:
       sync-tag: win-cuda-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
