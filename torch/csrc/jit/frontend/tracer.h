@@ -181,6 +181,7 @@ TORCH_API void setWarn(warn_fn_type fn);
 struct TORCH_API NoWarn {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
+    // NOLINTNEXTLINE(*.cplusplus.UninitializedObject)
     if (state) {
       prev = state->warn;
       state->warn = false;
@@ -196,12 +197,10 @@ struct TORCH_API NoWarn {
 };
 
 struct WithNestedTracingFrame {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
