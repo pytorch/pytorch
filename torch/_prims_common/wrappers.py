@@ -10,7 +10,7 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Union, Tuple, NamedTuple
+from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
 from functools import wraps
 import warnings
