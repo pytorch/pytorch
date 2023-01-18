@@ -3,6 +3,7 @@ import logging
 import math
 import re
 import types
+from contextlib import contextmanager
 from collections import OrderedDict
 from typing import Dict, List
 
@@ -190,314 +191,323 @@ class TorchVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
+        @contextmanager
+        def record_torch_api_call():
+            try:
+                tx.torch_api_call = f"{self.value.__module__}.{self.value.__name__}"
+                yield
+            finally:
+                tx.torch_api_call = None
+
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value in config.constant_functions:
-            assert not args and not kwargs
-            return ConstantVariable(config.constant_functions[self.value], **options)
-        elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
-            # constant fold
-            return ConstantVariable(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-                **options,
-            )
-        elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
-            if self.value is torch.nn.Softmax:
-                return self._call_softmax(tx, args, kwargs, options)
-            if self.value is torch.nn.CrossEntropyLoss:
-                return self._call_cross_entropy_loss(tx, args, kwargs, options)
-            else:
-                unimplemented(f"construct nn.Module: {self.value.__name__}")
-        elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
-            assert len(args) == 1
-            if isinstance(args[0], TensorVariable) or (
-                self.value is torch.overrides.is_tensor_like
-                and isinstance(args[0], UserDefinedObjectVariable)
-                and hasattr(args[0].value, "__torch_function__")
-            ):
-                return ConstantVariable(True, **options)
-            else:
-                return ConstantVariable(False, **options)
-        elif (
-            self.value
-            in (
-                torch.is_floating_point,
-                torch.is_complex,
-            )
-            and isinstance(args[0], TensorVariable)
-            and args[0].dtype is not None
-        ):
-            if self.value is torch.is_floating_point:
-                return ConstantVariable(args[0].dtype.is_floating_point, **options)
-            elif self.value is torch.is_complex:
-                return ConstantVariable(args[0].dtype.is_complex, **options)
-            else:
-                raise AssertionError()
-        elif (
-            self.value is torch.numel
-            and isinstance(args[0], TensorVariable)
-            and args[0].size is not None
-        ):
-            return ConstantVariable(product(args[0].size), **options)
-        elif self.value in REWRITE_OPS_TO_TENSOR_SIZE_METHOD:
-            assert len(args) == 1
-            assert isinstance(args[0], TensorVariable)
-            return args[0].call_method(tx, "size", [], {})
-        elif self.value in (
-            torch.nn.modules.utils._single,
-            torch.nn.modules.utils._pair,
-            torch.nn.modules.utils._triple,
-            torch.nn.modules.utils._quadruple,
-            torch.nn.modules.utils._ntuple,
-        ):
-            return self._call_ntuple(tx, args, kwargs, options)
-        elif self.value is torch.no_grad:
-            return GradModeVariable.create(tx, False, **options)
-        elif self.value is torch.enable_grad:
-            return GradModeVariable.create(tx, True, **options)
-        elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
-        elif self.value is torch.is_grad_enabled:
-            assert not (args or kwargs)
-            return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
-                GradModeVariable._guards_singleton
-            )
-        elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
-            unimplemented(f"dynamic shapes: {self.value.__name__}")
-        elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
-            # This code block implements inlining the __torch_function__
-            # override of a tensor.
-
-            tensor_with_tf_override = args[0]
-
-            # TODO(future PR): make this implement the full __torch_function__ API
-            # instead of assuming the relevant override is in the first argument.
-            args[0] = args[0].tensor_variable
-
-            unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-                tx,
-                self,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
-                options,
-                args,
-                kwargs,
-            )
-
-            # The wrapping here follows the logic in
-            # `torch.Tensor.__torch_function__`.
-            if self.value in torch.overrides.get_default_nowrap_functions():
-                return unwrapped
-            return TensorWithTFOverrideVariable(
-                unwrapped,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
-            )
-        elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
-        elif self.value in (
-            torch.profiler.profile,
-            torch.profiler.record_function,
-            torch.autograd.profiler.profile,
-            torch.autograd.profiler.record_function,
-        ):
-            log.warning("Profiler will be ignored")
-            return NullContextVariable(**options)
-        elif self.value is torch.autograd._profiler_enabled:
-            unimplemented("torch.autograd._profiler_enabled not supported yet")
-        elif self.value is torch.jit.annotate:
-            assert len(args) == 2
-            return args[1]
-        elif self.value is torch.backends.cudnn.is_acceptable:
-            # is_acceptable(tensor) returns true if
-            #   (a) tensor dtype/device are supported by cudnn
-            #   (b) cudnn is available
-            #   (c) some initialization has completed
-            # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
-            assert (
-                len(args) == 1 or "tensor" in kwargs
-            ), "Expect 1 input to cudnn.is_acceptable"
-            tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
-            assert isinstance(
-                tensor_variable, TensorVariable
-            ), "Expect input to cudnn.is_acceptable to be a tensor"
-            tensor_inp = torch.tensor(
-                0, dtype=tensor_variable.dtype, device=tensor_variable.device
-            )
-            return ConstantVariable(
-                torch.backends.cudnn.is_acceptable(tensor_inp), **options
-            )
-        if (
-            self.value.__name__ == "get_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ):
-
-            def get_state_from_generator():
-                return self.value()
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    get_state_from_generator,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=self.value(),
-                **options,
-            )
-        if (
-            self.value.__name__ == "set_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ) or self.value == torch.random.set_rng_state:
-            assert len(args) == 1
-            assert isinstance(args[0], TensorVariable)
-
-            unimplemented(
-                "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
-            )
-            # In fake tensor case, this state doesn't matter, but
-            # it needs to be valid to not segfault. Pull a real tensor out.
-            # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
-            # However, it is imperative to record the call_function in the graph with the true args
-            # (Not the fake example_value) - for the sake of graph correctness.
-            if self.value == torch.random.set_rng_state:
-                example_value = torch.random.get_rng_state()
-            else:
-                example_value = self.value.__self__.get_state()
-
-            self.value.__module__ = self.__module__
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=example_value,
-                **options,
-            )
-        elif (
-            self.value == torch.numel
-            and len(args) == 1
-            and isinstance(args[0], TensorVariable)
-            and len(kwargs) == 0
-        ):
-            # TODO(voz): This is rewritten as a call_method because
-            # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    "numel",
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                **options,
-            )
-        elif (
-            self.value == torch.addcdiv
-            and len(args) == 3
-            and "value" in kwargs
-            and len(kwargs) == 1
-        ):
-            # decompose addcdiv into constituent ops, prevents a graph break due to converting
-            # value to a scalar
-            result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
-            result = TorchVariable(torch.mul, **options).call_function(
-                tx, [result, kwargs["value"]], {}
-            )
-            return TorchVariable(torch.add, **options).call_function(
-                tx, [args[0], result], {}
-            )
-        else:
-            any_symints_or_symfloats = any(
-                [isinstance(x, DynamicShapeVariable) for x in args]
-            )
-            all_ints_or_floats = all(
-                [
-                    isinstance(
-                        x, (variables.ConstantVariable, variables.DynamicShapeVariable)
-                    )
-                    for x in args
-                ]
-            )
-            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
-            if (
-                self.value.__module__ == "torch"
-                and self.value.__name__ in bin_ops
-                and any_symints_or_symfloats
-                and all_ints_or_floats
-            ):
-                msg = f"""\
-Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
-To support this behavior, we need to allow const-propping tensors that store symint data.
-For now, dynamo will explicitly graph break when it encounters user code with this behavior.
-"""
-                log.warning(msg)
-                raise unimplemented(msg)
-            # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
-            # as FX symbolic trace doesn't support numpy int/float as base types.
-            if (
-                HAS_NUMPY
-                and self.value in tensortype_to_dtype
-                and len(args) == 1
-                and isinstance(args[0], ListVariable)
-                and args[0].is_python_constant()
-            ):
-                for x in args[0].items:
-                    if isinstance(x.value, np.generic):
-                        x.value = x.value.item()
-
-            # TODO(voz): Replace w/ dynamic shape rewrite table.
-            # Ideally, we would be able to do this at ctor time, but alas we need a combination
-            # of value + args to determine this.
-            fn_ = self.value
-            if any([isinstance(x, DynamicShapeVariable) for x in args]):
-                if self.value == math.sqrt:
-                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
-
-                    fn_ = sym_sqrt
-
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                **options,
-            )
-
-            if "out" in kwargs:
-                # out variants of torch operators like torch.sort and
-                # torch.sigmoid mutate the tensors in the out field. Track such
-                # tensors and rewrite the symbolic locals.
-                if isinstance(tensor_variable, TupleVariable):
-                    assert isinstance(kwargs["out"], TupleVariable)
-                    output_tensor_names = [
-                        tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
-                    ]
-                    for idx, name in enumerate(output_tensor_names):
-                        assert name in tx.symbolic_locals
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
-                elif isinstance(tensor_variable, TensorVariable):
-                    assert isinstance(kwargs["out"], TensorVariable)
-                    name = tx.find_symbolic_locals_name(kwargs["out"])
-                    assert name in tx.symbolic_locals
-                    tx.symbolic_locals[name] = tensor_variable
+        with record_torch_api_call():
+            if self.value in config.constant_functions:
+                assert not args and not kwargs
+                return ConstantVariable(config.constant_functions[self.value], **options)
+            elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
+                args, kwargs = specialize_args_kwargs(tx, args, kwargs)
+                # constant fold
+                return ConstantVariable(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                    **options,
+                )
+            elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
+                if self.value is torch.nn.Softmax:
+                    return self._call_softmax(tx, args, kwargs, options)
+                if self.value is torch.nn.CrossEntropyLoss:
+                    return self._call_cross_entropy_loss(tx, args, kwargs, options)
                 else:
-                    unimplemented(f"out variant of {type(kwargs['out'])}")
+                    unimplemented(f"construct nn.Module: {self.value.__name__}")
+            elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
+                assert len(args) == 1
+                if isinstance(args[0], TensorVariable) or (
+                    self.value is torch.overrides.is_tensor_like
+                    and isinstance(args[0], UserDefinedObjectVariable)
+                    and hasattr(args[0].value, "__torch_function__")
+                ):
+                    return ConstantVariable(True, **options)
+                else:
+                    return ConstantVariable(False, **options)
+            elif (
+                self.value
+                in (
+                    torch.is_floating_point,
+                    torch.is_complex,
+                )
+                and isinstance(args[0], TensorVariable)
+                and args[0].dtype is not None
+            ):
+                if self.value is torch.is_floating_point:
+                    return ConstantVariable(args[0].dtype.is_floating_point, **options)
+                elif self.value is torch.is_complex:
+                    return ConstantVariable(args[0].dtype.is_complex, **options)
+                else:
+                    raise AssertionError()
+            elif (
+                self.value is torch.numel
+                and isinstance(args[0], TensorVariable)
+                and args[0].size is not None
+            ):
+                return ConstantVariable(product(args[0].size), **options)
+            elif self.value in REWRITE_OPS_TO_TENSOR_SIZE_METHOD:
+                assert len(args) == 1
+                assert isinstance(args[0], TensorVariable)
+                return args[0].call_method(tx, "size", [], {})
+            elif self.value in (
+                torch.nn.modules.utils._single,
+                torch.nn.modules.utils._pair,
+                torch.nn.modules.utils._triple,
+                torch.nn.modules.utils._quadruple,
+                torch.nn.modules.utils._ntuple,
+            ):
+                return self._call_ntuple(tx, args, kwargs, options)
+            elif self.value is torch.no_grad:
+                return GradModeVariable.create(tx, False, **options)
+            elif self.value is torch.enable_grad:
+                return GradModeVariable.create(tx, True, **options)
+            elif self.value is torch.set_grad_enabled and len(args) == 1:
+                return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
+            elif self.value is torch.is_grad_enabled:
+                assert not (args or kwargs)
+                return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
+                    GradModeVariable._guards_singleton
+                )
+            elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
+                unimplemented(f"dynamic shapes: {self.value.__name__}")
+            elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
+                # This code block implements inlining the __torch_function__
+                # override of a tensor.
 
-            return tensor_variable
+                tensor_with_tf_override = args[0]
+
+                # TODO(future PR): make this implement the full __torch_function__ API
+                # instead of assuming the relevant override is in the first argument.
+                args[0] = args[0].tensor_variable
+
+                unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+                    tx,
+                    self,
+                    tensor_with_tf_override.orig_tensor_variable_source,
+                    tensor_with_tf_override.subclass_torch_function__func,
+                    tensor_with_tf_override.subclass_type,
+                    options,
+                    args,
+                    kwargs,
+                )
+
+                # The wrapping here follows the logic in
+                # `torch.Tensor.__torch_function__`.
+                if self.value in torch.overrides.get_default_nowrap_functions():
+                    return unwrapped
+                return TensorWithTFOverrideVariable(
+                    unwrapped,
+                    tensor_with_tf_override.orig_tensor_variable_source,
+                    tensor_with_tf_override.subclass_torch_function__func,
+                    tensor_with_tf_override.subclass_type,
+                )
+            elif self.value is torch.amp.autocast_mode.autocast:
+                return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+            elif self.value in (
+                torch.profiler.profile,
+                torch.profiler.record_function,
+                torch.autograd.profiler.profile,
+                torch.autograd.profiler.record_function,
+            ):
+                log.warning("Profiler will be ignored")
+                return NullContextVariable(**options)
+            elif self.value is torch.autograd._profiler_enabled:
+                unimplemented("torch.autograd._profiler_enabled not supported yet")
+            elif self.value is torch.jit.annotate:
+                assert len(args) == 2
+                return args[1]
+            elif self.value is torch.backends.cudnn.is_acceptable:
+                # is_acceptable(tensor) returns true if
+                #   (a) tensor dtype/device are supported by cudnn
+                #   (b) cudnn is available
+                #   (c) some initialization has completed
+                # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
+                assert (
+                    len(args) == 1 or "tensor" in kwargs
+                ), "Expect 1 input to cudnn.is_acceptable"
+                tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
+                assert isinstance(
+                    tensor_variable, TensorVariable
+                ), "Expect input to cudnn.is_acceptable to be a tensor"
+                tensor_inp = torch.tensor(
+                    0, dtype=tensor_variable.dtype, device=tensor_variable.device
+                )
+                return ConstantVariable(
+                    torch.backends.cudnn.is_acceptable(tensor_inp), **options
+                )
+            if (
+                self.value.__name__ == "get_state"
+                and hasattr(self.value, "__self__")
+                and isinstance(self.value.__self__, torch._C.Generator)
+            ):
+
+                def get_state_from_generator():
+                    return self.value()
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        get_state_from_generator,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    example_value=self.value(),
+                    **options,
+                )
+            if (
+                self.value.__name__ == "set_state"
+                and hasattr(self.value, "__self__")
+                and isinstance(self.value.__self__, torch._C.Generator)
+            ) or self.value == torch.random.set_rng_state:
+                assert len(args) == 1
+                assert isinstance(args[0], TensorVariable)
+
+                unimplemented(
+                    "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+                )
+                # In fake tensor case, this state doesn't matter, but
+                # it needs to be valid to not segfault. Pull a real tensor out.
+                # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
+                # However, it is imperative to record the call_function in the graph with the true args
+                # (Not the fake example_value) - for the sake of graph correctness.
+                if self.value == torch.random.set_rng_state:
+                    example_value = torch.random.get_rng_state()
+                else:
+                    example_value = self.value.__self__.get_state()
+
+                self.value.__module__ = self.__module__
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    example_value=example_value,
+                    **options,
+                )
+            elif (
+                self.value == torch.numel
+                and len(args) == 1
+                and isinstance(args[0], TensorVariable)
+                and len(kwargs) == 0
+            ):
+                # TODO(voz): This is rewritten as a call_method because
+                # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_method",
+                        "numel",
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
+            elif (
+                self.value == torch.addcdiv
+                and len(args) == 3
+                and "value" in kwargs
+                and len(kwargs) == 1
+            ):
+                # decompose addcdiv into constituent ops, prevents a graph break due to converting
+                # value to a scalar
+                result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
+                result = TorchVariable(torch.mul, **options).call_function(
+                    tx, [result, kwargs["value"]], {}
+                )
+                return TorchVariable(torch.add, **options).call_function(
+                    tx, [args[0], result], {}
+                )
+            else:
+                any_symints_or_symfloats = any(
+                    [isinstance(x, DynamicShapeVariable) for x in args]
+                )
+                all_ints_or_floats = all(
+                    [
+                        isinstance(
+                            x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                        )
+                        for x in args
+                    ]
+                )
+                bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+                if (
+                    self.value.__module__ == "torch"
+                    and self.value.__name__ in bin_ops
+                    and any_symints_or_symfloats
+                    and all_ints_or_floats
+                ):
+                    msg = f"""\
+    Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
+    To support this behavior, we need to allow const-propping tensors that store symint data.
+    For now, dynamo will explicitly graph break when it encounters user code with this behavior.
+    """
+                    log.warning(msg)
+                    raise unimplemented(msg)
+                # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
+                # as FX symbolic trace doesn't support numpy int/float as base types.
+                if (
+                    HAS_NUMPY
+                    and self.value in tensortype_to_dtype
+                    and len(args) == 1
+                    and isinstance(args[0], ListVariable)
+                    and args[0].is_python_constant()
+                ):
+                    for x in args[0].items:
+                        if isinstance(x.value, np.generic):
+                            x.value = x.value.item()
+
+                # TODO(voz): Replace w/ dynamic shape rewrite table.
+                # Ideally, we would be able to do this at ctor time, but alas we need a combination
+                # of value + args to determine this.
+                fn_ = self.value
+                if any([isinstance(x, DynamicShapeVariable) for x in args]):
+                    if self.value == math.sqrt:
+                        from torch.fx.experimental.symbolic_shapes import sym_sqrt
+
+                        fn_ = sym_sqrt
+
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
+
+                if "out" in kwargs:
+                    # out variants of torch operators like torch.sort and
+                    # torch.sigmoid mutate the tensors in the out field. Track such
+                    # tensors and rewrite the symbolic locals.
+                    if isinstance(tensor_variable, TupleVariable):
+                        assert isinstance(kwargs["out"], TupleVariable)
+                        output_tensor_names = [
+                            tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
+                        ]
+                        for idx, name in enumerate(output_tensor_names):
+                            assert name in tx.symbolic_locals
+                            tx.symbolic_locals[name] = tensor_variable.items[idx]
+                    elif isinstance(tensor_variable, TensorVariable):
+                        assert isinstance(kwargs["out"], TensorVariable)
+                        name = tx.find_symbolic_locals_name(kwargs["out"])
+                        assert name in tx.symbolic_locals
+                        tx.symbolic_locals[name] = tensor_variable
+                    else:
+                        unimplemented(f"out variant of {type(kwargs['out'])}")
+
+                return tensor_variable
 
     def is_dynamic_shapes(self, args, kwargs):
         """Check for dynamic shapes when shape specialization is enabled"""

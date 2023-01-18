@@ -1582,6 +1582,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
         # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
+
+        # Source torch api call
+        self.torch_api_call = None
+
         # Flag to indicate whether tracing is used for export.
         self.export = export
 

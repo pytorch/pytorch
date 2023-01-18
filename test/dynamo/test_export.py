@@ -869,14 +869,15 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
     def test_export_with_stack_trace(self):
-        inp = torch.tensor([0.1, 0.1])
+        inp = torch.randn(4, 4)
 
         class MyBlock(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, x):
-                return torch.cos(x).relu()
+                x = torch.nn.functional.linear(x, torch.randn(4, 4))
+                return torch.cos(x)
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -894,6 +895,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
+                self.assertTrue(node.meta["torch_api_call"] is not None)
 
         torch._dynamo.reset()
 
@@ -903,6 +905,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
+                self.assertTrue(node.meta["torch_api_call"] is not None)
+
+                # print(node.target, node.meta["torch_api_call"])
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
