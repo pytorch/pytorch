@@ -3607,6 +3607,21 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         with self.assertRaisesRegex(RuntimeError, "expects the current backward to be executed with multithreading disabled"):
             t.backward()
 
+    def test_view_replay_enabled(self):
+        def f(x):
+            out = x.clone().view(-1)
+            # mutate the view, triggering autograd view-replay logic
+            out.add_(1)
+            return out
+
+        x = torch.ones(2, 2, requires_grad=True)
+        with torch.autograd._set_view_replay_enabled(True):
+            out = f(x)
+
+        # view-replay was enabled, so we should see ViewBackward in the graph
+        # instead of AsStridedBackward.
+        self.assertTrue("ViewBackward" in str(out.grad_fn))
+
     def test_current_node(self):
         pr = []
 

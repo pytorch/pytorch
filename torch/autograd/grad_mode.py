@@ -4,7 +4,8 @@ from typing import Any
 from torch.utils._contextlib import _DecoratorContextManager
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode', 'set_multithreading_enabled']
+           'inference_mode', 'set_multithreading_enabled',
+           '_set_view_replay_enabled']
 
 class no_grad(_DecoratorContextManager):
     r"""Context-manager that disabled gradient calculation.
@@ -250,6 +251,42 @@ class set_multithreading_enabled(_DecoratorContextManager):
 
     def __exit__(self, *args) -> None:
         del self.multithreadeding_enabled_guard
+
+    def clone(self):
+        return self.__class__(self.mode)
+
+
+class _set_view_replay_enabled(_DecoratorContextManager):
+    r"""Context-manager that sets whether or not to always enable view-replay in autograd.
+
+    ``set_view_replay_enabled`` will enable or disable view-replay based on its argument :attr:`mode`.
+    It can be used as a context-manager or as a function.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    When a tensor view is mutated, the autograd engine needs to decide whether or not
+    to regenerate the "updated view" by either replaying the chain of views from the updated base,
+    or with a single call to as_strided.
+
+    If set_view_replay_enabled is set to True, then autograd will always use view replay.
+    Otherwise, it will fall back to its existing logic.
+
+    Args:
+        mode (bool): Flag whether to enable view-replay (``True``), or disable
+                     (``False``).
+
+    """
+
+    def __init__(self, mode: bool) -> None:
+        self.mode = mode
+        self.view_replay_enabled_guard = torch._C._ViewReplayEnabled(mode)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        del self.view_replay_enabled_guard
 
     def clone(self):
         return self.__class__(self.mode)

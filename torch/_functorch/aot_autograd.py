@@ -1897,7 +1897,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         else:
             args_with_synthetic_bases = args
 
-        all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
+        with torch.autograd._set_view_replay_enabled(True):
+            all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
 
         num_mutated_inps = CompiledFunction.num_mutated_inputs
         num_intermediate_bases = CompiledFunction.fw_metadata.num_intermediate_bases

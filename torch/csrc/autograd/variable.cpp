@@ -80,7 +80,8 @@ ViewInfo ViewInfo::chain(
       };
     } else {
       // current_view has a view_func and but it's parent doesn't have one
-      if (base.unsafeGetTensorImpl()->support_as_strided()) {
+      if (base.unsafeGetTensorImpl()->support_as_strided() &&
+          !c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
         auto size = base.sym_sizes().vec();
         auto stride = base.sym_strides().vec();
         auto storage_offset = base.sym_storage_offset();

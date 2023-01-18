@@ -38,6 +38,10 @@ struct C10_API AutogradState {
     mulithreading_enabled_ = mulithreading_enabled;
   }
 
+  void set_view_replay_enabled(bool view_replay_enabled) {
+    view_replay_enabled_ = view_replay_enabled;
+  }
+
   bool get_grad_mode() const {
     return grad_mode_;
   }
@@ -54,11 +58,16 @@ struct C10_API AutogradState {
     return mulithreading_enabled_;
   }
 
+  bool get_view_replay_enabled() const {
+    return view_replay_enabled_;
+  }
+
  private:
   bool grad_mode_ : 1;
   bool inference_mode_ : 1;
   bool fw_grad_mode_ : 1;
   bool mulithreading_enabled_ : 1;
+  bool view_replay_enabled_ : 1;
 };
 
 } // namespace c10
