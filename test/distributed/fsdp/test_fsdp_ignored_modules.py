@@ -243,8 +243,11 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignore_kwargs = (
             {"ignored_modules": layer1_ignored_modules}
             if ignore_modules
-            else {"ignored_parameters": set(
-                p for m in layer1_ignored_modules for p in m.parameters())}
+            else {
+                "ignored_parameters": set(
+                    p for m in layer1_ignored_modules for p in m.parameters()
+                )
+            }
         )
         model.layer1 = FSDP(model.layer1, **ignore_kwargs)
         model.layer3 = FSDP(model.layer3)
@@ -256,8 +259,11 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignore_kwargs_top = (
             {"ignored_modules": model_ignored_modules}
             if ignore_modules
-            else {"ignored_parameters": set(
-                p for m in model_ignored_modules for p in m.parameters())}
+            else {
+                "ignored_parameters": set(
+                    p for m in model_ignored_modules for p in m.parameters()
+                )
+            }
         )
         wrapped_model = FSDP(model, **ignore_kwargs_top)
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
@@ -272,7 +278,11 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignore_kwargs = (
             {"ignored_modules": ignored_modules}
             if ignore_modules
-            else {"ignored_parameters": set(p for m in ignored_modules for p in m.parameters())}
+            else {
+                "ignored_parameters": set(
+                    p for m in ignored_modules for p in m.parameters()
+                )
+            }
         )
 
         model.layer1 = FSDP(
