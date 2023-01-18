@@ -45,6 +45,24 @@ class TORCH_CUDA_CU_API IrVisitor : public OptOutDispatch {
   std::vector<Expr*> exprs_;
 };
 
+// Const version of IrVisitor
+class TORCH_CUDA_CU_API ConstIrVisitor : public OptOutConstDispatch {
+ public:
+  std::vector<const Expr*> handle(const std::vector<const Expr*>& expr);
+
+ protected:
+  using OptOutConstDispatch::handle;
+
+  virtual void handle(const ForLoop*) override;
+  virtual void handle(const IfThenElse*) override;
+
+ protected:
+  std::vector<const ForLoop*> for_loops_;
+  std::vector<const Scope*> scope_;
+  std::vector<const Expr*> scope_exprs_;
+  std::vector<const Expr*> exprs_;
+};
+
 // Base Expr Mutator class that visits all nodes with IrVisitor, and then
 // inserts new expressions, replaces expressions based on insertion/replace
 // maps provided or removes existing expressions. These replacement

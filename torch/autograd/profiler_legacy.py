@@ -13,6 +13,7 @@ from torch.autograd import (
 import itertools
 from warnings import warn
 
+__all__ = ["profile"]
 
 class profile(object):
     """DEPRECATED: use torch.profiler instead"""
@@ -57,7 +58,7 @@ class profile(object):
             self.with_flops,
             self.with_modules,
             # avoid exposing _ExperimentalConfig this in legacy public API
-            torch._C._autograd._ExperimentalConfig(),
+            torch._C._profiler._ExperimentalConfig(),
         )
 
     def __enter__(self):
@@ -102,11 +103,25 @@ class profile(object):
         if self.function_events is None:
             raise RuntimeError("Profiler didn't finish running")
 
-    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
+    def table(
+            self,
+            sort_by=None,
+            row_limit=100,
+            max_src_column_width=75,
+            max_name_column_width=55,
+            max_shapes_column_width=80,
+            header=None,
+            top_level_events_only=False
+    ):
         self._check_finish()
         assert self.function_events is not None
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, max_src_column_width=max_src_column_width, header=header,
+            sort_by=sort_by,
+            row_limit=row_limit,
+            max_src_column_width=max_src_column_width,
+            max_name_column_width=max_name_column_width,
+            max_shapes_column_width=max_shapes_column_width,
+            header=header,
             top_level_events_only=top_level_events_only
         )
     table.__doc__ = EventList.table.__doc__

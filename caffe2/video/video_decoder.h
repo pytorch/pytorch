@@ -508,11 +508,11 @@ class CallbackImpl : public Callback {
   }
 
   void frameDecoded(std::unique_ptr<DecodedFrame> frame) override {
-    frames.push_back(move(frame));
+    frames.push_back(std::move(frame));
   }
 
   void audioDecoded(std::unique_ptr<DecodedAudio> audio_sample) override {
-    audio_samples.push_back(move(audio_sample));
+    audio_samples.push_back(std::move(audio_sample));
   }
 
   void videoDecodingStarted(const VideoMeta& /*videoMeta*/) override {

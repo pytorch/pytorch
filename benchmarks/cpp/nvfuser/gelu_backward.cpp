@@ -113,9 +113,6 @@ BENCHMARK(GeluBackward_AutoSchedule)->Unit(benchmark::kMicrosecond);
 //------------------------------------------------------------------------------
 
 static void GeluBackward_Lower(benchmark::State& benchmark_state) {
-  constexpr int kHiddenFeatures = 512;
-  constexpr int kBatchSize = 64;
-
   Fusion fusion;
 
   // setup fusion
@@ -173,11 +170,11 @@ static void GeluBackward_RunFusion(benchmark::State& benchmark_state) {
   FusionExecutor executor;
   executor.compileFusion(&fusion);
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
   }
 }
@@ -204,7 +201,7 @@ static void GeluBackward_RunFusion_GpuOnly(benchmark::State& benchmark_state) {
   executor.setMeasureKernelTimeFlag(true);
   executor.compileFusion(&fusion);
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);

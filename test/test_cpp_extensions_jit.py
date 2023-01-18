@@ -37,7 +37,7 @@ def remove_build_path():
     if os.path.exists(default_build_root):
         shutil.rmtree(default_build_root)
 
-
+# There's only one test that runs gracheck, run slow mode manually
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -191,13 +191,15 @@ class TestCppExtensionJIT(common.TestCase):
         archflags = {
             '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
-            "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
         }
         if int(torch.version.cuda.split('.')[0]) >= 10:
             # CUDA 9 only supports compute capability <= 7.2
             archflags["7.5+PTX"] = (['75'], ['75'])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        if int(torch.version.cuda.split('.')[0]) < 12:
+            # CUDA 12 drops compute capability < 5.0
+            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)
@@ -864,7 +866,8 @@ class TestCppExtensionJIT(common.TestCase):
         a = torch.randn(5, 5, requires_grad=True)
         b = torch.randn(5, 5, requires_grad=True)
 
-        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
+        for fast_mode in (True, False):
+            gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
 
 
 if __name__ == "__main__":

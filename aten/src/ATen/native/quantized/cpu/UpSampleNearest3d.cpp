@@ -1,8 +1,16 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/QuantizedOps.h>
-#include <ATen/quantized/Quantizer.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_upsample_nearest_exact3d_native.h>
+#include <ATen/ops/upsample_nearest3d_native.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -228,28 +236,6 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
     c10::optional<double> scale_w) {
   return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor upsample_nearest3d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact3d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return _upsample_nearest_exact3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
 }
 
 } // namespace native

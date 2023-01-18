@@ -407,6 +407,34 @@ void IrGraphGenerator::handle(const TensorView* tv) {
   tensor_views_.push_back(tv);
 }
 
+void IrGraphGenerator::handle(const FullOp* fop) {
+  // node
+  printExpr(fop, "full");
+
+  // inputs & outputs
+  addArc(fop->getFillValue(), fop);
+  addArc(fop, fop->output(0));
+}
+
+void IrGraphGenerator::handle(const ARangeOp* aop) {
+  // node
+  printExpr(aop, "arange");
+
+  // inputs & outputs
+  addArc(aop->start(), aop);
+  addArc(aop->end(), aop);
+  addArc(aop->step(), aop);
+  addArc(aop, aop->output(0));
+}
+
+void IrGraphGenerator::handle(const EyeOp* eop) {
+  // node
+  printExpr(eop, "eye");
+
+  // inputs & outputs
+  addArc(eop, eop->output(0));
+}
+
 void IrGraphGenerator::handle(const UnaryOp* uop) {
   // node
   std::stringstream label;
@@ -441,6 +469,16 @@ void IrGraphGenerator::handle(const TernaryOp* op) {
   addArc(op->in2(), op, "[color=blue]");
   addArc(op->in3(), op, "[color=brown]");
   addArc(op, op->out());
+}
+
+void IrGraphGenerator::handle(const RNGOp* op) {
+  // node
+  std::stringstream label;
+  label << op->getRNGOpType();
+  printExpr(op, label.str());
+
+  // inputs & outputs
+  addArc(op, op->output(0));
 }
 
 void IrGraphGenerator::handle(const BroadcastOp* op) {

@@ -1,9 +1,16 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
  *

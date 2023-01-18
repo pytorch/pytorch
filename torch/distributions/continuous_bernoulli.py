@@ -22,6 +22,7 @@ class ContinuousBernoulli(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = ContinuousBernoulli(torch.tensor([0.3]))
         >>> m.sample()
         tensor([ 0.2538])

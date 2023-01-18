@@ -22,7 +22,7 @@ class ProcessedNodeInputs {
   ProcessedNodeInputs() : ProcessedNodeInputs(0) {}
 
   explicit ProcessedNodeInputs(size_t size) {
-    DCHECK_LT(size, (1 << 16));
+    TORCH_DCHECK_LT(size, (1 << 16));
     if (size <= kMaxInlineInputs) {
       repr_.inline_repr_.size = size;
     } else {
@@ -36,7 +36,7 @@ class ProcessedNodeInputs {
 
   uint16_t& operator[](uint16_t idx) {
     if (C10_LIKELY(repr_.is_inline())) {
-      DCHECK_LT(idx, repr_.inline_repr_.size);
+      TORCH_DCHECK_LT(idx, repr_.inline_repr_.size);
       return repr_.inline_repr_.inputs[idx];
     } else {
       return repr_.outline_repr_[idx];
@@ -102,12 +102,12 @@ class ProcessedNodeInputs {
     }
 
     uint16_t operator[](uint16_t idx) const {
-      DCHECK_LT(idx, size());
+      TORCH_DCHECK_LT(idx, size());
       return array_[idx + 1];
     }
 
     uint16_t& operator[](uint16_t idx) {
-      DCHECK_LT(idx, size());
+      TORCH_DCHECK_LT(idx, size());
       return array_[idx + 1];
     }
 

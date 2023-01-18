@@ -152,7 +152,7 @@ void checkChainingAndRun(
     net_def.set_num_workers(4);
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
-    CHECK_NOTNULL(dag);
+    TORCH_CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_TRUE(chains == expected);
     testExecution(net, net_def.op().size());
@@ -175,7 +175,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
-    CHECK_NOTNULL(dag);
+    TORCH_CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_EQ(expected_num_chains, chains.size());
     testExecution(net, net_def.op().size());
@@ -1108,7 +1108,7 @@ void testProfDAGNetErrorCase(bool test_error) {
   // with failing op - prof_dag handles invalid runs and returns empty stats,
   // without - returns stats for each op
   auto* prof_dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
-  CHECK_NOTNULL(prof_dag);
+  TORCH_CHECK_NOTNULL(prof_dag);
   auto stats_proto = prof_dag->GetPerOperatorCost();
   ASSERT_EQ(
       stats_proto.stats_size(), test_error ? 0 : net->GetOperators().size());

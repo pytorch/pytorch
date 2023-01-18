@@ -13,7 +13,7 @@ Default values for native configurations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Below is the output of the configuration for quantization of ops
-in fbgemm and qnnpack (PyTorch's default quantized backends).
+in x86 and qnnpack (PyTorch's default quantized backends).
 
 Results:
 

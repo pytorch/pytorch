@@ -159,14 +159,14 @@ class Timer(object):
 
         env:
             This tag indicates that otherwise identical tasks were run in
-            different environments, and are therefore not equivilent, for
+            different environments, and are therefore not equivalent, for
             instance when A/B testing a change to a kernel. `Compare` will
             treat Measurements with different `env` specification as distinct
             when merging replicate runs.
 
         num_threads:
             The size of the PyTorch threadpool when executing `stmt`. Single
-            threaded performace is important as both a key inference workload
+            threaded performance is important as both a key inference workload
             and a good indicator of intrinsic algorithmic efficiency, so the
             default is set to one. This is in contrast to the default PyTorch
             threadpool size which tries to utilize all cores.
@@ -377,7 +377,7 @@ class Timer(object):
 
             2) A large block size better amortizes the cost of `timer`
                invocation, and results in a less biased measurement. This is
-               important because CUDA syncronization time is non-trivial
+               important because CUDA synchronization time is non-trivial
                (order single to low double digit microseconds) and would
                otherwise bias the measurement.
 

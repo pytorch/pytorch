@@ -13,10 +13,12 @@ Testing environment:
 # 1. Does not reuse the build artifact in other CI workflows
 # 2. CI jobs are serialized because there is only one worker
 import os
+import boto3  # type: ignore[import]
 import git  # type: ignore[import]
 import pathlib
 import argparse
 import subprocess
+from pathlib import Path
 
 from typing import List, Tuple
 
@@ -31,6 +33,25 @@ threshold: 100
 direction: decrease
 timeout: 720
 tests:"""
+S3_BUCKET = "ossci-metrics"
+S3_PREFIX = "torchbench-pr-test"
+S3_URL_BASE = f"https://{S3_BUCKET}.s3.amazonaws.com/"
+
+class S3Client:
+    def __init__(self, bucket: str = S3_BUCKET, prefix: str = S3_PREFIX):
+        self.s3 = boto3.client('s3')
+        self.resource = boto3.resource('s3')
+        self.bucket = bucket
+        self.prefix = prefix
+
+    def upload_file(self, file_path: Path, filekey_prefix: str) -> None:
+        assert file_path.is_file(), f"Specified file path {file_path} does not exist or not file."
+        file_name = file_path.name
+        s3_key = f"{self.prefix}/{filekey_prefix}/{file_name}"
+        print(f"Uploading file {file_name} to S3 with key: {s3_key}")
+        self.s3.upload_file(str(file_path), self.bucket, s3_key)
+        # output the result URL
+        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}{s3_key}")
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
@@ -121,6 +142,7 @@ def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str) -> 
                "--pytorch-src", pytorch_path, "--torchbench-src", torchbench_path,
                "--config", os.path.join(output_dir, TORCHBENCH_CONFIG_NAME),
                "--output", os.path.join(output_dir, "result.txt")]
+    print(f"Running torchbench command: {command}")
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
 def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, head_sha: str,
@@ -133,11 +155,24 @@ def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, h
                "--head", head_sha,
                "--userbenchmark", userbenchmark,
                "--output-dir", output_dir]
+    print(f"Running torchbench userbenchmark command: {command}")
     subprocess.check_call(command, cwd=torchbench_path, env=env)
+
+def process_upload_s3(result_dir: str) -> None:
+    # validate result directory
+    result_dir_path = Path(result_dir)
+    assert result_dir_path.exists(), f"Specified result directory {result_dir} doesn't exist."
+    # upload all files to S3 bucket oss-ci-metrics
+    files = [x for x in result_dir_path.iterdir() if x.is_file()]
+    # upload file to S3 bucket
+    s3_client: S3Client = S3Client()
+    filekey_prefix = result_dir_path.name
+    for f in files:
+        s3_client.upload_file(f, filekey_prefix)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
-    parser.add_argument('--pr-body', required=True, help="The file that contains body of a Pull Request")
+    parser.add_argument('--pr-body', help="The file that contains body of a Pull Request")
 
     subparsers = parser.add_subparsers(dest='command')
     # parser for setup the torchbench branch name env
@@ -149,6 +184,9 @@ if __name__ == "__main__":
     run_parser.add_argument('--pr-head-sha', required=True, type=str, help="The Pull Request head hash")
     run_parser.add_argument('--pytorch-path', required=True, type=str, help="Path to pytorch repository")
     run_parser.add_argument('--torchbench-path', required=True, type=str, help="Path to TorchBench repository")
+    # parser to upload results to S3
+    upload_parser = subparsers.add_parser("upload-s3")
+    upload_parser.add_argument('--result-dir', required=True, type=str, help="Path to benchmark output")
     args = parser.parse_args()
 
     if args.command == 'set-torchbench-branch':
@@ -179,6 +217,8 @@ if __name__ == "__main__":
         if not models and not userbenchmarks:
             print("Can't parse valid models or userbenchmarks from the pr body. Quit.")
             exit(-1)
+    elif args.command == 'upload-s3':
+        process_upload_s3(args.result_dir)
     else:
         print(f"The command {args.command} is not supported.")
         exit(-1)

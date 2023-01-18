@@ -12,6 +12,7 @@
 
 #include <torch/csrc/Export.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {

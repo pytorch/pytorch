@@ -1,6 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Activation.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/glu_backward_native.h>
+#include <ATen/ops/glu_backward_jvp_native.h>
+#include <ATen/ops/glu_jvp_native.h>
+#include <ATen/ops/glu_native.h>
+#include <ATen/ops/sigmoid.h>
+#endif
 
 namespace at {
 

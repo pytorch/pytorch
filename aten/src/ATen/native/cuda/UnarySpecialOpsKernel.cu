@@ -17,8 +17,7 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 const char exp2_name[] = "exp2_kernel";
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
@@ -151,7 +150,9 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, common_dtype, "sigmoid_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return scalar_t{1} / (scalar_t{1} + std::exp(-a));
+        using opmath_t = at::opmath_type<scalar_t>;
+        const auto one = opmath_t{1};
+        return static_cast<scalar_t>(one/(one + std::exp(-opmath_t{a})));
       });
     });
   }
@@ -179,8 +180,9 @@ void sinc_kernel_cuda(TensorIteratorBase& iter) {
               return scalar_t(1);
             } else {
               // NVCC says constexpr var is not accessible from device
-              scalar_t product = c10::detail::pi<scalar_t>() * a;
-              return std::sin(product) / product;
+              using opmath_t = at::opmath_type<scalar_t>;
+              opmath_t product = c10::detail::pi<opmath_t>() * opmath_t{a};
+              return static_cast<scalar_t>(std::sin(product) / product);
             }
           });
         });
@@ -391,5 +393,4 @@ REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

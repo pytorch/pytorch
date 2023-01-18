@@ -17,19 +17,19 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             '_propagate_qconfig_helper',
             '_remove_activation_post_process',
             '_remove_qconfig',
-            'add_observer_',
+            '_add_observer_',
             'add_quant_dequant',
             'convert',
-            'get_observer_dict',
-            'get_unique_devices_',
-            'is_activation_post_process',
+            '_get_observer_dict',
+            '_get_unique_devices_',
+            '_is_activation_post_process',
             'prepare',
             'prepare_qat',
             'propagate_qconfig_',
             'quantize',
             'quantize_dynamic',
             'quantize_qat',
-            'register_activation_post_process_hook',
+            '_register_activation_post_process_hook',
             'swap_module',
         ]
         self._test_function_import('quantize', function_list)
@@ -118,7 +118,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     def test_function_import_quant_type(self):
         function_list = [
             'QuantType',
-            'quant_type_to_str',
+            '_get_quant_type_to_str',
         ]
         self._test_function_import('quant_type', function_list)
 
@@ -177,9 +177,9 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "default_qat_qconfig_v2",
             "get_default_qconfig",
             "get_default_qat_qconfig",
-            "assert_valid_qconfig",
+            "_assert_valid_qconfig",
             "QConfigAny",
-            "add_module_to_qconfig_obs_ctr",
+            "_add_module_to_qconfig_obs_ctr",
             "qconfig_equals"
         ]
         self._test_function_import('qconfig', function_list)
@@ -225,7 +225,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "get_fuser_method",
         ]
         dict_list = [
-            "DEFAULT_OP_LIST_TO_FUSER_METHOD"
+            "_DEFAULT_OP_LIST_TO_FUSER_METHOD"
         ]
         self._test_function_import('fuser_method_mappings', function_list)
         self._test_dict_import('fuser_method_mappings', dict_list)

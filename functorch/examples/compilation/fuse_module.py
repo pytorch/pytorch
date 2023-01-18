@@ -36,7 +36,7 @@ mod = Foo()
 compiled_mod = compiled_module(mod, fw_compiler, bw_compiler)
 
 for a, b in zip(run(mod, input), run(compiled_mod, input)):
-    torch.testing.assert_allclose(a, b)
+    torch.testing.assert_close(a, b)
 
 out = mod(input)
 out.sum().backward()
@@ -45,7 +45,7 @@ compiled_mod.orig_module.param.data -= compiled_mod.orig_module.param.grad
 compiled_mod.orig_module.param.grad = None
 
 for a, b in zip(run(mod, input), run(compiled_mod, input)):
-    torch.testing.assert_allclose(a, b)
+    torch.testing.assert_close(a, b)
 
 for _ in range(5):
     i = 10000

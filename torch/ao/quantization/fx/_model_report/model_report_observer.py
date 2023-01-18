@@ -198,7 +198,7 @@ class ModelReportObserver(ObserverBase):
             self.percentile_batches_tracked = torch.zeros_like(any_non_zero_quantile_value)
             self.average_percentile_ratio = torch.zeros_like(ratio_if_not_zero)
 
-        # also initialize the constant channel var if that is not initialized seperately
+        # also initialize the constant channel var if that is not initialized separately
         if self.constant_channels.shape[0] == 0:
             self.constant_channels = torch.zeros_like(any_constant_channels)
 

@@ -38,7 +38,7 @@ torch::lazy::TSOpVector Normal::Lower(
   arguments.emplace_back("std", std_);
   torch::lazy::TSOpVector normal__out =
       torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
-  CHECK_EQ(normal__out.size(), 1);
+  TORCH_CHECK_EQ(normal__out.size(), 1);
 
   return normal__out;
 }

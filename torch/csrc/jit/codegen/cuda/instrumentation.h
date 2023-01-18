@@ -31,7 +31,7 @@ namespace inst {
 //! An easy way to view traces is to type `about://tracing` in Chrome or
 //! Chromium.
 //!
-class Trace : public NonCopyable {
+class TORCH_CUDA_CU_API Trace : public NonCopyable {
  public:
   using Clock = std::chrono::steady_clock;
 
@@ -73,7 +73,7 @@ class Trace : public NonCopyable {
 
 //! \internal Automatic scope for a perf marker
 //!   (normally used through the FUSER_PERF_SCOPE macro)
-class TraceScope : public NonCopyable {
+class TORCH_CUDA_CU_API TraceScope : public NonCopyable {
  public:
   explicit TraceScope(const char* event_name) : event_name_(event_name) {
     Trace::instance()->beginEvent(event_name_);

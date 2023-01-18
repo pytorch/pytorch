@@ -33,9 +33,9 @@ class RoIPoolFOp final : public Operator<Context> {
               "spatial_scale", 1.)),
         pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
         pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)) {
-    DCHECK_GT(spatial_scale_, 0);
-    DCHECK_GT(pooled_height_, 0);
-    DCHECK_GT(pooled_width_, 0);
+    TORCH_DCHECK_GT(spatial_scale_, 0);
+    TORCH_DCHECK_GT(pooled_height_, 0);
+    TORCH_DCHECK_GT(pooled_width_, 0);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -59,9 +59,9 @@ class RoIPoolFGradientOp final : public Operator<Context> {
               "spatial_scale", 1.)),
         pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
         pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)) {
-    DCHECK_GT(spatial_scale_, 0);
-    DCHECK_GT(pooled_height_, 0);
-    DCHECK_GT(pooled_width_, 0);
+    TORCH_DCHECK_GT(spatial_scale_, 0);
+    TORCH_DCHECK_GT(pooled_height_, 0);
+    TORCH_DCHECK_GT(pooled_width_, 0);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 

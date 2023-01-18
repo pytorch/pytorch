@@ -4,9 +4,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 bool SimplifierHashType::operator==(const SimplifierHashType& other) const {
   return _h == other._h;
@@ -159,7 +157,7 @@ void HashProvider::visit(LoadPtr v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
   SimplifierHashType indices_hash;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
@@ -170,7 +168,7 @@ void HashProvider::visit(StorePtr v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
   SimplifierHashType indices_hash;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
@@ -185,7 +183,7 @@ void HashProvider::visit(BlockPtr v) {
   CACHE_GUARD();
   SimplifierHashType hash;
 
-  for (StmtPtr s : *v) {
+  for (const StmtPtr& s : *v) {
     s->accept(this);
     hash = hash_combine(hash, hashOf(s));
   }
@@ -258,7 +256,7 @@ void HashProvider::visit(AllocatePtr v) {
       hash_combine("allocate", hashOf(buffer_var), v->dtype());
 
   std::vector<ExprPtr> dims = v->dims();
-  for (ExprPtr dim : dims) {
+  for (const ExprPtr& dim : dims) {
     dim->accept(this);
     hash = hash_combine(hash, hashOf(dim));
   }
@@ -298,7 +296,7 @@ void HashProvider::visit(TermPtr v) {
   v->scalar()->accept(this);
 
   SimplifierHashType hash = hash_combine("term", hashOf(v->scalar()));
-  for (auto c : v->variables()) {
+  for (const auto& c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -311,7 +309,7 @@ void HashProvider::visit(PolynomialPtr v) {
   v->scalar()->accept(this);
 
   SimplifierHashType hash = hash_combine("term", hashOf(v->scalar()));
-  for (auto c : v->variables()) {
+  for (const auto& c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -327,7 +325,7 @@ void HashProvider::visit(MaxTermPtr v) {
     hash = hash_combine(hash, hashOf(v->scalar()));
   }
 
-  for (auto c : v->variables()) {
+  for (const auto& c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -343,7 +341,7 @@ void HashProvider::visit(MinTermPtr v) {
     hash = hash_combine(hash, hashOf(v->scalar()));
   }
 
-  for (auto c : v->variables()) {
+  for (const auto& c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -351,6 +349,4 @@ void HashProvider::visit(MinTermPtr v) {
   putHash(v, hash);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

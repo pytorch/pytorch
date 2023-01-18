@@ -95,7 +95,7 @@ Tensor slice_width(
 
     api::PipelineBarrier pipeline_barrier{};
 
-    context->submit_texture_copy(
+    context->submit_copy<api::VulkanImage, api::VulkanImage>(
         // pipeline barrier
         pipeline_barrier,
         // images
@@ -126,7 +126,7 @@ Tensor slice_width(
 
       api::PipelineBarrier pipeline_barrier{};
 
-      context->submit_texture_copy(
+      context->submit_copy<api::VulkanImage, api::VulkanImage>(
           // pipeline barrier
           pipeline_barrier,
           // images
@@ -171,7 +171,7 @@ Tensor slice_height(
 
     api::PipelineBarrier pipeline_barrier{};
 
-    context->submit_texture_copy(
+    context->submit_copy<api::VulkanImage, api::VulkanImage>(
         // pipeline barrier
         pipeline_barrier,
         // images
@@ -200,7 +200,7 @@ Tensor slice_height(
 
       api::PipelineBarrier pipeline_barrier{};
 
-      context->submit_texture_copy(
+      context->submit_copy<api::VulkanImage, api::VulkanImage>(
           // pipeline barrier
           pipeline_barrier,
           // images
@@ -269,7 +269,7 @@ Tensor slice(
   }
   dim += 4 - nDims;
 
-  vTensor v_output{api::context(), newSizes, self.options()};
+  vTensor v_output{api::context(), newSizes, self.scalar_type()};
 
   if (dim == 3) {
     slice_width(self, start_val, end_val, step, v_output);

@@ -3,7 +3,7 @@ import torch.fx as fx
 from functorch import make_fx
 from torch.profiler import profile, ProfilerActivity
 
-from functorch._src.compile_utils import fx_graph_cse
+from torch._functorch.compile_utils import fx_graph_cse
 
 def profile_it(f, inp):
     for _ in range(5):

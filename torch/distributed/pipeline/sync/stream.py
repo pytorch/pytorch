@@ -12,7 +12,9 @@ from typing import Generator, List, Union, cast
 
 import torch
 
-__all__: List[str] = []
+__all__: List[str] = ["CPUStreamType", "new_stream", "current_stream", "default_stream",
+                      "use_device", "use_stream", "get_device", "wait_stream", "record_stream",
+                      "is_cuda", "as_cuda"]
 
 
 class CPUStreamType:
@@ -102,7 +104,7 @@ def record_stream(tensor: torch.Tensor, stream: AbstractStream) -> None:
         #
         # Issue: https://github.com/pytorch/pytorch/issues/27366
         #
-        tensor = tensor.new_empty([0]).set_(tensor.storage())
+        tensor = tensor.new_empty([0]).set_(tensor._typed_storage())
 
         # Typechecking: torch.cuda.Stream is incompatible with torch._C.Stream
         tensor.record_stream(as_cuda(stream))  # type: ignore[arg-type]

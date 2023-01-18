@@ -1,14 +1,14 @@
 #include <c10/util/StringUtil.h>
-#include <c10d/Utils.hpp>
-#include <c10d/debug.h>
-#include <c10d/logger.hpp>
 #include <fmt/format.h>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <string>
 
 #include <c10/util/CallOnce.h>
 
 #ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #endif
 
 namespace c10d {
@@ -49,8 +49,8 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   return output << loggerInfo;
 }
 
-Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
-  reducer_ = reducer;
+Logger::Logger(std::shared_ptr<c10d::Reducer> reducer)
+    : reducer_(std::move(reducer)) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
@@ -92,8 +92,10 @@ void Logger::set_env_variables() {
         parse_env("GLOO_DEVICE_TRANSPORT");
 
 #ifdef USE_C10D_GLOO
-    auto gloo_pg =
-        static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.get());
+    auto gloo_pg = static_cast<c10d::ProcessGroupGloo*>(
+        reducer_->process_group_
+            ->getBackend(c10d::ProcessGroup::BackendType::GLOO)
+            .get());
     auto n_threads = gloo_pg->getNumThreads();
     ddp_logging_data_->ints_map["gloo_num_threads"] = n_threads;
 #endif

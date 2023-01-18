@@ -4,7 +4,7 @@ import re
 import textwrap
 from typing import List, Optional, Tuple
 
-from torch.utils.benchmark import _make_temp_dir
+from torch.utils.benchmark.utils.common import _make_temp_dir
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label

@@ -9,8 +9,8 @@ import torch
 from typing import Tuple
 import copy
 
-from torch.ao.sparsity._experimental.data_sparsifier import DataNormSparsifier
-from torch.ao.sparsity._experimental.data_scheduler import BaseDataScheduler
+from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
+from torch.ao.pruning._experimental.data_scheduler import BaseDataScheduler
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
