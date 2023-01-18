@@ -8,7 +8,6 @@ import os
 import tempfile
 import textwrap
 import time
-from importlib import import_module
 from io import StringIO
 from typing import Any, Dict, List, Optional, Union
 from unittest import mock
@@ -25,13 +24,6 @@ log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-# We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
-dynamo_config = import_module(f"{config.dynamo_import}.config")
-dynamo_debug_utils = import_module(f"{config.dynamo_import}.debug_utils")
-dynamo_logging = import_module(f"{config.dynamo_import}.logging")
-dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
-dynamo_testing = import_module(f"{config.dynamo_import}.testing")
-dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
 try:
     from triton.testing import do_bench
@@ -86,13 +78,17 @@ def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
     return -(numer // -denom)
 
+
 def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
     sympy.Expr.
     """
-    return [i.get_pyobj().expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst]
+    return [
+        i.get_pyobj().expr if isinstance(i, torch.SymInt) else sympy.Integer(i)
+        for i in lst
+    ]
 
 
 def gen_gm_and_inputs(target, args, kwargs):

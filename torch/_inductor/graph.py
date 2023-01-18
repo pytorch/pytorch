@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
@@ -31,7 +32,12 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product, convert_shape_to_inductor
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_dtype_size,
+    sympy_product,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -61,7 +67,9 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(ex.stride())
+            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
+                ex.stride()
+            )
         else:
             return self._shape_env.create_symbolic_sizes_strides(ex)
 
@@ -114,6 +122,12 @@ class GraphLowering(torch.fx.Interpreter):
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.warning(f"Using FallbackKernel: {name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -159,7 +173,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -518,7 +532,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 

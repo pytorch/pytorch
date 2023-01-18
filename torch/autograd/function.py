@@ -7,7 +7,7 @@ from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from torch._functorch.autograd_function import custom_function_call
 
 __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
@@ -323,8 +323,8 @@ class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, Functi
                 pass
 
         - The forward no longer accepts a ctx argument.
-        - Instead, you must also define a setup_context staticmethod to handle setting up the
-          ``ctx`` object.
+        - Instead, you must also override the :meth:`torch.autograd.Function.setup_context`
+          staticmethod to handle setting up the ``ctx`` object.
           ``output`` is the output of the forward, ``inputs`` are a Tuple of inputs
           to the forward.
         - See :ref:`extending-autograd` for more details
@@ -339,6 +339,23 @@ class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, Functi
         """
         raise NotImplementedError("You must implement the forward function for custom"
                                   " autograd.Function.")
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: Tuple[Any], output: Any) -> Any:
+        r"""There are two ways to define the forward pass of an autograd.Function.
+
+        Either:
+
+        1. Override forward with the signature forward(ctx, *args, **kwargs).
+           ``setup_context`` is not overridden. Setting up the ctx for backward
+           happens inside the ``forward``.
+        2. Override forward with the signature forward(*args, **kwargs) and
+           override ``setup_context``. Setting up the ctx for backward happens
+           inside ``setup_context`` (as opposed to inside the ``forward``)
+
+        See :meth:`torch.autograd.Function.forward` and :ref:`extending-autograd` for more details.
+        """
+        raise NotImplementedError("setup_context is not implemented.")
 
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
@@ -490,13 +507,12 @@ class Function(_SingleLevelFunction):
             args = _functorch.utils.unwrap_dead_wrappers(args)
             return super().apply(*args, **kwargs)
 
-        if not hasattr(cls, 'setup_context'):
-            # TODO: link documentation in error message
-            # https://github.com/pytorch/pytorch/issues/90224
+        if cls.setup_context == _SingleLevelFunction.setup_context:
             raise RuntimeError(
-                'In order to use an autograd.Function with functorch transforms ',
-                '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
-                'staticmethod.')
+                'In order to use an autograd.Function with functorch transforms '
+                '(vmap, grad, jvp, jacrev, ...), it must override the setup_context '
+                'staticmethod. For more details, please see '
+                'https://pytorch.org/docs/master/notes/extending.func.html')
 
         return custom_function_call(cls, *args, **kwargs)
 

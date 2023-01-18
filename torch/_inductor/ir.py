@@ -32,11 +32,11 @@ from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
     cache_on_self,
+    convert_shape_to_inductor,
     sympy_dot,
     sympy_product,
     sympy_subs,
     sympy_symbol,
-    convert_shape_to_inductor,
 )
 from .virtualized import ops, V
 
@@ -2945,8 +2945,7 @@ class FallbackKernel(ExternKernelAlloc):
             )
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
-        if self.kernel not in ("aten.convolution_backward",):
-            log.warning(f"Using FallbackKernel: {self.kernel}")
+        V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -3353,7 +3352,17 @@ def _prepare_convolution_fusion_create(
         bias_fake = (
             ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
         )
-        output = torch.ops.aten.convolution( x_fake, weight_fake, bias_fake, stride, padding, dilation, False, [0, 0], groups,)
+        output = torch.ops.aten.convolution(
+            x_fake,
+            weight_fake,
+            bias_fake,
+            stride,
+            padding,
+            dilation,
+            False,
+            [0, 0],
+            groups,
+        )
         output_size = output.size()
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
@@ -3847,7 +3856,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.garbage_collect_values = False
         self.env = {}
         self.fetch_attr = submodules.__getitem__
-        self.name = V.get_ops_handler().name
+        self.name = "InterpreterShim"
 
 
 class LoopBody:
