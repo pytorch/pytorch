@@ -1123,7 +1123,6 @@ class TestOperators(TestCase):
         xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
-        xfail('cumprod'),
         xfail('fill'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
@@ -1194,7 +1193,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
-        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),

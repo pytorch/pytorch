@@ -4083,8 +4083,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.vector_norm'),  # can accept vector inputs
         xfail('linalg.norm'),  # can accept vector inputs
         xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
+        xfail('linalg.vander'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
-        xfail('linalg.vander'), # cannot accept dimensions equal to or less than one
         xfail('linalg.vecdot'),
         # throws in vmap on CUDA
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
