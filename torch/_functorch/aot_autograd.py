@@ -2338,7 +2338,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
-        return stateless.functional_call(mod, params_and_buffers, args, kwargs)
+        return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
     named_params = dict(_named_parameters(mod, remove_duplicate=False))
     named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
