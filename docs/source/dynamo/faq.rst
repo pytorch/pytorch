@@ -198,7 +198,7 @@ trouble, and the profiler will accumulate statistics over this duration.
 
 .. code-block:: python
 
-   prof = dynamo.utils.CompilationProfiler()
+   prof = dynamo.utils.CompileProfiler()
    @dynamo.optimize(prof)
    def my_model():
        ...
