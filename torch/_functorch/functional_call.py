@@ -123,7 +123,7 @@ def functional_call(
 
         parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
 
-    return nn.utils.stateless.functional_call(module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights)
+    return nn.utils.stateless._functional_call(module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights)
 
 
 @exposed_in("torch.func")

@@ -4,7 +4,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 import torch
 import unittest
 import warnings
-import torch.nn.utils._stateless as stateless
 import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -334,12 +333,12 @@ def forward(self, x_1):
         # An old version of this test called the module directly.  This works
         # for tracing_mode == "real", but for fake tensors, we also have to
         # ensure that the parameters and buffers get wrapped in fake tensors
-        # because free fake tensors are not supported.  Fortunately stateless
+        # because free fake tensors are not supported.  Fortunately functional_call
         # does precisely this for us.
         def f(x, params, buffers):
             for p in params.values():
                 p.grad = None
-            loss = stateless.functional_call(mod, {**params, **buffers}, (x,)).sum()
+            loss = torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
             # I could have done this with the functional API, but there is
             # plenty of exercising this; I want to show mutating API still
             # works
@@ -523,7 +522,7 @@ def forward(self, x_1):
         model = Foo()
 
         def f(x, params):
-            out = stateless.functional_call(model, params, x).sum()
+            out = torch.func.functional_call(model, params, x).sum()
             out.backward()
             return list(params.values())
         input = torch.randn(3, 5, requires_grad=True)
@@ -581,7 +580,7 @@ def forward(self, x_1):
             if not isinstance(args, Iterable):
                 args = [args]
             params_and_buffers = {**params, **buffers}
-            out = stateless.functional_call(model, params_and_buffers, args)
+            out = torch.func.functional_call(model, params_and_buffers, args)
             out.sum().backward()
             return [p - 1e-4 * p.grad for p in params.values()]
 
