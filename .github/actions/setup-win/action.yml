@@ -55,20 +55,20 @@ runs:
         set +e
 
         PYTHON3=$(${CONDA_RUN} which python3)
-        HAS_PYTHON3=$?
+        EXIT_CODE=$?
 
-        if [[ "${HAS_PYTHON3}" == "0" ]]; then
+        if [[ "${EXIT_CODE}" == "0" ]]; then
           echo "Found Python3 at ${PYTHON3}, adding it into GITHUB_PATH"
           echo "${PYTHON3}" >> "${GITHUB_PATH}"
         else
           # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3
           # installation, which is Python 3 based. Its Python is default to Python 3. Further, there
           # is also the Miniconda installation that is Python 2 based, and both can be installed if
-          # needed.  In both cases, Python binary is just called python
+          # needed. In both cases, Python binary is just called python
           PYTHON=$(${CONDA_RUN} which python)
-          HAS_PYTHON=$?
+          EXIT_CODE=$?
 
-          if [[ "${HAS_PYTHON}" == "0" ]]; then
+          if [[ "${EXIT_CODE}" == "0" ]]; then
             PYTHON3=$(echo "${PYTHON}" | sed "s/python/python3/")
             # It's difficult to setup alias across GitHub action steps, so I just add a softlink
             # here pointing to Python
