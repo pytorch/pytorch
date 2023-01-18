@@ -67,6 +67,27 @@ def _default_to_foreach(tensorlists: List[List[torch.Tensor]], differentiable: b
     )
 
 
+# Common doc strings among optimizers
+_foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
+            is used. If unspecified by the user (so foreach is None), we will try to use
+            foreach over the for-loop implementation on CUDA, since it is usually
+            significantly more performant. (default: None)"""
+
+_capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
+            capture in a CUDA graph. Passing True can impair ungraphed performance,
+            so if you don't intend to graph capture this instance, leave it False
+            (default: False)"""
+
+_differentiable_doc = r"""differentiable (bool, optional): whether autograd should
+            occur through the optimizer step in training. Otherwise, the step()
+            function runs in a torch.no_grad() context. Setting to True can impair
+            performance, so leave it False if you don't intend to run autograd
+            through this instance (default: False)"""
+
+_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
+            objective, instead of minimizing (default: False)"""
+
+
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following
     signature::
