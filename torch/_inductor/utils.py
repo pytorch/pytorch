@@ -10,7 +10,7 @@ import textwrap
 import time
 from importlib import import_module
 from io import StringIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from unittest import mock
 
 import sympy
@@ -85,6 +85,14 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
     return -(numer // -denom)
+
+def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+    """
+    Gets the shape and stride of a tensor. For non-symbolic tensors, this is
+    trivial. But for symbolic tensors, we need to map from SymIntNode into
+    sympy.Expr.
+    """
+    return [i.get_pyobj().expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst]
 
 
 def gen_gm_and_inputs(target, args, kwargs):

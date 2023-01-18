@@ -318,12 +318,12 @@ if HAS_SYMPY:
             # difficult to check the types.
             if base.is_zero:
                 return sympy.S.Zero
-            if divisor == 1:
-                return sympy.floor(base)
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
             if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
                 return sympy.floor(base / divisor)
+            if divisor == 1:
+                return base
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 

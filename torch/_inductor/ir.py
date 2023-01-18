@@ -36,6 +36,7 @@ from .utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
+    convert_shape_to_inductor,
 )
 from .virtualized import ops, V
 
@@ -128,7 +129,7 @@ def reads_from_conv(buf, var_ranges):
 
 def ir_node_to_tensor(x, guard_shape=True):
     shape_fn = (
-        V.graph.sizevars.guard_static_shape
+        V.graph.sizevars.shape_env.create_symintnode
         if guard_shape
         else V.graph.sizevars.size_hint
     )
@@ -219,6 +220,11 @@ class IndexingDiv(sympy.Function):
     """
 
     nargs = (2,)
+
+    def _sympystr(self, printer):
+        base = printer.parenthesize(self.args[0], 50)
+        divisor = printer.parenthesize(self.args[1], 50)
+        return f"{base}//{divisor}"
 
     @classmethod
     def eval(cls, base, divisor):
@@ -1607,6 +1613,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
+        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -3199,8 +3206,8 @@ class Convolution(ExternKernelAlloc):
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
-            output_size,
-            strides,
+            convert_shape_to_inductor(output_size),
+            convert_shape_to_inductor(strides),
         )
 
         if bias is not None:
@@ -3346,17 +3353,7 @@ def _prepare_convolution_fusion_create(
         bias_fake = (
             ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
         )
-        output = torch.ops.aten.convolution(
-            x_fake,
-            weight_fake,
-            bias_fake,
-            stride,
-            padding,
-            dilation,
-            False,
-            [0, 0],
-            groups,
-        )
+        output = torch.ops.aten.convolution( x_fake, weight_fake, bias_fake, stride, padding, dilation, False, [0, 0], groups,)
         output_size = output.size()
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
