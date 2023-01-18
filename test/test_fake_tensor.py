@@ -751,7 +751,7 @@ class FakeTensorOperatorInvariants(TestCase):
             torch.ones(6, dtype=torch.int64),
             torch.arange(2, dtype=torch.int64),
             False,
-            2, # mode = max
+            2,  # mode = max
         ]
 
         ref_out = torch.ops.aten._embedding_bag(*args)
