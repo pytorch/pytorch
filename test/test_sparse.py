@@ -4260,18 +4260,9 @@ class TestSparseAny(TestCase):
         """
         for t in self.generate_simple_inputs(
                 from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
-            is_hybrid = t.dense_dim() > 0
-
-            # TODO: The following exception cases all correspond to
-            # not implemented conversions
-            if is_hybrid and from_layout is not torch.sparse_coo:
-                with self.assertRaisesRegex(RuntimeError, "sparse_compressed_to_dense: Hybrid tensors are not supported"):
-                    t.to_dense()
-
-            else:
-                r = t.to_dense()
-                self.assertEqual(r.layout, torch.strided)
-                self.assertEqual(r, t)
+            r = t.to_dense()
+            self.assertEqual(r.layout, torch.strided)
+            self.assertEqual(r, t)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
@@ -4423,7 +4414,7 @@ class TestSparseAny(TestCase):
         if (from_layout, to_layout) == (torch.sparse_csr, torch.sparse_bsr):
             # See gh-90910
             t = torch.tensor([[0, 0, 1, 0], [0, 1, 0, 0]], dtype=dtype, device=device).to_sparse_csr()
-            r = t.to_sparse_bsr(2, 2)
+            r = t.to_sparse_bsr((2, 2))
             torch._validate_sparse_compressed_tensor_args(r.crow_indices(), r.col_indices(), r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 
