@@ -22,7 +22,7 @@ import types
 import typing
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Any, Dict, List
 
 try:
@@ -66,6 +66,7 @@ def tabulate(rows, headers):
 
 
 def dynamo_profiled(func):
+    @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         datafn = (
@@ -86,6 +87,7 @@ def dynamo_profiled(func):
 
 
 def dynamo_timed(func):
+    @wraps(func)
     def time_wrapper(*args, **kwargs):
         key = func.__qualname__
         if key not in compilation_metrics:
@@ -318,6 +320,13 @@ def is_numpy_float_type(value):
                 np.float64,
             ),
         )
+    else:
+        return False
+
+
+def is_numpy_ndarray(value):
+    if HAS_NUMPY:
+        return istype(value, np.ndarray)
     else:
         return False
 
@@ -856,6 +865,8 @@ def same(
         if relax_numpy_equality:
             ref = ref.item()
         return (type(ref) is type(res)) and (ref == res)
+    elif is_numpy_ndarray(ref):
+        return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
