@@ -259,15 +259,13 @@ struct alignas(sizeof(T) * 2) complex {
         /* divide by zeros should yield a complex inf or nan */
         real_ = ar / abs_br;
         imag_ = ai / abs_bi;
-      }
-      else {
+      } else {
         auto rat = bi / br;
         auto scl = 1.0 / (br + bi * rat);
         real_ = (ar + ai * rat) * scl;
         imag_ = (ai - ar * rat) * scl;
       }
-    }
-    else {
+    } else {
       auto rat = br / bi;
       auto scl = 1.0 / (bi + br * rat);
       real_ = (ar * rat + ai) * scl;
