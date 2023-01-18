@@ -22,6 +22,8 @@ def arch_type(arch_version: str) -> str:
         return "cuda"
     elif arch_version in ROCM_ARCHES:
         return "rocm"
+    elif arch_version in CPU_CXX11_ABI_ARCH:
+        return "cpu-cxx11-abi"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
 
@@ -36,6 +38,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in ROCM_ARCHES
     },
     "cpu": "pytorch/manylinux-builder:cpu",
+    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
 }
 
 CONDA_CONTAINER_IMAGES = {
@@ -77,6 +80,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
         "rocm": f"rocm{gpu_arch_version}",
+        "cpu-cxx11-abi": "cpu-cxx11-abi",
     }.get(gpu_arch_type, gpu_arch_version)
 
 
@@ -123,8 +127,7 @@ def generate_libtorch_matrix(os: str, abi_version: str,
     if arches is None:
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES
-            arches += ROCM_ARCHES
+            arches += CUDA_ARCHES + ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
 
@@ -186,7 +189,7 @@ def generate_wheels_matrix(os: str,
         # Define default compute archivectures
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES + ROCM_ARCHES
+            arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
 
@@ -194,7 +197,7 @@ def generate_wheels_matrix(os: str,
     for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
-            gpu_arch_version = "" if arch_version == "cpu" else arch_version
+            gpu_arch_version = "" if arch_version == "cpu" or arch_version == "cpu-cxx11-abi" else arch_version
             # Skip rocm 3.11 binaries for now as the docker image are not correct
             if python_version == "3.11" and gpu_arch_type == "rocm":
                 continue
@@ -212,6 +215,7 @@ def generate_wheels_matrix(os: str,
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
+                        "devtoolset": "",
                         "pytorch_extra_install_requirements":
                         "nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -242,6 +246,7 @@ def generate_wheels_matrix(os: str,
                     ),
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                     "package_type": package_type,
+                    "devtoolset": "cxx11-abi" if arch_version == "cpu-cxx11-abi" else "",
                     "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                         ".", "_"
                     ),
