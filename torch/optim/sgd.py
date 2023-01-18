@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 from .optimizer import Optimizer, required, _use_grad_for_differentiable
 from typing import List, Optional
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['SGD', 'sgd']
 
@@ -271,48 +272,50 @@ def _multi_tensor_sgd(params: List[Tensor],
     if len(params) == 0:
         return
 
-    if has_sparse_grad is None:
-        has_sparse_grad = any(grad.is_sparse for grad in grads)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
+    for device_params, device_grads, device_momentum_buffer_list, indices in grouped_tensors.values():
+        device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
 
-    if maximize:
-        grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
+        if maximize:
+            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
 
-    if weight_decay != 0:
-        grads = torch._foreach_add(grads, params, alpha=weight_decay)
+        if weight_decay != 0:
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
-    if momentum != 0:
-        bufs = []
-
-        all_states_with_momentum_buffer = True
-        for i in range(len(momentum_buffer_list)):
-            if momentum_buffer_list[i] is None:
-                all_states_with_momentum_buffer = False
-                break
-            else:
-                bufs.append(momentum_buffer_list[i])
-
-        if all_states_with_momentum_buffer:
-            torch._foreach_mul_(bufs, momentum)
-            torch._foreach_add_(bufs, grads, alpha=1 - dampening)
-        else:
+        if momentum != 0:
             bufs = []
-            for i in range(len(momentum_buffer_list)):
-                if momentum_buffer_list[i] is None:
-                    buf = momentum_buffer_list[i] = torch.clone(grads[i]).detach()
+
+            all_states_with_momentum_buffer = True
+            for i in range(len(device_momentum_buffer_list)):
+                if device_momentum_buffer_list[i] is None:
+                    all_states_with_momentum_buffer = False
+                    break
                 else:
-                    buf = momentum_buffer_list[i]
-                    buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+                    bufs.append(device_momentum_buffer_list[i])
 
-                bufs.append(buf)
+            if all_states_with_momentum_buffer:
+                torch._foreach_mul_(bufs, momentum)
+                torch._foreach_add_(bufs, device_grads, alpha=1 - dampening)
+            else:
+                bufs = []
+                for i in range(len(device_momentum_buffer_list)):
+                    if device_momentum_buffer_list[i] is None:
+                        buf = device_momentum_buffer_list[i] = momentum_buffer_list[indices[i]] = \
+                            torch.clone(device_grads[i]).detach()
+                    else:
+                        buf = device_momentum_buffer_list[i]
+                        buf.mul_(momentum).add_(device_grads[i], alpha=1 - dampening)
 
-        if nesterov:
-            torch._foreach_add_(grads, bufs, alpha=momentum)
+                    bufs.append(buf)
+
+            if nesterov:
+                torch._foreach_add_(device_grads, bufs, alpha=momentum)
+            else:
+                device_grads = bufs
+
+        if not device_has_sparse_grad:
+            torch._foreach_add_(device_params, device_grads, alpha=-lr)
         else:
-            grads = bufs
-
-    if not has_sparse_grad:
-        torch._foreach_add_(params, grads, alpha=-lr)
-    else:
-        # foreach APIs dont support sparse
-        for i in range(len(params)):
-            params[i].add_(grads[i], alpha=-lr)
+            # foreach APIs don't support sparse
+            for i in range(len(device_params)):
+                device_params[i].add_(device_grads[i], alpha=-lr)
