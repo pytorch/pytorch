@@ -3,7 +3,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim) {
   int64_t ndim = self.dim();
@@ -34,4 +34,4 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
   return new_strides_unsort;
 }
 
-}}
+} // namespace at::native
