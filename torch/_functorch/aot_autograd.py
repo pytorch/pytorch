@@ -1859,7 +1859,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             )
             del contiguous_args
 
-            class CustomDelayedError(torch.autograd.Function):
+            class CompiledFunctionBackward(torch.autograd.Function):
                 # This custom autograd Function ensures that the backward graph is
                 # properly connected, but errors when the user performs double backward.
                 #
@@ -1889,7 +1889,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 def backward(ctx, *args):
                     raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
 
-            out = CustomDelayedError.apply(*all_args)
+            out = CompiledFunctionBackward.apply(*all_args)
             return out
 
     @wraps(CompiledFunction.apply)
