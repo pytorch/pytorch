@@ -54,7 +54,8 @@ class LogNormal(TransformedDistribution):
 
     @property
     def variance(self):
-        return (self.scale.pow(2).exp() - 1) * (2 * self.loc + self.scale.pow(2)).exp()
+        scale_sq = self.scale.pow(2)
+        return scale_sq.expm1() * (2 * self.loc + scale_sq).exp()
 
     def entropy(self):
         return self.base_dist.entropy() + self.loc
