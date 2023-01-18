@@ -298,11 +298,13 @@ def timed(
         xm.mark_step()
         xm.wait_device_ops()
 
-    t0 = time.perf_counter()
+    time_total = 0
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
         # Put this call inside the loop to reset the seed for each iteration.
+        # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
+        t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
         # instead of calling sync on result_list, we should call mark_step.
@@ -316,12 +318,16 @@ def timed(
             # we need the mark step to send the optimizer graph out for
             # compilation.
             xm.mark_step()
+        t_iter_end = time.perf_counter()
+        time_total += t_iter_end - t_iter_begin
 
+    t_0 = time.perf_counter()
     if use_xla:
         xm.wait_device_ops()
     synchronize()
-    t1 = time.perf_counter()
-    return (t1 - t0, result) if return_result else t1 - t0
+    t_1 = time.perf_counter()
+    time_total += t_1 - t_0
+    return (time_total, result) if return_result else time_total
 
 
 class Stats:

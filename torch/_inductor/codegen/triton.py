@@ -934,6 +934,7 @@ class TritonKernel(Kernel):
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
+        cond = " & ".join(masks)
         sizes = [":" for _ in self.range_trees]
         sizes[-1] = "None"
         reduction_range_prefix = self.range_trees[-1].prefix
@@ -947,8 +948,13 @@ class TritonKernel(Kernel):
         result_var = self.cse.newvar()
         result_var.mask_vars = set(var for var in masks if var[0] != "r")
         if self.persistent_reduction:
-            line = f"tl.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
-            result_var = self.cse.generate(self.compute, line)
+            masked_value = self.cse.generate(
+                self.compute, f"tl.where({cond}, {value}, {default})"
+            )
+            result_var = self.cse.generate(
+                self.compute,
+                f"tl.{reduction_type}({masked_value}, {dim})[{', '.join(sizes)}]",
+            )
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -972,8 +978,6 @@ class TritonKernel(Kernel):
                 updated = f"{accumulator} + {value}"
             else:
                 raise NotImplementedError(f"reduction_type {reduction_type}")
-
-            cond = " & ".join(masks)
 
             if accumulator_index:
                 # argmax or argmin
