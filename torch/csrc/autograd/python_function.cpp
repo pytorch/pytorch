@@ -213,8 +213,19 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
-    for (const auto& hook : cdata->pre_hooks()) {
+    for (const auto& hook : cdata->tensor_pre_hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+    // See NOTE [retains_grad_hook PyObject traversal]
+    for (const auto& hook : cdata->retains_grad_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+    for (const auto& hook : cdata->pre_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -877,10 +888,15 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
           unpacked_input.input_vars.begin(), unpacked_input.input_vars.end()),
       seq_id);
 
-  // Temporary hack to improve functorch UX. We'll find a better solution.
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
   if (functorch_tls) {
-    functorch_tls->checkSupportsAutogradFunction();
+    // autograd.Function support for functorch is handled in Python.
+    // If we have gotten here, then either we are dealing with a
+    // torch.autograd.function._SingleLevelFunction, or something in
+    // the implementation went wrong.
+    // The following code is useful for debugging when something goes wrong
+    // because it'll raise a loud error (instead of being silently incorrect).
+    functorch_tls->checkSupportsSingleLevelAutogradFunction();
   }
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
@@ -907,8 +923,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   // autograd.Function may optionally contain a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
   bool has_separate_setup_context_fn =
-      (isAutogradFunctionExtensionEnabled() &&
-       PyObject_HasAttrString(cls, "setup_context"));
+      PyObject_HasAttrString(cls, "setup_context");
 
   auto num_args = PyTuple_GET_SIZE(inputs);
 
@@ -985,7 +1000,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
       "access pattern that is no longer supported. For examples on how to use new-style "
       "autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-  cdata->add_pre_hook(std::move(hook));
+  cdata->add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

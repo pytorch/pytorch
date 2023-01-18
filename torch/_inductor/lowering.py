@@ -10,8 +10,8 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch import _prims_common
 from torch._prims_common import (
+    canonicalize_dims,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -488,16 +488,17 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
-    offset = len(x.get_size()) == 0
-    dim = _validate_dim(x, dim, offset)
-    new_shape = list(x.get_size())
-    if len(new_shape) > 0:
-        removed = new_shape.pop(dim)
-        if V.graph.sizevars.maybe_guard_equals(removed, 1):
-            return view(x, new_shape)
 
+    dim = canonicalize_dims(len(x.get_size()), dim)
+    dims = set((dim,) if not isinstance(dim, tuple) else dim)
+
+    new_shape = [
+        s
+        for d, s in enumerate(x.get_size())
+        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
+    ]
     # squeeze does nothing if the size isn't 1
-    return x
+    return view(x, new_shape) if new_shape != x.get_size() else x
 
 
 @register_lowering([aten.squeeze_])
@@ -1853,41 +1854,17 @@ def index(x, indices):
     )
 
 
-# Note [Decompositions as Inductor Lowerings]
-# This is moved from decomposition to lowering because this decomp introduced
+# All the indexing decompositions are written in terms of index, index_put, and index_put_
+# We cannot have this lowering as a decomposition as it introduces
 # mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
 # code elimination and common subexpression elimination optimizations, which
 # assume graphs to be side-effect free. More details at
-# https://github.com/pytorch/torchdynamo/issues/1235.
-# Moving such reinplacing type of decomps to lowering ensures that AotAutograd
-# gets good graphs.
-# A better long term solution would be to functionalize all decompositions.
-# That would let us use these decompositions "normally",
-# instead of forcing them to be lowerings.
+# https://github.com/pytorch/torchdynamo/issues/1235
+# and
+# https://github.com/pytorch/torchdynamo/issues/1863
 @register_lowering([aten.index_put])
 def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
-
-
-# See Note [Decompositions as Inductor Lowerings]
-# We don't want the decomp to do type promotion implicitly;
-# It will try to convert index (int64) to a float-like type.
-@register_lowering([aten.index_add], type_promotion_kind=None)
-def index_add(x, dim, index, tensor, *, alpha=1):
-    return index_add_(clone(x), dim, index, tensor, alpha=alpha)
-
-
-# See Note [Decompositions as Inductor Lowerings]
-# We don't want the decomp to do type promotion implicitly;
-# It will try to convert index (int64) to a float-like type.
-@register_lowering([aten.index_add_], type_promotion_kind=None)
-def index_add_(x, dim, index, tensor, *, alpha=1):
-    dim = _prims_common.canonicalize_dims(len(x.get_size()), dim)
-    if alpha != 1:
-        tensor = mul(tensor, alpha)
-    idx = (None,) * dim + (index,)
-    index_put_(x, idx, tensor, accumulate=True)
-    return x
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
