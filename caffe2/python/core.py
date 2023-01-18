@@ -2804,7 +2804,7 @@ class ExecutionStep(object):
         """
         return [
             attr
-            for net in self._net_dict.valus()
+            for net in self._net_dict.values()
             for attr in net.get_attributes(name)
         ]
 
