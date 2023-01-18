@@ -1482,6 +1482,11 @@ def parse_args(args=None):
         help="number of threads to use for eager and inductor",
     )
     parser.add_argument(
+        "--compile-threads",
+        type=int,
+        help="number of threads to use for the compilation of inductor",
+    )
+    parser.add_argument(
         "--nopython", action="store_true", help="Turn graph breaks into errors"
     )
     parser.add_argument(
@@ -1942,6 +1947,9 @@ def run(runner, args, original_dir=None):
 
     if args.threads:
         torch.set_num_threads(args.threads)
+
+    if args.compile_threads:
+        torch._inductor.config.compile_threads = args.compile_threads
 
     if args.verbose:
         torch._dynamo.config.log_level = logging.DEBUG
