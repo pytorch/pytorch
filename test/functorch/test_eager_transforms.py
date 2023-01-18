@@ -2814,6 +2814,34 @@ class TestHelpers(TestCase):
 
 
 class TestComposability(TestCase):
+    def test_deprecation_vmap(self, device):
+        x = torch.randn(3, device=device)
+
+        # functorch version of the API is deprecated
+        with self.assertWarnsRegex(UserWarning, "Please use torch.vmap"):
+            vmap(torch.sin)
+
+        # the non-functorch version is not deprecated
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            torch.vmap(torch.sin)
+
+    @parametrize('transform', [
+        'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_deprecation_transforms(self, device, transform):
+        api = getattr(functorch, transform)
+        new_api = getattr(torch.func, transform)
+
+        # functorch version of the API is deprecated
+        with self.assertWarnsRegex(UserWarning, f"Please use torch.func.{transform}"):
+            api(torch.sin)
+
+        # the non-functorch version is not deprecated
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            new_api(torch.sin)
+
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
         y = grad(grad(torch.sin))(x)
