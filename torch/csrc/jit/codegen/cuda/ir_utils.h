@@ -106,6 +106,10 @@ class FilteredView {
     return begin() == end();
   }
 
+  std::vector<value_type> vector() const {
+    return std::vector<value_type>(begin(), end());
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;
@@ -156,6 +160,18 @@ std::vector<int> normalizeOld2New(
 // Reference is found through direct pointer comparison.
 Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
+//! Replace Vals in an index Val as specified by replacement_map while
+//! cloning the given index Val. The index val is assumed to represent
+//! a tensor index consisting of Ints  and arithmetic expressions.
+//!
+//! This is similar to replaceValInExpr but is different as Vals are
+//! cloned such that no other exprs using the same leaf Vals are not
+//! modified. TODO: Consider cleaning up the multiple replacement
+//! routines.
+Val* replaceValInIndexVal(
+    Val* index,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 // Makes rfactor generic with reduction ops and Welford
 TORCH_CUDA_CU_API TensorView* rfactorHelper(
     TensorView* red_tv,
@@ -180,6 +196,16 @@ TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val);
 // strictly between fusion inputs/outputs, it could effectively return dead
 // code.
 TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val);
+
+// Return immediate siblings of val, this function can be used on any Val and
+// will return siblings through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val);
 
 // Return immediate producers of vals, this function can be used on any vals and
 // will return producers through Exprs.
@@ -223,6 +249,16 @@ TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 // code.
 TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
 
+// Return immediate siblings of tv, this function will return all immediate
+// siblings of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv);
+
 // Return immediate producers of tvs, this function will return all immediate
 // producers of tvs through Exprs.
 //
@@ -262,6 +298,12 @@ TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
+// returns all tensor views in fusion that are used between outputs and inputs
+// except the specified set.
+TORCH_CUDA_CU_API std::vector<TensorView*> allTvsExcept(
+    Fusion* fusion,
+    const std::unordered_set<TensorView*>& except);
+
 TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
     Fusion* fusion,
     bool ignore_trivial = true);
@@ -269,10 +311,21 @@ TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
 // Returns the initialization value of tv or nullptr if not initialized.
 TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);
 
+// Returns if Expr is a reduction op
+TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
+
+// Returns if Expr is a reduction op with TensorView or TensorIndex
+TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
+
+// Returns all non-trivial view operations. We shouldn't have trivial view
+// operations but this function is to simply make sure if we ever do we don't
+// pull them in.
+TORCH_CUDA_CU_API std::vector<ViewOp*> getViewOps(Fusion*);
+
 template <typename T>
 std::string toString(const T& nodes) {
   std::stringstream ss;
-  for (Statement* stmt : nodes) {
+  for (const Statement* stmt : nodes) {
     if (ss.tellp() != 0) {
       ss << ", ";
     }

@@ -62,7 +62,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //! Query if lowering is in progress
   static bool hasCurrent();
 
-  ConcretizedBroadcastDomains& concretizedBroadcastDomains() {
+  std::shared_ptr<const ConcretizedBroadcastDomains>
+  concretizedBroadcastDomains() {
     return concretized_broadcast_domains_;
   }
 
@@ -76,20 +77,16 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return thread_pred_map_;
   }
 
-  const std::unique_ptr<ComputeAtMap>& caMap() const {
-    return compute_at_map_;
+  std::shared_ptr<const ComputeAtMap> caMap() const {
+    return std::const_pointer_cast<const ComputeAtMap>(compute_at_map_);
   }
 
   const TrivialReductionInfo& trivialReductionInfo() const {
     return trivial_reduction_info_;
   }
 
-  const HaloInfo& haloInfo() const {
-    return halo_info_;
-  }
-
-  HaloInfo& haloInfo() {
-    return halo_info_;
+  std::shared_ptr<const HaloInfo> haloInfo() const {
+    return std::const_pointer_cast<const HaloInfo>(halo_info_);
   }
 
   const ParallelDimensionMap& parallelDimensionMap() const {
@@ -130,6 +127,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
 
   const auto& nonDivisibleSplitInfo() const {
     return non_divisible_split_info_;
+  }
+
+  const auto& divisbleSplitSet() const {
+    return divisible_splits_;
   }
 
   DoubleBufferInfo& doubleBufferInfo() {
@@ -198,12 +199,13 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   // would be safer to wrap all of these in unique pointers and remove the build
   // interface and default constructor. That way they couldn't be accessed
   // without being initialized.
-  ConcretizedBroadcastDomains concretized_broadcast_domains_;
+  std::shared_ptr<const ConcretizedBroadcastDomains>
+      concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
-  std::unique_ptr<ComputeAtMap> compute_at_map_;
+  std::shared_ptr<ComputeAtMap> compute_at_map_;
   TrivialReductionInfo trivial_reduction_info_;
-  HaloInfo halo_info_;
+  std::shared_ptr<HaloInfo> halo_info_;
   LocalAllocationInfoMap local_allocation_info_map_;
   WarpPaddedParallelInfo warp_pad_info_;
   ParallelDimensionMap parallel_dimension_map_;
@@ -214,6 +216,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   FusedReductionInfo fused_reduction_info_;
   SyncMap sync_map_;
   kir::KernelPerformanceProfile profile_;
+  std::unordered_set<Split*> divisible_splits_;
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size

@@ -906,7 +906,7 @@ Atoms are the most basic elements of expressions.
 
 Identifiers
 """""""""""
-The rules that dictate what is a legal identifer in TorchScript are the same as
+The rules that dictate what is a legal identifier in TorchScript are the same as
 their `Python counterparts <https://docs.python.org/3/reference/lexical_analysis.html#identifiers>`_.
 
 Literals
@@ -1830,7 +1830,7 @@ Specifically, following APIs are fully supported:
 
 - ``torch.distributed.rpc.rpc_async()``
     - ``rpc_async()`` makes a non-blocking RPC call to run a function on a remote worker. RPC messages are sent and received in parallel to execution of Python code.
-    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+    - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
 - ``torch.distributed.rpc.remote()``
     - ``remote.()`` executes a remote call on a worker and gets a Remote Reference ``RRef`` as the return value.
     - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.remote`.

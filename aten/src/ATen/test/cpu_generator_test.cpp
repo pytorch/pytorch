@@ -144,8 +144,8 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibility) {
   //   launch on same thread index and create two engines.
   //   Given same seed, idx and offset, assert that the engines
   //   should be aligned and have the same sequence.
-  at::Philox4_32_10 engine1(0, 0, 4);
-  at::Philox4_32_10 engine2(0, 0, 4);
+  at::Philox4_32 engine1(0, 0, 4);
+  at::Philox4_32 engine2(0, 0, 4);
   ASSERT_EQ(engine1(), engine2());
 }
 
@@ -156,11 +156,11 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset1) {
   //   make another engine increment to until the
   //   first 8 values. Assert that the first call
   //   of engine2 and the 9th call of engine1 are equal.
-  at::Philox4_32_10 engine1(123, 1, 0);
+  at::Philox4_32 engine1(123, 1, 0);
   // Note: offset is a multiple of 4.
   // So if you want to skip 8 values, offset would
   // be 2, since 2*4=8.
-  at::Philox4_32_10 engine2(123, 1, 2);
+  at::Philox4_32 engine2(123, 1, 2);
   for (const auto i : c10::irange(8)) {
     (void)i; // Suppress unused variable warning
     // Note: instead of using the engine() call 8 times
@@ -179,8 +179,8 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset2) {
   //   make engine2 skip to the 2^64th 128 bit while being at 2^64th thread
   //   Assert that engine2 should be increment_val+1 steps behind engine1.
   unsigned long long increment_val = std::numeric_limits<uint64_t>::max();
-  at::Philox4_32_10 engine1(123, 0, increment_val);
-  at::Philox4_32_10 engine2(123, increment_val, increment_val);
+  at::Philox4_32 engine1(123, 0, increment_val);
+  at::Philox4_32 engine2(123, increment_val, increment_val);
 
   engine2.incr_n(increment_val);
   engine2.incr();
@@ -195,8 +195,8 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset3) {
   //   start engine2 at thread 1, with offset 0
   //   Assert that engine1 is 1 step behind engine2.
   unsigned long long increment_val = std::numeric_limits<uint64_t>::max();
-  at::Philox4_32_10 engine1(123, 0, increment_val);
-  at::Philox4_32_10 engine2(123, 1, 0);
+  at::Philox4_32 engine1(123, 0, increment_val);
+  at::Philox4_32 engine2(123, 1, 0);
   engine1.incr();
   ASSERT_EQ(engine1(), engine2());
 }
@@ -206,8 +206,8 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineIndex) {
   //   Tests if thread indexing is working properly.
   //   create two engines with different thread index but same offset.
   //   Assert that the engines have different sequences.
-  at::Philox4_32_10 engine1(123456, 0, 4);
-  at::Philox4_32_10 engine2(123456, 1, 4);
+  at::Philox4_32 engine1(123456, 0, 4);
+  at::Philox4_32 engine2(123456, 1, 4);
   ASSERT_NE(engine1(), engine2());
 }
 
@@ -246,4 +246,20 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
     ASSERT_EQ(engine1(), engine2());
   }
 
+}
+
+TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibilityRandN) {
+  at::Philox4_32 engine1(0, 0, 4);
+  at::Philox4_32 engine2(0, 0, 4);
+  ASSERT_EQ(engine1.randn(1), engine2.randn(1));
+}
+
+TEST(CPUGeneratorImpl, TestPhiloxDeterministic) {
+  at::Philox4_32 engine1(0, 0, 4);
+  ASSERT_EQ(engine1(), 4013802324);  // Determinism!
+  ASSERT_EQ(engine1(), 2979262830);  // Determinism!
+
+  at::Philox4_32 engine2(10, 0, 1);
+  ASSERT_EQ(engine2(), 2007330488);  // Determinism!
+  ASSERT_EQ(engine2(), 2354548925);  // Determinism!
 }

@@ -81,6 +81,8 @@ class IterableDataset(Dataset[T_co]):
 
     Example 1: splitting workload across all workers in :meth:`__iter__`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
+        >>> # xdoctest: +SKIP("Fails on MacOS12")
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -106,19 +108,23 @@ class IterableDataset(Dataset[T_co]):
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [3, 4, 5, 6]
+        [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [3, 5, 4, 6]
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
-        [3, 4, 5, 6]
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12)))
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -159,7 +165,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 5, 4, 6]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
     def __iter__(self) -> Iterator[T_co]:
@@ -310,9 +316,12 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
 
     Optionally fix the generator for reproducible results, e.g.:
 
-    >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
-    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator(
-    ).manual_seed(42))
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> generator1 = torch.Generator().manual_seed(42)
+        >>> generator2 = torch.Generator().manual_seed(42)
+        >>> random_split(range(10), [3, 7], generator=generator1)
+        >>> random_split(range(30), [0.3, 0.3, 0.4], generator=generator2)
 
     Args:
         dataset (Dataset): Dataset to be split

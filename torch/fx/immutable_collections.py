@@ -3,6 +3,8 @@ from typing import Any, Dict, Tuple, List
 from ._compatibility import compatibility
 from torch.utils._pytree import Context, _register_pytree_node
 
+__all__ = ["immutable_list", "immutable_dict"]
+
 _help_mutation = """\
 If you are attempting to modify the kwargs or args of a torch.fx.Node object,
 instead create a new copy of it and assign the copy to the node:

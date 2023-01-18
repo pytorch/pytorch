@@ -20,6 +20,11 @@ do
   touch "$file" || true
 done < <(find /var/lib/jenkins/.gradle -type f -print0)
 
+# Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
+if [ -f ~/workspace/third_party/pocketfft/pocketfft_hdronly.h ]; then
+  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" ~/workspace/third_party/pocketfft/pocketfft_hdronly.h
+fi
+
 export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
@@ -78,7 +83,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi
 
-if [ -n "{GRADLE_OFFLINE:-}" ]; then
+if [ -n "${GRADLE_OFFLINE:-}" ]; then
     GRADLE_PARAMS+=" --offline"
 fi
 

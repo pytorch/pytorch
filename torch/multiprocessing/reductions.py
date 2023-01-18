@@ -113,7 +113,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
-        storage = storage_cls(0, dtype=dtype, device=storage_device)
+        storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
     else:
         storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes))
         if storage is None:
@@ -132,8 +132,10 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset, device=storage_device)
 
+    _storage = storage if isinstance(storage, torch.UntypedStorage) else storage._untyped_storage
+
     t = torch._utils._rebuild_tensor(
-        torch.storage._TypedStorage(wrap_storage=storage._untyped(), dtype=dtype),
+        torch.storage.TypedStorage(wrap_storage=_storage, dtype=dtype, _internal=True),
         tensor_offset, tensor_size, tensor_stride)
 
     if tensor_cls == torch.nn.parameter.Parameter:
@@ -147,7 +149,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
 
 
 def reduce_tensor(tensor):
-    storage = tensor.storage()
+    storage = tensor._typed_storage()
 
     if tensor.requires_grad and not tensor.is_leaf:
         raise RuntimeError("Cowardly refusing to serialize non-leaf tensor which requires_grad, "
@@ -248,7 +250,7 @@ def reduce_tensor(tensor):
     # eliminated it so that we could just use tensor views to implement the same
     # thing.
     #
-    if storage.is_cuda:
+    if storage._untyped_storage.device.type == 'cuda':
         (device,
          handle,
          storage_size_bytes,
@@ -298,7 +300,7 @@ def storage_from_cache(cls, key):
     storage_ref = shared_cache.get(key)
     if storage_ref is None:
         return None
-    return torch._UntypedStorage._new_with_weak_ptr(storage_ref.cdata)
+    return torch.UntypedStorage._new_with_weak_ptr(storage_ref.cdata)
 
 
 def rebuild_storage_fd(cls, df, size):
@@ -315,17 +317,18 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
-    storage: Union[torch._TypedStorage, torch._UntypedStorage] = storage_from_cache(cls, handle)
+    storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
     if dtype is None:
-        storage = torch._UntypedStorage._new_shared_filename_cpu(manager, handle, size)
+        storage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, size)
     else:
         byte_size = size * torch._utils._element_size(dtype)
-        untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size)
-        storage = torch._TypedStorage(
+        untyped_storage: torch.UntypedStorage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size)
+        storage = torch.TypedStorage(
             wrap_storage=untyped_storage,
-            dtype=dtype)
+            dtype=dtype,
+            _internal=True)
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 
@@ -334,18 +337,18 @@ def rebuild_storage_empty(cls):
     return cls()
 
 def rebuild_typed_storage(storage, dtype):
-    return torch.storage._TypedStorage(wrap_storage=storage, dtype=dtype)
+    return torch.storage.TypedStorage(wrap_storage=storage, dtype=dtype, _internal=True)
 
-# Use for torch.storage._TypedStorage
+# Use for torch.storage.TypedStorage
 def reduce_typed_storage(storage):
-    return (rebuild_typed_storage, (storage._storage, storage.dtype))
+    return (rebuild_typed_storage, (storage._untyped_storage, storage.dtype))
 
 def rebuild_typed_storage_child(storage, storage_type):
-    return storage_type(wrap_storage=storage)
+    return storage_type(wrap_storage=storage, _internal=True)
 
-# Use for child classes of torch.storage._TypedStorage, like torch.FloatStorage
+# Use for child classes of torch.storage.TypedStorage, like torch.FloatStorage
 def reduce_typed_storage_child(storage):
-    return (rebuild_typed_storage_child, (storage._storage, type(storage)))
+    return (rebuild_typed_storage_child, (storage._untyped_storage, type(storage)))
 
 def reduce_storage(storage):
     from . import get_sharing_strategy
@@ -355,7 +358,7 @@ def reduce_storage(storage):
         metadata = storage._share_filename_cpu_()
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
-        if isinstance(storage, torch._TypedStorage):
+        if isinstance(storage, torch.TypedStorage):
             metadata += (storage.dtype,)
         storage._shared_incref()
     elif storage.size() == 0:
@@ -377,12 +380,12 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        if t.__name__ == '_UntypedStorage':
+        if t.__name__ == 'UntypedStorage':
             ForkingPickler.register(t, reduce_storage)
         else:
             ForkingPickler.register(t, reduce_typed_storage_child)
 
-    ForkingPickler.register(torch.storage._TypedStorage, reduce_typed_storage)
+    ForkingPickler.register(torch.storage.TypedStorage, reduce_typed_storage)
 
     for t in torch._tensor_classes:
         ForkingPickler.register(t, reduce_tensor)

@@ -23,28 +23,6 @@ fi
 # shellcheck disable=SC2034
 BUILD_TEST_LIBTORCH=0
 
-# Use conda cmake in some CI build. Conda cmake will be newer than our supported
-# min version (3.5 for xenial and 3.10 for bionic),
-# so we only do it in four builds that we know should use conda.
-# Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
-# Alternatively we could point cmake to the right place
-# export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-if [[ "${TEST_CONFIG:-}" == *xla* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-focal* ]]; then
-  if ! which conda; then
-    echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
-    exit 1
-  else
-    conda install -q -y cmake
-  fi
-  if [[ "$BUILD_ENVIRONMENT" == *centos* ]]; then
-    # cmake3 package will conflict with conda cmake
-    sudo yum -y remove cmake3 || true
-  fi
-fi
-
 retry () {
   "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
 }

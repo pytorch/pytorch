@@ -122,10 +122,33 @@
     }                                                                     \
   }()
 
+#define AT_DISPATCH_SPARSE_VALUE_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
+          kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
+
 namespace at {
 namespace sparse_csr {
 
 using SparseCsrTensor = Tensor;
+
+inline bool is_sparse_compressed(const Layout& layout) {
+  switch (layout) {
+    case kSparseCsr:
+    case kSparseCsc:
+    case kSparseBsr:
+    case kSparseBsc:
+      return true;
+    default:;
+  }
+  return false;
+}
+
+inline bool is_sparse_compressed(const Tensor& self) {
+  return is_sparse_compressed(self.layout());
+}
 
 inline SparseCsrTensorImpl* get_sparse_csr_impl(const SparseCsrTensor& self) {
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
@@ -233,6 +256,56 @@ inline int plainDimension(
     IntArrayRef size,
     size_t dense_ndim = 0) {
   return size.size() - dense_ndim - (isCompressedRow(layout) ? 1 : 2);
+}
+
+inline int64_t numBatchDimensions(Tensor const& self) {
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "numBatchDimensions",
+      [&self] { return self.crow_indices().dim() - 1; },
+      [&self] { return self.ccol_indices().dim() - 1; });
+}
+
+inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "getCompressedPlainIndices",
+      [&self] {
+        return std::make_pair(self.crow_indices(), self.col_indices());
+      },
+      [&self] {
+        return std::make_pair(self.ccol_indices(), self.row_indices());
+      });
+}
+
+inline Layout flip_compressed_layout(Layout layout) {
+  switch (layout) {
+    case kSparseCsr:
+      return kSparseCsc;
+    case kSparseCsc:
+      return kSparseCsr;
+    case kSparseBsr:
+      return kSparseBsc;
+    case kSparseBsc:
+      return kSparseBsr;
+    default:
+      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+      return kSparseCsr;
+  }
+}
+
+inline DimVector getBlockSize(Tensor const& self) {
+  int64_t n_batch = numBatchDimensions(self);
+  return at::DimVector(self.values().sizes().slice(n_batch + 1, 2));
+}
+
+inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
+  if (self.layout() == at::kSparseBsr || self.layout() == at::kSparseBsc) {
+    int64_t n_batch = numBatchDimensions(self);
+    return self.values().sym_sizes().slice(n_batch + 1, 2).vec();
+  } else {
+    return {};
+  }
 }
 
 } // namespace sparse_csr

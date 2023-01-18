@@ -6,18 +6,16 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface PTMCoreMLCompiler : NSObject
 
-+ (void)setModelCacheDirectory:(const std::string&)dir;
++ (void)setCacheDirectory:(const std::string&)dir;
 
-+ (NSString*)modelCacheDirectory;
++ (NSString*)cacheDirectory;
 
-+ (NSURL*)compileModel:(const std::string&)modelSpecs
-               modelID:(const std::string&)modelID;
++ (BOOL)compileModel:(const std::string&)modelSpecs
+             modelID:(const std::string&)modelID;
 
-+ (nullable MLModel*)loadCPUModelAtURL:(NSURL*)modelURL;
-
-+ (nullable MLModel*)loadModelAtURL:(NSURL*)modelURL
-                            backend:(const std::string&)backend
-                  allowLowPrecision:(BOOL)allowLowPrecision;
++ (nullable MLModel*)loadModel:(const std::string&)modelID
+                       backend:(const std::string&)backend
+             allowLowPrecision:(BOOL)allowLowPrecision;
 
 @end
 

@@ -241,7 +241,7 @@ class TestLiteScriptModule(TestCase):
 
         script_module = torch.jit.script(MyTestModuleForListWithModuleClass())
         with self.assertRaisesRegex(RuntimeError,
-                                    r"^Returining a list or dictionary with pytorch class type "
+                                    r"^Returning a list or dictionary with pytorch class type "
                                     r"is not supported in mobile module "
                                     r"\(List\[Foo\] or Dict\[int\, Foo\] for class Foo\(torch\.nn\.Module\)\)\. "
                                     r"Workaround\: instead of using pytorch class as their element type\, "
@@ -264,7 +264,7 @@ class TestLiteScriptModule(TestCase):
 
         script_module = torch.jit.script(MyTestModuleForDictWithModuleClass())
         with self.assertRaisesRegex(RuntimeError,
-                                    r"^Returining a list or dictionary with pytorch class type "
+                                    r"^Returning a list or dictionary with pytorch class type "
                                     r"is not supported in mobile module "
                                     r"\(List\[Foo\] or Dict\[int\, Foo\] for class Foo\(torch\.nn\.Module\)\)\. "
                                     r"Workaround\: instead of using pytorch class as their element type\, "

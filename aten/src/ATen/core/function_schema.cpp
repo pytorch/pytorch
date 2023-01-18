@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <stack>
+#include <utility>
 
 namespace c10 {
 
@@ -15,6 +16,37 @@ const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) 
   } else {
     return returns();
   }
+}
+
+FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
+  auto cloneWithRealTypes = [&](const Argument& a) {
+    if (with_symint) {
+      return a.cloneWithType(a.real_type());
+    }
+    // Don't use real type if it looks like a SymInt
+    // NB: keep this in sync with unpackSymInt in KernelFunction_impl.h
+    if (
+      *a.real_type() == *getTypePtr<c10::SymInt>() ||
+      *a.real_type() == *getTypePtr<c10::optional<c10::SymInt>>() ||
+      *a.real_type() == *getTypePtr<c10::SymIntArrayRef>() ||
+      *a.real_type() == *getTypePtr<at::OptionalSymIntArrayRef>()
+    ) {
+      // Keep the fake type
+      return a.cloneWithType(a.type());
+    } else {
+      return a.cloneWithType(a.real_type());
+    }
+  };
+  std::vector<Argument> new_arguments, new_returns;
+  std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);
+  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), cloneWithRealTypes);
+  return FunctionSchema(
+    name(),
+    overload_name(),
+    std::move(new_arguments),
+    std::move(new_returns),
+    is_vararg(),
+    is_varret());
 }
 
 bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const {
@@ -101,7 +133,7 @@ c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
       if (mutable_types.size() == 0) {
         return c10::nullopt;
       }
-      return {AliasTypeSet{TupleType::create(mutable_types)}};
+      return {AliasTypeSet{TupleType::create(std::move(mutable_types))}};
     }
     default:
       return c10::nullopt;

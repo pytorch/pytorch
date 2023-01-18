@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
 #include <functional>
+#include <string>
 
 namespace at {
 
@@ -28,7 +29,7 @@ TORCH_API bool in_parallel_region();
 namespace internal {
 
 // Initialise num_threads lazily at first parallel call
-inline TORCH_API void lazy_init_num_threads() {
+inline void lazy_init_num_threads() {
   thread_local bool init = false;
   if (C10_UNLIKELY(!init)) {
     at::init_num_threads();

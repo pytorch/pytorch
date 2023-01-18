@@ -873,7 +873,7 @@ graph(%x : Tensor,
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)
 
-All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
+All program execution starts with a graph executor. It's responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
 
 
 In this section, we use a running example program that computes one step of an LSTM to show how the graph is transformed:
@@ -894,7 +894,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 ```
 
-After going through the the frontend, we start with this unoptimized graph:
+After going through the frontend, we start with this unoptimized graph:
 
 ```
 graph(%x : Tensor,
@@ -1200,6 +1200,8 @@ or switching the fuser could also provide a temporary fix in case of bugs.
 | NNC context manager | `with torch.jit.fuser("fuser1"):` |
 | NVFuser enable/disable | `torch._C._jit_set_nvfuser_enabled()` |
 | NVFuser context manager | `with torch.jit.fuser("fuser2")` |
+| oneDNN Graph on CPU | `torch._C._jit_set_llga_enabled(True)` |
+| oneDNN Graph context manager | `with torch.jit.fuser("fuser3"):` |
 
 **C++ APIs:**
 
@@ -1406,7 +1408,7 @@ TODO: differentiation, symbolic autograd, fusion, operators
 We attempt to reduce the number of `prim::Guard` nodes as these nodes may interfere with optimizations.
 * First, `GuardElimination::moveGuardsToDefs` tries to move `prim::Guards` to their definitions, so the guards guarding the same `Tensor` follow the definition directly or another guard on the same `Tensor`.
 * This ordering allows us to **coalesce** (done in `GuardElimination::coalesceGuards`) multiple guards into a single one.
-* After guards are  **coaslesced** , `GuardElimination::eliminateGuards` attempts to eliminate more guards as follows: it inspects each operation and its inputs. It checks if inputs to the operation are guarded and also if the operation produces the consistent shapes given the guarded inputs. For example, if two inputs to `add` are guaranteed to be of shape `(2, 3)`, the output shape will also always be `(2, 3)`. If this property holds, we are allowed to remove the guard guarding operation's output.
+* After guards are  **coalesced** , `GuardElimination::eliminateGuards` attempts to eliminate more guards as follows: it inspects each operation and its inputs. It checks if inputs to the operation are guarded and also if the operation produces the consistent shapes given the guarded inputs. For example, if two inputs to `add` are guaranteed to be of shape `(2, 3)`, the output shape will also always be `(2, 3)`. If this property holds, we are allowed to remove the guard guarding operation's output.
 
 Lastly, we need to be handle cases when the assumptions about `Tensor` shapes fail at runtime. To handle guard failures, we need to be able to run the original code i.e. the code  that doesn't rely on assumptions about shapes. As guards can be inserted and moved (by Optimizer) at/to arbitrary points in a computational graph, we need to be able to resume execution starting from those arbitrary points onward.
 

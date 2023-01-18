@@ -49,10 +49,10 @@ class TestTensorCreationOps(JitTestCase):
 
     def test_triu_indices_specified_dtype(self):
         def triu_indices(rows: int, cols: int):
-            indices = torch.triu_indices(rows, cols, dtype=torch.float)
+            indices = torch.triu_indices(rows, cols, dtype=torch.int32)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert indices.dtype == torch.float
+            assert indices.dtype == torch.int32
 
         self.checkScript(triu_indices, (3, 3))
 
@@ -67,9 +67,9 @@ class TestTensorCreationOps(JitTestCase):
 
     def test_tril_indices_specified_dtype(self):
         def tril_indices(rows: int, cols: int):
-            indices = torch.tril_indices(rows, cols, dtype=torch.float)
+            indices = torch.tril_indices(rows, cols, dtype=torch.int32)
             # Have to perform assertion here because TorchScript returns dtypes
             # as integers, which are not comparable against eager torch.dtype.
-            assert indices.dtype == torch.float
+            assert indices.dtype == torch.int32
 
         self.checkScript(tril_indices, (3, 3))

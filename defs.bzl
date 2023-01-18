@@ -1,10 +1,3 @@
-def get_sleef_arch_deps():
-    return [
-        ("x86_64", [
-            "third-party//sleef:sleef",
-        ]),
-    ]
-
 def get_blas_gomp_arch_deps():
     return [
         ("x86_64", [
@@ -22,7 +15,6 @@ default_compiler_flags = [
     "-Wno-unused-function",
     "-Wno-unused-parameter",
     "-Wno-error=strict-aliasing",
-    "-Wno-unused-local-typedefs",
     "-Wno-shadow-compatible-local",
     "-Wno-maybe-uninitialized",  # aten is built with gcc as part of HHVM
     "-Wno-unknown-pragmas",

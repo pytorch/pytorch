@@ -15,7 +15,9 @@ namespace c10 {
 
 template <typename T, size_t N>
 class SmallBuffer {
-  static_assert(std::is_pod<T>::value, "SmallBuffer is intended for POD types");
+  static_assert(
+      std::is_trivial<T>::value,
+      "SmallBuffer is intended for POD types");
 
   T storage_[N];
   size_t size_;

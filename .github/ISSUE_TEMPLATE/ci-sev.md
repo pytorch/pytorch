@@ -5,6 +5,8 @@ about: Tracking incidents for PyTorch's CI infra.
 
 > NOTE: Remember to label this issue with "`ci: sev`"
 
+**MERGE BLOCKING** <!-- remove this line if you don't want this SEV to block merges -->
+
 ## Current Status
 *Status could be: preemptive, ongoing, mitigated, closed. Also tell people if they need to take action to fix it (i.e. rebase)*.
 

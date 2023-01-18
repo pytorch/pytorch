@@ -1,6 +1,7 @@
 # Pytorch - oneDNN Graph API Bridge
-This integration will add the infrastructure of a new PyTorch JIT graph fuser based on [oneDNN Graph API](https://spec.oneapi.io/onednn-graph/latest/programming_model.html), which provides a flexible API for aggressive fusion. The current preview4 version supports fusion for FP32 inference. Currently, the speedup is achieved for static shapes,
-although we'd soon add dynamic-shape support. When oneDNN Graph is enabled, weights are cached, as they're constant during inference.
+This is a PyTorch JIT graph fuser based on [oneDNN Graph API](https://spec.oneapi.io/onednn-graph/latest/programming_model.html), which provides a flexible API for aggressive fusion. Float & BFloat16 inference is supported. However, BFloat16 only performs well on Intel Xeon Cooper Lake platform & beyond, as they have native BFloat16 support. Also, currently, PyTorch has divergent AMP support in JIT & eager modes, so one should disable JIT AMP support & leverage eager mode AMP support to use BFloat16. Please refer to the BFloat16 example below.
+
+Currently, speedup is achieved only for static shapes, although we'd soon add dynamic-shape support. When oneDNN Graph is enabled, weights are cached, as they're constant during inference.
 
 ## Graph Optimization
 We have registered optimization passes in the custom pre-passes set of PyTorch:
@@ -84,7 +85,7 @@ To map another op to oneDNN Graph, you should add an entry for it in in createOp
 If it has an inplace variant, you should add it in the lambda being passed to RemoveTensorMutation in
 torch/csrc/jit/codegen/onednn/interface.cpp. You might also want to add it to canFuseNode in torch/csrc/jit/codegen/onednn/register_interface.cpp.
 
-## How to use
+## Example with Float
 
 
 ```python
@@ -103,6 +104,28 @@ with torch.no_grad():
 
 # run the model
 with torch.no_grad():
-    # oneDNN graph fusion will be trigerred during runtime
+    # oneDNN graph fusion will be triggered during runtime
     output = model(images)
+```
+
+## Example with BFloat16
+
+```python
+# Assuming we have a model of the name 'model'
+
+example_input = torch.rand(1, 3, 224, 224)
+
+# enable oneDNN Graph
+torch.jit.enable_onednn_fusion(True)
+# Disable AMP for JIT
+torch._C._jit_set_autocast_mode(False)
+with torch.no_grad(), torch.cpu.amp.autocast():
+    model = torch.jit.trace(model, (example_input))
+    model = torch.jit.freeze(model)
+     # 2 warm-ups (2 for tracing/scripting with an example, 3 without an example)
+    model(example_input)
+    model(example_input)
+
+    # speedup would be observed in subsequent runs.
+    model(example_input)
 ```

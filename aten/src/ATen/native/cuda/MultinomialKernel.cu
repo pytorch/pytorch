@@ -26,7 +26,7 @@
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -80,7 +80,7 @@ void renormRows(Tensor& t) {
   int64_t cols = t.size(1);
 
   auto props = at::cuda::getCurrentDeviceProperties();
-  CUDA_KERNEL_ASSERT(props != NULL);
+  TORCH_CHECK(props != nullptr);
   int numSM = props->multiProcessorCount;
   const int64_t maxThreads = std::min(
       props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
@@ -342,7 +342,7 @@ void multinomial_with_replacement_kernel_impl(
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
-    CUDA_KERNEL_ASSERT(props != NULL);
+    TORCH_CHECK(props != nullptr);
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
@@ -457,4 +457,4 @@ void multinomial_with_replacement_kernel_impl(
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-}}
+} // namespace at::native

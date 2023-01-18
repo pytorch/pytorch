@@ -1225,7 +1225,7 @@ TEST_F(ModulesTest, Unfold) {
         model(torch::randn({1, 2, 2, 2})),
         "Given input with spatial size (2, 2), kernel_size=(2, 3), "
         "dilation=(1, 1), padding=(0, 0), calculated shape of the array of "
-        "sliding blocks as (1, 0), which is too small (non-positive).");
+        "sliding blocks as (1, 0), but its components must be at least one.");
   }
 }
 

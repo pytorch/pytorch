@@ -17,7 +17,16 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 #include <ATen/native/quantized/PackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/ArrayRef.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
+C10_DIAGNOSTIC_POP()
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
@@ -112,7 +121,7 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
 
   at::Tensor apply_dynamic(
     const at::Tensor& input,
-    bool reduce_range) {
+    bool reduce_range) override {
     TORCH_CHECK(false, "apply_dynamic is currently not reported");
   }
 
@@ -207,7 +216,11 @@ uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  while (address % alignment == 0 && alignment < 16) alignment *= 2;
+  for (; alignment < 16; alignment *= 2) {
+    if (address % (alignment * 2)) {
+      return alignment;
+    }
+  }
   return alignment;
 }
 

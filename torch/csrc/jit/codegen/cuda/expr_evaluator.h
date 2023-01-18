@@ -1,11 +1,13 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <c10/util/Optional.h>
 
+#include <string>
 #include <unordered_map>
 
 namespace torch {
@@ -13,7 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class FusionPrecomputedIntegers;
+class FusionPrecomputedValues;
 
 //! Calculate Fusion IR expressions
 class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
@@ -27,33 +29,37 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
   }
 
   //! Bind a concrete value to an IR variable
-  void bind(Val* value, Int::ScalarType concrete_value);
+  void bind(Val* value, const IntOrDouble& concrete_value);
+
+  //! Bind a concrete value to a named scalar
+  void bind(const std::string& name, const IntOrDouble& concrete_value);
 
   //! Try to evaluate a Fusion IR value
-  c10::optional<Int::ScalarType> evaluate(Val* value);
+  c10::optional<IntOrDouble> evaluate(Val* value);
 
   //! Debugging helper, prints all the currently known values
   void print() const;
 
-  void bindPrecomputedIntegers(
-      FusionPrecomputedIntegers* precomputed_integers) {
-    evaluator_precomputed_integers_ = precomputed_integers;
+  void bindPrecomputedValues(FusionPrecomputedValues* precomputed_values) {
+    evaluator_precomputed_values_ = precomputed_values;
   }
 
-  auto precomputedIntegers() {
-    return evaluator_precomputed_integers_;
+  auto precomputedValues() {
+    return evaluator_precomputed_values_;
   }
 
  private:
-  c10::optional<Int::ScalarType> getValue(Val* value);
+  c10::optional<IntOrDouble> getValue(Val* value);
 
   void handle(UnaryOp*) final;
   void handle(BinaryOp*) final;
+  // TODO: handle swizzle
 
  private:
-  std::unordered_map<const Val*, Int::ScalarType> known_values_;
+  std::unordered_map<const Val*, IntOrDouble> known_values_;
+  std::unordered_map<std::string, IntOrDouble> known_named_scalars_;
   Fusion* fusion_ = nullptr;
-  FusionPrecomputedIntegers* evaluator_precomputed_integers_ = nullptr;
+  FusionPrecomputedValues* evaluator_precomputed_values_ = nullptr;
 };
 
 } // namespace cuda

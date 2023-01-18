@@ -19,7 +19,6 @@
 #include <thrust/pair.h>
 
 #include <ATen/native/cuda/jit_utils.h>
-#include <iostream>
 
 namespace at { namespace native {
 
@@ -1068,6 +1067,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
       // Note that if vt0 < ReduceConfig::vec_size, then this means the register pressure could be high, in such case,
       // we should avoid vectorization.
       config.vectorize_input = true;
+      dim0 /= config.input_vec_size;
     } else if (!reduction_on_fastest_striding_dimension) {
       // Case 2: "vectorize along output"
       config.output_vec_size = get_output_vec_size<scalar_t>(iter);
@@ -1091,7 +1091,10 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
+
+  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -1101,9 +1104,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  constexpr int min_values_per_thread = 16;
-  constexpr int max_values_per_thread = 256;
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
+  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
@@ -1135,8 +1136,23 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
+  // at::Half/at::ComplexHalf overflows easily as it's range is very small.
+  // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_half_or_chalf =
+      (std::is_same<at::Half, scalar_t>::value &&
+       std::is_same<at::Half, out_scalar_t>::value) ||
+      (std::is_same<c10::complex<Half>, scalar_t>::value &&
+       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+  // at::BFloat16 has lower precision and can lead to rounding errors.
+  // So when scalar_t and out_scalar_t are at::BFloat16, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_bfloat16 =
+      (std::is_same<at::BFloat16, scalar_t>::value &&
+       std::is_same<at::BFloat16, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value;
+      std::is_convertible<arg_t, out_scalar_t>::value &&
+      !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
@@ -1227,9 +1243,23 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   //TODO - this will be different for more complicated reductions, but for now reductions using
   //func_wrapper all have arg_t = opmath
   using arg_t = at::opmath_type<scalar_t>;
+  // at::Half/at::ComplexHalf overflows easily as it's range is very small.
+  // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_half_or_chalf =
+      (std::is_same<at::Half, scalar_t>::value &&
+       std::is_same<at::Half, out_scalar_t>::value) ||
+      (std::is_same<c10::complex<Half>, scalar_t>::value &&
+       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+  // at::BFloat16 has lower precision and can lead to rounding errors.
+  // So when scalar_t and out_scalar_t are at::BFloat16, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_bfloat16 =
+      (std::is_same<at::BFloat16, scalar_t>::value &&
+       std::is_same<at::BFloat16, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value;
-  static_assert(can_accumulate_in_output == true, "unsupported arg_t for jitted reduction");
+      std::is_convertible<arg_t, out_scalar_t>::value &&
+      !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;

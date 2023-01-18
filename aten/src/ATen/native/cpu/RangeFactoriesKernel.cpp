@@ -13,7 +13,7 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -54,7 +54,9 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
     at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       int64_t idx(p_begin);
       TensorIterator it(iter);
-      cpu_serial_kernel_vec(
+      // Remove vectorization implementation, due to the precision issue between integer and double.
+      // Will not harm the performance.
+      cpu_serial_kernel(
           it,
           [start, end, step, halfway, steps, &idx]() -> scalar_t {
             if (idx < halfway) {
@@ -62,17 +64,6 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
             } else {
               return end - step * (steps - (idx++) - 1);
             }
-          },
-          [start, end, step, halfway, steps, &idx]() -> Vectorized<scalar_t> {
-            Vectorized<scalar_t> res;
-            if (idx < halfway) {
-              res = Vectorized<scalar_t>::arange(start + step * idx, step);
-            } else {
-              res = Vectorized<scalar_t>::arange(
-                  end - step * (steps - idx - 1), step);
-            }
-            idx += Vectorized<scalar_t>::size();
-            return res;
           }, {p_begin, p_end});
     });
   });
@@ -83,4 +74,4 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
 REGISTER_DISPATCH(arange_stub, &arange_kernel);
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
-}} // namespace at::native
+} // namespace at::native

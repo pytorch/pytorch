@@ -4,42 +4,20 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-conda install -y six
-pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
-
-# TODO move this to docker
-# Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
-pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
-  pytest \
-  pytest-xdist \
-  pytest-rerunfailures
-
-if [ -z "${CI}" ]; then
-  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
+if [[ -n "$CONDA_ENV" ]]; then
+  # Use binaries under conda environment
+  export PATH="$CONDA_ENV/bin":$PATH
 fi
 
-export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
-
-# Test PyTorch
-if [ -z "${CI}" ]; then
-  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
+# Test that OpenMP is enabled for non-arm64 build
+if [[ ${BUILD_ENVIRONMENT} != *arm64* ]]; then
+  pushd test
+  if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
+    echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
+    exit 1
+  fi
+  popd
 fi
-
-# Download torch binaries in the test jobs
-if [ -z "${CI}" ]; then
-  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
-  7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
-fi
-
-# Test that OpenMP is enabled
-pushd test
-if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
-  echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
-  exit 1
-fi
-popd
-
 
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
@@ -104,7 +82,18 @@ test_libtorch() {
   fi
 }
 
+print_cmake_info() {
+  CMAKE_EXEC=$(which cmake)
+  echo "$CMAKE_EXEC"
+
+  CONDA_INSTALLATION_DIR=$(dirname "$CMAKE_EXEC")
+  # Print all libraries under cmake rpath for debugging
+  ls -la "$CONDA_INSTALLATION_DIR/../lib"
+}
+
 test_custom_backend() {
+  print_cmake_info
+
   echo "Testing custom backends"
   pushd test/custom_backend
   rm -rf build && mkdir build
@@ -125,6 +114,8 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
+  print_cmake_info
+
   echo "Testing custom script operators"
   pushd test/custom_operator
   # Build the custom operator library.
@@ -145,6 +136,8 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
+  print_cmake_info
+
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
   # Build the custom operator library.
@@ -163,13 +156,9 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-test_dynamo() {
-  pushd ../torchdynamo
-  pytest tests
-  popd
-}
-
-if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+if [[ "${TEST_CONFIG}" == *functorch* ]]; then
+  test_functorch
+elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_libtorch
@@ -179,11 +168,9 @@ if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
     test_custom_backend
   fi
 else
-  checkout_install_torchdynamo
   test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
-  test_dynamo
 fi

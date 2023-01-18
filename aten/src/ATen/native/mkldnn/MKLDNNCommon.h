@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -23,6 +23,9 @@ TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor);
 
 // Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
 TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor);
+
+// Set MKLDNN verbose level
+TORCH_API int set_verbose(int level);
 
 }}
 

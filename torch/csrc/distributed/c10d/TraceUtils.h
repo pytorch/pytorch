@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/irange.h>
-#include <c10d/Store.hpp>
-#include <c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #include <sys/types.h>
 

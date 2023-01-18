@@ -41,7 +41,7 @@
 static PyObject* THPStorage_nbytes(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return THPUtils_packUInt64(self->cdata->nbytes());
+  return py::cast(self->cdata->sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -138,7 +138,7 @@ static PyObject* THPStorage_resize_(PyObject* _self, PyObject* number_arg) {
   } else {
     TORCH_CHECK(
         false,
-        "_UntypedStorage.resize_: got unexpected device type ",
+        "UntypedStorage.resize_: got unexpected device type ",
         device_type);
   }
   Py_INCREF(self);
@@ -151,9 +151,8 @@ static PyObject* THPStorage_fill_(PyObject* _self, PyObject* number_arg) {
   auto self = (THPStorage*)_self;
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
-      "fill_ expects %s, "
+      "fill_ expects int, "
       "but got %s",
-      THPUtils_typeTraits<uint8_t>::python_type_str,
       THPUtils_typename(number_arg));
   storage_fill(
       at::unsafeStorageFromTH(self->cdata, /*retain=*/true),

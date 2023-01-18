@@ -3,8 +3,10 @@
 import os
 import shutil
 import sys
+import unittest
 
 import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_utils import IS_ARM64
 import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
@@ -18,7 +20,6 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
     TEST_CUDNN = (
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
     )
-IS_WINDOWS = sys.platform == "win32"
 
 
 def remove_build_path():
@@ -54,6 +55,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
     def tearDownClass(cls):
         remove_build_path()
 
+    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_open_device_registration(self):
         module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
