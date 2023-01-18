@@ -105,6 +105,10 @@ class Adam(Optimizer):
         capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
+        differentiable (bool, optional): whether autograd should occur through the optimizer step
+            in training otherwise, the step() function runs in a torch.no_grad() context.
+            Setting to True can impair performance, so leave it False if you don't intend to run
+            autograd through this instance (default: False)
         fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. Since the fused implementation is usually significantly faster than
@@ -312,13 +316,16 @@ def adam(params: List[Tensor],
     # and when differentiable=False.
     # We still respect when the user inputs False for fused.
     if fused is None:
-        if not differentiable and all(
-            p.is_cuda and torch.is_floating_point(p)
-            for p in params + grads + exp_avgs + exp_avg_sqs + max_exp_avg_sqs + state_steps
-        ):
-            fused = True
-        else:
-            fused = False
+        all_tensors = []
+        all_tensors.extend(params)
+        all_tensors.extend(grads)
+        all_tensors.extend(exp_avgs)
+        all_tensors.extend(exp_avg_sqs)
+        all_tensors.extend(max_exp_avg_sqs)
+        all_tensors.extend(state_steps)
+        fused = not torch.jit.is_scripting() and not differentiable and all(
+            p.is_cuda and torch.is_floating_point(p) for p in all_tensors
+        )
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
