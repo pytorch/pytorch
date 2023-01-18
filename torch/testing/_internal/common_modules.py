@@ -1180,7 +1180,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64, torch.complex128]),
                    # These fail only on ROCm
@@ -1344,7 +1343,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64]),
                ),

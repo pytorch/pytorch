@@ -44,6 +44,13 @@ using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tens
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
 DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
+using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const c10::optional<Tensor>&,
+    IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub);
+using mkldnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub);
 using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
@@ -91,6 +98,7 @@ enum class ConvBackend {
   MiopenDepthwise,
   MiopenTranspose,
   Mkldnn,
+  MkldnnTranspose,
   MkldnnEmpty,
   NnpackSpatial,
   Overrideable,
@@ -385,7 +393,9 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
       (weight_memory_format == at::MemoryFormat::ChannelsLast);
 
   // TODO: add channels last 3d support
-  bool can_use_mkldnn_channels_last_3d = false;
+  bool can_use_mkldnn_channels_last_3d =
+      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
 
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }
