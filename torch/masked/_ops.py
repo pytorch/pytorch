@@ -783,9 +783,6 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_nnz = new_crow_indices[-1]
             new_col_indices = col_indices.new_zeros(new_nnz)
-            # segment_reduce takes 'max'/'min' rather than 'amax'/'amin', changing this would be BC-breaking
-            if reduce in ["amax", "amin"]:
-                reduce = reduce[1:]
             new_values = torch.segment_reduce(values, reduce, offsets=crow_indices)
             new_shape = [mask_input.size(0), 1]
     else:

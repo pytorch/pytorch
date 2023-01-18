@@ -11,7 +11,7 @@
 #include <vector>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // Offset calculator for indexing in Hermitian mirrored order.
 // In mirrored dims, maps linear index i to (n - i) % n
@@ -121,4 +121,4 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
 
 REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_);
 
-}} // at::native
+} // at::native
