@@ -273,6 +273,39 @@ uint16_t _mask_to_meta(bool pos0, bool pos1, bool pos2, bool pos3) {
   return 0;
 }
 
+// Based on
+// https://github.com/NVIDIA/cutlass/blob/8b42e751c63ba219755c8ed91af5f6ec1ecc1ee6/tools/util/include/cutlass/util/host_reorder.h#L86
+// Original note:
+// This is needed for the sparse tensor core kernels.  The purpose
+// is to use ldmatrix to load from shared memory to the register file.
+void reorder_meta(int16_t* dest,
+                  const int16_t* src,
+                  int64_t length_m,
+                  int64_t meta_size_1) {
+  for (int m = 0; m < length_m; m++) {
+    for (int k = 0; k < meta_size_1; k++) {
+      // NOTE: Kept full code for future extensibility
+      // First reorder the rows.
+      int group = (sizeof(int16_t) == 2) ? 32 : 16;
+      int interweave = (sizeof(int16_t) == 2) ? 4 : 2;
+
+      int dest_row = m / group * group + (m % 8) * interweave + (m % group) / 8;
+      int dest_col = k;
+
+      // Next swizzle the 2x2 blocks from Z to N.
+      if (((dest_row % 2) == 0) && ((dest_col % 2) == 1)) {
+        ++dest_row;
+        --dest_col;
+      } else if (((dest_row % 2) == 1) && ((dest_col % 2) == 0)) {
+        --dest_row;
+        ++dest_col;
+      }
+
+      dest[dest_row * meta_size_1 + dest_col] = src[m * meta_size_1 + k];
+    }
+  }
+}
+
 Tensor _cusparselt_create_meta(const Tensor& mask) {
   const int64_t length_m = mask.size(0);
   const int64_t length_k = mask.size(1);
@@ -283,6 +316,7 @@ Tensor _cusparselt_create_meta(const Tensor& mask) {
   auto options = mask.options();
   options = options.dtype(at::kShort);
   auto result = at::empty({length_m, length_k / 16}, options);
+  auto result_reordered = at::empty({length_m, length_k / 16}, options);
   const bool* mask_ptr = mask.data_ptr<bool>();
   int16_t* result_ptr = result.data_ptr<int16_t>();
   for (int64_t i = 0; i < length_m; i++) {
@@ -313,7 +347,9 @@ Tensor _cusparselt_create_meta(const Tensor& mask) {
     }
   }
 
-  return result;
+  int16_t* result_reordered_ptr = result_reordered.data_ptr<int16_t>();
+  reorder_meta(result_reordered_ptr, result_ptr, length_m, length_k / 16);
+  return result_reordered;
 }
 
 } // namespace native
