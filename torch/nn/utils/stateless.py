@@ -8,9 +8,11 @@ __all__ = ["functional_call"]
 
 # We avoid typing module here because module attributes are declared as Union[Parameter, Tensor] by default
 # and using other types causes mypy errors
+
+
 def _change_class(module, params_and_buffers) -> None:
     cls = module.__class__
-    attr_to_path : Dict[str, str] = module._attr_to_path
+    attr_to_path: Dict[str, str] = module._attr_to_path
 
     def _getattribute(self, name: str) -> Any:
         if name in attr_to_path:
@@ -174,6 +176,7 @@ def functional_call(
     kwargs: Dict[str, Any] = None,
     *,
     tie_weights: bool = True,
+    strict: bool = False,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -222,6 +225,7 @@ def functional_call(
             tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
             paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
+        strict (bool, optional): Default: False.
 
     Returns:
         Any: the result of calling ``module``.
@@ -239,6 +243,14 @@ def functional_call(
         raise RuntimeError("The stateless API can't be used with Jitted modules")
     if kwargs is None:
         kwargs = {}
+    if strict:
+        for name, value in parameters_and_buffers.items():
+            try:
+                org_value = module.get_parameter(name)
+            except AttributeError:
+                org_value = module.get_buffer(name)
+            if value.shape != org_value.shape or value.dtype != org_value.dtype:
+                raise AttributeError()
     with _reparametrize_module(module, parameters_and_buffers, tie_weights):
         if isinstance(args, tuple):
             out = module(*args, **kwargs)
