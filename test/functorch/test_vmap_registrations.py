@@ -106,7 +106,6 @@ xfail_not_implemented = {
     "aten::ctc_loss.Tensor",
     "aten::cudnn_is_acceptable",
     "aten::cummaxmin_backward",
-    "aten::cumprod_backward",
     "aten::data",
     "aten::diagflat",
     "aten::divide.out_mode",
