@@ -3553,6 +3553,13 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(str(tracer.graph), str(tracer_after.graph))
         self.assertTrue(not hasattr(tracer_before, 'graph') or str(tracer.graph) != str(tracer_before.graph))
 
+    def test_deepcopy_graphmodule(self):
+        m = symbolic_trace(SimpleTest())
+        m.meta['hello'] = 'world'
+        copy_m = copy.deepcopy(m)
+        self.assertEqual(copy_m.meta['hello'], 'world')
+
+
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
