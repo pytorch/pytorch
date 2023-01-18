@@ -31,7 +31,7 @@ hash = subprocess.check_output(
 
 # Split the log into an entry per benchmark
 entries = re.split(
-    r"(?:cuda train ([^ ]+)|WARNING:root:([^ ]+) failed to load)", full_log
+    r"(?:cuda (?:train|eval) +([^ ]+)|WARNING:root:([^ ]+) failed to load)", full_log
 )[1:]
 
 
