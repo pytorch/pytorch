@@ -43,13 +43,14 @@ class JobCheckState(NamedTuple):
     url: str
     status: Optional[str]
 
+JobNameToStateDict = Dict[str, JobCheckState]
 
 class WorkflowCheckState:
     def __init__(self, name: str, url: str, status: Optional[str]):
         self.name: str = name
         self.url: str = url
         self.status: Optional[str] = status
-        self.jobs: Dict[str, JobCheckState] = {}
+        self.jobs: JobNameToStateDict = {}
 
 
 GH_PR_REVIEWS_FRAGMENT = """
@@ -520,7 +521,7 @@ def add_workflow_conclusions(
     checksuites: Any,
     get_next_checkruns_page: Callable[[List[Dict[str, Dict[str, Any]]], int, Any], Any],
     get_next_checksuites: Callable[[Any], Any]
-) -> Dict[str, JobCheckState]:
+) -> JobNameToStateDict:
     # graphql seems to favor the most recent workflow run, so in theory we
     # shouldn't need to account for reruns, but do it just in case
 
@@ -580,7 +581,7 @@ def add_workflow_conclusions(
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
     # the workflow that ran than the container workflow.
-    res: Dict[str, JobCheckState] = {}
+    res: JobNameToStateDict = {}
     for workflow_name, workflow in workflows.items():
         if len(workflow.jobs) > 0:
             for job_name, job in workflow.jobs.items():
@@ -675,7 +676,7 @@ class GitHubPR:
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
         self.labels: Optional[List[str]] = None
-        self.conclusions: Optional[Dict[str, JobCheckState]] = None
+        self.conclusions: Optional[JobNameToStateDict] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
@@ -803,7 +804,7 @@ class GitHubPR:
         self.labels = labels
         return self.labels
 
-    def get_checkrun_conclusions(self) -> Dict[str, JobCheckState]:
+    def get_checkrun_conclusions(self) -> JobNameToStateDict:
         """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
             return self.conclusions
@@ -1231,7 +1232,7 @@ def find_matching_merge_rule(
     raise RuntimeError(reject_reason)
 
 
-def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[str, JobCheckState]:
+def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
 
     def get_commit_next_check_runs(edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any) -> Any:
         rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
@@ -1267,7 +1268,7 @@ def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[
 def get_combined_checks_from_pr_and_land_validation(
     pr: GitHubPR,
     land_check_commit: Optional[str],
-) -> Dict[str, JobCheckState]:
+) -> JobNameToStateDict:
     """
     Combines checks from both the PR and land validation to get a holistic view
     of all checks.
@@ -1292,7 +1293,7 @@ def get_combined_checks_from_pr_and_land_validation(
     return merged_checks
 
 def filter_checks_with_lambda(
-    checks: Dict[str, JobCheckState],
+    checks: JobNameToStateDict,
     status_filter: Callable[[Optional[str]], bool]
 ) -> List[JobCheckState]:
     return [check for check in checks.values() if status_filter(check.status)]
@@ -1397,7 +1398,7 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 def categorize_checks(
-    check_runs: Dict[str, JobCheckState],
+    check_runs: JobNameToStateDict,
     required_checks: List[str],
 ) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
