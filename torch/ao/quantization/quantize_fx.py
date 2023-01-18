@@ -4,6 +4,10 @@ import warnings
 import torch
 from torch.fx import GraphModule
 from .fx.tracer import QuantizationTracer
+from .fx.tracer import (  # noqa: F401
+    Scope,
+    ScopeContextManager
+)
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
 from .fx.convert import convert
@@ -61,61 +65,6 @@ def _fuse_fx(
     _check_is_graph_module(graph_module)
     return fuse(
         graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
-
-
-class Scope(object):
-    """ Scope object that records the module path and the module type
-    of a module. Scope is used to track the information of the module
-    that contains a Node in a Graph of GraphModule. For example::
-
-        class Sub(torch.nn.Module):
-            def forward(self, x):
-                # This will be a call_method Node in GraphModule,
-                # scope for this would be (module_path="sub", module_type=Sub)
-                return x.transpose(1, 2)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                self.sub = Sub()
-
-            def forward(self, x):
-                # This will be a call_method Node as well,
-                # scope for this would be (module_path="", None)
-                x = x.transpose(1, 2)
-                x = self.sub(x)
-                return x
-
-    """
-
-    def __init__(self, module_path: str, module_type: Any):
-        super().__init__()
-        self.module_path = module_path
-        self.module_type = module_type
-
-
-class ScopeContextManager(object):
-    """ A context manager to track the Scope of Node during symbolic tracing.
-    When entering a forward function of a Module, we'll update the scope information of
-    the current module, and when we exit, we'll restore the previous scope information.
-    """
-
-    def __init__(
-        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
-    ):
-        super().__init__()
-        self.prev_module_type = scope.module_type
-        self.prev_module_path = scope.module_path
-        self.scope = scope
-        self.scope.module_path = current_module_path
-        self.scope.module_type = type(current_module)
-
-    def __enter__(self):
-        return
-
-    def __exit__(self, *args):
-        self.scope.module_path = self.prev_module_path
-        self.scope.module_type = self.prev_module_type
-        return
 
 
 def _prepare_fx(
