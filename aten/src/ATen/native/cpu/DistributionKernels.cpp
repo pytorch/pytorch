@@ -23,7 +23,7 @@
 #include <cpuinfo.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
@@ -103,7 +103,7 @@ static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, 
   templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
-#if !AT_MKL_ENABLED()
+#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2))
 void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
@@ -237,5 +237,4 @@ REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
