@@ -122,7 +122,7 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleOutput_CUDA) {
   fusion.addOutput(tv6);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn({256, 1024, 1024}, options);
+  at::Tensor input = at::randn({32, 1024, 1024}, options);
 
   auto lparams = scheduleTranspose(&fusion, {input});
 
@@ -159,8 +159,8 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
   fusion.addOutput(tv5);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input0 = at::randn({256, 1024, 1024}, options);
-  at::Tensor input1 = at::randn({256, 1024, 1024}, options);
+  at::Tensor input0 = at::randn({32, 1024, 1024}, options);
+  at::Tensor input1 = at::randn({32, 1024, 1024}, options);
 
   auto lparams = scheduleTranspose(&fusion, {input0, input1});
 
@@ -199,7 +199,7 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMatchingSkipConnection_CUDA) {
   fusion.addOutput(tv4);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn({256, 1024, 1024}, options);
+  at::Tensor input = at::randn({32, 1024, 1024}, options);
 
   auto lparams = scheduleTranspose(&fusion, {input});
 
@@ -677,9 +677,9 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMissingDim_CUDA) {
   fusion.addOutput(tv6);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input0 = at::randn({512, 1024, 512}, options);
-  at::Tensor input1 = at::randn({1, 1024, 1}, options);
-  at::Tensor input2 = at::randn({1024}, options);
+  at::Tensor input0 = at::randn({256, 512, 256}, options);
+  at::Tensor input1 = at::randn({1, 512, 1}, options);
+  at::Tensor input2 = at::randn({512}, options);
 
   auto lparams = scheduleTranspose(&fusion, {input0, input1, input2});
 
