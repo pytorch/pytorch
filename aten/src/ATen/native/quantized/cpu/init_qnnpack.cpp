@@ -1,8 +1,7 @@
 #ifdef USE_PYTORCH_QNNPACK
 
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
+#include <c10/util/Exception.h>
 #include <pytorch_qnnpack.h>
 
 #include <c10/util/CallOnce.h>

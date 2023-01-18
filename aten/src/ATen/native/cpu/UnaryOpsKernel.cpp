@@ -13,6 +13,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
@@ -27,8 +28,7 @@
 #include <mkl.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 inline namespace CPU_CAPABILITY {
 
@@ -73,7 +73,7 @@ template <typename T>
 void VmlLog(int64_t N, const T* X, T* Y) {
   constexpr int64_t K = Vectorized<T>::size();
   at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-    using VT = vec::vec_scalar_t<T>;
+    using VT = at::opmath_type<T>;
     vec::map(
         [](Vectorized<VT> x_vec) { return x_vec.log(); },
         Y + begin,
@@ -203,13 +203,18 @@ static void angle_kernel(TensorIteratorBase& iter) {
 
 // NB: Ignores the negative bit on tensors
 void conj_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kBFloat16, kHalf, kComplexHalf, iter.common_dtype(), "conj_cpu", [&]() {
-        cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-            [=](Vectorized<scalar_t> a) { return a.conj(); });
-      });
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "conj_cpu",
+    AT_DISPATCH_CASE_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, [&] {
+      // conj is a no-op for non-complex types
+      direct_copy_kernel(iter);
+    })
+    AT_DISPATCH_CASE_COMPLEX_TYPES_AND(kComplexHalf, [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+          [=](Vectorized<scalar_t> a) { return a.conj(); });
+    })
+  );
 }
 
 static void bitwise_not_kernel(TensorIteratorBase& iter) {
@@ -774,7 +779,7 @@ IMPLEMENT_COMPLEX_KERNEL(log)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(log10)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(log1p)
+IMPLEMENT_COMPLEX_KERNEL(log1p)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(log2)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -794,5 +799,4 @@ IMPLEMENT_FLOAT_KERNEL(trunc)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(lgamma)
 
-} // namespace native
-} // namespace at
+} // namespace at::native

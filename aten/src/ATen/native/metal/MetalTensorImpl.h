@@ -31,6 +31,10 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
     return strides_;
   }
 
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    return c10::fromIntArrayRefKnownNonNegative(strides_);
+  }
+
   bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
     return true;
   }

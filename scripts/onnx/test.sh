@@ -6,6 +6,7 @@ UNKNOWN=()
 
 # defaults
 PARALLEL=1
+export TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK=ERRORS
 
 while [[ $# -gt 0 ]]
 do
@@ -29,9 +30,11 @@ fi
 
 # pytest, scipy, hypothesis: these may not be necessary
 # pytest-cov: installing since `coverage run -m pytest ..` doesn't work
+# pytest-subtests: unittest subtests support for pytest
 # parameterized: parameterizing test class
-pip install pytest scipy hypothesis pytest-cov parameterized
-pip install -e tools/coverage_plugins_package # allows coverage to run w/o failing due to a missing plug-in
+pip install pytest scipy hypothesis pytest-cov pytest-subtests parameterized
+# allows coverage to run w/o failing due to a missing plug-in
+pip install -e tools/coverage_plugins_package
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -66,11 +69,11 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
     --ignore "$top_dir/test/onnx/test_custom_ops.py" \
     --ignore "$top_dir/test/onnx/test_utility_funs.py" \
     --ignore "$top_dir/test/onnx/test_models.py" \
+    --ignore "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
     "${test_paths[@]}"
 
   # Heavy memory usage tests that cannot run in parallel.
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_utility_funs.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "not TestModelsONNXRuntime"
@@ -81,6 +84,7 @@ if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # TODO(#79802): Parameterize test_models.py
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_models.py" \
+    "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
 
   pytest "${args[@]}" "${args_parallel[@]}" \

@@ -186,7 +186,7 @@ void MemoryDAG::setWildcards(
     auto wildcardElement = getWildcardElement(v);
     TORCH_INTERNAL_ASSERT(wildcardElement);
 
-    const MemoryLocations pointeeSet = getMemoryLocations(elementMap.at(v));
+    const MemoryLocations& pointeeSet = getMemoryLocations(elementMap.at(v));
     for (const auto& pointee : pointeeSet) {
       auto from = this->fromIndex(pointee);
       // avoid cycles where the wildcard points to itself

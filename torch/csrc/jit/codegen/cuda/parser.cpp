@@ -74,6 +74,32 @@ const auto& profileFailedAttr = Symbol::attr("profile_failed");
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
+Val* castTensoToDtype(CgValue self, JitValue* cast_val) {
+  auto cast_ival = toIValue(cast_val);
+  // we need static type for cast
+  TORCH_INTERNAL_ASSERT(cast_ival.has_value());
+  if (cast_ival->isInt()) {
+    auto dtype = cast_ival->toScalarType();
+
+    // We want to keep our internal fusion math in FP32
+    // Shape Inference will continue to propagate the right
+    // type to outputs unchanged.
+    if (dtype == at::ScalarType::Half || dtype == at::ScalarType::BFloat16) {
+      dtype = at::ScalarType::Float;
+    }
+
+    return castOp(aten_to_data_type(dtype), self);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        cast_ival->isNone(),
+        "unrecognized dtype option, expect 'int' but got: ",
+        cast_ival->tagKind());
+
+    // return a copy if dtype is `None`
+    return set(self);
+  }
+}
+
 bool isReductionNonCompatibleTensor(
     const std::shared_ptr<c10::TensorType>& tensor_type) {
   return is_zero_dim_tensor(tensor_type) || is_zero_sized_tensor(tensor_type);
@@ -1295,7 +1321,7 @@ class IrParser {
               }
             }
 
-            auto out = randlike(operand);
+            auto out = rand_like(operand);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -2286,7 +2312,7 @@ class IrParser {
 
               auto data_type = DataType::Null;
               if (const auto opt_ivalue = toIValue(node->input(2))) {
-                if (!opt_ivalue.value().isNone()) {
+                if (!opt_ivalue->isNone()) {
                   data_type = aten_to_data_type(opt_ivalue->toScalarType());
                 }
               }
@@ -2431,8 +2457,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumVarOps> Variance = {
-          "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
-          "aten::std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
+          "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor",
+          "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
       for (auto signature : Variance) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -2454,8 +2480,13 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(
                   dims_list.has_value(), "Cannot fuse with dynamic axes");
               std::vector<int> dims;
-              for (const auto dim : dims_list->vec()) {
-                dims.emplace_back(static_cast<int>(dim));
+              if (!dims_list->empty()) {
+                for (const auto dim : dims_list->vec()) {
+                  dims.emplace_back(static_cast<int>(dim));
+                }
+              } else {
+                dims.resize(input->as<TensorView>()->nDims());
+                std::iota(dims.begin(), dims.end(), 0);
               }
 
               auto unbiased = constant_as<bool>(node->input(2));
@@ -2552,7 +2583,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+          "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2706,6 +2737,56 @@ class IrParser {
       }
     }
 
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self = list_val.front();
+            list_val.pop_front();
+
+            auto out = castTensoToDtype(self, node->input(1));
+
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[2]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[3]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[4]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[6]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
     // Limiting aten::to implementation to only change the dtype of a tensor
     {
       auto ptr_op = getOperatorForLiteral(
@@ -2720,22 +2801,8 @@ class IrParser {
             auto self = list_val.front();
             list_val.pop_front();
 
-            // we need static type for cast
-            TORCH_INTERNAL_ASSERT(
-                node->input(1)->node()->kind() == prim::Constant);
-            auto dtype = toIValue(node->input(1))->toScalarType();
+            auto out = castTensoToDtype(self, node->input(1));
 
-            // We want to keep our internal fusion math in FP32
-            // Shape Inference will continue to propagate the right
-            // type to outputs unchanged.
-            if (dtype == at::ScalarType::Half) {
-              dtype = at::ScalarType::Float;
-            }
-            if (dtype == at::ScalarType::BFloat16) {
-              dtype = at::ScalarType::Float;
-            }
-
-            auto out = castOp(aten_to_data_type(dtype), self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -2839,6 +2906,34 @@ class IrParser {
             }
           },
           isInputNonSizeZeroTensor,
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            Val* negative_slope = value_map[node->inputs()[1]->unique()];
+
+            auto out = leaky_relu(self, negative_slope);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -3276,6 +3371,115 @@ class IrParser {
             // expand_sizes needs to be constant
             auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
             if (!expand_sizes.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::permute_copy.int(Tensor(a) self, int[] dims) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self_t = list_val.front();
+            list_val.pop_front();
+            auto self = self_t->as<TensorView>();
+
+            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dims.has_value(), "The dims parameter is required.");
+            TORCH_INTERNAL_ASSERT(
+                dims.value().size() == self->getMaybeRFactorDomain().size());
+
+            auto output = permute(self, dims->vec());
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            if (!dims.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self_t = list_val.front();
+            list_val.pop_front();
+            auto self = self_t->as<TensorView>();
+
+            auto dim0 = constant_as<int>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dim0.has_value(), "dim0 in transpose is not valid.");
+
+            auto dim1 = constant_as<int>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                dim1.has_value(), "dim1 in transpose is not valid.");
+
+            auto output = transpose(self, dim0.value(), dim1.value());
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->input(1)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            if (node->input(2)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op =
+          getOperatorForLiteral("prim::t_copy(Tensor(a) self) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self_t = list_val.front();
+            list_val.pop_front();
+            auto self = self_t->as<TensorView>();
+
+            TORCH_INTERNAL_ASSERT(self->getMaybeRFactorDomain().size() <= 2);
+
+            auto output = transpose(self);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
 
@@ -4046,6 +4250,49 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
+  static auto permute_schema =
+      getOperatorForLiteral(
+          "aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)")
+          ->schema();
+  static auto permute_copy_schema =
+      getOperatorForLiteral(
+          "prim::permute_copy(Tensor(a) self, int[] dims) -> Tensor")
+          ->schema();
+  if (node->matches(permute_schema) || node->matches(permute_copy_schema)) {
+    switch (offset) {
+      // argument 1: dims;
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto transpose_int_copy_schema =
+      getOperatorForLiteral(
+          "aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)")
+          ->schema();
+  static auto transpose_int_schema =
+      getOperatorForLiteral(
+          "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor")
+          ->schema();
+  if (node->matches(transpose_int_copy_schema) ||
+      node->matches(transpose_int_schema)) {
+    switch (offset) {
+      // argument 1: dim0;
+      // argument 2: dim1;
+      case 1:
+      case 2:
+        profileInt(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
   static auto batch_norm_impl_index_schema =
       getOperatorForLiteral(
           "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)")
@@ -4188,6 +4435,20 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
+  static auto to_copy_schema =
+      getOperatorForLiteral(
+          "aten::_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor")
+          ->schema();
+  if (node->matches(to_copy_schema)) {
+    switch (offset) {
+      case 1:
+        profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
   static auto to_dtype_schema =
       getOperatorForLiteral(
           "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
@@ -4237,6 +4498,30 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         return true;
       case 3:
         profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static auto var_dim_schema =
+      getOperatorForLiteral(
+          "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
+          ->schema();
+  static auto std_dim_schema =
+      getOperatorForLiteral(
+          "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
+          ->schema();
+  if (node->matches(var_dim_schema) || node->matches(std_dim_schema)) {
+    switch (offset) {
+      case 1:
+        profileIntList(pr, node, offset);
+        return true;
+      case 2:
+        profileBool(pr, node, offset);
+        return true;
+      case 3:
+        profileBool(pr, node, offset);
         return true;
       default:
         return false;

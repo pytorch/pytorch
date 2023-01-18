@@ -37,6 +37,7 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ARG CONDA_CMAKE
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
@@ -57,6 +58,17 @@ RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/instal
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
+
+# (optional) Install UCC
+ARG UCX_COMMIT
+ARG UCC_COMMIT
+ENV UCX_COMMIT $UCX_COMMIT
+ENV UCC_COMMIT $UCC_COMMIT
+ENV UCX_HOME /usr
+ENV UCC_HOME /usr
+ADD ./common/install_ucc.sh install_ucc.sh
+RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
+RUN rm install_ucc.sh
 
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
@@ -125,6 +137,10 @@ RUN rm install_openssl.sh
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
+# See https://github.com/pytorch/pytorch/issues/82174
+# TODO(sdym@fb.com):
+# check if this is needed after full off Xenial migration
+ENV CARGO_NET_GIT_FETCH_WITH_CLI true
 RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Add jni.h for java host build

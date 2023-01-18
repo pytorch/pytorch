@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_expr_sort.h>
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
@@ -188,6 +189,16 @@ void GpuLower::collectPaddedParallelDims() {
   }
 }
 
+void assignRNGOffset(Fusion* fusion) {
+  int counter = 0;
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<RNGOp>()) {
+      auto rop = expr->as<RNGOp>();
+      rop->setRNGOffset(counter++);
+    }
+  }
+}
+
 void GpuLower::lower(Fusion* fusion, DataType index_type) {
   FUSER_PERF_SCOPE("GpuLower::lower");
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
@@ -213,6 +224,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
       tv->resolveIndexDtype();
     }
   }
+  assignRNGOffset(fusion_);
 
   FusionGuard fg(fusion_);
   // prepare for lowering
@@ -237,7 +249,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // mappings of all iteration domains across the fusion. There are three types
   // of mappings Permissive, Exact, and Loop, see compute_at_map.h/cpp for more
   // information.
-  compute_at_map_ = std::make_unique<ComputeAtMap>(fusion_);
+  compute_at_map_ = std::make_shared<ComputeAtMap>(fusion_);
 
   if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
     std::cout << compute_at_map_->toString() << std::endl;
@@ -245,8 +257,12 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   compute_at_map_->validateAndPropagatePType();
 
+  // Uses compute_at_map, find all splits that are enforced to be divisible
+  divisible_splits_ = getAllDivisibleSplits(fusion_, compute_at_map_.get());
+
   // Used in parallel dimension map
-  concretized_broadcast_domains_.build(fusion_);
+  concretized_broadcast_domains_ =
+      std::make_shared<const ConcretizedBroadcastDomains>(fusion_);
 
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
@@ -256,6 +272,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   // Validate mma data format and compatibility if any on the fusion.
   validateMma(fusion_);
+
+  // Validate swizzle usage on the fusion schedule.
+  validateSwizzle(fusion_);
 
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
@@ -267,15 +286,26 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
-  haloInfo().build(fusion_);
+  halo_info_ = std::make_shared<HaloInfo>(fusion_, compute_at_map_);
 
   // Want to run this after parallel map and halo info map are
   // created. vectorized_accesses_ and vectorized_set_info_ are filled.
   validateAndCollectVectorizeInfo(fusion_);
 
+  // Depends on ComputeAtMap and HaloInfo.
+  validateAndConvertIterDomainGrouping(fusion_);
+
+  // Assumes all grouped reductions are convered to
+  // GroupedReductionOp, which is done by
+  // validateAndConvertIterDomainGrouping
+  validateGroupedReductions(fusion_);
+
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
   sync_map_.build(fusion_);
+  if (isDebugDumpEnabled(DebugDumpOption::SyncMap)) {
+    std::cout << sync_map_.toString() << std::endl;
+  }
 
   partialSplitMap().build(fusion_);
 

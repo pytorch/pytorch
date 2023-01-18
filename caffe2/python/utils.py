@@ -18,7 +18,9 @@ import numpy as np
 from six import integer_types, binary_type, text_type, string_types
 
 OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
+OPTIMIZER_ITERATION_LR_NAME = "optimizer_iteration_lr"
 ITERATION_MUTEX_NAME = "iteration_mutex"
+ITERATION_MUTEX_LR_NAME = "iteration_mutex_lr"
 
 
 def OpAlmostEqual(op_a, op_b, ignore_fields=None):

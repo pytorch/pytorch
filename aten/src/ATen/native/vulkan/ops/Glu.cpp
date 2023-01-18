@@ -16,7 +16,7 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
       "Vulkan glu only supports GLU for dim = 1, but got dim = ",
       dim);
   TORCH_CHECK(
-      channels_size(input_arg) % 2 == 0,
+      get_dim<Dim4D::Channel>(input_arg) % 2 == 0,
       "Vulkan glu expects channel dim to be multiple of 2!");
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
@@ -30,7 +30,7 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
   vTensor v_output{
       context,
       {v_input_sizes[0], output_ch_size, v_input_sizes[2], v_input_sizes[3]},
-      v_input.options(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {

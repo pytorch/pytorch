@@ -25,7 +25,6 @@ static void setupBatchNorm_nhwc_BWD(Fusion* fusion, DataType dtype) {
   FusionGuard fg(fusion);
 
   const bool kTraining = true;
-  const float kMomentum = 0.1;
   const float kEps = 1e-5;
 
   // setup fusion
@@ -85,9 +84,6 @@ static void NvFuserScheduler_BatchNorm_nhwc_BWD(
     FusionExecutorCache* fusion_executor_cache,
     DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
-
-  const bool kTraining = true;
-  const float kEps = 1e-5;
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),

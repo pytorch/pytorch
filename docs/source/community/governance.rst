@@ -60,18 +60,15 @@ design docs, any disputes and dispute resolutions) so that
 contributors and other interested parties understand the
 future direction of the project and can participate in discussion.
 
-Within `pytorch/pytorch <https://github.com/pytorch/pytorch>`__,
-maintainer groups are defined in the
-`CODEOWNERS <https://github.com/pytorch/pytorch/blob/master/CODEOWNERS>`__
-file in the GitHub repository. For other modules that correspond
-to repositories, membership is recorded on GitHub as access
-level to the repo (i.e. “write” permission). Module maintainers
-are given privileges to administrate the repository (except for
-`pytorch/pytorch <https://github.com/pytorch/pytorch>`__ where
-they are responsible for a folder).
+Responsibilities of the maintainer includes:
+* Triaging high priority issues of the module
+* Triaging and reviewing and landing high priority pull requests of the module
+* Supporting public documentation related to the module
+* Running public developer meetings
 
 Core Maintainers
 ----------------
+
 The core maintainers are expected to have a deep understanding
 of the PyTorch code base and design philosophies. Their responsibilities
 include:
@@ -130,14 +127,12 @@ The Principles
 The Process for Nomination
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* We will have a nomination form, where anyone in the community can
-  nominate a person to a Module maintainer position
-* Every 3 months, the core maintainers go through the nominations,
-  do light filtering around spam or desk-rejection, and draw up a
-  list of potential nominees.
-* The core maintainers ask the specific module maintainers for more
-  information on the nominee. The information should include the following
-  items:
+* Each module has its own process. Please contact module maintainers for more information.
+  However, if there is no process identified, you can file a request to the core maintainers
+  by submitting `this form <https://forms.gle/xNeu1byGMZVHcA2q7>`__. Core maintainers are
+  meeting every three months.
+* If you are submitting a request to the core maintainers, the information in your request
+  must include the following items:
 
   * The nominees depth and breadth of code, review and design
     contributions on the module
@@ -265,6 +260,23 @@ be opened for discussion. This includes:
 -  Removal of core features or platform support
 
 Core and module maintainers ultimately approve these changes.
+
+General Project Policies
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+PyTorch has been established as PyTorch a Series of LF Projects, LLC.
+Policies applicable to PyTorch and participants in PyTorch, including
+guidelines on the usage of trademarks, are located at https://www.lfprojects.org/policies/.
+
+PyTorch participants acknowledge that the copyright in all new contributions
+will be retained by the copyright holder as independent works of authorship
+and that no contributor or copyright holder will be required to assign copyrights
+to the project. Except as described below, all code contributions to the project
+must be made using the 3-Clause-BSD License available here:
+https://opensource.org/licenses/BSD-3-Clause (the “Project License”).
+All outbound code will be made available under the Project License.
+The Maintainers may approve the use of an alternative open license or
+licenses for inbound or outbound contributions on an exception basis.
 
 FAQ
 ---

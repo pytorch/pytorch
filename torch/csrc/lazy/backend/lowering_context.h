@@ -42,7 +42,7 @@ class TORCH_API LoweringContext {
   LoweringContext(
       const std::string& name,
       BackendDevice device,
-      c10::ArrayRef<torch::lazy::Node*> post_order,
+      c10::ArrayRef<const torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status);
 
   virtual ~LoweringContext() = default;
@@ -50,7 +50,7 @@ class TORCH_API LoweringContext {
   static std::unique_ptr<LoweringContext> Create(
       const std::string& name,
       BackendDevice device,
-      c10::ArrayRef<torch::lazy::Node*> post_order,
+      c10::ArrayRef<const torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status);
 
   static std::unique_ptr<LoweringContext> Create(

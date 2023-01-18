@@ -759,6 +759,10 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
 '''
         )
 
+    # Definition: a dangling impl happens when someone does an impl() on a
+    # function but not a def() for it. This is usually a bug, e.g. someone
+    # misspelled an operator name, or someone registered an impl for an op that
+    # no longer exists
     def test_find_dangling_impls(self):
         dangling_impls = C._dispatch_find_dangling_impls()
         self.assertEqual(

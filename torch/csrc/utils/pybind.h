@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
 #include <pybind11/pybind11.h>
@@ -11,9 +12,8 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_tuples.h>
+#include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <stdexcept>
 #include <utility>
@@ -33,26 +33,17 @@ namespace detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
-struct type_caster<at::Tensor> {
+struct TORCH_PYTHON_API type_caster<at::Tensor> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
+  PYBIND11_TYPE_CASTER(at::Tensor, _("torch.Tensor"));
 
-  bool load(handle src, bool) {
-    PyObject* obj = src.ptr();
-    if (THPVariable_Check(obj)) {
-      value = THPVariable_Unpack(obj);
-      return true;
-    }
-    return false;
-  }
+  bool load(handle src, bool);
 
   static handle cast(
       const at::Tensor& src,
       return_value_policy /* policy */,
-      handle /* parent */) {
-    return handle(THPVariable_Wrap(src));
-  }
+      handle /* parent */);
 };
 
 // torch._StorageBase <-> at::Storage
@@ -60,7 +51,7 @@ template <>
 struct type_caster<at::Storage> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Storage, _("at::Storage"));
+  PYBIND11_TYPE_CASTER(at::Storage, _("torch.StorageBase"));
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
@@ -83,7 +74,7 @@ template <>
 struct type_caster<at::Generator> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Generator, _("at::Generator"));
+  PYBIND11_TYPE_CASTER(at::Generator, _("torch.Generator"));
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
@@ -103,53 +94,64 @@ struct type_caster<at::Generator> {
 };
 
 template <>
-struct type_caster<at::IntArrayRef> {
+struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("at::IntArrayRef"));
+  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("Tuple[int, ...]"));
 
-  bool load(handle src, bool) {
-    PyObject* source = src.ptr();
-    auto tuple = PyTuple_Check(source);
-    if (tuple || PyList_Check(source)) {
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      const auto size =
-          tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
-      v_value.resize(size);
-      for (const auto idx : c10::irange(size)) {
-        PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx)
-                              : PyList_GET_ITEM(source, idx);
-        if (THPVariable_Check(obj)) {
-          v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
-        } else if (PyLong_Check(obj)) {
-          // use THPUtils_unpackLong after it is safe to include
-          // python_numbers.h
-          v_value[idx] = THPUtils_unpackLong(obj);
-        } else {
-          return false;
-        }
-      }
-      value = v_value;
-      return true;
-    }
-    return false;
-  }
+  bool load(handle src, bool);
   static handle cast(
       at::IntArrayRef src,
       return_value_policy /* policy */,
-      handle /* parent */) {
-    return handle(THPUtils_packInt64Array(src.size(), src.data()));
-  }
+      handle /* parent */);
 
  private:
   std::vector<int64_t> v_value;
 };
 
 template <>
+struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::SymIntArrayRef, _("List[int]"));
+
+  bool load(handle src, bool);
+  static handle cast(
+      at::SymIntArrayRef src,
+      return_value_policy /* policy */,
+      handle /* parent */);
+
+ private:
+  std::vector<c10::SymInt> v_value;
+};
+
+template <>
+struct type_caster<at::MemoryFormat> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("torch.memory_format"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPMemoryFormat_Check(obj)) {
+      value = reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
+      return true;
+    }
+    return false;
+  }
+  static handle cast(
+      at::MemoryFormat src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return handle(torch::utils::getTHPMemoryFormat(src));
+  }
+};
+
+template <>
 struct type_caster<at::Device> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Device, _("at::Device"));
+  PYBIND11_TYPE_CASTER(at::Device, _("torch.device"));
 
   // PYBIND11_TYPE_CASTER defines a member field called value. Since at::Device
   // cannot be default-initialized, we provide this constructor to explicitly
@@ -171,6 +173,100 @@ struct type_caster<at::Device> {
       return_value_policy /* policy */,
       handle /* parent */) {
     return handle(THPDevice_New(src));
+  }
+};
+
+template <>
+struct type_caster<c10::DispatchKey>
+    : public type_caster_base<c10::DispatchKey> {
+  using base = type_caster_base<c10::DispatchKey>;
+  c10::DispatchKey tmp;
+
+ public:
+  bool load(handle src, bool convert) {
+    if (base::load(src, convert)) {
+      return true;
+    } else if (py::isinstance(
+                   src, py::module_::import("builtins").attr("str"))) {
+      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
+      value = &tmp;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      c10::DispatchKey src,
+      return_value_policy policy,
+      handle parent) {
+    return base::cast(src, policy, parent);
+  }
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<c10::Scalar> {
+ public:
+  PYBIND11_TYPE_CASTER(
+      c10::Scalar,
+      _("Union[Number, torch.SymInt, torch.SymFloat]"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      const c10::Scalar& si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("Union[int, torch.SymInt]"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymInt si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("float"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymFloat si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <typename T>
+struct type_caster<c10::complex<T>> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::complex<T>, _("complex"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+
+    // Refered from `THPUtils_unpackComplexDouble`
+    Py_complex py_complex = PyComplex_AsCComplex(obj);
+    if (py_complex.real == -1.0 && PyErr_Occurred()) {
+      return false;
+    }
+
+    // Python's Complex is always double precision.
+    value = c10::complex<double>(py_complex.real, py_complex.imag);
+    return true;
+  }
+
+  static handle cast(
+      const c10::complex<T>& complex,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    // Python only knows double precision complex.
+    return handle(PyComplex_FromDoubles(complex.real(), complex.imag()));
   }
 };
 

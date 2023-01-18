@@ -136,7 +136,7 @@ class EliminateDeadBroadcastAndAllocate {
 //!    be removed, and generates a replacement map from the broadcast
 //!    output to reduction output.
 //!
-//!   2. kir_utils::replaceInputsInExpr replaces applicable uses of
+//!   2. ir_utils::replaceInputsInExpr replaces applicable uses of
 //!    the broadcast output with the corresponding reduction output.
 //!
 //!   3. EliminateDeadBroadcastAndAllocate removes the broadcast ops
@@ -145,8 +145,8 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
  public:
   static std::vector<Expr*> fuse(const std::vector<Expr*>& exprs) {
     FuseBroadcastWithWarpReduce fuse_broadcast_map(exprs);
-    const auto replaced_inputs =
-        replaceInputsInExpr(exprs, fuse_broadcast_map.val_replacement_map_);
+    const auto replaced_inputs = ir_utils::replaceInputsInExpr(
+        exprs, fuse_broadcast_map.val_replacement_map_);
     return EliminateDeadBroadcastAndAllocate::run(replaced_inputs);
   }
 

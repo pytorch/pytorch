@@ -63,7 +63,7 @@ set_target_properties(clog PROPERTIES
   C_EXTENSIONS NO)
 CLOG_TARGET_RUNTIME_LIBRARY(clog)
 set_target_properties(clog PROPERTIES PUBLIC_HEADER include/clog.h)
-target_include_directories(clog BEFORE PUBLIC include)
+target_include_directories(clog PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 if(CLOG_LOG_TO_STDIO)
   target_compile_definitions(clog PRIVATE CLOG_LOG_TO_STDIO=1)
 else()
@@ -73,7 +73,10 @@ if(ANDROID AND NOT CLOG_LOG_TO_STDIO)
   target_link_libraries(clog PRIVATE log)
 endif()
 
+add_library(cpuinfo::clog ALIAS clog)
+
 install(TARGETS clog
+  EXPORT cpuinfo-targets
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")

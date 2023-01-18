@@ -3,7 +3,7 @@
 #include <ATen/miopen/Exceptions.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 
 namespace at { namespace native {

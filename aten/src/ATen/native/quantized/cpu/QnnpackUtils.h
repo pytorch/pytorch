@@ -1,13 +1,19 @@
 #pragma once
 
 #ifdef USE_PYTORCH_QNNPACK
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/Factory.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 #include <utility>
 
@@ -41,7 +47,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
             bias, bias.suggest_memory_format())),
         per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
         input_scale(std::move(input_scale)),
-        w_scales(w_scales),
+        w_scales(std::move(w_scales)),
         w_zero_points(std::move(w_zps)) {}
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
@@ -131,7 +137,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         is_per_channel_(is_per_channel),
         input_scale(input_scale),
         kernel_(std::move(kernel)),
-        w_scales(w_scale),
+        w_scales(std::move(w_scale)),
         w_zero_points(std::move(w_zps)) {
     const bool any_padding = std::any_of(
         padding_.begin(), padding_.end(), [](const auto& e) { return e != 0; });
@@ -266,8 +272,9 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     void* zero_buffer = malloc(zero_size);
     if (zero_buffer == nullptr) {
       pytorch_qnnp_delete_operator(convolution);
-      pytorch_qnnp_log_error(
-          "failed to allocate %zu bytes for zero padding", zero_size);
+      TORCH_INTERNAL_ASSERT(
+          false, "failed to allocate %zu bytes for zero padding",
+          zero_size);
     }
     // Need to set to input zero point
     // memset(zero_buffer, input_zero_point, zero_size);

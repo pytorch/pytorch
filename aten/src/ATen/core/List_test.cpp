@@ -1118,7 +1118,7 @@ TEST(ListTest, canAccessStringByReference) {
   List<std::string> list({"one", "two"});
   const auto& listRef = list;
   static_assert(std::is_same<decltype(listRef[1]), const std::string&>::value,
-                "const List<std::string> acccess should be by const reference");
+                "const List<std::string> access should be by const reference");
   std::string str = list[1];
   const std::string& strRef = listRef[1];
   EXPECT_EQ("two", str);
@@ -1130,7 +1130,7 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   const auto& listRef = list;
   static_assert(
       std::is_same<decltype(listRef[1]), c10::optional<std::reference_wrapper<const std::string>>>::value,
-      "List<c10::optional<std::string>> acccess should be by const reference");
+      "List<c10::optional<std::string>> access should be by const reference");
   c10::optional<std::string> str1 = list[1];
   c10::optional<std::string> str2 = list[2];
   decltype(auto) strRef1 = listRef[1];

@@ -1,9 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorTransformations.h>
+#include <ATen/native/cpu/PixelShuffleKernel.h>
 
-#include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 
-#include <ATen/native/cpu/PixelShuffleKernel.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/pixel_shuffle_native.h>
+#include <ATen/ops/pixel_unshuffle_native.h>
+#endif
+
+#include <algorithm>
+#include <numeric>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -52,6 +64,11 @@ Tensor pixel_shuffle_cpu(const Tensor& self, int64_t upscale_factor) {
   auto output = at::empty({0}, self.options());
   auto memory_format = self.suggest_memory_format();
   output.resize_(output_sizes, memory_format);
+
+  if (output.numel() == 0) {
+    return output;
+  }
+
   auto input = self.contiguous(memory_format);
 
   pixel_shuffle_kernel(kCPU, output, input, upscale_factor);
@@ -60,6 +77,10 @@ Tensor pixel_shuffle_cpu(const Tensor& self, int64_t upscale_factor) {
 
 Tensor pixel_unshuffle_cpu(const Tensor& self, int64_t downscale_factor) {
   check_pixel_unshuffle_shapes(self, downscale_factor);
+
+  if (self.numel() == 0) {
+    return self.clone();
+  }
 
   // Format: (B1, ..., Bn), C, H, W
   std::vector<int64_t> output_sizes(self.sizes().begin(), self.sizes().end() - 3);
@@ -71,6 +92,11 @@ Tensor pixel_unshuffle_cpu(const Tensor& self, int64_t downscale_factor) {
   auto output = at::empty({0}, self.options());
   auto memory_format = self.suggest_memory_format();
   output.resize_(output_sizes, memory_format);
+
+  if (output.numel() == 0) {
+    return output;
+  }
+
   auto input = self.contiguous(memory_format);
 
   pixel_unshuffle_kernel(kCPU, output, input, downscale_factor);
@@ -114,7 +140,8 @@ Tensor math_pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   std::vector<int64_t> final_shape(self.sizes().begin(), self_sizes_batch_end);
   final_shape.insert(final_shape.end(), {oc, oh, ow});
 
-  return input_permuted.reshape(final_shape);
+  // pixel_shuffle expects to *never* return an alias of the input.
+  return input_permuted.clone(at::MemoryFormat::Contiguous).view(final_shape);
 }
 
 Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
@@ -154,7 +181,8 @@ Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   std::vector<int64_t> final_shape(self.sizes().begin(), self_sizes_batch_end);
   final_shape.insert(final_shape.end(), {oc, oh, ow});
 
-  return input_permuted.reshape(final_shape);
+  // pixel_unshuffle expects to *never* return an alias of the input.
+  return input_permuted.clone(at::MemoryFormat::Contiguous).view(final_shape);
 }
 
 DEFINE_DISPATCH(pixel_shuffle_kernel);

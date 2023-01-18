@@ -1,8 +1,24 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/FunctionalInverses.h>
 #include <ATen/ScalarOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_test_ambiguous_defaults_native.h>
+#include <ATen/ops/_test_autograd_multiple_dispatch_native.h>
+#include <ATen/ops/_test_autograd_multiple_dispatch_view_native.h>
+#include <ATen/ops/_test_optional_filled_intlist_native.h>
+#include <ATen/ops/_test_optional_floatlist_native.h>
+#include <ATen/ops/_test_optional_intlist_native.h>
+#include <ATen/ops/_test_string_default_native.h>
+#include <ATen/ops/_test_warn_in_autograd_native.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -74,5 +90,33 @@ Tensor _test_warn_in_autograd(const Tensor &self) {
   return self.clone();
 }
 
+// Test registration of per-dispatch-key derivatives in derivatives.yaml.
+// See derivatives.yaml for dummy registrations.
+
+Tensor _test_autograd_multiple_dispatch_fullcoverage(const Tensor &self) {
+  return self.clone();
+}
+
+Tensor _test_autograd_multiple_dispatch_ntonly(const Tensor &self, bool b) {
+  return self.clone();
+}
+
+// Test derivative dispatch registration for view_copy ops
+Tensor _test_autograd_multiple_dispatch_view(const Tensor &self) {
+  return self.view(-1);
+}
+
 } // namespace native
+
+namespace functionalization {
+
+// view_copy ops must have a functional inverse registered
+Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
+    TORCH_INTERNAL_ASSERT(false,
+    "Attempted to call _test_autograd_multiple_dispatch_view_copy_inverse() during the functionalization pass. ",
+    "This function is for testing only and should never be called.");
+    return Tensor();
+}
+
+} // namespace functionalization
 } // namespace at

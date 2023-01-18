@@ -4,11 +4,11 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue ScriptDictIterator::next() {
   if (iter_ == end_) {
@@ -197,5 +197,4 @@ void initScriptDictBindings(PyObject* module) {
                                    // long as the iterator
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

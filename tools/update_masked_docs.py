@@ -1,7 +1,7 @@
-"""This script updates the file torch/_masked/_docs.py that contains
+"""This script updates the file torch/masked/_docs.py that contains
 the generated doc-strings for various masked operations. The update
 should be triggered whenever a new masked operation is introduced to
-torch._masked package. Running the script requires that torch package
+torch.masked package. Running the script requires that torch package
 is functional.
 """
 
@@ -10,7 +10,7 @@ import os
 
 def main() -> None:
 
-    target = os.path.join("torch", "_masked", "_docs.py")
+    target = os.path.join("torch", "masked", "_docs.py")
 
     try:
         import torch
@@ -40,9 +40,9 @@ def main() -> None:
 """
     )
 
-    for func_name in sorted(torch._masked.__all__):
-        func = getattr(torch._masked, func_name)
-        func_doc = torch._masked._generate_docstring(func)
+    for func_name in sorted(torch.masked._ops.__all__):
+        func = getattr(torch.masked._ops, func_name)
+        func_doc = torch.masked._generate_docstring(func)
         _new_content.append(f'{func_name}_docstring = """{func_doc}"""\n')
 
     new_content = "\n".join(_new_content)

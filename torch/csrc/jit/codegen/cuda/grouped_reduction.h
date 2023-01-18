@@ -27,6 +27,10 @@ namespace cuda {
 //!   dimensions, the same transformations and the same axes to
 //!   reduce.
 //!
+//! Note that Welford is not allowed yet, though it should be
+//! technically straightforward to support horizontal fusions of
+//! welford ops. Unclear how common it would be in practice, though.
+//!
 //! \param reduction_outputs Tensors produced by ReductionOp
 TORCH_CUDA_CU_API void groupReductions(
     const std::vector<TensorView*>& reduction_outputs);

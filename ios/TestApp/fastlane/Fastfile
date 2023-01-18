@@ -2,22 +2,6 @@ default_platform(:ios)
 
 platform :ios do
   before_all do
-    setup_circle_ci
-  end
-  lane :install_root_cert do
-    import_certificate(
-      certificate_path: "AppleWWDRCAG3.cer",
-      keychain_path: "/Users/distiller/Library/Keychains/fastlane_tmp_keychain-db",
-      keychain_password: ""
-    )
-  end
-  lane :install_dev_cert do
-    puts "Installing Certificates.p12"
-    import_certificate(
-      keychain_name: ENV["MATCH_KEYCHAIN_NAME"],
-      keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"],
-      certificate_path: 'Certificates.p12',
-      certificate_password: ENV["IOS_CERT_SECRET"] || "default"
-    )
+    setup_ci(provider: "circleci", timeout: 0)
   end
 end

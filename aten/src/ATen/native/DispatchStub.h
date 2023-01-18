@@ -1,11 +1,10 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
+#include <c10/core/DeviceType.h>
+#include <c10/macros/Export.h>
 
-#include <type_traits>
 #include <atomic>
+#include <utility>
 
 // Implements instruction set specific function dispatch.
 //
@@ -114,10 +113,12 @@ struct TORCH_API DispatchStubImpl {
     std::atomic<void*> cpu_dispatch_ptr;
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
+    void* mps_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
     void* cuda_dispatch_ptr = nullptr;
     void* hip_dispatch_ptr = nullptr;
+    void* mps_dispatch_ptr = nullptr;
   #endif
 };
 
@@ -165,6 +166,10 @@ public:
     impl.hip_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
+  void set_mps_dispatch_ptr(FnPtr fn_ptr) {
+    impl.mps_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
   static TORCH_API FnPtr DEFAULT;
 #ifdef HAVE_AVX512_CPU_DEFINITION
   static TORCH_API FnPtr AVX512;
@@ -187,6 +192,13 @@ template <typename DispatchStub>
 struct RegisterCUDADispatch {
   RegisterCUDADispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
     stub.set_cuda_dispatch_ptr(value);
+  }
+};
+
+template <typename DispatchStub>
+struct RegisterMPSDispatch {
+  RegisterMPSDispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
+    stub.set_mps_dispatch_ptr(value);
   }
 };
 
@@ -259,6 +271,9 @@ struct RegisterHIPDispatch {
 #define REGISTER_HIP_DISPATCH(name, fn) \
   static RegisterHIPDispatch<struct name> name ## __register(name, fn);
 
+#define REGISTER_MPS_DISPATCH(name, fn) \
+  static RegisterMPSDispatch<struct name> name ## __register(name, fn);
+
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
 #if defined(__CUDACC__)
@@ -268,6 +283,9 @@ struct RegisterHIPDispatch {
 // is HIP in the PyTorch HIPify build.
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
+#elif defined(__OBJC__) && defined(USE_MPS)
+// NB: this macro must be used from a 'mm' file in order to dispatch a MPS kernel
+#define REGISTER_DISPATCH(name, fn) REGISTER_MPS_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define REGISTER_NO_AVX512_DISPATCH(name)       \

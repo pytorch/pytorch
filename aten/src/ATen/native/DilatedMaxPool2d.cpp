@@ -1,8 +1,18 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/Pool.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 namespace at {
 namespace meta {

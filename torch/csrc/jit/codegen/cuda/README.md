@@ -187,7 +187,7 @@ There're a few debug dump that could be turned on via environment variables. Loo
 1. `dump_eff_bandwidth`: print out effective bandwidth of each generated kernel. This naively measure the kernel time divided by I/O buffer size and is a good/simple metric of performance for bandwidth bound kernels
 2. `cuda_kernel`: print out generated cuda kernels
 3. `launch_param`: print out launch config of generated kernels
-4. `print_args`: print out input output tensors of executed codegen kernels
+4. `kernel_args`: print out input/output/buffer tensors of all executed codegen kernels, note that for buffers, we indicate whether they are zero-initialized, which hints on an extra kernel to fill the tensor before codegen kernels.
 
 ### FAQs
 
@@ -197,8 +197,8 @@ First thing is to check that you have fusion kernel running properly. Try to run
 
 If turning on NVFuser produces unexpected outputs, set the `PYTORCH_NVFUSER_DISABLE` environment variable to disable some of the optional features, e.g.:
 - `fma`: disable using FMA instructions
-- `index_hoist`: disble optimization to hoist comon index expressions
-- `predicate_elimination`: disble optimization to eliminate redundant predicates
+- `index_hoist`: disable optimization to hoist common index expressions
+- `predicate_elimination`: disable optimization to eliminate redundant predicates
 - `unroll_with_rng`: disable unrolling when RNG is used
 
 For example, `export PYTORCH_NVFUSER_DISABLE=fma,index_hoist` would disable FMA and index hoisting.
