@@ -216,6 +216,9 @@ class Shard(Placement):
     def __hash__(self) -> int:
         return hash(self.dim)
 
+    def __repr__(self) -> str:
+        return f"Shard(dim={self.dim})"
+
 
 class Replicate(Placement):
     # replicate placement
@@ -227,6 +230,9 @@ class Replicate(Placement):
     def __hash__(self) -> int:
         # every replicate placement is the same
         return -1
+
+    def __repr__(self) -> str:
+        return "Replicate()"
 
 
 class _Partial(Placement):
@@ -272,6 +278,9 @@ class _Partial(Placement):
 
     def __hash__(self) -> int:
         return hash(self.reduce_op)
+
+    def __repr__(self) -> str:
+        return f"_Partial(reduce_op={self.reduce_op})"
 
 
 # used internally to propagate the placements
