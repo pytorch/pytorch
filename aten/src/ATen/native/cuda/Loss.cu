@@ -58,7 +58,7 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 
 } // namespace
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -611,4 +611,4 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cuda)
       reduction,
       ignore_index);
 }
-}}  // namespace at::native
+}  // namespace at::native
