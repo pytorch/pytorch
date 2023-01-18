@@ -621,6 +621,15 @@ Utilities
 
 Symbolic Numbers
 ----------------
+.. autoclass:: SymInt
+    :members:
+
+.. autoclass:: SymFloat
+    :members:
+
+.. autoclass:: SymBool
+    :members:
+
 .. autosummary::
     :toctree: generated
     :nosignatures:

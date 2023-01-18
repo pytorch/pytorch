@@ -559,14 +559,24 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
             torch._C._will_engine_execute_node(out)
 
-    def test_autograd_function_extension_enabled_by_default(self):
-        # This feature flag is enabled by default. We're not deleting it yet
-        # so we can easily turn the feature off, but we want it enabled by
-        # default so that people can begin to test with it.
-        # We'll keep it around until approx. after next PyTorch release.
-        # Tracking issue: https://github.com/pytorch/pytorch/issues/90224
-        enabled = torch._C._is_autograd_function_extension_enabled()
-        self.assertTrue(enabled)
+    def test_custom_function_vmap_defaults(self):
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                return x ** 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return gO * 2 * x
+
+        self.assertFalse(MySquare.generate_vmap_rule)
+        self.assertTrue(hasattr(MySquare, 'vmap'))
 
     def test_custom_function_setup_context_simple(self):
         class MySquare(Function):
@@ -584,11 +594,10 @@ class TestAutograd(TestCase):
                 x, = ctx.saved_tensors
                 return gO * 2 * x
 
-        with torch.autograd.function._set_autograd_function_extension_enabled(True):
-            x = torch.randn([], requires_grad=True)
-            y = MySquare.apply(x)
-            gx, = torch.autograd.grad(y, x)
-            self.assertEqual(gx, 2 * x)
+        x = torch.randn([], requires_grad=True)
+        y = MySquare.apply(x)
+        gx, = torch.autograd.grad(y, x)
+        self.assertEqual(gx, 2 * x)
 
     def test_custom_function_setup_context_multi_output(self):
         # Multiple outputs with some non-Tensor outputs.
@@ -609,11 +618,10 @@ class TestAutograd(TestCase):
             def backward(ctx, gO, _):
                 return gO * ctx.two_x
 
-        with torch.autograd.function._set_autograd_function_extension_enabled(True):
-            x = torch.randn([], requires_grad=True)
-            y, _ = MySquare.apply(x)
-            gx, = torch.autograd.grad(y, x)
-            self.assertEqual(gx, 2 * x)
+        x = torch.randn([], requires_grad=True)
+        y, _ = MySquare.apply(x)
+        gx, = torch.autograd.grad(y, x)
+        self.assertEqual(gx, 2 * x)
 
     def test_custom_function_setup_context_multi_input(self):
         class MyReshape(Function):
@@ -652,9 +660,8 @@ class TestAutograd(TestCase):
             self.assertEqual(y_expected, y)
             self.assertEqual(gx_expected, gx)
 
-        with torch.autograd.function._set_autograd_function_extension_enabled(True):
-            test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
-            test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+        test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
+        test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -1092,20 +1099,6 @@ class TestAutograd(TestCase):
             b.sum().backward()
             self.assertEqual(pre_counter[0], 4)
             self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
-
-    def test_autograd_function_extension_feature_flag(self):
-        try:
-            prev = torch._C._is_autograd_function_extension_enabled()
-
-            torch._C._set_autograd_function_extension_enabled(True)
-            state = torch._C._is_autograd_function_extension_enabled()
-            self.assertTrue(state)
-
-            torch._C._set_autograd_function_extension_enabled(False)
-            state = torch._C._is_autograd_function_extension_enabled()
-            self.assertFalse(state)
-        finally:
-            torch._C._set_autograd_function_extension_enabled(prev)
 
     def test_grad_fn_prehooks_multiple_outputs(self):
         # Compute gradients without hooks
@@ -5885,6 +5878,51 @@ for shape in [(1,), ()]:
         y = getFn(False).apply(a)
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
+
+    def test_autograd_node_isinstance(self):
+        # Node is a "virtual" base class of codegen'd nodes. This means that
+        # isinstance and issubclass are overridden, but mro is unchanged
+        Node = torch.autograd.graph.Node
+
+        a = torch.rand(3, 3, requires_grad=True)
+        b = a.exp()
+
+        # Some nodes have codegened registrations to the torch._C._function module
+        self.assertIsInstance(b.grad_fn, Node)
+        self.assertTrue(issubclass(type(b.grad_fn), Node))
+        self.assertTrue(Node not in type(b.grad_fn).mro())
+
+        # Other nodes have manual registrations to the torch._C._function module
+        self.assertNotIsInstance(torch._C._functions.AccumulateGrad, Node)
+        self.assertTrue(issubclass(torch._C._functions.AccumulateGrad, Node))
+        self.assertIsInstance(b.grad_fn.next_functions[0][0], Node)
+        self.assertTrue(issubclass(torch._C._functions.DelayedError, Node))
+
+        # Special cases
+        self.assertNotIsInstance(None, Node)
+        self.assertNotIsInstance(1, Node)
+        self.assertNotIsInstance(Node, Node)
+        self.assertTrue(issubclass(Node, Node))
+
+        # Custom function case
+        self.assertTrue(issubclass(torch.autograd.function.BackwardCFunction, Node))
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                self.assertIsInstance(ctx, Node)
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                self.assertIsInstance(ctx, Node)
+                return x
+
+        out = Func.apply(a)
+        self.assertIsInstance(out.grad_fn, Node)
+        self.assertTrue(issubclass(type(out.grad_fn), Node))
+        self.assertTrue(Node not in type(out.grad_fn).mro())
+        out.sum().backward()
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
