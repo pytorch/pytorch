@@ -14,6 +14,7 @@ def functional_call(
     kwargs: Dict[str, Any] = None,
     *,
     tie_weights: bool = True,
+    strict: bool = False,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -109,6 +110,9 @@ def functional_call(
             tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
             paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
+        strict (bool, optional): If True, then the parameters and buffers passed in must match the parameters and
+            buffers in the original module. Therefore, if True and there are any missing or unexpected keys, it will
+            error. Default: False.
 
     Returns:
         Any: the result of calling ``module``.
@@ -128,7 +132,7 @@ def functional_call(
         parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
 
     return nn.utils.stateless._functional_call(
-        module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights
+        module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights, strict=strict
     )
 
 

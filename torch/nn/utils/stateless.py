@@ -116,65 +116,55 @@ def _create_tied_weights_map(
     return tied_weights_to_given_name
 
 
-def _create_swap_params(params_and_buffers):
-    def _swap_parameters(
-        module, tensor_name: str, full_path: str, tensor: Optional[Tensor]
-    ) -> None:
-        # Changes the module class to get a new __getattr__ dunder method
-        # that looks for the reparametrized tensor
-        if hasattr(module, "_attr_to_path"):
-            module._attr_to_path[tensor_name] = full_path
-        else:
-            module._attr_to_path = {}
-            module._attr_to_path[tensor_name] = full_path
-            _change_class(module, params_and_buffers)
-
-    return _swap_parameters
-
-
-def _remove_swap(module, name: str, full_path: str) -> None:
-    if hasattr(module, "_orig_class"):
-        module.__class__ = module._orig_class
-        delattr(module, "_orig_class")
-        delattr(module, "_attr_to_path")
-
-
 @contextlib.contextmanager
 def _reparametrize_module(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
     tie_weights: bool = False,
+    strict: bool = False,
 ) -> Iterator[None]:
     accessor = NamedMemberAccessor(module)
+    if strict:
+        missing_keys, unexpected_keys = accessor.check_keys(parameters_and_buffers)
+        error_msgs = []
+        if len(unexpected_keys) > 0:
+            error_msgs.append(
+                "Unexpected key(s): {}.".format(", ".join(map(repr, unexpected_keys)))
+            )
+        if len(missing_keys) > 0:
+            error_msgs.append("Missing key(s): {}.".format(", ".join(map(repr, missing_keys))))
+        if len(error_msgs) > 0:
+            raise RuntimeError(
+                'Error(s) in reparameterizing for {}:\n\t{}'.format(
+                    module._get_name(), "\n\t".join(error_msgs)
+                )
+            )
 
-    def apply_func_submodules(
-        func: Callable[..., None], full_path: str, given_path: str, args: Tuple
-    ) -> None:
-        prefix_path, _, last_atom = full_path.rpartition(".")
-        func(accessor.get_submodule(prefix_path), last_atom, given_path, *args)
+    if tie_weights:
+        tied_weights_map = _create_tied_weights_map(module, parameters_and_buffers)
+        # Do not modify the original dict
+        parameters_and_buffers_tied = parameters_and_buffers.copy()
+        for tied_name, given_name in tied_weights_map.items():
+            parameters_and_buffers_tied[tied_name] = parameters_and_buffers[given_name]
+    else:
+        parameters_and_buffers_tied = parameters_and_buffers
 
-    tied_weights_map = (
-        _create_tied_weights_map(module, parameters_and_buffers) if tie_weights else {}
-    )
-    for name, tensor in parameters_and_buffers.items():
-        apply_func_submodules(
-            _create_swap_params(parameters_and_buffers),
-            name,
-            name,
-            (tensor,),
-        )
-    for tied_name, user_given_name in tied_weights_map.items():
-        apply_func_submodules(
-            _create_swap_params(parameters_and_buffers),
-            tied_name,
-            user_given_name,
-            (None,),
-        )
+    orig_parameters_and_buffers: Dict[str, Tensor] = {}
     try:
+        orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+            parameters_and_buffers_tied, allow_missing=True
+        )
         yield
     finally:
-        for name in parameters_and_buffers:
-            apply_func_submodules(_remove_swap, name, name, ())
+        new_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+            orig_parameters_and_buffers, allow_missing=True
+        )
+        # Sometimes the module is not completely stateless and has some in-place modifications on
+        # the _parameters and _buffers dictionaries.
+        # Write the changed parameters and buffers back to the original dict.
+        parameters_and_buffers.update(
+            {k: v for k, v in new_parameters_and_buffers.items() if k in parameters_and_buffers}
+        )
 
 
 def _apply_func_submodules(
@@ -197,6 +187,7 @@ def functional_call(
     kwargs: Dict[str, Any] = None,
     *,
     tie_weights: bool = True,
+    strict: bool = False,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -251,6 +242,9 @@ def functional_call(
             tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
             paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
+        strict (bool, optional): If True, then the parameters and buffers passed in must match the parameters and
+            buffers in the original module. Therefore, if True and there are any missing or unexpected keys, it will
+            error. Default: False.
 
     Returns:
         Any: the result of calling ``module``.
@@ -258,10 +252,13 @@ def functional_call(
     warnings.warn(
         "This API is deprecated as of PyTorch 2.0 and will be removed in a future "
         "version of PyTorch. Please use torch.func.functional_call instead "
-        "which is a drop-in replacement for this API.")
+        "which is a drop-in replacement for this API."
+    )
 
-    return _functional_call(module, parameters_and_buffers, args, kwargs,
-                            tie_weights=tie_weights)
+    return _functional_call(
+        module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights, strict=strict
+    )
+
 
 def _functional_call(
     module: 'torch.nn.Module',
@@ -270,6 +267,7 @@ def _functional_call(
     kwargs: Dict[str, Any] = None,
     *,
     tie_weights: bool = True,
+    strict: bool = False,
 ):
     # TODO allow kwargs such as unsafe and others for parametrization
     if (
@@ -287,7 +285,7 @@ def _functional_call(
         raise RuntimeError("The stateless API can't be used with Jitted modules")
     if kwargs is None:
         kwargs = {}
-    with _reparametrize_module(module, parameters_and_buffers, tie_weights):
+    with _reparametrize_module(module, parameters_and_buffers, tie_weights, strict):
         if isinstance(args, tuple):
             out = module(*args, **kwargs)
         else:

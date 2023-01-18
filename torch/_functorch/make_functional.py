@@ -123,11 +123,9 @@ def load_weights(
     as Tensors. This means that mod.parameters() will still be empty after this call.
     """
     accessor = NamedMemberAccessor(mod)
-    for name, p in zip(names, params):
-        if as_params:
-            p = nn.Parameter(p)
-        accessor.del_tensor(name)
-        accessor.set_tensor(name, p)
+    if as_params:
+        params = [nn.Parameter(p) for p in params]
+    accessor.set_tensors(names, params)
 
 
 def _swap_state(
@@ -138,9 +136,9 @@ def _swap_state(
     for (_, attr_names), elem in zip(names_map.items(), elems):
         for i, attr_name in enumerate(attr_names):
             if i == 0:
-                result.append(accessor.get_tensor(attr_name))
-            accessor.del_tensor(attr_name)
-            accessor.set_tensor(attr_name, elem)
+                result.append(accessor.swap_tensor(attr_name, elem))
+            else:
+                accessor.set_tensor(attr_name, elem)
     return result
 
 
@@ -151,8 +149,7 @@ def load_buffers(
     as_params: bool = False,
 ) -> None:
     accessor = NamedMemberAccessor(mod)
-    for name, p in zip(names, buffers):
-        accessor.set_tensor(name, p)
+    accessor.set_tensors(names, buffers)
 
 
 def load_state(
