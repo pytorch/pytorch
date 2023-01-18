@@ -2752,6 +2752,7 @@ class ExternKernelOut(ExternKernel):
             kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
+
         wrapper.generate_extern_kernel_out(
             self.output_view,
             self.codegen_reference(),
