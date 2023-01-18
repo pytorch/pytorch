@@ -18,16 +18,16 @@
     },
     "clang-tidy": {
         "Darwin-i386": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/11.1.0/clang-tidy",
-            "hash": "00a61e97189d096dc8ff029590fdc38493862993df04980a53a926bdccc80905"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/15.0.6/clang-tidy",
+            "hash": "11c9234155dd5b7aec8cf46ea9629401c4432576615b6eff2a5a4c5e3f9e6504"
         },
         "Darwin-arm": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/11.1.0/clang-tidy",
-            "hash": "22b22f5625e030c50fece061fc94bd04d6a884e22859361e5094ef5cf74135f6"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/15.0.6/clang-tidy",
+            "hash": "4ed664cf50bb9fddec2d4170b3d7bbe0135dc5648acbd620b61c8d25a5a2fdb7"
         },
         "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/11.1.0/clang-tidy",
-            "hash": "f0eb93147808e361ea7d42d8868f4feddb53185e878d6cc2a493a4104265d2ee"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/15.0.6/clang-tidy",
+            "hash": "8defeb3a2698caca60251f9d682bc08374f1a37eec77d515533affdd03f93add"
         }
     },
     "actionlint": {
