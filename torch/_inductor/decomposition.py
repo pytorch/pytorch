@@ -68,6 +68,8 @@ decompositions = get_decompositions(
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
+        aten.masked_fill,
+        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
@@ -411,19 +413,6 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill])
-def masked_fill(value, mask, other):
-    if isinstance(other, numbers.Number):
-        other = torch.tensor(other, dtype=value.dtype, device=value.device)
-    assert other.numel() == 1 and other.ndim == 0
-    if other.device != value.device and other.numel() == 1:
-        other = other.to(value.device)
-    if other.dtype != value.dtype:
-        # TODO: error out on improper complex conversions
-        other = other.to(value.dtype)
-    return torch.where(mask, other, value)
-
-
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
@@ -483,11 +472,6 @@ def leaky_relu_(x, negative_slope=0.01):
 @register_decomposition(aten.silu_)
 def silu_(x):
     return x.copy_(aten.silu(x))
-
-
-@register_decomposition(aten.masked_fill_)
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
 
 
 @register_decomposition([aten.baddbmm])
