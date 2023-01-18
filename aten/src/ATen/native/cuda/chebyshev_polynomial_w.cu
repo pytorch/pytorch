@@ -8,8 +8,7 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-    namespace native {
+namespace at::native {
         namespace {
             const char chebyshev_polynomial_w_name[] = "chebyshev_polynomial_w_forward";
 
@@ -29,5 +28,4 @@ namespace at {
         } // namespace (anonymous)
 
         REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace at::native
