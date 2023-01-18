@@ -27,10 +27,10 @@ fi
 BASE_FLAGS=( --accuracy --explain )
 DATE="$(date)"
 
-python benchmarks/dynamo/torchbench.py --output torchbench.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee torchbench.log
-python benchmarks/dynamo/huggingface.py --output huggingface.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee huggingface.log
-python benchmarks/dynamo/timm_models.py --output timm_models.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee timm_models.log
-cat torchbench.log huggingface.log timm_models.log | tee sweep.log
-gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $@ - $(git rev-parse HEAD) $DATE" sweep.log | tee -a sweep.log
-python "$(dirname "$BASH_SOURCE")"/parse_logs.py sweep.log > final.csv
-gh gist create final.csv
+python "$(dirname "$BASH_SOURCE")"/torchbench.py --output "$PWD"/torchbench.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee torchbench.log
+python "$(dirname "$BASH_SOURCE")"/huggingface.py --output "$PWD"/huggingface.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee huggingface.log
+python "$(dirname "$BASH_SOURCE")"/timm_models.py --output "$PWD"/timm_models.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee timm_models.log
+cat "$PWD"/torchbench.log "$PWD"/huggingface.log "$PWD"/timm_models.log | tee "$PWD"/sweep.log
+gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $* - $(git rev-parse HEAD) $DATE" "$PWD"/sweep.log | tee -a "$PWD"/sweep.log
+python "$(dirname "$BASH_SOURCE")"/parse_logs.py "$PWD"/sweep.log > "$PWD"/final.csv
+gh gist create "$PWD"/final.csv
