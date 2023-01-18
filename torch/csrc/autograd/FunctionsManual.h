@@ -220,6 +220,10 @@ at::Tensor unsqueeze_to(
     const at::Tensor& self,
     int64_t dim,
     c10::SymIntArrayRef sym_sizes);
+at::Tensor unsqueeze_to(
+    const at::Tensor& self,
+    IntArrayRef dim,
+    c10::SymIntArrayRef sym_sizes);
 std::vector<at::Tensor> cat_tensors_backward(
     const at::Tensor& grad,
     const std::vector<std::vector<c10::SymInt>>& sizes,
