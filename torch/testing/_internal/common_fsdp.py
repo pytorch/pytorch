@@ -139,6 +139,7 @@ def subtest_name(test_name_mapping, *args):
         [test_name_mapping[str(s)] if s is not None else "none" for s in args]
     )
 
+
 def _broadcast_state_dict(rank, state_dict):
     # For non-FSDP roots, some parts of the model state on rank 0 may
     # not be on CPU, so we move everything to CPU to avoid issues like:
@@ -154,6 +155,7 @@ def _broadcast_state_dict(rank, state_dict):
     for param_name in state_dict.keys():
         state_dict[param_name] = state_dict[param_name].cuda()
     return state_dict
+
 
 def get_full_params(model: nn.Module, recurse: bool = True):
     """
@@ -332,10 +334,9 @@ class TransformerWithSharedParams(FSDPTestModel):
 
             if (
                 "sharding_strategy" in fsdp_kwargs
-                and fsdp_kwargs["sharding_strategy"] in {
-                    ShardingStrategy.HYBRID_SHARD,
-                    ShardingStrategy._HYBRID_SHARD_ZERO2
-                } and not isinstance(group, tuple)
+                and fsdp_kwargs["sharding_strategy"]
+                in {ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2}
+                and not isinstance(group, tuple)
             ):
                 fsdp_pg = None
             else:
@@ -1017,7 +1018,7 @@ class FSDPTest(MultiProcessTestCase):
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                "has parameters on cuda"
+                "has parameters on cuda",
             )
             if expects_device_error
             else suppress()
