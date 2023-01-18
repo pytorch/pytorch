@@ -11,7 +11,7 @@
 #define RESTRICT __restrict__
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -54,4 +54,4 @@ void _compute_linear_combination_cpu_kernel(
 
 REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cpu_kernel);
 
-}} // namespace at::native
+} // namespace at::native

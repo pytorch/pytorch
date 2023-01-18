@@ -50,8 +50,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'sym_int', 'sym_float', 'compile', 'vmap'
-]
+    'sym_int', 'sym_float', 'compile', 'vmap']
 
 ################################################################################
 # Load the extension module
@@ -1221,11 +1220,13 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 
 class _TorchCompileInductorWrapper:
+    compiler_name = "inductor"
+
     def __init__(self, mode, passes):
         from torch._dynamo.eval_frame import lookup_backend
         from torch._inductor.config import InductorConfigContext
 
-        self.compile_fn = lookup_backend("inductor")
+        self.compile_fn = lookup_backend(self.compiler_name)
         self.cm = InductorConfigContext(mode if mode is not None else passes)
         self._torchdynamo_orig_callable = self.compile_fn
 
@@ -1327,3 +1328,14 @@ import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
 from torch.func import vmap
+
+# The function _sparse_coo_tensor_unsafe is removed from PyTorch
+# Python API (v. 1.13), here we temporarily provide its replacement
+# with a deprecation warning.
+# TODO: remove the function for PyTorch v 1.15.
+def _sparse_coo_tensor_unsafe(*args, **kwargs):
+    import warnings
+    warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
+                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
+    kwargs['check_invariants'] = False
+    return torch.sparse_coo_tensor(*args, **kwargs)
