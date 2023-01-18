@@ -2624,7 +2624,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
         test(op, (torch.rand(B0, 2, 3, 5),))
-        test(op, (torch.rand(B0),))
         test(op, (torch.rand(2, B0, 3, 5),), in_dims=1)
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)

@@ -317,7 +317,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             parameters will not be managed by this FSDP instance,
             that means these parameters will not be flattened and sharded by FSDP,
             their gradients will not be synchronized as well. With this newly added
-            argument, ``ignored_modules`` could be deprecated soon. For backward compatibility,
+            argument, ``ignored_modules`` could be deprecated soon. For backward compatiablity,
             both ``ignored_parameters`` and ``ignored_modules`` are kept for now,
             but FSDP only allows one of them to be specified as not ``None``.
     """
@@ -1161,7 +1161,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model, False, False
             )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1209,7 +1211,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)

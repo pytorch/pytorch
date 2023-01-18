@@ -5,10 +5,7 @@ import sys
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    ShardingStrategy,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -108,7 +105,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             self._test_ignored_modules_transformer,
         )
 
-    def _test_ignored_modules_transformer(self, use_orig_params: bool, ignore_modules: bool):
+    def _test_ignored_modules_transformer(
+        self, use_orig_params: bool, ignore_modules: bool
+    ):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
         model: nn.Module = TransformerWithSharedParams.init(
@@ -173,7 +172,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             )
         else:
             wrapped_model = FSDP(
-                model, ignored_parameters=list(model.layer1.parameters()), use_orig_params=use_orig_params
+                model,
+                ignored_parameters=list(model.layer1.parameters()),
+                use_orig_params=use_orig_params,
             )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored nested sequential's parameters
@@ -222,11 +223,16 @@ class TestFSDPIgnoredModules(FSDPTest):
                 ignored modules) to the root FSDP instance.
         """
         self.run_subtests(
-            {"pass_ignored_modules_to_root": [False, True], "ignore_modules": [True, False]},
+            {
+                "pass_ignored_modules_to_root": [False, True],
+                "ignore_modules": [True, False],
+            },
             self._test_diff_ignored_modules_across_ranks,
         )
 
-    def _test_diff_ignored_modules_across_ranks(self, pass_ignored_modules_to_root: bool, ignore_modules: bool):
+    def _test_diff_ignored_modules_across_ranks(
+        self, pass_ignored_modules_to_root: bool, ignore_modules: bool
+    ):
         # To exercise different `FlatParameter` enumerations across ranks,
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
         # after `layer1`, which has the variable number of ignored modules
