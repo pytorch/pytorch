@@ -836,6 +836,7 @@ class TritonKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
+        original_index = index
         index, mask_vars, mask = self.indexing(index)
 
         if "rmask" in mask:
@@ -857,7 +858,11 @@ class TritonKernel(Kernel):
         if V.graph.is_unspec_arg(name):
             line = var
         else:
-            line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+            if isinstance(original_index, sympy.Integer):
+                dense_size = self.dense_size_str()
+                line = f"tl.broadcast_to({var} + ({original_index}), {dense_size})"
+            else:
+                line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
 
