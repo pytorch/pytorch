@@ -7,33 +7,6 @@ from typing import List, Optional
 from torch import Tensor
 from torch._awaits import Await
 
-@torch.jit.script
-class CFX(object):
-    def __init__(self, a: Tensor, b: Tensor):
-        self.a = a
-        self.b = b
-
-    def ma(self) -> Tensor:
-        return self.a
-
-    @torch.jit.unused
-    # Even for jit.unused we need to be decl-scriptable, as jit adds stub with the same decl.
-    # If to add fx types here - during decl resolve jit will try to compile it and fail.
-    def __fx_create_arg__(self, tracer):
-        return tracer.create_node(
-            "call_function",
-            CFX,
-            args=(tracer.create_arg(self.a), tracer.create_arg(self.b)),
-            kwargs={},
-        )
-
-def cfx_delayed(c: CFX) -> Tensor:
-    return 2 * (c.ma() + 1)
-
-@torch.fx.wrap
-def cfx_wrapped(c: CFX) -> Await[Tensor]:
-    return torch.jit._awaitable(cfx_delayed, c)
-
 
 class TestAwait(JitTestCase):
     def test_await_python(self):
@@ -291,26 +264,6 @@ class TestAwait(JitTestCase):
         t = torch.jit._awaitable_wait(aw)
         self.assertTrue(t.v == 3)
 
-    def test_await_fx_simple(self):
-        def delayed(x: Tensor) -> Tensor:
-            return 2 * (x + 1)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def process(self, aw: Await[Tensor]):
-                return torch.jit._awaitable_wait(aw)
-
-            def forward(self, x: Tensor):
-                aw = torch.jit._awaitable(delayed, x)
-                y = 3 * x
-                r = self.process(aw)
-                return r + y
-        m = M()
-        tracer = torch.fx.Tracer()
-        g = tracer.trace(m)
-
     def test_await_isinstance(self):
         def delayed(x: Tensor) -> Tensor:
             return 2 * (x + 1)
@@ -376,25 +329,3 @@ class TestAwait(JitTestCase):
         tm = torch.jit.trace(main, (inp, inp))
         inp_check = torch.ones(2)
         self.assertEqual(main(inp_check, inp_check), tm(inp_check, inp_check))
-
-    def test_await_fx(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def process(self, aw: Await[Tensor]):
-                return torch.jit._awaitable_wait(aw)
-
-            def forward(self, x: Tensor, y: Tensor):
-                aw = cfx_wrapped(CFX(x, y))
-                z = torch.sin(x)
-                r = self.process(aw)
-                return r + z
-
-        m = M()
-        tracer = torch.fx.Tracer()
-        g = tracer.trace(m)
-        gm = torch.fx.GraphModule(tracer.root, g)
-        sm = torch.jit.script(gm)
-        inp = torch.randn(2)
-        self.assertEqual(m(inp, inp), sm(inp, inp))

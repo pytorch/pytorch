@@ -12,8 +12,7 @@
 
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static thread_local bool allow_numbers_as_tensors = false;
 
@@ -794,5 +793,4 @@ py::object _get_operation_for_overload_or_packet(
   return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

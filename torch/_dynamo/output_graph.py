@@ -756,6 +756,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
+        self.side_effects.keepalive = []
 
     def create_proxy(
         self,

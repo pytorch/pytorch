@@ -341,37 +341,6 @@ class Tracer(TracerBase):
 
             return self.create_node("get_attr", qualname, (), {})
 
-        if isinstance(a, torch.Await):
-            is_nowait = a.is_nowait()  # type: ignore[attr-defined]
-            await_args: Tuple[Any, ...] = a.args()  # type: ignore[attr-defined]
-
-            if is_nowait:
-                return super().create_arg(
-                    self.create_proxy(
-                        "call_function",
-                        torch.jit._awaitable_nowait,
-                        await_args,
-                        {},
-                    )
-                )
-            else:
-                i = 0
-                while True:
-                    qualname = f"torch_await_fn_{i}"
-                    if not hasattr(self.root, qualname):
-                        break
-                    i += 1
-                setattr(self.root, qualname, a.fn())  # type: ignore[attr-defined]
-                fn_attr = self.create_proxy("get_attr", qualname, (), {})
-                return super().create_arg(
-                    self.create_proxy(
-                        "call_function",
-                        torch.jit._awaitable,
-                        (fn_attr, *await_args),
-                        {},
-                    )
-                )
-
         return super().create_arg(a)
 
     @compatibility(is_backward_compatible=True)
