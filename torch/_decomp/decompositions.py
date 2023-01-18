@@ -2754,16 +2754,6 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
-@register_decomposition(aten.zero)
-def zero(input: Tensor) -> Tensor:
-    return torch.fill(input, 0)
-
-
-@register_decomposition([aten.zeros_like])
-def zeros_like(self: Tensor, *args, **kwargs) -> Tensor:
-    return torch.full_like(self, 0, *args, **kwargs)
-
-
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -2794,4 +2784,3 @@ register_inplace(aten.scatter_, aten.scatter)
 register_inplace(aten.scatter_add_, aten.scatter_add)
 register_inplace(aten.scatter_reduce_, aten.scatter_reduce)
 register_inplace(aten.silu_, aten.silu)
-register_inplace(aten.zero_, aten.zero)
