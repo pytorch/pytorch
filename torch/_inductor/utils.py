@@ -236,6 +236,9 @@ def sympy_str(expr: sympy.Expr):
 
 
 def sympy_symbol(name):
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
