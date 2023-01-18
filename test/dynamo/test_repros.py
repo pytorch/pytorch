@@ -1762,7 +1762,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return (add_2,)
 
         mod = MockModule()
-        opt_mod = torch._dynamo.optimize("aot_inductor_debug")(mod)
+        opt_mod = torch._dynamo.optimize("aot_eager_decomp_partition")(mod)
 
         args = [
             ((2, 512), (2048, 4), torch.int64, "cpu", False),
@@ -1904,7 +1904,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
 
-        opt_foo = torch._dynamo.optimize("aot_inductor_debug")(foo)
+        opt_foo = torch._dynamo.optimize("aot_eager_decomp_partition")(foo)
         with torch.cuda.amp.autocast(enabled=True):
             ref = foo(*args)[0]
             res = foo(*args)[0]
@@ -2252,7 +2252,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         m_ref = Repro()
         m_test = deepcopy(m_ref)
 
-        @torch._dynamo.optimize("aot_inductor_debug")
+        @torch._dynamo.optimize("aot_eager_decomp_partition")
         def compiled_fn(x):
             return m_test(x)
 

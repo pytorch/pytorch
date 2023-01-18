@@ -34,7 +34,7 @@ def aot_autograd(**kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
         import functorch.compile
 
-        # Hack to get around circular import problems with aot_inductor_debug
+        # Hack to get around circular import problems with aot_eager_decomp_partition
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()
 
@@ -91,7 +91,7 @@ aot_ts = aot_autograd(fw_compiler=ts_compile)
 
 # Uses TorchInductor AOT Autograd decomps and partitioner to isolate aot vs
 # inductor problems.
-aot_inductor_debug = aot_autograd(
+aot_eager_decomp_partition = aot_autograd(
     # these are taken from memory_efficient_fusion()
     fw_compiler=nop,
     bw_compiler=nop,
@@ -347,6 +347,10 @@ def create_aot_backends():
     # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
     BACKENDS["aot_eager"] = aot_eager
 
+    # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
+    # isolate inductor vs aot_eager errors
+    BACKENDS["aot_eager_decomp_partition"] = aot_eager_decomp_partition
+
     # aot_ts uses torchscript backend. We can use this with both nnc and nvfuser
     # by using the relevant fuser with torch.jit.fuser(...)
     BACKENDS["aot_ts"] = aot_ts
@@ -371,10 +375,6 @@ def create_aot_backends():
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
     BACKENDS["aot_cudagraphs"] = aot_cudagraphs
-
-    # aot_inductor_debug just replaces the inductor compiler with nop to help
-    # isolate inductor vs aot_eager errors
-    BACKENDS["aot_inductor_debug"] = aot_inductor_debug
 
     BACKENDS["aot_torchxla_trivial"] = aot_torchxla_trivial
     BACKENDS["aot_torchxla_trace_once"] = aot_torchxla_trace_once
