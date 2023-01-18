@@ -98,7 +98,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed = cls(other.embed_dim, other.num_heads, other.dropout,
                        (other.in_proj_bias is not None),
                        (other.bias_k is not None),
-                       other.add_zero_attn, other.kdim, other.vdim)
+                       other.add_zero_attn, other.kdim, other.vdim,
+                       other.batch_first)
         observed.bias_k = other.bias_k
         observed.bias_v = other.bias_v
         observed.qconfig = other.qconfig
