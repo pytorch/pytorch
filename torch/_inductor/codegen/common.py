@@ -193,7 +193,6 @@ class KernelArgs:
     @staticmethod
     def _lookup(prefix, odict, name):
         assert isinstance(name, (str, sympy.Symbol))
-        name = str(name)
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
@@ -339,8 +338,8 @@ class KernelArgs:
             precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
-            call_args.append(outer)
-            precompile_args.append(SizeArg(inner, sympy_symbol(outer)))
+            call_args.append(str(outer))
+            precompile_args.append(SizeArg(inner, outer))
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
