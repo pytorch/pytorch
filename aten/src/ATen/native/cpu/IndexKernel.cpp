@@ -15,7 +15,7 @@
 #include <c10/util/irange.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -185,7 +185,7 @@ void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
@@ -244,7 +244,7 @@ void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cpu", [&] {
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
@@ -584,4 +584,4 @@ REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
 REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
-}} // namespace at::native
+} // namespace at::native
