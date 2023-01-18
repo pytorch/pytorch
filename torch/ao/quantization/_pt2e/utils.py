@@ -1,5 +1,4 @@
 import torch
-import torch._dynamo as torchdynamo
 from torch.fx import GraphModule
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 # TODO[jerryzh168]: move this to a more general util function
@@ -7,7 +6,6 @@ from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
 from collections import OrderedDict
-import copy
 import operator
 
 # TODO[qihan]: longer term, this should happen in the dynamo stack as well
