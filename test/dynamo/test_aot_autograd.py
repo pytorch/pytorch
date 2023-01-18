@@ -337,10 +337,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         for grad_output in (torch.tensor(1.0, requires_grad=True), None):
             # See @once_differentiable docs for why there are two different errors
             x = torch.tensor(1.0, requires_grad=True)
-            if grad_output is None:
-                err = "does not require grad and does not have a grad_fn"
-            else:
-                err = "torch.compile with aot_autograd does not currently support double backward"
+            err = "torch.compile with aot_autograd does not currently support double backward"
 
             # The following cases should be equivalent:
 
