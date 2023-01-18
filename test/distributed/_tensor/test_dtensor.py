@@ -201,6 +201,26 @@ class DTensorTest(DTensorTestBase):
         self.assertNotEqual(sharded_tensor.placements, shard_spec)
 
     @with_comms
+    def test_dtensor_spec_hash(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(3, 3)
+        local_tensor2 = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        sharded_tensor2 = DTensor.from_local(local_tensor2, device_mesh, shard_spec)
+        # note that DTensorSpec without real tensor data, so the hash would be the same
+        # as long as the mesh, placements and tensor properties are the same
+        self.assertEqual(hash(sharded_tensor._spec), hash(sharded_tensor2._spec))
+
+        # change the placements would change the hash
+        local_tensor3 = torch.ones(3, 3)
+        replica_spec = [Replicate()]
+        replica_tensor = DTensor.from_local(
+            local_tensor3, device_mesh, replica_spec, run_check=False
+        )
+        self.assertNotEqual(hash(sharded_tensor._spec), hash(replica_tensor._spec))
+
+    @with_comms
     def test_dtensor_properties(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]

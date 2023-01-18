@@ -73,7 +73,6 @@ class OpSchema(object):
     is_inplace: bool = False
     is_out_variant: bool = False
 
-
     def __post_init__(self) -> None:
         # simple analysis of function schema to determine
         # if this is an inplace/out variant, it might not
