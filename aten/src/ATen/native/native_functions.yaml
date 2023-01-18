@@ -13540,7 +13540,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: permute_copy
-  tags: view_copy
+  tags: [view_copy, canonical]
 
 - func: _reshape_alias_copy(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
   variants: function
@@ -13565,7 +13565,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: slice_copy_Tensor_symint
-  tags: view_copy
+  tags: [view_copy, canonical]
 
 - func: split_copy.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
   variants: function
@@ -13607,7 +13607,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: transpose_copy_int
-  tags: view_copy
+  tags: [canonical, view_copy]
 
 - func: unsqueeze_copy(Tensor self, int dim) -> Tensor
   variants: function
@@ -13675,13 +13675,13 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: view_copy_symint
-  tags: view_copy
+  tags: [view_copy, canonical]
 
 - func: view_copy.dtype(Tensor self, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: view_copy_dtype
-  tags: view_copy
+  tags: [view_copy, canonical]
 
 - func: unfold_copy(Tensor self, int dimension, int size, int step) -> Tensor
   variants: function
