@@ -21,7 +21,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -1297,4 +1297,4 @@ REGISTER_DISPATCH(batch_norm_cpu_stub, &batch_norm_cpu_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_collect_stats_stub, &batch_norm_cpu_collect_stats_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_backward_stub, &batch_norm_cpu_backward_kernel);
 
-}} // namespace at::native
+} // namespace at::native
