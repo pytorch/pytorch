@@ -84,9 +84,6 @@ compute_only_pw_cast_for_opmath = partial(
 pw_cast_for_opmath = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
-reduction_complex_to_real = partial(
-    type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
-)
 pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
@@ -175,7 +172,6 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 
 @register_decomposition(aten.hardtanh_backward)
-@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
@@ -183,7 +179,6 @@ def hardtanh_backward(
 
 
 @register_decomposition(aten.hardshrink_backward)
-@pw_cast_for_opmath
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
     return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
 
@@ -205,7 +200,6 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 
 @register_decomposition(aten.threshold_backward)
-@pw_cast_for_opmath
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0.0, grad_output)
 
@@ -541,7 +535,7 @@ def binary_cross_entropy(
     #     "all elements of input should be between 0 and 1"
     # )
     loss = (target - 1) * torch.maximum(
-        torch.log(1 - self), self.new_full((), -100)
+        torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
     if weight is not None:
         loss = loss * weight
@@ -994,8 +988,11 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    unnormalized = torch.exp(x - x_max)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
@@ -1014,8 +1011,11 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    shifted = x - x_max
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -1522,6 +1522,7 @@ def _native_batch_norm_legit_functional(
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
+    assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -1552,34 +1553,8 @@ def _to_copy(
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
-        out = torch.empty_like(x, memory_format=memory_format)
-        out = aten.copy.default(out, x)
-        return out  # type: ignore[call-overload]
+        return torch.clone(x, memory_format=memory_format)
     return x
-
-
-@pw_cast_for_int_to_real
-def xlogy(self: Tensor, other: Tensor) -> Tensor:
-    return aten.where(
-        aten.isnan(self),
-        self,
-        aten.where(
-            self == aten.new_zeros(self, ()),
-            aten.new_zeros(self, ()),
-            self * aten.log(other),
-        ),
-    )
-
-
-@register_decomposition(aten.std.correction)
-@reduction_complex_to_real
-def std_decomposition(
-    x: Tensor,
-    dim: Optional[List[int]] = None,
-    correction: Optional[int] = None,
-    keepdim: bool = False,
-):
-    return torch.sqrt(torch.var(x, dim, correction=correction, keepdim=keepdim))
 
 
 # Questionable decompositions
@@ -1871,6 +1846,31 @@ def index_add_(
     *,
     alpha: NumberType = 1,
 ):
+    return _index_add(x, dim, index, tensor, inplace=True, alpha=alpha)
+
+
+@register_decomposition(aten.index_add)
+@out_wrapper()
+def index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+
+
+def _index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    inplace: bool,
+    alpha: NumberType = 1,
+):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
         index.ndim <= 1,
@@ -1884,9 +1884,47 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
+    # Treat scalars as elements of \R^1
+    zero_dim = x.ndim == 0
+    x1 = x.unsqueeze(0) if zero_dim else x
     idx = (None,) * dim + (index,)
-    aten.index_put_(x, idx, tensor, accumulate=True)
-    return x
+    index_put = aten.index_put_ if inplace else aten.index_put
+    out = index_put(x1, idx, tensor, accumulate=True)
+    if inplace:
+        return x
+    else:
+        return out.squeeze(0) if zero_dim else out.contiguous()
+
+
+@register_decomposition(aten.index_copy_)
+def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return _index_copy(x, dim, index, tensor, inplace=True)
+
+
+@register_decomposition(aten.index_copy)
+@out_wrapper()
+def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return _index_copy(x, dim, index, tensor, inplace=False)
+
+
+def _index_copy(
+    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    zero_dim = x.ndim == 0
+    x1 = x.unsqueeze(0) if zero_dim else x
+    idx = (None,) * dim + (index,)
+    index_put = aten.index_put_ if inplace else aten.index_put
+    out = index_put(x1, idx, tensor)
+    if inplace:
+        return x
+    else:
+        return out.squeeze(0) if zero_dim else out.contiguous()
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
@@ -1897,20 +1935,6 @@ def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
         if idx in wrapped_dims:
             self = self.squeeze(idx)
     return self
-
-
-@register_decomposition(aten.logsumexp.default)
-@pw_cast_for_int_to_real
-def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
-    return result.log().add(maxes_squeezed)
 
 
 # nb: Should use acc_t, not op_math
@@ -1927,27 +1951,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     return min - torch.log1p(z), buffer
 
 
-@register_decomposition(aten.norm)
-@out_wrapper()
-def norm(
-    self: Tensor,
-    p: Optional[float] = None,
-    dim: List[int] = None,
-    keepdim: bool = False,
-    dtype: Optional[torch.dtype] = None,
-):
-    p = p if p is not None else 2.0
-    if dtype:
-        return torch.linalg.vector_norm(self.to(dtype), p, dim, keepdim, dtype=dtype)
-
-    computation_dtype, result_dtype = utils.elementwise_dtypes(
-        self, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
-    )
-    return torch.linalg.vector_norm(
-        self.to(computation_dtype), p, dim, keepdim, dtype=dtype
-    ).to(result_dtype)
-
-
 @register_decomposition(aten.uniform)
 def uniform(
     x: Tensor,
@@ -1961,6 +1964,12 @@ def uniform(
         dtype=x.dtype,
         device=x.device,
     )
+
+
+@register_decomposition(aten.uniform_)
+def uniform_(self, low=0, high=1, generator=None):
+    assert generator is None
+    return self.copy_((high - low) * torch.rand_like(self) + low)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -2714,7 +2723,12 @@ def upsample_bicubic2d_default(
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
     coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
-    return _upsample_cubic_interp1d(coeffs_y, t_y)
+    result = _upsample_cubic_interp1d(coeffs_y, t_y)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(a)
+    result = result.contiguous(memory_format=memory_format)
+    return result
 
 
 @register_decomposition(aten.upsample_bicubic2d.vec)
