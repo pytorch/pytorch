@@ -759,6 +759,7 @@ class FakeTensorOperatorInvariants(TestCase):
             meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
             meta_out = torch.ops.aten._embedding_bag(*meta_args)
 
+        self.assertEqual(len(ref_out), len(meta_out))
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
 
