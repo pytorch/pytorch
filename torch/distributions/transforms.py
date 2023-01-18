@@ -824,7 +824,7 @@ class CorrCholeskyTransform(Transform):
         y_cumsum_vec = tril_matrix_to_vec(y_cumsum_shifted, diag=-1)
         t = y_vec / (y_cumsum_vec).sqrt()
         # inverse of tanh
-        x = ((1 + t) / (1 - t)).log() / 2
+        x = (t.log1p() - t.neg().log1p()) / 2
         return x
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
