@@ -526,6 +526,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if dtype in (torch.float16, torch.bfloat16):
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
+
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -1710,10 +1715,12 @@ class LoopLevel:
 
     def clone(self):
         loop = copy(self)
+        loop.inner = []
         if self.inner:
-            for idx, inner_loop in enumerate(self.inner):
-                loop.inner[idx] = inner_loop.clone()
-                loop.inner[idx].parent = loop
+            for inner_loop in self.inner:
+                inner_loop_clone = inner_loop.clone()
+                inner_loop_clone.parent = loop
+                loop.inner.append(inner_loop_clone)
         loop.kernel = deepcopy(self.kernel)
         return loop
 
