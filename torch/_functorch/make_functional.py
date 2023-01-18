@@ -503,18 +503,19 @@ def functional_init(model_class, ensemble_shape=(), device='cpu'):
             raise ValueError('NYI: ensemble_shape with more than 1 element')
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
-            return make_functional_deprecated_v1(model)
+            func, params = make_functional(model)
+            return params, func, None
         num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
         models = tuple(model_class(*args, **kwargs).to(device)
                        for _ in range(num_models))
-        _, fn, names = make_functional_deprecated_v1(model_class(*args, **kwargs))
-        weights = tuple(make_functional_deprecated_v1(model)[0] for model in models)
+        fn, _ = make_functional(model_class(*args, **kwargs))
+        weights = tuple(make_functional(model)[1] for model in models)
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
-        return weights, fn, names
+        return weights, fn, None
     return wrapped
 
 
@@ -524,20 +525,21 @@ def functional_init_with_buffers(model_class, ensemble_shape=(), device='cpu'):
             raise ValueError('NYI: ensemble_shape with more than 1 element')
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
-            return make_functional_deprecated_v1(model)
+            func, params, buffers = make_functional_with_buffers(model)
+            return params, buffers, func, None
         num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
         models = tuple(model_class(*args, **kwargs).to(device)
                        for _ in range(num_models))
-        _, _, fn, weight_names, buffer_names = \
-            make_functional_with_buffers_deprecated_v1(model_class(*args, **kwargs))
-        weights, buffers = zip(*tuple(make_functional_with_buffers_deprecated_v1(model)[:2]
+        fn, _, _ = \
+            make_functional_with_buffers(model_class(*args, **kwargs))
+        weights, buffers = zip(*tuple(make_functional_with_buffers(model)[1:]
                                       for model in models))
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
         buffers = tuple(zip(*buffers))
         buffers = tuple(torch.stack(shards).detach() for shards in buffers)
-        return weights, buffers, fn, weight_names, buffer_names
+        return weights, buffers, fn, None, None
     return wrapped
