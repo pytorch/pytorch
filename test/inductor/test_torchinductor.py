@@ -704,7 +704,7 @@ class CommonTemplate:
 
     def test_add_const_int(self):
         def fn(a):
-            return (a + 1,)
+            return (a + 1, torch.add(a, 1, alpha=2))
 
         self.common(fn, (torch.randn(32),))
 
