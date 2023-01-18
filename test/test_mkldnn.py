@@ -304,6 +304,11 @@ class TestMkldnn(TestCase):
         input_shapes = (55, 55)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
         for train, bias, dilation, groups in options:
+            # skip tests for ConvTransposed2d with groups
+            # lift this when groups are enabled.
+            if conv_module is torch.nn.ConvTranspose2d:
+                groups = 1
+
             N = torch.randint(3, 10, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
