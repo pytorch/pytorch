@@ -1617,8 +1617,22 @@ class TestMPS(TestCase):
 
         x = x[:,3:].view(2, 3, 4, 1)
         x_cpu = x_cpu[:,3:].view(2, 3, 4, 1)
-
         self.assertEqual(x, x_cpu)
+
+        x = x + 2
+        x_cpu = x_cpu + 2
+        self.assertEqual(x, x_cpu)
+
+    def test_slice_reshape_contg_view(self):
+        import torch
+
+        x_mps = torch.randn(1, 4800, 2, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        r_mps = x_mps + 2
+        r_cpu = x_cpu + 2
+
+        self.assertEqual(r_mps, r_cpu)
 
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995

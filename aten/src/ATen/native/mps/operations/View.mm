@@ -536,10 +536,25 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
   int src_ndim_view = src_view_shape.size();
   if (src_ndim_base == src_ndim_view) {
-    for (const auto i : c10::irange(src_ndim_base)) {
+    for (const auto i: c10::irange(src_ndim_base)) {
       if (src_view_shape[i] > src_base_shape[i]) {
         return false;
       }
+    }
+  } else {
+    // Detect slice followed by reshape cases, e.g (1,4800,2) -> (1,4800)
+    bool allDimsEqual = true;
+    auto min_ndim = std::min(src_ndim_base, src_ndim_view);
+    for (const auto i: c10::irange(min_ndim)) {
+      if (src_view_shape[i] > src_base_shape[i]) {
+        return false;
+      }
+      else if (src_view_shape[i] != src_base_shape[i]) {
+        allDimsEqual = false;
+      }
+    }
+    if (allDimsEqual) {
+      return false;
     }
   }
   return true;
