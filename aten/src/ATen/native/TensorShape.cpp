@@ -3573,6 +3573,10 @@ Tensor numpy_T(const Tensor &self) {
         "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
     );
   }
+  if (n == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
@@ -3582,6 +3586,10 @@ Tensor numpy_T(const Tensor &self) {
 
 Tensor matrix_H(const Tensor &self) {
   const auto ndim = self.dim();
+  if (ndim == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.H is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   TORCH_CHECK(ndim == 2 || ndim == 0,
       "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
       ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
@@ -3606,14 +3614,25 @@ Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name
 } // anonymous namespace
 
 Tensor mT(const Tensor &self) {
+  if (self.dim() == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.mT is deprecated on 0-D tensors. This function is the identity in these cases.");
+  }
   return _adjoint(self, /*transpose=*/true, "mT");
 }
 
 Tensor mH(const Tensor &self) {
+  if (self.dim() == 0) {
+    // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.mH is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   return _adjoint(self, /*transpose=*/false, "mH");
 }
 
 Tensor adjoint(const Tensor &self) {
+  if (self.dim() == 0) {
+   TORCH_WARN_ONCE("adjoint() is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
