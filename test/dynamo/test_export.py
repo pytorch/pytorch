@@ -1455,6 +1455,53 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    def test_export_with_closure_diff(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            def forward(self, pred, x):
+                return self.indirection(pred, x)
+
+            def indirection(self, pred, x):
+                def true_fn(y):
+                    return y + 2
+
+                def false_fn(y):
+                    return y - 2
+
+                def shallow(x):
+                    return x * 2
+
+                def deep(x):
+                    return cond(
+                        x[0][0] > 0,
+                        true_fn,
+                        false_fn,
+                        [x],
+                    )
+
+                return cond(pred, shallow, deep, [x])
+
+        mod = Module()
+        x = torch.randn([3, 3])
+        pred = torch.tensor(x[0][0].item() < 0)
+        real_result = mod.forward(pred, x)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(mod.forward, pred, x)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+        # New X, just to show we did not specialize
+        x = x * -1
+        pred = torch.tensor(x[0][0].item() < 0)
+        real_result_2 = mod.forward(pred, x)
+        dynamo_result_2 = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
+
     def test_export_meta_val(self):
         def f(x, y, z):
             return x * y + z

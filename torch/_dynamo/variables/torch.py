@@ -10,6 +10,10 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dynamo.side_effects import AttributeMutationNew, SideEffects
+from torch._dynamo.utils import get_fake_value
+from torch._dynamo.variables import DynamicShapeVariable
+from torch._dynamo.variables.misc import NewCellVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -766,12 +770,30 @@ class TorchPyOperator(VariableTracker):
 
                 guards = state.output.guards
                 nn_modules = state.output.nn_modules
+                side_effects = state.output.side_effects
 
                 # Nub out bits of state that we don't require to be
                 # equal
                 comparable_state = state._replace(
                     output=state.output._replace(
                         guard_state=GuardsCheckpointState(set()),
+                        # New cells are created for all closure variables, including functions in outer scope.
+                        # Then these "side effects" are pruned (see above) based on which of them are accessed.
+                        # Unfortunately this causes different "side effects" per branch.
+                        # We shouldn't care when branches call different sets of functions in outer scope.
+                        side_effects=SideEffects(
+                            id_to_variable={
+                                k: v
+                                for k, v in side_effects.id_to_variable.items()
+                                if not isinstance(v, NewCellVariable)
+                            },
+                            store_attr_mutations={
+                                k: v
+                                for k, v in side_effects.store_attr_mutations.items()
+                                if not isinstance(k, AttributeMutationNew)
+                            },
+                            keepalive=[],
+                        ),
                         nn_modules=None,
                         # Timestamp is monotonically increasing so we don't
                         # care about divergence
