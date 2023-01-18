@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 Decl mergeTypesFromTypeComment(
     const Decl& decl,
@@ -821,4 +822,5 @@ Expr Parser::parseExp() {
   return pImpl->parseExp();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -9,7 +9,8 @@
 #include <ATen/native/Pool.h>
 #include <torch/library.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 
 void set_kernel_params
@@ -287,4 +288,5 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
 
 }
 
-} // namespace at::native
+}
+}

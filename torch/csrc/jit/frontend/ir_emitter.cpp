@@ -43,7 +43,8 @@
 #include <set>
 #include <stack>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
@@ -5681,4 +5682,5 @@ void CompilationUnit::define_interface(
   this->register_type(iface);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

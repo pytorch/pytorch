@@ -3,7 +3,8 @@
 #include <cstring>
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // computes levenshtein edit distance between two words
 // returns maxEditDistance + 1 if the edit distance exceeds MaxEditDistance
@@ -52,4 +53,5 @@ size_t ComputeEditDistance(
   return result;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

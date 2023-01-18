@@ -6,7 +6,9 @@
 
 #include <c10/util/irange.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
@@ -1309,4 +1311,6 @@ c10::optional<int64_t> evalInt(ExprPtr e) {
   }
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

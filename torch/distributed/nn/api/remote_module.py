@@ -367,10 +367,7 @@ class _RemoteModule(nn.Module):
 
     def register_forward_pre_hook(  # type: ignore[return]
         self,
-        hook: Union[
-            Callable[[T, Tuple[Any, ...]], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
-        ],
+        hook: Callable[..., None],
         prepend: bool = False,
         with_kwargs: bool = False,
     ) -> RemovableHandle:
@@ -378,10 +375,7 @@ class _RemoteModule(nn.Module):
 
     def register_forward_hook(  # type: ignore[return]
         self,
-        hook: Union[
-            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
-        ],
+        hook: Callable[..., None],
         prepend: bool = False,
         with_kwargs: bool = False,
     ) -> RemovableHandle:

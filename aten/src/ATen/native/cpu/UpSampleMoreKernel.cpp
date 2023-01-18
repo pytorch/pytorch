@@ -9,7 +9,8 @@
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/vec.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
@@ -598,4 +599,5 @@ REGISTER_DISPATCH(upsample_linear1d_backward_kernel, &upsample_linear1d_backward
 REGISTER_DISPATCH(upsample_bilinear2d_backward_kernel, &upsample_bilinear2d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_trilinear3d_backward_kernel, &upsample_trilinear3d_backward_kernel_impl);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

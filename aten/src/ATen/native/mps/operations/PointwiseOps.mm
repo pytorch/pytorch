@@ -2,7 +2,8 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
@@ -113,4 +114,5 @@ TORCH_IMPL_FUNC(addcdiv_out_mps)
   mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, const_cast<Tensor&>(output), true, "addcdiv_out_mps");
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

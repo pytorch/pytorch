@@ -10,7 +10,8 @@
 #include <ATen/ops/set_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
@@ -38,4 +39,5 @@ Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offse
   return result;
 }
 
-} // namespace at::native
+}
+}

@@ -3,7 +3,9 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 ExprHandle ExprHandle::operator+(const ExprHandle& other) const {
   return Add::make(*this, other);
@@ -563,4 +565,6 @@ ExprHandle expr_to_vec(ExprHandle v, int lanes) {
   }
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

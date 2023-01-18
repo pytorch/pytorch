@@ -7,7 +7,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <stdexcept>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 IValue ScriptListIterator::next() {
   if (iter_ == end_) {
@@ -312,4 +313,5 @@ void initScriptListBindings(PyObject* module) {
           }));
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -6,7 +6,8 @@
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/native/cpu/SerialStackImpl.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -21,4 +22,5 @@ void stack_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 REGISTER_DISPATCH(stack_serial_stub, &stack_serial_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

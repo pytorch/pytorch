@@ -41,7 +41,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
@@ -592,4 +593,5 @@ Module jitModuleFromSourceAndConstants(
   return m;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

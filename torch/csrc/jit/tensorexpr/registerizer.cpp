@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 namespace registerizer {
 
 // AccessInfo
@@ -793,4 +795,6 @@ StmtPtr registerize(StmtPtr s) {
   return s;
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

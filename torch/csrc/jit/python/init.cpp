@@ -119,7 +119,8 @@
 #include <tuple>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using c10::AliasInfo;
 using c10::Argument;
@@ -1997,5 +1998,5 @@ void initJITBindings(PyObject* module) {
   atexit.attr("register")(
       py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
-
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

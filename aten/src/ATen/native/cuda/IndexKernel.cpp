@@ -19,7 +19,8 @@
 #endif
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
@@ -84,4 +85,4 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   return self;
 }
 
-}  // namespace at::native
+}}  // namespace at::native

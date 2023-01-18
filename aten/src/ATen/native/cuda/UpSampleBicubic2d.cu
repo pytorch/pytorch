@@ -16,7 +16,8 @@
 #include <ATen/ops/upsample_bicubic2d_backward_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
@@ -294,4 +295,5 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

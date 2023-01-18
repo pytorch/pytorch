@@ -30,7 +30,8 @@
 
 #include <caffe2/serialize/inline_container.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
   std::vector<Method> methods;
@@ -400,4 +401,5 @@ mobile::Module jitModuleToMobile(
   return m;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

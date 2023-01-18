@@ -2,7 +2,6 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer, _use_grad_for_differentiable
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -47,11 +46,7 @@ class Adadelta(Optimizer):
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer is used.
-            Since the foreach implementation is usually significantly faster than
-            the for-loop implementation on CUDA, we try to use it whenever possible
-            (all parameters are on CUDA). Else, we continue with the for-loop
-            implementation. (default: None)
+        foreach (bool, optional): whether foreach implementation of optimizer is used (default: None)
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
 
@@ -178,7 +173,7 @@ def adadelta(
     acc_deltas: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool = None,
     differentiable: bool = False,
     *,
     lr: float,
@@ -192,19 +187,9 @@ def adadelta(
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    # We try to use the foreach implementation on CUDA whenever possible since
-    # it is faster than the for-loop implementation. However, the foreach
-    # implementation is not differentiable, so we must check differentiable=False.
-    # We still respect when the user inputs False for foreach.
     if foreach is None:
-        all_tensors = []
-        all_tensors.extend(params)
-        all_tensors.extend(grads)
-        all_tensors.extend(square_avgs)
-        all_tensors.extend(acc_deltas)
-        foreach = not torch.jit.is_scripting() and not differentiable and all(
-            p.is_cuda for p in all_tensors
-        )
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -287,26 +272,24 @@ def _multi_tensor_adadelta(
     if len(params) == 0:
         return
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
-    for device_params, device_grads, device_square_avgs, device_acc_deltas in grouped_tensors.values():
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+    if maximize:
+        grads = torch._foreach_neg(grads)
 
-        if weight_decay != 0:
-            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)
 
-        torch._foreach_mul_(device_square_avgs, rho)
-        torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)
+    torch._foreach_mul_(square_avgs, rho)
+    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
 
-        std = torch._foreach_add(device_square_avgs, eps)
-        torch._foreach_sqrt_(std)
+    std = torch._foreach_add(square_avgs, eps)
+    torch._foreach_sqrt_(std)
 
-        deltas = torch._foreach_add(device_acc_deltas, eps)
-        torch._foreach_sqrt_(deltas)
-        torch._foreach_div_(deltas, std)
-        torch._foreach_mul_(deltas, device_grads)
+    deltas = torch._foreach_add(acc_deltas, eps)
+    torch._foreach_sqrt_(deltas)
+    torch._foreach_div_(deltas, std)
+    torch._foreach_mul_(deltas, grads)
 
-        torch._foreach_add_(device_params, deltas, alpha=-lr)
+    torch._foreach_add_(params, deltas, alpha=-lr)
 
-        torch._foreach_mul_(device_acc_deltas, rho)
-        torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)
+    torch._foreach_mul_(acc_deltas, rho)
+    torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)

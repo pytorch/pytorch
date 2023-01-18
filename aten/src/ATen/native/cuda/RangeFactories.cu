@@ -67,7 +67,8 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 
 }  // namespace
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
@@ -271,4 +272,4 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
   return result;
 }
 
-} // namespace at::native
+}} // namespace at::native

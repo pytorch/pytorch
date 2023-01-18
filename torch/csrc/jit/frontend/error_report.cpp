@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
@@ -81,4 +82,5 @@ const char* ErrorReport::what() const noexcept {
   return the_message.c_str();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

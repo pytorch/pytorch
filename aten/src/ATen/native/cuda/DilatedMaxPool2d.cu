@@ -21,7 +21,8 @@
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -565,3 +566,4 @@ const Tensor& gradInput) {
 }
 
 } // at::native
+} // at

@@ -19,7 +19,8 @@
 #endif
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 template<typename T, int NormType, int depth=1, int r_args_depth=1, int res_arg_index=0>
 struct LpNormFunctor {
@@ -185,4 +186,5 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   return result;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

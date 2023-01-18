@@ -15,7 +15,8 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/copysign.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -1272,4 +1273,5 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

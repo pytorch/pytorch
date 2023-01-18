@@ -12,7 +12,8 @@
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <c10/util/irange.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 typedef MPSGraphTensor* (^NormOpBlock)(mps::MPSBinaryCachedGraph*, MPSGraphTensor*, MPSGraphTensor*);
 #define NormOpFn(graph, primary, secondary) MPSGraphTensor* (mps::MPSBinaryCachedGraph* graph, MPSGraphTensor* primary, MPSGraphTensor* secondary)
@@ -1973,4 +1974,5 @@ TORCH_API ::std::tuple<at::Tensor &,at::Tensor &> median_out_mps(
   return std::tuple<Tensor&, Tensor&>{values, indices};
 }
 
-} // namespace at::native
+} // native
+} // at

@@ -17,7 +17,8 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 const char exp2_name[] = "exp2_kernel";
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
@@ -393,4 +394,5 @@ REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

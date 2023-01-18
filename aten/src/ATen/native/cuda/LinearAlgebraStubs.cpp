@@ -29,7 +29,8 @@ struct MagmaInitializer {
 }  // namespace (anonymous)
 #endif
 #endif
-namespace at::native {
+namespace at {
+namespace native {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
 cuda::detail::LinalgDispatch disp = {_symeig_helper_cuda,
@@ -182,4 +183,4 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/
 
-} // namespace at::native
+}} // namespace at::native

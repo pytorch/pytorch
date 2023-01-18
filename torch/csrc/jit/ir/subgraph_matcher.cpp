@@ -5,7 +5,8 @@
 #include <regex>
 #include <stack>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 
 /**
@@ -366,4 +367,5 @@ std::vector<Match> findPatternMatches(const Graph& pattern, Graph& graph) {
   return matches;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

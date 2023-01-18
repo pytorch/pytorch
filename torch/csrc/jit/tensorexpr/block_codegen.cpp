@@ -6,7 +6,9 @@
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 std::string blockDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
@@ -365,4 +367,6 @@ void BlockCodeGen::call_raw(const std::vector<void*>& args) {
 BlockCodeGen::~BlockCodeGen() = default;
 RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

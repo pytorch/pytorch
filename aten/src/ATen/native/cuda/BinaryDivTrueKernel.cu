@@ -13,7 +13,8 @@
 
 #include <type_traits>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace binary_internal {
 
 const char div_name[] = "div_kernel";
@@ -58,4 +59,5 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(div_true_stub, &binary_internal::div_true_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

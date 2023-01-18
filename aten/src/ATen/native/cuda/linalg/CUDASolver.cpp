@@ -6,7 +6,9 @@
 
 #ifdef CUDART_VERSION
 
-namespace at::cuda::solver {
+namespace at {
+namespace cuda {
+namespace solver {
 
 template <>
 void getrf<double>(
@@ -1953,6 +1955,8 @@ void xsyevd<c10::complex<double>, double>(
 }
 #endif // USE_CUSOLVER_64_BIT
 
-} // namespace at::cuda::solver
+} // namespace solver
+} // namespace cuda
+} // namespace at
 
 #endif // CUDART_VERSION

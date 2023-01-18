@@ -29,7 +29,8 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using flatbuffers::FlatBufferBuilder;
 using mobile::serialization::CreateArg;
@@ -830,4 +831,5 @@ bool register_flatbuffer_serializer() {
   return true;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

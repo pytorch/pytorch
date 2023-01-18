@@ -18,7 +18,8 @@
 
 #include <limits>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // [Algorithm of randperm]
 //
@@ -130,4 +131,4 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   return result;
 }
 
-} // namespace at::native
+}} // namespace at::native

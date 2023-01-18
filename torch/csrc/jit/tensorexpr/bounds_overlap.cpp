@@ -3,7 +3,10 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
-namespace torch::jit::tensorexpr::analysis {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+namespace analysis {
 
 // Returns true if the given expression is guaranteed to be positive.
 bool mustBePositive(ExprPtr e) {
@@ -365,4 +368,7 @@ subtractIndicesBounds(const IndexBounds& A, const IndexBounds& B) {
   return subtractIndicesBounds(A, B, overlaps(A, B));
 }
 
-} // namespace torch::jit::tensorexpr::analysis
+} // namespace analysis
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

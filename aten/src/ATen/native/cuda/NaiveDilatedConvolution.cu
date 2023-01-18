@@ -22,7 +22,8 @@
 
 #include <tuple>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -611,4 +612,5 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cuda(
 REGISTER_CUDA_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cuda);
 REGISTER_CUDA_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

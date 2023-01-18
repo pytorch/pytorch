@@ -21,7 +21,8 @@
 #include <ATen/ops/narrow.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
@@ -320,4 +321,5 @@ TORCH_IMPL_FUNC(cat_out_cuda)
   }
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

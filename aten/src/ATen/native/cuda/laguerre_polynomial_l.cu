@@ -8,7 +8,8 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at::native {
+namespace at {
+    namespace native {
         namespace {
             const char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
 
@@ -28,4 +29,5 @@ namespace at::native {
         } // namespace (anonymous)
 
         REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda);
-} // namespace at::native
+    } // namespace native
+} // namespace at

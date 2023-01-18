@@ -23,7 +23,8 @@ using c10::make_right;
 using c10::OperatorName;
 using c10::OptionalType;
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 struct SchemaParser {
@@ -389,4 +390,5 @@ OperatorName parseName(const std::string& name) {
   return std::move(parsed.left());
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

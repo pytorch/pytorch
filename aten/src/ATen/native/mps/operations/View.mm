@@ -4,7 +4,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/mps/MPSAllocator.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace mps {
 
 struct ViewCachedGraph : public MPSCachedGraph
@@ -742,4 +743,5 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayR
   return result;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

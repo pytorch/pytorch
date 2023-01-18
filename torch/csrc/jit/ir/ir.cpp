@@ -23,7 +23,8 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace utils {
 std::string getNodesModuleHierarchy(const Node& n) {
@@ -2314,4 +2315,5 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   return false;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

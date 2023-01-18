@@ -19,7 +19,8 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
@@ -282,4 +283,5 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

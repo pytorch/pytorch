@@ -3,7 +3,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
@@ -373,4 +374,5 @@ ConcreteModuleType::getModulesPy() const {
   return ret;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

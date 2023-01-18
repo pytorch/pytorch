@@ -10,7 +10,8 @@
 #include <string>
 #include <type_traits>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using ::c10::IValue;
 
@@ -787,4 +788,5 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   return true;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

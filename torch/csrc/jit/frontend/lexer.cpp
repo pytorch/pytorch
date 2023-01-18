@@ -6,7 +6,8 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static const std::unordered_map<int, int> binary_prec = {
     {TK_IF, 1},
@@ -102,4 +103,5 @@ C10_EXPORT SharedParserData& sharedParserData() {
   return data;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

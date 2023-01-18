@@ -8,7 +8,8 @@
 #include <ATen/TensorIteratorInternal.h>
 #include <ATen/Parallel.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 inline namespace CPU_CAPABILITY {
 void neg_kernel(TensorIteratorBase &iter);
 void conj_kernel(TensorIteratorBase &iter);
@@ -270,4 +271,5 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

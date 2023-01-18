@@ -16,7 +16,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct VarWithType;
 struct ParsedLiteral;
@@ -648,4 +649,5 @@ Value* IRParser::findValueInVMap(const std::string& name) {
   return vmap.at(name);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

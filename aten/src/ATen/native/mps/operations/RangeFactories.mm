@@ -10,7 +10,8 @@
 #include <cmath>
 #include <limits>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 struct RangeCachedGraph : public mps::MPSCachedGraph {
@@ -191,5 +192,4 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   }
   return result;
 }
-
-} // namespace at::native
+}} // namespace at::native

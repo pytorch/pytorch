@@ -190,7 +190,7 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         self.opset_version = _constants.ONNX_DEFAULT_OPSET
 
         def incorrect_relu_symbolic_function(g, self):
-            return g.op("Add", self, g.op("Constant", value_t=torch.tensor(1.0)))
+            return self
 
         torch.onnx.register_custom_op_symbolic(
             "aten::relu",

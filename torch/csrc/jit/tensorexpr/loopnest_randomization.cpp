@@ -11,7 +11,9 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 namespace randomization_helper {
 
@@ -743,4 +745,6 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   return;
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

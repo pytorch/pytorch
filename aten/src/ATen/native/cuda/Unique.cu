@@ -29,7 +29,8 @@
 
 #include <ATen/native/cuda/UniqueCub.cuh>
 
-namespace at::native {
+namespace at {
+namespace native{
 
 namespace {
 
@@ -232,4 +233,5 @@ unique_consecutive_cuda(const Tensor& self, const bool return_inverse, const boo
   return unique_dim_consecutive_cuda(self, dim.value(), return_inverse, return_counts);
 }
 
-}  // namespace at::native
+}  // namespace native
+}  // namespace at

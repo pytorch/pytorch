@@ -99,7 +99,6 @@ Quantization to work with this as well.
     BackendConfig
     BackendPatternConfig
     DTypeConfig
-    DTypeWithConstraints
     ObservationType
 
 torch.ao.quantization.fx.custom_config

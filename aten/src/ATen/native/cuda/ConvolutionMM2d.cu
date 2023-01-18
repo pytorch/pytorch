@@ -18,7 +18,7 @@
 #include <ATen/ops/sum.h>
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 namespace {
 
 void slow_conv2d_shape_check(
@@ -499,4 +499,5 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cuda(
       grad_bias);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

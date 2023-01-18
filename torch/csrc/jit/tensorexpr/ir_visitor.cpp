@@ -7,7 +7,9 @@
 
 #include <c10/util/irange.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 template <
     typename Op,
@@ -267,4 +269,6 @@ void IRVisitor::visit(ReduceOpPtr v) {
   }
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

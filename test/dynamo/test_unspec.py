@@ -65,7 +65,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 "b": xy,
                 "c": np_y[0][0] / 68,
                 "d": np_x.sum(),
-                "e": np_x + np_y,
             }, x + np_y.sum() + z
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)

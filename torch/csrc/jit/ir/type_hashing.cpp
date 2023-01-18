@@ -6,7 +6,8 @@
 #include <c10/util/hash.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 size_t hashType(const Type& type) {
@@ -40,4 +41,5 @@ bool EqualType::operator()(
   return *a == *b;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

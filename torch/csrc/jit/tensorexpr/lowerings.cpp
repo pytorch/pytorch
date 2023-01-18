@@ -6,7 +6,9 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/mkldnn/Common.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
   static FunctionSchemaMap<NNCLoweringFunction> lowering_registry_;
@@ -1998,4 +2000,6 @@ NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
   return nullptr;
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

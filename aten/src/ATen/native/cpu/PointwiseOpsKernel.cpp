@@ -6,7 +6,8 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/core/Scalar.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
@@ -241,4 +242,5 @@ REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

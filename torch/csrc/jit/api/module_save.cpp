@@ -1,7 +1,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/serialization/export.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
   ExportModule(*this, out, extra_files, false /* bytecode_format */);
@@ -40,4 +41,5 @@ void Module::_save_for_mobile(
       use_flatbuffer);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

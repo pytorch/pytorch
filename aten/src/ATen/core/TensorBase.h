@@ -207,14 +207,14 @@ class TORCH_API TensorBase {
     impl_ = x.impl_;
     return *this;
   };
-  TensorBase& operator=(TensorBase&& x) & noexcept {
+  TensorBase& operator=(TensorBase&& x) & {
     impl_ = std::move(x.impl_);
     return *this;
   }
 
   // Ban assignment to rvalues, since at::Tensor (weirdly) performs a deep copy here
   TensorBase& operator=(const TensorBase&) && = delete;
-  TensorBase& operator=(TensorBase&&) && noexcept = delete;
+  TensorBase& operator=(TensorBase&&) && = delete;
 
   bool is_same(const TensorBase& other) const noexcept {
     return impl_ == other.impl_;

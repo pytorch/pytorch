@@ -3,7 +3,7 @@
 
 #ifdef CUDART_VERSION
 
-namespace at::cuda {
+namespace at { namespace cuda {
 namespace {
 
 void createCusolverDnHandle(cusolverDnHandle_t *handle) {
@@ -47,6 +47,6 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   return handle;
 }
 
-} // namespace at::cuda
+}} // namespace at::cuda
 
 #endif // CUDART_VERSION

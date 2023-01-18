@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/frontend/inline_loop_condition.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void InlineBlockBeforeNode(Node* before_node, Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
@@ -60,4 +61,5 @@ void InlineLoopCondition(std::shared_ptr<Graph>& graph) {
   inlineLoopCondition(graph->block());
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

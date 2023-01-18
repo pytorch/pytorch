@@ -19,7 +19,8 @@
 #endif
 
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 // Block size for weight_norm_*_first_dim_kernel.
@@ -522,4 +523,5 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
 #undef TILE_W
 #undef TILE_H
 
-} // namespace at::native
+} // namespace native
+} // namespace at
