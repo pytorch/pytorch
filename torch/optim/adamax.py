@@ -306,7 +306,7 @@ def _multi_tensor_adamax(
     grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
     for grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps in grouped_tensors.values():
         if maximize:
-            grads = torch._foreach_neg(grads)
+            grouped_grads = torch._foreach_neg(grouped_grads)
 
         grouped_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_params]
         grouped_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_grads]
@@ -331,7 +331,7 @@ def _multi_tensor_adamax(
                 [exp_inf.unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
             )
             torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
-
+    
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         clr = _stack_if_compiling([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
         torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, clr)
