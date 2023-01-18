@@ -7,6 +7,7 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from functorch.experimental.control_flow import cond
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
@@ -1419,8 +1420,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_with_module_layer(self):
-        from functorch.experimental.control_flow import cond
-
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1455,9 +1454,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_with_closure_diff(self):
-        from functorch.experimental.control_flow import cond
-
         class Module(torch.nn.Module):
             def forward(self, pred, x):
                 return self.indirection(pred, x)

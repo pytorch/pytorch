@@ -11,8 +11,6 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.side_effects import AttributeMutationNew, SideEffects
-from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import DynamicShapeVariable
 from torch._dynamo.variables.misc import NewCellVariable
 from torch._guards import GuardsCheckpointState
 
