@@ -20,6 +20,11 @@ __all__ = [
     "FullStateDictConfig",
     "LocalStateDictConfig",
     "ShardedStateDictConfig",
+    "OptimStateDictConfig",
+    "FullOptimStateDictConfig",
+    "LocalOptimStateDictConfig",
+    "ShardedOptimStateDictConfig",
+    "StateDictSettings",
 ]
 
 

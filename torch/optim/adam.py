@@ -316,13 +316,16 @@ def adam(params: List[Tensor],
     # and when differentiable=False.
     # We still respect when the user inputs False for fused.
     if fused is None:
-        if not differentiable and all(
-            p.is_cuda and torch.is_floating_point(p)
-            for p in params + grads + exp_avgs + exp_avg_sqs + max_exp_avg_sqs + state_steps
-        ):
-            fused = True
-        else:
-            fused = False
+        all_tensors = []
+        all_tensors.extend(params)
+        all_tensors.extend(grads)
+        all_tensors.extend(exp_avgs)
+        all_tensors.extend(exp_avg_sqs)
+        all_tensors.extend(max_exp_avg_sqs)
+        all_tensors.extend(state_steps)
+        fused = not torch.jit.is_scripting() and not differentiable and all(
+            p.is_cuda and torch.is_floating_point(p) for p in all_tensors
+        )
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
