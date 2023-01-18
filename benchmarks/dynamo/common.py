@@ -92,20 +92,14 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
-    "drq",  # assert type(inner_out) == type(user_out)
     "hf_T5_base",  # fp64_OOM
     "mobilenet_v2_quantized_qat",  # setStorage
     "resnet50_quantized_qat",  # setStorage
-    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
     "tacotron2",  # aten._thnn_fused_lstm_cell.default
-    "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
     "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
-    "botnet26t_256",  # assert type(inner_out) == type(user_out)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
-    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
     "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
-    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "twins_pcpvt_base",  # timeout
 ]
 

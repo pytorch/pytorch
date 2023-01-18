@@ -9,7 +9,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 enum class EqOpType {EQ, NE};
 
@@ -47,4 +47,4 @@ void ne_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
 REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native
