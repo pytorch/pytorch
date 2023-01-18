@@ -335,6 +335,28 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
             )
+        elif self.value is torch.Tensor:
+            # torch.Tensor() calls fail under fake mode.
+            # So, we replace torch.Tensor calls with torch.FloatTensor calls,
+            # or whatever the default tensor type is.
+
+            current_tensor_type = None
+            for tensor_type in torch._tensor_classes:
+                if (
+                    tensor_type.dtype == torch.get_default_dtype()
+                    and str(tensor_type.device) == torch._C._get_default_device()
+                    and "sparse" not in str(tensor_type.layout).lower()
+                ):
+                    current_tensor_type = tensor_type
+                    break
+
+            assert (
+                current_tensor_type is not None
+            ), "Current default tensor type is not recognized"
+
+            return TorchVariable(current_tensor_type, **options).call_function(
+                tx, args, kwargs
+            )
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
