@@ -4,6 +4,12 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -95,9 +101,6 @@ kernel_name_max_ops = 10
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
-
-# How to import torchdynamo, either torchdynamo or torch.dynamo
-dynamo_import = inductor_import.replace("inductor", "dynamo")
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"

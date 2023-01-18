@@ -23,7 +23,7 @@ class TORCH_API ProcessGroupRoundRobin final : public ProcessGroup {
   explicit ProcessGroupRoundRobin(
       int rank,
       int size,
-      std::vector<c10::intrusive_ptr<Backend>> processGroups);
+      std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups);
 
   ~ProcessGroupRoundRobin() override;
 
@@ -103,11 +103,11 @@ class TORCH_API ProcessGroupRoundRobin final : public ProcessGroup {
       const BarrierOptions& opts = BarrierOptions()) override;
 
  private:
-  std::vector<c10::intrusive_ptr<Backend>> processGroups_;
-  std::vector<c10::intrusive_ptr<Backend>>::const_iterator iterator_;
+  std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups_;
+  std::vector<c10::intrusive_ptr<ProcessGroup>>::const_iterator iterator_;
 
   // Returns the next ProcessGroup to use.
-  const c10::intrusive_ptr<Backend>& next();
+  const c10::intrusive_ptr<ProcessGroup>& next();
 };
 
 } // namespace c10d

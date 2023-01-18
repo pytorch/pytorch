@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
@@ -31,7 +32,7 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
+from .utils import gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -117,9 +118,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.warning(f"Using FallbackKernel: {name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -165,7 +173,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -366,6 +374,21 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 result = super().run_node(n)
 
+            # require the same stride order for dense outputs,
+            # so that user-land view() will not throw because inductor
+            # output different strides than eager
+            # long term the solution is to make view() always succeed
+            # with infallible strides.
+            if any(user.op == "output" for user in n.users):
+                strides = n.meta["val"].stride()
+                dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                # requiring a stride order for a non-dense output wouldn't
+                # recreate the same strides, and would fail with view, defer for now.
+                if dense and len(strides):
+                    result = ir.ExternKernel.require_stride_order(
+                        result, ir.get_stride_order(strides)
+                    )
+
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
@@ -404,6 +427,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches meach with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
         return result
 
     def check_platform(self):
@@ -499,7 +523,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
