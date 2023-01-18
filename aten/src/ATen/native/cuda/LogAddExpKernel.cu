@@ -23,7 +23,7 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
           }
           else {
             scalar_t m = ::max(a, b);
-            return m + ::log((scalar_t)(1.0) + ::exp(-::abs(a - b)));
+            return m + ::log1p(::exp(-::abs(a - b)));
           }
         });
       });

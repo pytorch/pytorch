@@ -535,7 +535,7 @@ def binary_cross_entropy(
     #     "all elements of input should be between 0 and 1"
     # )
     loss = (target - 1) * torch.maximum(
-        torch.log(1 - self), self.new_full((), -100)
+        torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
     if weight is not None:
         loss = loss * weight
