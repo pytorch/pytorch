@@ -26,9 +26,6 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .utils import (
-    dynamo_logging,
-    dynamo_optimizations,
-    dynamo_utils,
     get_dtype_size,
     has_incompatible_cudagraph_ops,
 )
