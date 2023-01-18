@@ -756,9 +756,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
-
-    # Clear references to user objects once compilation is finished
-    def clear_live_user_objs(self):
         self.side_effects.keepalive = []
 
     def create_proxy(

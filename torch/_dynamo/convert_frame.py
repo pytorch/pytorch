@@ -456,7 +456,6 @@ def _compile(
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
 
-        output.clear_live_user_objs()
         return guarded_code
     except (
         Unsupported,
