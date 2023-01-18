@@ -7,8 +7,8 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.fx.experimental.proxy_tensor import make_fx
 from functorch.experimental.control_flow import cond
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1578,8 +1578,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return cond(pred, self.true_fn, self.false_fn, [x, y])
 
         model = ConditionOp()
-        inp = (torch.tensor(False), torch.empty(4, 4), torch.empty(4, 4),)
-        gm, _ = torch._dynamo.export(model, *inp, aten_graph=True, tracing_mode="symbolic")
+        inp = (
+            torch.tensor(False),
+            torch.randn(4, 4),
+            torch.randn(4, 4),
+        )
+        gm, _ = torch._dynamo.export(
+            model, *inp, aten_graph=True, tracing_mode="symbolic"
+        )
 
         gm.print_readable()
 
