@@ -706,10 +706,14 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, fake_mod.__dict__['_graph'])
+        res = GraphModule(fake_mod, fake_mod.__dict__['_graph'])
+        res.meta = copy.deepcopy(self.meta)
+        return res
 
     def __copy__(self):
-        return GraphModule(self, self.graph)
+        res = GraphModule(self, self.graph)
+        res.meta = self.meta
+        return res
 
     @compatibility(is_backward_compatible=False)
     def print_readable(self, print_output=True):

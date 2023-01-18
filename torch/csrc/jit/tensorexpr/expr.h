@@ -178,7 +178,7 @@ class TORCH_API Var : public ExprNode<Var> {
   }
 
   void set_name_hint(std::string&& name) {
-    name_hint_ = name;
+    name_hint_ = std::move(name);
   }
 
   Var(std::string name_hint, Dtype dtype)
