@@ -1,10 +1,11 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
+
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <vector>
-#include <algorithm>
 
 namespace at {
 namespace cuda {
@@ -38,6 +39,12 @@ bool get_p2p_access(int dev, int dev_to_access) {
               dev_to_access, " is not a device");
   TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
 
+#ifdef USE_ROCM
+  bool needs_pool_specific_peer_access = false;
+#else
+  bool needs_pool_specific_peer_access = CUDACachingAllocator::get()->needsPoolSpecificPeerAccess();
+#endif
+
   auto &cache = p2pAccessEnabled_[dev * num_devices_ + dev_to_access];
 
   if (cache != -1) {
@@ -49,12 +56,30 @@ bool get_p2p_access(int dev, int dev_to_access) {
   int access = 0;
   C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
   if (access) {
-    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
-    if (err == cudaErrorPeerAccessAlreadyEnabled) {
-      // ignore and clear the error if access was already enabled
-      cudaGetLastError();
+    if (needs_pool_specific_peer_access) {
+#if CUDA_VERSION >= 11040
+      // Double-checks allocator backend hasn't changed, which would definitely be an error.
+      // cudaMallocAsync pools are unaffected by cudaDeviceEnablePeerAccess.
+      // We need pool-specific enablement. See
+      // https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-2/
+      cudaMemPool_t mempool;
+      C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev_to_access));
+      cudaMemAccessDesc desc = {};
+      desc.location.type = cudaMemLocationTypeDevice;
+      desc.location.id = dev;
+      desc.flags = cudaMemAccessFlagsProtReadWrite;
+      C10_CUDA_CHECK(cudaMemPoolSetAccess(mempool, &desc, 1 /* numDescs */));
+#else
+      TORCH_INTERNAL_ASSERT(false);
+#endif
     } else {
-      C10_CUDA_CHECK(err);
+      cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
+      if (err == cudaErrorPeerAccessAlreadyEnabled) {
+        // ignore and clear the error if access was already enabled
+        cudaGetLastError();
+      } else {
+        C10_CUDA_CHECK(err);
+      }
     }
     cache = 1;
   } else {

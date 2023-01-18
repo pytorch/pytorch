@@ -7,13 +7,21 @@ __all__ = ['PairwiseDistance', 'CosineSimilarity']
 
 class PairwiseDistance(Module):
     r"""
-    Computes the pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
+    Computes the pairwise distance between input vectors, or between columns of input matrices.
+
+    Distances are computed using ``p``-norm, with constant ``eps`` added to avoid division by zero
+    if ``p`` is negative, i.e.:
+
+    .. math ::
+        \mathrm{dist}\left(x, y\right) = \left\Vert x-y + \epsilon e \right\Vert_p,
+
+    where :math:`e` is the vector of ones and the ``p``-norm is given by.
 
     .. math ::
         \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
 
     Args:
-        p (real): the norm degree. Default: 2
+        p (real, optional): the norm degree. Can be negative. Default: 2
         eps (float, optional): Small value to avoid division by zero.
             Default: 1e-6
         keepdim (bool, optional): Determines whether or not to keep the vector dimension.
@@ -23,6 +31,7 @@ class PairwiseDistance(Module):
         - Input2: :math:`(N, D)` or :math:`(D)`, same shape as the Input1
         - Output: :math:`(N)` or :math:`()` based on input dimension.
           If :attr:`keepdim` is ``True``, then :math:`(N, 1)` or :math:`(1)` based on input dimension.
+
     Examples::
         >>> pdist = nn.PairwiseDistance(p=2)
         >>> input1 = torch.randn(100, 128)

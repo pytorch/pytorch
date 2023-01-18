@@ -1,7 +1,16 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_unpool2d_native.h>
+#include <ATen/ops/max_unpool3d_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -11,6 +20,10 @@ Tensor& max_unpooling2d_forward_out_cpu(
     const Tensor& indices_,
     IntArrayRef output_size,
     Tensor& output) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic with duplicate indices
+  at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
+
   auto oheight = output_size[0];
   auto owidth = output_size[1];
   TORCH_CHECK(
@@ -149,6 +162,10 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic with duplicate indices
+  at::globalContext().alertNotDeterministic("max_unpooling3d_forward_out");
+
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];

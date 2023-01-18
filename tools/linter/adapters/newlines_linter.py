@@ -4,13 +4,13 @@ NEWLINE: Checks files to make sure there are no trailing newlines.
 import argparse
 import json
 import logging
-import os
 import sys
 
 from enum import Enum
-from typing import NamedTuple, Optional
+from typing import List, NamedTuple, Optional
 
 NEWLINE = 10  # ASCII "\n"
+CARRIAGE_RETURN = 13  # ASCII "\r"
 LINTER_CODE = "NEWLINE"
 
 
@@ -33,78 +33,96 @@ class LintMessage(NamedTuple):
     description: Optional[str]
 
 
-def correct_trailing_newlines(filename: str) -> bool:
-    with open(filename, "rb") as f:
-        a = len(f.read(2))
-        if a == 0:
-            return True
-        elif a == 1:
-            # file is wrong whether or not the only byte is a newline
-            return False
-        else:
-            f.seek(-2, os.SEEK_END)
-            b, c = f.read(2)
-            # no ASCII byte is part of any non-ASCII character in UTF-8
-            return b != NEWLINE and c == NEWLINE
-
-
 def check_file(filename: str) -> Optional[LintMessage]:
     logging.debug("Checking file %s", filename)
 
     with open(filename, "rb") as f:
-        a = len(f.read(2))
-        if a == 0:
-            # File is empty, just leave it alone.
-            return None
-        elif a == 1:
-            # file is wrong whether or not the only byte is a newline
+        lines = f.readlines()
+
+    if len(lines) == 0:
+        # File is empty, just leave it alone.
+        return None
+
+    if len(lines) == 1 and len(lines[0]) == 1:
+        # file is wrong whether or not the only byte is a newline
+        return LintMessage(
+            path=filename,
+            line=None,
+            char=None,
+            code=LINTER_CODE,
+            severity=LintSeverity.ERROR,
+            name="testestTrailing newline",
+            original=None,
+            replacement=None,
+            description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
+        )
+
+    if len(lines[-1]) == 1 and lines[-1][0] == NEWLINE:
+        try:
+            original = b"".join(lines).decode("utf-8")
+        except Exception as err:
             return LintMessage(
                 path=filename,
                 line=None,
                 char=None,
                 code=LINTER_CODE,
                 severity=LintSeverity.ERROR,
-                name="testestTrailing newline",
+                name="Decoding failure",
                 original=None,
                 replacement=None,
-                description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
+                description=f"utf-8 decoding failed due to {err.__class__.__name__}:\n{err}",
             )
 
-        else:
-            # Read the last two bytes
-            f.seek(-2, os.SEEK_END)
-            b, c = f.read(2)
-            # no ASCII byte is part of any non-ASCII character in UTF-8
-            if b != NEWLINE and c == NEWLINE:
-                return None
-            else:
-                f.seek(0)
-                try:
-                    original = f.read().decode("utf-8")
-                except Exception as err:
-                    return LintMessage(
-                        path=filename,
-                        line=None,
-                        char=None,
-                        code=LINTER_CODE,
-                        severity=LintSeverity.ERROR,
-                        name="Decoding failure",
-                        original=None,
-                        replacement=None,
-                        description=f"utf-8 decoding failed due to {err.__class__.__name__}:\n{err}",
-                    )
+        return LintMessage(
+            path=filename,
+            line=None,
+            char=None,
+            code=LINTER_CODE,
+            severity=LintSeverity.ERROR,
+            name="Trailing newline",
+            original=original,
+            replacement=original.rstrip("\n") + "\n",
+            description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
+        )
+    has_changes = False
+    original_lines: Optional[List[bytes]] = None
+    for idx, line in enumerate(lines):
+        if len(line) >= 2 and line[-1] == NEWLINE and line[-2] == CARRIAGE_RETURN:
+            if not has_changes:
+                original_lines = list(lines)
+                has_changes = True
+            lines[idx] = line[:-2] + b"\n"
 
-                return LintMessage(
-                    path=filename,
-                    line=None,
-                    char=None,
-                    code=LINTER_CODE,
-                    severity=LintSeverity.ERROR,
-                    name="Trailing newline",
-                    original=original,
-                    replacement=original.rstrip("\n") + "\n",
-                    description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
-                )
+    if has_changes:
+        try:
+            assert original_lines is not None
+            original = b"".join(original_lines).decode("utf-8")
+            replacement = b"".join(lines).decode("utf-8")
+        except Exception as err:
+            return LintMessage(
+                path=filename,
+                line=None,
+                char=None,
+                code=LINTER_CODE,
+                severity=LintSeverity.ERROR,
+                name="Decoding failure",
+                original=None,
+                replacement=None,
+                description=f"utf-8 decoding failed due to {err.__class__.__name__}:\n{err}",
+            )
+        return LintMessage(
+            path=filename,
+            line=None,
+            char=None,
+            code=LINTER_CODE,
+            severity=LintSeverity.ERROR,
+            name="DOS newline",
+            original=original,
+            replacement=replacement,
+            description="DOS newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
+        )
+
+    return None
 
 
 if __name__ == "__main__":

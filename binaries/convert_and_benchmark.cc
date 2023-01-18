@@ -591,7 +591,7 @@ void runNetwork(
   }
 
   caffe2::NetBase* net = workspace->CreateNet(net_def);
-  CHECK_NOTNULL(net);
+  TORCH_CHECK_NOTNULL(net);
 
   LOG(INFO) << "Starting benchmark.";
   caffe2::ObserverConfig::initSampleRate(1, 1, 1, run_individual, warmup);

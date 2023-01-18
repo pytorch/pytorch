@@ -193,16 +193,13 @@ bool Val::isConstScalar() const {
 }
 
 bool Val::isConstInt() const {
-  if (!isAnInt()) {
-    return false;
-  }
-  return ConstCheck::isConstInt(this);
+  return ConstCheck::isConst(this) && isAnInt();
 }
 
 int64_t Val::evaluateInt() {
   TORCH_INTERNAL_ASSERT(
-      ConstCheck::isConstInt(this),
-      "Cannot get Int of not const integers through IR nodes, must use runtime ExpressionEvaluator.");
+      ConstCheck::isConst(this),
+      "Cannot get Int of not const values through IR nodes, must use runtime ExpressionEvaluator.");
 
   if (this->as<Int>()->value().has_value()) {
     return this->as<Int>()->value().value();
@@ -213,7 +210,24 @@ int64_t Val::evaluateInt() {
   TORCH_INTERNAL_ASSERT(
       evaluated_val.has_value(),
       "Detected a const integer but failed to infer its value.");
-  return evaluated_val.value();
+  return evaluated_val->as<int64_t>();
+}
+
+double Val::evaluateDouble() {
+  TORCH_INTERNAL_ASSERT(
+      ConstCheck::isConst(this),
+      "Cannot get Double of not const doubles through IR nodes, must use runtime ExpressionEvaluator.");
+
+  if (this->as<Double>()->value().has_value()) {
+    return this->as<Double>()->value().value();
+  }
+
+  ExpressionEvaluator ee(fusion());
+  auto evaluated_val = ee.evaluate(this);
+  TORCH_INTERNAL_ASSERT(
+      evaluated_val.has_value(),
+      "Detected a const integer but failed to infer its value.");
+  return evaluated_val->as<double>();
 }
 
 c10::optional<int64_t> Val::getInt() const {
@@ -224,7 +238,18 @@ c10::optional<int64_t> Val::getInt() const {
       }
     }
   }
-  return c10::optional<int64_t>();
+  return c10::nullopt;
+}
+
+c10::optional<double> Val::getDouble() const {
+  if (isConstScalar() && isAnInt()) {
+    if (this->getValType() == ValType::Scalar) {
+      if (this->isA<Double>()) {
+        return this->as<Double>()->value();
+      }
+    }
+  }
+  return c10::nullopt;
 }
 
 bool Val::isZeroInt() const {
@@ -316,6 +341,12 @@ void Expr::setPredicate(kir::Predicate* predicate) {
   predicate_ = predicate;
 }
 
+Expr* Expr::withPredicate(kir::Predicate* predicate) {
+  auto result = shallowCopy();
+  result->setPredicate(predicate);
+  return result;
+}
+
 kir::Predicate* Expr::writePredicate() const {
   TORCH_INTERNAL_ASSERT(
       container()->isA<kir::Kernel>(), "Function invalid for fusion.");
@@ -326,6 +357,19 @@ void Expr::setWritePredicate(kir::Predicate* write_predicate) {
   TORCH_INTERNAL_ASSERT(
       container()->isA<kir::Kernel>(), "Function invalid for fusion.");
   write_predicate_ = write_predicate;
+}
+
+Expr* Expr::withWritePredicate(kir::Predicate* predicate) {
+  auto result = shallowCopy();
+  result->setWritePredicate(predicate);
+  return result;
+}
+
+void Expr::copyPredicatesFrom(const Expr* expr) {
+  if (container()->isA<kir::Kernel>()) {
+    predicate_ = expr->predicate_;
+    write_predicate_ = expr->write_predicate_;
+  }
 }
 
 } // namespace cuda

@@ -18,6 +18,7 @@ class HalfNormal(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = HalfNormal(torch.tensor([1.0]))
         >>> m.sample()  # half-normal distributed with scale=1
         tensor([ 0.1046])
@@ -58,7 +59,7 @@ class HalfNormal(TransformedDistribution):
         if self._validate_args:
             self._validate_sample(value)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
-        log_prob[value.expand(log_prob.shape) < 0] = -inf
+        log_prob = torch.where(value >= 0, log_prob, -inf)
         return log_prob
 
     def cdf(self, value):

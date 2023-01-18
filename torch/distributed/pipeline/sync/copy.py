@@ -15,7 +15,7 @@ from torch import Tensor
 
 from .stream import AbstractStream, current_stream, get_device, record_stream, use_stream, wait_stream
 
-__all__: List[str] = []
+__all__: List[str] = ["Context", "Copy", "Wait"]
 
 
 Tensors = Sequence[Tensor]

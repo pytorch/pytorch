@@ -640,7 +640,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                     assert(g1 == g2)
                     assert dev_1 == dev_2, (
                         "Unequal devices for sparse generators: "
-                        "{} and {}".format(dev1, dev2)
+                        "{} and {}".format(dev_1, dev_2)
                     )
                     assert(op1_i is None or op2_i is None)
                     assert(op1_v is None or op2_v is None)
@@ -970,7 +970,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                         input_name,
                         err
                     )
-                )
+                ) from err
 
             # Finally, let's create the sum operator.
             sum_ops, g = self._MakeSumOps(input_name, input_version)
@@ -1175,7 +1175,7 @@ class GradientRegistry(object):
                 raise Exception(
                     "Exception when creating gradient for [{}]:{}.\nOp: \n{}".
                     format(op.type, e, str(op))
-                )
+                ) from e
 
         if gradient_ops is None:
             return [], g_input

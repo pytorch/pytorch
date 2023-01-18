@@ -9,6 +9,8 @@ import torch.distributed as dist
 # if we're trying to use them.
 from torch.distributed import ProcessGroup, group
 
+__all__ = ["average_parameters", "get_params_to_average", "average_parameters_or_parameter_groups"]
+
 def average_parameters(
     params: Iterator[torch.nn.Parameter], process_group: ProcessGroup
 ):

@@ -1,8 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_nearest_exact2d.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact2d_native.h>
+#include <ATen/ops/upsample_nearest2d.h>
+#include <ATen/ops/upsample_nearest2d_backward.h>
+#include <ATen/ops/upsample_nearest2d_backward_native.h>
+#include <ATen/ops/upsample_nearest2d_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -150,28 +165,6 @@ Tensor _upsample_nearest_exact2d(
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return at::_upsample_nearest_exact2d(input, osize, scale_h, scale_w);
-}
-
-Tensor upsample_nearest2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_nearest2d_backward(grad_output, osize, input_size, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::_upsample_nearest_exact2d_backward(grad_output, osize, input_size, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_nearest2d_kernel);

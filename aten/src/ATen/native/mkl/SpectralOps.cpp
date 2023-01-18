@@ -1,13 +1,25 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_fft_c2c_native.h>
+#include <ATen/ops/_fft_c2r_native.h>
+#include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/empty.h>
+#endif
+
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 
 namespace at { namespace native {
 // In real-to-complex transform, MKL FFT only fills half of the values due to
@@ -313,16 +325,9 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }}
 
 #elif AT_MKL_ENABLED()
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Utils.h>
-
-#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
-#include <vector>
 #include <numeric>
 #include <cmath>
 

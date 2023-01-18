@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <cstdint>
 
 #ifdef USE_FBGEMM

@@ -1,5 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 

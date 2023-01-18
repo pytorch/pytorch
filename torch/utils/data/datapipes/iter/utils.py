@@ -20,6 +20,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
         the iterable instance to prevent data inconsistency across iterations.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp = IterableWrapper(range(10))
         >>> list(dp)

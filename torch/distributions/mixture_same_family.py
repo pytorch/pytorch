@@ -17,24 +17,25 @@ class MixtureSameFamily(Distribution):
 
     Examples::
 
-        # Construct Gaussian Mixture Model in 1D consisting of 5 equally
-        # weighted normal distributions
+        >>> # xdoctest: +SKIP("undefined vars")
+        >>> # Construct Gaussian Mixture Model in 1D consisting of 5 equally
+        >>> # weighted normal distributions
         >>> mix = D.Categorical(torch.ones(5,))
         >>> comp = D.Normal(torch.randn(5,), torch.rand(5,))
         >>> gmm = MixtureSameFamily(mix, comp)
 
-        # Construct Gaussian Mixture Modle in 2D consisting of 5 equally
-        # weighted bivariate normal distributions
+        >>> # Construct Gaussian Mixture Modle in 2D consisting of 5 equally
+        >>> # weighted bivariate normal distributions
         >>> mix = D.Categorical(torch.ones(5,))
         >>> comp = D.Independent(D.Normal(
-                     torch.randn(5,2), torch.rand(5,2)), 1)
+        ...          torch.randn(5,2), torch.rand(5,2)), 1)
         >>> gmm = MixtureSameFamily(mix, comp)
 
-        # Construct a batch of 3 Gaussian Mixture Models in 2D each
-        # consisting of 5 random weighted bivariate normal distributions
+        >>> # Construct a batch of 3 Gaussian Mixture Models in 2D each
+        >>> # consisting of 5 random weighted bivariate normal distributions
         >>> mix = D.Categorical(torch.rand(3,5))
         >>> comp = D.Independent(D.Normal(
-                    torch.randn(3,5,2), torch.rand(3,5,2)), 1)
+        ...         torch.randn(3,5,2), torch.rand(3,5,2)), 1)
         >>> gmm = MixtureSameFamily(mix, comp)
 
     Args:
@@ -59,7 +60,7 @@ class MixtureSameFamily(Distribution):
 
         if not isinstance(self._mixture_distribution, Categorical):
             raise ValueError(" The Mixture distribution needs to be an "
-                             " instance of torch.distribtutions.Categorical")
+                             " instance of torch.distributions.Categorical")
 
         if not isinstance(self._component_distribution, Distribution):
             raise ValueError("The Component distribution need to be an "

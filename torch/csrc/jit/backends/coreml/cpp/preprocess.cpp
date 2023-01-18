@@ -1,8 +1,13 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
+
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/script.h>
 
 namespace py = pybind11;

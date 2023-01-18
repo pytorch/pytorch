@@ -1,7 +1,7 @@
 /*
   Provides the implementations of MKL Sparse BLAS function templates.
 */
-
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/SparseBlas.h>
 

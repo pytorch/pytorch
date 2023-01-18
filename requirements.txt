@@ -2,6 +2,7 @@
 astunparse
 expecttest
 future
+hypothesis
 numpy
 psutil
 pyyaml
@@ -11,3 +12,6 @@ six
 types-dataclasses
 typing_extensions
 sympy
+filelock
+networkx
+jinja2

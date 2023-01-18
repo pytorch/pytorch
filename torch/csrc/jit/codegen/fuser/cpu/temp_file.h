@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/disallow_copy.h>
 
 #ifdef _WIN32
 #include <WinError.h>
@@ -61,7 +61,7 @@ int wmkstemps(wchar_t* tmpl, int suffix_len) {
 #endif
 
 struct TempFile {
-  TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
+  AT_DISALLOW_COPY_AND_ASSIGN(TempFile);
 
   TempFile(const std::string& t, int suffix) {
 #ifdef _MSC_VER

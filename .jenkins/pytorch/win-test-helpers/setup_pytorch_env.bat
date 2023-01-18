@@ -7,19 +7,12 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 
 :: Install Miniconda3
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
-call :retry %INSTALLER_DIR%\install_miniconda3.bat
 
-:retry
-call %* || (powershell -nop -c "& {sleep 1}" && call %*) || (powershell -nop -c "& {sleep 2}" && call %*)
+:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
+:: We just need to activate it here
+call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
-
-:: extra conda dependencies for testing purposes
-if NOT "%BUILD_ENVIRONMENT%"=="" (
-    call conda install -y -q mkl protobuf numba scipy=1.6.2 typing_extensions dataclasses
-    if errorlevel 1 exit /b
-    if not errorlevel 0 exit /b
-)
 
 pushd .
 if "%VC_VERSION%" == "" (
@@ -31,14 +24,6 @@ if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 @echo on
 popd
-
-:: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-=======
-:: Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
-
-pip install "ninja==1.10.0.post1" future "hypothesis==5.35.1" "expecttest==0.1.3" "librosa>=0.6.2" "scipy==1.6.3" psutil pillow "unittest-xml-reporting<=3.2.0,>=2.0.0" pytest pytest-xdist pytest-rerunfailures
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
 
 set DISTUTILS_USE_SDK=1
 

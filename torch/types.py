@@ -21,6 +21,7 @@ _device = torch.device
 _qscheme = torch.qscheme
 _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
+_dispatchkey = Union[str, torch._C.DispatchKey]
 
 class SymInt:
     pass
@@ -31,7 +32,7 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Union[_device, str, None]
+Device = Union[_device, str, _int, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
 

@@ -1,3 +1,4 @@
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/utils/schema_info.h>
 
 namespace torch {
@@ -56,7 +57,8 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
   if (!alias_maps_current_) {
     generateAliasMaps();
   }
-  static const std::vector<c10::FunctionSchema> training_ops = getTrainingOps();
+  static const std::vector<SchemaSpecialCasePair> training_ops =
+      getTrainingOps();
   const auto& correct_map = (argument.type == c10::SchemaArgType::input)
       ? input_alias_map_
       : output_alias_map_;
@@ -67,29 +69,39 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
       correct_map[argument.index].begin(),
       correct_map[argument.index].end(),
       [this](size_t aliasing_index) {
-        bool special_case =
-            (this->schema_.arguments()[aliasing_index].name() ==
-                 "running_mean" ||
-             this->schema_.arguments()[aliasing_index].name() == "running_var");
-        bool is_training_op = std::any_of(
+        const auto is_training_op = std::find_if(
             training_ops.begin(),
             training_ops.end(),
-            [this](const c10::FunctionSchema& training_op) {
-              return this->schema_ == training_op;
+            [this](const auto& training_op) {
+              return this->schema_ == training_op.first;
             });
-        if (special_case && is_training_op) {
-          bool has_training = value_map_.count("training") &&
-              value_map_.at("training").toBool();
+
+        bool special_case = (is_training_op != training_ops.end()) &&
+            is_training_op->second.count(
+                this->schema_.arguments()[aliasing_index].name());
+        if (special_case) {
+          bool has_training = (hasInputArgumentNamed("training") &&
+                               !value_map_.count("training")) ||
+              (value_map_.count("training") &&
+               value_map_.at("training").toBool());
           bool has_train =
-              value_map_.count("train") && value_map_.at("train").toBool();
-          bool has_use_input_stats = value_map_.count("use_input_stats") &&
-              value_map_.at("use_input_stats").toBool();
+              (hasInputArgumentNamed("train") && !value_map_.count("train")) ||
+              (value_map_.count("train") && value_map_.at("train").toBool());
+          bool has_use_input_stats =
+              (hasInputArgumentNamed("use_input_stats") &&
+               !value_map_.count("use_input_stats")) ||
+              (value_map_.count("use_input_stats") &&
+               value_map_.at("use_input_stats").toBool());
           return has_training || has_train || has_use_input_stats;
         } else {
           return this->schema_.is_mutable(
               {c10::SchemaArgType::input, aliasing_index});
         }
       });
+}
+
+bool SchemaInfo::has_argument(c10::string_view name) {
+  return schema_.argumentIndexWithName(name) != c10::nullopt;
 }
 
 bool SchemaInfo::is_mutable(c10::string_view name) {
@@ -101,20 +113,27 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
 }
 
 bool SchemaInfo::is_nondeterministic() const {
-  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
-      getNonDeterministicOps();
-  static const c10::FunctionSchema detach_schema = torch::jit::parseSchema(
+  static const c10::FunctionSchema dropout_schema = torch::jit::parseSchema(
       "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-  if (detach_schema == this->schema_ && value_map_.count("train") &&
+  if (dropout_schema == schema_ && value_map_.count("train") &&
       !value_map_.at("train").toBool()) {
     return false;
   }
+
+#if defined C10_MOBILE
+  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
+      getNonDeterministicOps();
   return std::any_of(
       nondeterministic_ops.begin(),
       nondeterministic_ops.end(),
       [this](const c10 ::FunctionSchema& nondeterministic_op) {
         return nondeterministic_op == this->schema_;
       });
+#else
+  const auto& op = c10::Dispatcher::singleton().findOp(
+      c10::OperatorName(schema_.name(), schema_.overload_name()));
+  return op && op->hasTag(at::Tag::nondeterministic_seeded);
+#endif
 }
 
 bool SchemaInfo::may_alias(
@@ -140,7 +159,7 @@ bool SchemaInfo::may_alias(
     generateAliasMaps();
   }
   bool wildcard_alias_check =
-      wildcard_set_.count(lhs) && wildcard_set_.count(rhs);
+      wildcardSet().count(lhs) && wildcardSet().count(rhs);
   if (wildcard_alias_check) {
     return true;
   }
@@ -193,8 +212,23 @@ bool SchemaInfo::mayContainAliasImpl(
           schema_.getCorrectList(rhs.type)[rhs.index].type());
   bool types_can_alias =
       schema_.canAliasTypeSetsAlias(lhsContainedAliasTypeSet, rhsAliasTypeSet);
-  return types_can_alias && container_set_.count(lhs) &&
-      wildcard_set_.count(rhs);
+  return types_can_alias && containerSet().count(lhs) &&
+      wildcardSet().count(rhs);
+}
+
+void SchemaInfo::ensureConservativity(
+    const std::unordered_set<at::Symbol>& duplicates,
+    const std::vector<c10::Argument>& arguments_list,
+    c10::SchemaArgType type) {
+  for (size_t i = 0; i < arguments_list.size(); i++) {
+    if (arguments_list[i].alias_info()) {
+      for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+        if (duplicates.count(set)) {
+          wildcard_set_.insert({type, i});
+        }
+      }
+    }
+  }
 }
 
 std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
@@ -233,45 +267,49 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   return nondeterministic_ops;
 }
 
-void SchemaInfo::ensureConservativity(
-    const std::unordered_set<at::Symbol>& duplicates,
-    const std::vector<c10::Argument>& arguments_list,
-    c10::SchemaArgType type) {
-  for (size_t i = 0; i < arguments_list.size(); i++) {
-    if (arguments_list[i].alias_info()) {
-      for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
-        if (duplicates.count(set)) {
-          wildcard_set_.insert({type, i});
-        }
-      }
-    }
-  }
-}
+std::vector<SchemaSpecialCasePair> SchemaInfo::getTrainingOps() {
+  // This is a list of pairs of ops to sets of strings
+  //  where the a boolean variable (either "training",
+  // "train" or "use_input_stats") affects the mutability
+  // of the unorderered set of strings.
+  static const std::vector<std::pair<std::string, std::unordered_set<std::string>>> training_op_pairs =
+      {{"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+        {"running_mean", "running_var"}},
+       {"aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+        {"running_mean", "running_var"}},
+       {"aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)",
+        {"running_mean", "running_var"}},
+       {"aten::cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)",
+        {"running_mean", "running_var"}},
+       {"aten::miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)",
+        {"running_mean", "running_var"}},
+       {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
+        {"running_mean", "running_var"}},
+       {"aten::native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))",
+        {"running_mean", "running_var"}},
+       {"aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor",
+        {"noise"}},
+       {"aten::rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)",
+        {"noise"}},
+       {"rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)",
+        {"noise"}}};
 
-std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
-  // This is a list of ops where the a boolean variable (either "training",
-  // "train" or "use_input_stats") affects the mutability of running_mean and
-  // running_var
-  static const std::vector<std::string> training_op_strings = {
-      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-      "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-      "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)",
-      "aten::cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)",
-      "aten::miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)",
-      "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
-      "aten::native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))",
-  };
-
-  std::vector<c10::FunctionSchema> training_ops;
-  training_ops.reserve(training_op_strings.size());
-  for (const std::string& signature : training_op_strings) {
-    training_ops.push_back(torch::jit::parseSchema(signature));
+  std::vector<SchemaSpecialCasePair> training_ops;
+  training_ops.reserve(training_op_pairs.size());
+  for (const auto& signature : training_op_pairs) {
+    training_ops.emplace_back(
+        torch::jit::parseSchema(signature.first), signature.second);
   }
 
   return training_ops;
 }
 
 void SchemaInfo::initSchemaInfo() {
+  if (has_init_) {
+    return;
+  }
+  has_init_ = true;
+
   std::unordered_set<at::Symbol> duplicates;
   auto init_schema_arguments = [this, &duplicates](
                                    const std::vector<c10::Argument>&
@@ -317,7 +355,19 @@ void SchemaInfo::initSchemaInfo() {
       duplicates, schema_.returns(), c10::SchemaArgType::output);
 }
 
+const std::unordered_set<c10::SchemaArgument>& SchemaInfo::wildcardSet() {
+  initSchemaInfo();
+  return wildcard_set_;
+}
+
+const std::unordered_set<c10::SchemaArgument>& SchemaInfo::containerSet() {
+  initSchemaInfo();
+  return container_set_;
+}
+
 void SchemaInfo::generateAliasMaps() {
+  initSchemaInfo();
+
   alias_maps_current_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.arguments().size(), std::unordered_set<size_t>());

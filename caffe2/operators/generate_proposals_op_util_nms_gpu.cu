@@ -145,15 +145,15 @@ void nms_gpu_upright(
   // Overlapping CPU computes and D2H memcpy
   // both take about the same time
   cudaEvent_t copy_done;
-  cudaEventCreate(&copy_done);
+  C10_CUDA_CHECK(cudaEventCreate(&copy_done));
   int nto_copy = std::min(CHUNK_SIZE, N);
-  CUDA_CHECK(cudaMemcpyAsync(
+  C10_CUDA_CHECK(cudaMemcpyAsync(
       &h_delete_mask[0],
       &d_delete_mask[0],
       nto_copy * mask_ld * sizeof(int),
       cudaMemcpyDeviceToHost,
       context->cuda_stream()));
-  CUDA_CHECK(cudaEventRecord(copy_done, context->cuda_stream()));
+  C10_CUDA_CHECK(cudaEventRecord(copy_done, context->cuda_stream()));
   int offset = 0;
   std::vector<int> h_keep_sorted_list;
   std::vector<int> rmv(mask_ld, 0);
@@ -162,7 +162,7 @@ void nms_gpu_upright(
     int next_offset = offset + ncopied;
     nto_copy = std::min(CHUNK_SIZE, N - next_offset);
     if (nto_copy > 0) {
-      CUDA_CHECK(cudaMemcpyAsync(
+      C10_CUDA_CHECK(cudaMemcpyAsync(
           &h_delete_mask[next_offset * mask_ld],
           &d_delete_mask[next_offset * mask_ld],
           nto_copy * mask_ld * sizeof(int),
@@ -170,9 +170,10 @@ void nms_gpu_upright(
           context->cuda_stream()));
     }
     // Waiting for previous copy
-    CUDA_CHECK(cudaEventSynchronize(copy_done));
-    if (nto_copy > 0)
-      cudaEventRecord(copy_done, context->cuda_stream());
+    C10_CUDA_CHECK(cudaEventSynchronize(copy_done));
+    if (nto_copy > 0){
+      C10_CUDA_CHECK(cudaEventRecord(copy_done, context->cuda_stream()));
+    }
     for (int i = offset; i < next_offset; ++i) {
       int iblock = i / BOXES_PER_THREAD;
       int inblock = i % BOXES_PER_THREAD;
@@ -186,15 +187,15 @@ void nms_gpu_upright(
     }
     offset = next_offset;
   }
-  cudaEventDestroy(copy_done);
+  C10_CUDA_CHECK(cudaEventDestroy(copy_done));
 
   const int nkeep = h_keep_sorted_list.size();
-  cudaMemcpyAsync(
+  C10_CUDA_CHECK(cudaMemcpyAsync(
       d_keep_sorted_list,
       &h_keep_sorted_list[0],
       nkeep * sizeof(int),
       cudaMemcpyHostToDevice,
-      context->cuda_stream());
+      context->cuda_stream()));
 
   *h_nkeep = nkeep;
 }
@@ -502,15 +503,15 @@ void nms_gpu_rotated(
   // Overlapping CPU computes and D2H memcpy
   // both take about the same time
   cudaEvent_t copy_done;
-  cudaEventCreate(&copy_done);
+  C10_CUDA_CHECK(cudaEventCreate(&copy_done));
   int nto_copy = std::min(CHUNK_SIZE, N);
-  CUDA_CHECK(cudaMemcpyAsync(
+  C10_CUDA_CHECK(cudaMemcpyAsync(
       &h_delete_mask[0],
       &d_delete_mask[0],
       nto_copy * mask_ld * sizeof(int),
       cudaMemcpyDeviceToHost,
       context->cuda_stream()));
-  CUDA_CHECK(cudaEventRecord(copy_done, context->cuda_stream()));
+  C10_CUDA_CHECK(cudaEventRecord(copy_done, context->cuda_stream()));
   int offset = 0;
   std::vector<int> h_keep_sorted_list;
   std::vector<int> rmv(mask_ld, 0);
@@ -519,7 +520,7 @@ void nms_gpu_rotated(
     int next_offset = offset + ncopied;
     nto_copy = std::min(CHUNK_SIZE, N - next_offset);
     if (nto_copy > 0) {
-      CUDA_CHECK(cudaMemcpyAsync(
+      C10_CUDA_CHECK(cudaMemcpyAsync(
           &h_delete_mask[next_offset * mask_ld],
           &d_delete_mask[next_offset * mask_ld],
           nto_copy * mask_ld * sizeof(int),
@@ -527,9 +528,10 @@ void nms_gpu_rotated(
           context->cuda_stream()));
     }
     // Waiting for previous copy
-    CUDA_CHECK(cudaEventSynchronize(copy_done));
-    if (nto_copy > 0)
-      cudaEventRecord(copy_done, context->cuda_stream());
+    C10_CUDA_CHECK(cudaEventSynchronize(copy_done));
+    if (nto_copy > 0){
+      C10_CUDA_CHECK(cudaEventRecord(copy_done, context->cuda_stream()));
+    }
     for (int i = offset; i < next_offset; ++i) {
       int iblock = i / BOXES_PER_THREAD;
       int inblock = i % BOXES_PER_THREAD;
@@ -543,15 +545,15 @@ void nms_gpu_rotated(
     }
     offset = next_offset;
   }
-  cudaEventDestroy(copy_done);
+  C10_CUDA_CHECK(cudaEventDestroy(copy_done));
 
   const int nkeep = h_keep_sorted_list.size();
-  cudaMemcpyAsync(
+  C10_CUDA_CHECK(cudaMemcpyAsync(
       d_keep_sorted_list,
       &h_keep_sorted_list[0],
       nkeep * sizeof(int),
       cudaMemcpyHostToDevice,
-      context->cuda_stream());
+      context->cuda_stream()));
 
   *h_nkeep = nkeep;
 }

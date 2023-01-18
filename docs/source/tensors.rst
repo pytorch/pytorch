@@ -345,7 +345,6 @@ Tensor class reference
     Tensor.dot
     Tensor.double
     Tensor.dsplit
-    Tensor.eig
     Tensor.element_size
     Tensor.eq
     Tensor.eq_
@@ -484,7 +483,6 @@ Tensor class reference
     Tensor.logit
     Tensor.logit_
     Tensor.long
-    Tensor.lstsq
     Tensor.lt
     Tensor.lt_
     Tensor.less
@@ -625,6 +623,7 @@ Tensor class reference
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter
+    Tensor.softmax
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask
@@ -638,6 +637,7 @@ Tensor class reference
     Tensor.std
     Tensor.stft
     Tensor.storage
+    Tensor.untyped_storage
     Tensor.storage_offset
     Tensor.storage_type
     Tensor.stride
@@ -669,7 +669,12 @@ Tensor class reference
     Tensor.arctanh_
     Tensor.tolist
     Tensor.topk
+    Tensor.to_dense
     Tensor.to_sparse
+    Tensor.to_sparse_csr
+    Tensor.to_sparse_csc
+    Tensor.to_sparse_bsr
+    Tensor.to_sparse_bsc
     Tensor.trace
     Tensor.transpose
     Tensor.transpose_
@@ -685,6 +690,7 @@ Tensor class reference
     Tensor.type
     Tensor.type_as
     Tensor.unbind
+    Tensor.unflatten
     Tensor.unfold
     Tensor.uniform_
     Tensor.unique

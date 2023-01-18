@@ -73,7 +73,7 @@ class ParametrizationList(ModuleList):
     It is the type of ``module.parametrizations[tensor_name]`` when ``module[tensor_name]``
     has been parametrized with :func:`register_parametrization`.
 
-    If the first registered parmetrization has a ``right_inverse`` that returns one tensor or
+    If the first registered parametrization has a ``right_inverse`` that returns one tensor or
     does not have a ``right_inverse`` (in which case we assume that ``right_inverse`` is the identity),
     it will hold the tensor under the name ``original``.
     If it has a ``right_inverse`` that returns more than one tensor, these will be registered as
@@ -120,7 +120,7 @@ class ParametrizationList(ModuleList):
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
         #    # If it has one input, this allows to be able to use set_ to be able to
         #    # move data to/from the original tensor without changing its id (which is what the
-        #    # optimiser uses to track parameters)
+        #    # optimizer uses to track parameters)
         #    if isinstance(Y, Tensor)
         #      assert X.dtype == Y.dtype
         # Below we use original = X, new = Y
@@ -242,7 +242,7 @@ class ParametrizationList(ModuleList):
                 if len(value) != self.ntensors:
                     raise ValueError(
                         "'right_inverse' must return a sequence of tensors of length "
-                        f"{self.ntensors}. Got a sequence of lenght {len(value)}."
+                        f"{self.ntensors}. Got a sequence of length {len(value)}."
                     )
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
@@ -460,6 +460,7 @@ def register_parametrization(
         ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> import torch
         >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P
@@ -590,7 +591,7 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
 
     Args:
         module (nn.Module): module to query
-        name (str, optional): attribute in the module to query
+        tensor_name (str, optional): attribute in the module to query
             Default: ``None``
     """
     parametrizations = getattr(module, "parametrizations", None)
@@ -656,7 +657,7 @@ def remove_parametrizations(
                                            "for a parameter that is an instance of a tensor subclass requires "
                                            "set_() to be implemented correctly for the tensor subclass. Either "
                                            "set leave_parametrized=False or provide a working implementation for "
-                                           "set_() in the tensor subclass.")
+                                           "set_() in the tensor subclass.") from e
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more

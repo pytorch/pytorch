@@ -383,7 +383,7 @@ def declare_returned_variables(f: NativeFunction) -> str:
         return ""
     if len(f.func.returns) == 1:
         return ""
-    types = map(cpp.return_type, f.func.returns)
+    types = [cpp.return_type(r, symint=True) for r in f.func.returns]
     names = cpp.return_names(f)
     return "\n".join(f"{type.cpp_type()} {name};" for type, name in zip(types, names))
 
@@ -458,11 +458,20 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 )
 
 
-def type_wrapper_name(f: NativeFunction) -> str:
+def type_wrapper_name(f: NativeFunction, key: str = "Default") -> str:
     if f.func.name.overload_name:
-        return f"{cpp.name(f.func)}_{f.func.name.overload_name}"
+        name = f"{cpp.name(f.func)}_{f.func.name.overload_name}"
     else:
-        return cpp.name(f.func)
+        name = cpp.name(f.func)
+
+    # The key argument is only used in gen_variable_type where we need fns per autograd dispatch key.
+    # In gen_trace_type and gen_inplace_view_type where only one fn per native_fn must be generated,
+    # the key argument should not be passed.
+    # We do not append key if it is Default so that generated functions from
+    # before per-dispatch-key derivatives were added retain the same names.
+    if key != "Default":
+        name = name + f"_{key}"
+    return name
 
 
 @with_native_function
@@ -474,13 +483,13 @@ def method_definition(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
             for a in f.func.schema_order_arguments()
         ]
     )
 
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+        return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=formals,
         type_definition_body=emit_trace_body(f),
@@ -526,7 +535,8 @@ def gen_trace_type(
         [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
         key_fn=lambda fn: fn.root_name,
         base_env={
-            "generated_comment": f"@generated from {template_path}/TraceType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/TraceType.cpp",
         },
         env_callable=gen_trace_type_func,
         num_shards=5,

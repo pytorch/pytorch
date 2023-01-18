@@ -18,6 +18,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/moduledict.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
+  ${TORCH_API_TEST_DIR}/nested.cpp
   ${TORCH_API_TEST_DIR}/parameterdict.cpp
   ${TORCH_API_TEST_DIR}/parameterlist.cpp
   ${TORCH_API_TEST_DIR}/namespace.cpp
@@ -41,11 +42,6 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/grad_mode.cpp
   ${TORCH_API_TEST_DIR}/operations.cpp
 )
-
-if(USE_DEPLOY)
-  list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/imethod.cpp)
-endif()
-
 if(USE_CUDA)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
 endif()
@@ -54,8 +50,7 @@ add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
 if(NOT MSVC)
-  target_compile_options(test_api PRIVATE -Wno-unused-variable)
-  target_compile_options(test_api PRIVATE -Wno-unused-local-typedefs)
+  target_compile_options_if_supported(test_api -Wno-unused-variable)
 endif()
 
 if(USE_CUDA)
@@ -68,10 +63,6 @@ if(USE_CUDA)
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
 endif()
 
-if(USE_DEPLOY)
-  target_link_libraries(test_api PRIVATE torch_deploy)
-endif()
-
 # Workaround for https://github.com/pytorch/pytorch/issues/40941
 if(USE_OPENMP AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.0.0))
   # Compiling transformer.cpp or pow_test.cpp with -O2+ and both -fuse-openmp and -faligned-newout any optimization
@@ -81,19 +72,14 @@ if(USE_OPENMP AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSI
 endif()
 
 if(NOT MSVC)
-  if(APPLE)
-    target_compile_options(test_api PRIVATE
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces)
-  else()
-    target_compile_options(test_api PRIVATE
-      # Considered to be flaky.  See the discussion at
-      # https://github.com/pytorch/pytorch/pull/9608
-      -Wno-maybe-uninitialized
-      # gcc gives nonsensical warnings about variadic.h
-      -Wno-unused-but-set-parameter)
-  endif()
+  # Clang has an unfixed bug leading to spurious missing braces
+  # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+  target_compile_options_if_supported(test_api "-Wno-missing-braces")
+  # Considered to be flaky.  See the discussion at
+  # https://github.com/pytorch/pytorch/pull/9608
+  target_compile_options_if_supported(test_api "-Wno-maybe-uninitialized")
+  # gcc gives nonsensical warnings about variadic.h
+  target_compile_options_if_supported(test_api "-Wno-unused-but-set-parameter")
 endif()
 
 if(INSTALL_TEST)

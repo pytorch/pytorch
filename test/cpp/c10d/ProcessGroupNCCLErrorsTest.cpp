@@ -1,9 +1,9 @@
 #include <chrono>
 
 #include <c10/util/irange.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 

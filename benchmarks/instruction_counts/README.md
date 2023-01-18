@@ -73,7 +73,7 @@ Timer(
 ```
 
 Moreover, because `signature` is provided we know that creation of `x` and `w`
-is part of setup, and the overall comptation uses `x` and `w` to produce `y`.
+is part of setup, and the overall computation uses `x` and `w` to produce `y`.
 As a result, we can derive TorchScript'd and AutoGrad variants as well. We can
 deduce that a TorchScript model will take the form:
 
