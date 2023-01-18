@@ -1982,6 +1982,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         @contextmanager
         def tensor_type_ctx(tensor_type):
             old_tensor_type = None
+            reasons = []
             for t in torch._tensor_classes:
                 if (
                     t.dtype == torch.get_default_dtype()
@@ -1989,10 +1990,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                     and "sparse" not in str(t.layout).lower()
                 ):
                     old_tensor_type = tensor_type
+                else:
+                    reasons.append(
+                        f"{t}: dtype {t.dtype} == {torch.get_default_dtype()} -> "
+                        f"{t.dtype == torch.get_default_dtype}; "
+                        f"device {str(t.device)} == {torch._C._get_default_device()} -> "
+                        f"{str(t.device) == torch._C._get_default_device()}; "
+                        f"non-sparse str(t.layout).lower() -> {'sparse' not in str(t.layout.lower())}"
+                    )
             if old_tensor_type is None:
                 raise AssertionError(
                     f"Could not find a non-sparse tensor with {torch.get_default_dtype()},"
-                    f"{torch._C._get_default_device()} in {torch._tensor_classes}"
+                    f"{torch._C._get_default_device()} in {torch._tensor_classes}\n"
+                    f"{'\n'.join(reasons)}"
                 )
             try:
                 torch.set_default_tensor_type(tensor_type)
