@@ -470,6 +470,7 @@ def export(
 
 def export_without_kwargs(
     fn: Union[torch.nn.Module, Callable],
+    opset_version,
     *args,
     use_binary_format: bool = True,
     **kwargs,
@@ -521,6 +522,7 @@ def export_without_kwargs(
     # Export FX graph to ONNX ModelProto.
     return _export(
         compiler.captured_graph,
+        opset_version,
         # Function optimized by _dynamo doesn't have None in args.
         *tuple(arg for arg in bound_args if arg is not None),
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,

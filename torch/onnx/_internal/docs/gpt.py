@@ -111,11 +111,15 @@ def test_gpt2_one_shot(model_name):
     # onnx_model = export(model, **inputs)
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
+    opset_version = 16
+
     onnx_model_text = fx_onnx.export_without_kwargs(
-        model, **inputs, use_binary_format=False
+        model, opset_version, **inputs, use_binary_format=False
     )
     onnx.save(onnx_model_text, "gpt2.onnx")
-    onnx_model = fx_onnx.export_without_kwargs(model, **inputs, use_binary_format=True)
+    onnx_model = fx_onnx.export_without_kwargs(
+        model, opset_version, **inputs, use_binary_format=True
+    )
 
     ref_outputs, _ = tree_flatten(model(**inputs, return_dict=False))
     ort_outputs = run_ort(

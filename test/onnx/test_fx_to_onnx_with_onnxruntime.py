@@ -1,14 +1,35 @@
 # Owner(s): ["module: onnx"]
+import io
 import unittest
+from typing import Any, Sequence, Tuple, Union
 
 import onnx_test_common
+import onnxruntime  # type: ignore[import]
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
+from torch.utils import _pytree as pytree
+from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
+    def setUp(self):
+        super().setUp()
+        self.opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+
+    def _run_ort(
+        self, onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
+    ) -> Sequence[Any]:
+        session = onnxruntime.InferenceSession(
+            onnx_model, providers=["CPUExecutionProvider"]
+        )
+        input_names = [ort_input.name for ort_input in session.get_inputs()]
+        return session.run(
+            None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+        )
+
     def test_simple_function(self):
         def func(x):
             y = x + 1
@@ -53,6 +74,26 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         self.run_test_with_fx_to_onnx_exporter(MNISTModel(), (tensor_x,))
+
+    def test_gpt2_tiny(self):
+        model_name = "sshleifer/tiny-gpt2"
+        # Download pytorch model
+        model = AutoModel.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Transform input tokens
+        inputs = tokenizer("Hello world!", return_tensors="pt")
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs["attention_mask"]
+
+        onnx_model = fx_onnx.export_without_kwargs(
+            model, self.opset_version, **inputs, use_binary_format=True
+        )
+
+        ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
+        ort_outputs = self._run_ort(onnx_model, (input_ids, attention_mask))
+        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+            torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
 
 
 if __name__ == "__main__":
