@@ -73,12 +73,18 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   // This is can used to manually set the index for the given rFactor ID.
   // Currently, this `override_index` is only used by indexing ops like
   // select/index_select.
+  // The argument `cvta_smem_address` specifies whether to use `cvta` ptx to
+  // convert shared memory address to unsigned int for indexing. This argument
+  // is effective only if the indexed tensor is a shared memory tensor. On other
+  // memory type, this argument will be ignored. Search `toSmem` in the codebase
+  // for additional information.
   Val* lowerSrcIndex(
       Val* val,
       Val* dst,
-      const std::unordered_map<IterDomain*, Val*>& override_index = {}) const;
+      const std::unordered_map<IterDomain*, Val*>& override_index = {},
+      bool cvta_smem_address = false) const;
 
-  Val* lowerDstIndex(Val* dst) const;
+  Val* lowerDstIndex(Val* dst, bool cvta_smem_address = false) const;
 
   void handleBlockReduction(const ReductionOp* rop, Val* out, Val* in);
   void handleGridReduction(const ReductionOp* rop, Val* out, Val* in);

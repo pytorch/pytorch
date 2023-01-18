@@ -29,10 +29,17 @@ int64_t findOutermostPosWithSatisfiedDependency(
     Val* value,
     const std::vector<kir::ForLoop*>& loops) {
   // We don't recursively look into tensor indexing to find its dependency.
-  // Instead, we always assume tensors to have dependency on all loop variables
-  // and prefer to put it at the innermost loop.
-  if (value->isOneOf<TensorView, kir::TensorIndex>()) {
+  // Instead, we always assume tensor indices to have dependency on all loop
+  // variables and prefer to put it at the innermost loop.
+  if (value->isA<kir::TensorIndex>()) {
     return getInnermostNonTrivialLoop(loops);
+  }
+  // For TensorView, we must find its allocation to determine which loop it
+  // belongs to. TensorView is handled differently from TensorIndex because
+  // TensorIndex is a tensor data access, but TensorView only contains meta data
+  // access like `T1.data`, or `toSmem(T1)`.
+  if (TensorView* tv = dynamic_cast<TensorView*>(value)) {
+    return lower_utils::getAllocInformation(tv, loops).alloc_pos;
   }
 
   auto def = value->definition();
@@ -95,6 +102,9 @@ Val* findRefAsSubexprOf(Val* from, Val* reference, bool exact) {
       return from;
     }
   }
+  if (from->isOneOf<TensorView, kir::TensorIndex>()) {
+    return nullptr;
+  }
   auto def = from->definition();
   if (def != nullptr) {
     for (auto input : def->inputs()) {
@@ -115,15 +125,23 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
     std::vector<Val*>& seen_subexprs,
     int64_t parent_pos,
     bool is_given) {
-  if (value->isA<TensorView>() || value->isA<kir::TensorIndex>()) {
-    // Current implementation of value hoisting does not have data flow
-    // analysis. It assumes that allocating all indices at the beginning of a
-    // for loop satisfies all data dependency. However, when the value is an
-    // expression of a tensor, this approach will fail. For this case we just
-    // return a true for the second return value which will help us to make sure
-    // that we don't insert it into `common_scalar_map_` so that we won't
-    // consider it as a reusing opportunity.
+  if (value->isA<kir::TensorIndex>()) {
+    // Current implementation of value hoisting does not have advanced data flow
+    // analysis to handle tensor index. Unlike scalar, the computation of tensor
+    // index might be hidden behind a predicate, making its analysis very
+    // complicated. For this case we just return a true for the second return
+    // value which will help us to make sure that we don't insert it into
+    // `common_scalar_map_` so that we won't consider it as a reusing
+    // opportunity.
+    // Note that although we are unable to handle TensorIndex, we can handle
+    // TensorView correctly. A scalar that depends on TensorView is usually
+    // something like below: toSmem(T1), or, (char*)(T1.data). These expressions
+    // just access the meta data of the tensor, instead of accessing its
+    // elements. So we are fine about hoisting it because we can just find its
+    // allocation and make sure that our allocation is after it.
     return {value, true};
+  } else if (value->isA<TensorView>()) {
+    return {value, false};
   }
 
   auto def = value->definition();
@@ -148,13 +166,13 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
 
   // Recursively hoist all the producers of `value`
   bool changed = false; // if any of the inputs is replaced by an existing val
-  bool has_tensor_dependency = false;
+  bool has_tensor_index_dependency = false;
   std::vector<Val*> inputs;
   for (auto input : def->inputs()) {
     auto hoist = hoistScalarImpl(input, loops, seen_subexprs, my_pos);
     inputs.emplace_back(hoist.first);
     if (hoist.second) {
-      has_tensor_dependency = true;
+      has_tensor_index_dependency = true;
     }
     if (inputs.back() != input) {
       changed = true;
@@ -177,14 +195,14 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
   // `common_scalar_map_` so that future `value` could consider reusing it. If
   // `value` is a subexpression of the given value, then we insert it into
   // `common_scalar_map_` only if it can be hoisted to outer loops.
-  if (!has_tensor_dependency && (is_given || my_pos < parent_pos)) {
+  if (!has_tensor_index_dependency && (is_given || my_pos < parent_pos)) {
     common_scalar_map_[my_loop].emplace_back(value);
     if (my_pos < parent_pos) {
       hoisted_or_reused_.emplace(value);
     }
   }
   seen_subexprs.emplace_back(value);
-  return {value, has_tensor_dependency};
+  return {value, has_tensor_index_dependency};
 }
 
 namespace {
@@ -309,7 +327,19 @@ std::pair<int64_t, bool> findAllocPointFromDataDependency(
     Val* value) {
   int64_t pos = -1;
   for (auto i : c10::irange(exprs.size())) {
-    for (auto o : exprs[i]->outputs()) {
+    auto expr = exprs[i];
+    if (auto alloc = dynamic_cast<kir::Allocate*>(expr)) {
+      // Currently this branch is only to handle shared memory address. For
+      // shared memory address, we generate code like `toSmem(T7)`, this does
+      // not need the shared memory tensor to be computed, but it does require
+      // T7 to be allocated.
+      auto buffer = alloc->buffer();
+      if (buffer == value ||
+          findRefAsSubexprOf(value, buffer, true) != nullptr) {
+        pos = i;
+      }
+    }
+    for (auto o : expr->outputs()) {
       if (value == o) {
         return {i, true};
       }
@@ -368,7 +398,8 @@ class CommonIndexInserter : private kir::ExprMutator {
       // kernel, which can be either int64_t or int. Not very clean,
       // but this seems to be the quickest way to use the value type
       // as we don't have a scalar IR node for the value type.
-      if (isIntegralType(*value->getDataType())) {
+      auto dtype = *value->getDataType();
+      if (isIntegralType(dtype) && dtype != DataType::SMemAddress) {
         value->resolveIndexDtype();
       }
 

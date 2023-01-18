@@ -1,12 +1,6 @@
 // Utility macro for this file
 #define DEVICE_INLINE __device__ inline
 
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
-
-namespace Turing {
-
-namespace util {
-
 // Utility for converting generic pointer to SMEM pointer in PTX.
 //  We should review vectorized load/stores with shared memory.
 //  SMEM memory movement PTX is only Global -> SMEM, SMEM -> Local, Local ->
@@ -20,6 +14,12 @@ DEVICE_INLINE unsigned toSmem(const void* raw_ptr) {
 
   return smem_ptr_uint;
 }
+
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
+
+namespace Turing {
+
+namespace util {
 
 // LdMatrix has .x1, .x2 and .x4 options, currently we actively use .x2 and
 //  .x4. In .x2 option. the the address register of upper half warp (lane 16-31)
@@ -67,9 +67,8 @@ DEVICE_INLINE void adjustPartialLdMatrixAddrInTuring(unsigned& addr_in_byte) {
 //   then thread 0-15 will specify the start of each row.
 // Finally is an x4 modifier producing a 32x8 using addrs from 0-31 in each
 // warp.
-DEVICE_INLINE void ldMatrix(Array<__half, 4, 4>& out, void const* ptr) {
+DEVICE_INLINE void ldMatrix(Array<__half, 4, 4>& out, unsigned addr) {
   uint2& val = reinterpret_cast<uint2&>(out);
-  unsigned addr = util::toSmem(ptr);
   util::adjustPartialLdMatrixAddrInTuring(addr);
   asm volatile("ldmatrix.sync.aligned.x2.m8n8.shared.b16 {%0,%1}, [%2];"
                : "=r"(val.x), "=r"(val.y)
@@ -79,26 +78,23 @@ DEVICE_INLINE void ldMatrix(Array<__half, 4, 4>& out, void const* ptr) {
 // Same as previous, 8x8 matrix is vectorized loaded, then scattered (to perform
 // transpose) so threads will hold 2 values down a column (instead of the
 // previous instruction that's across a row).
-DEVICE_INLINE void ldMatrixT(Array<__half, 4, 4>& out, void const* ptr) {
+DEVICE_INLINE void ldMatrixT(Array<__half, 4, 4>& out, unsigned addr) {
   uint2& val = reinterpret_cast<uint2&>(out);
-  unsigned addr = util::toSmem(ptr);
   util::adjustPartialLdMatrixAddrInTuring(addr);
   asm volatile("ldmatrix.sync.aligned.x2.trans.m8n8.shared.b16 {%0,%1}, [%2];"
                : "=r"(val.x), "=r"(val.y)
                : "r"(addr));
 }
 
-DEVICE_INLINE void ldMatrix(Array<__half, 8, 8>& out, void const* ptr) {
+DEVICE_INLINE void ldMatrix(Array<__half, 8, 8>& out, unsigned addr) {
   uint4& val = reinterpret_cast<uint4&>(out);
-  unsigned addr = util::toSmem(ptr);
   asm volatile("ldmatrix.sync.aligned.x4.m8n8.shared.b16 {%0,%1,%2,%3}, [%4];"
                : "=r"(val.x), "=r"(val.y), "=r"(val.z), "=r"(val.w)
                : "r"(addr));
 }
 
-DEVICE_INLINE void ldMatrixT(Array<__half, 8, 8>& out, void const* ptr) {
+DEVICE_INLINE void ldMatrixT(Array<__half, 8, 8>& out, unsigned addr) {
   uint4& val = reinterpret_cast<uint4&>(out);
-  unsigned addr = util::toSmem(ptr);
   asm volatile(
       "ldmatrix.sync.aligned.x4.trans.m8n8.shared.b16 {%0,%1,%2,%3}, [%4];"
       : "=r"(val.x), "=r"(val.y), "=r"(val.z), "=r"(val.w)
@@ -115,31 +111,10 @@ namespace Ampere {
 
 // MMA instruction wrappers (sm_80+):
 
-namespace util {
-
-// Special utility for cp_async
-DEVICE_INLINE unsigned toSmem(void* ptr) {
-  unsigned smem_ptr_uint;
-
-  // Declare 64 bit register smem_ptr
-  // Convert the input to a shared memory pointer
-  // Convert to unsigned 32 bit pointer
-  asm("{ .reg .u64 smem_ptr; cvta.to.shared.u64 smem_ptr, %1; cvt.u32.u64 %0, smem_ptr; }\n"
-      : "=r"(smem_ptr_uint)
-      : "l"(ptr));
-
-  return smem_ptr_uint;
-}
-
-} // namespace util
-
 // Global to SMEM load that is asynchronous,
 // not guaranteed to be completed until cpAsyncBarrier() is called.
 template <typename dtype, int len>
-DEVICE_INLINE void cpAsync(
-    Array<dtype, len, len>* smem_ptr,
-    void const* gmem_ptr) {
-  unsigned smem_addr = util::toSmem(&(smem_ptr->array[0]));
+DEVICE_INLINE void cpAsync(unsigned smem_addr, void const* gmem_ptr) {
   constexpr int byte_size = sizeof(dtype) * len;
 
   static_assert(
@@ -156,10 +131,9 @@ DEVICE_INLINE void cpAsync(
 // not guaranteed to be completed until cpAsyncBarrier() is called.
 template <typename dtype, int len>
 DEVICE_INLINE void cpAsync(
-    Array<dtype, len, len>* smem_ptr,
+    unsigned smem_addr,
     void const* gmem_ptr,
     bool predicate) {
-  unsigned smem_addr = util::toSmem(&(smem_ptr->array[0]));
   constexpr int byte_size = sizeof(dtype) * len;
 
   static_assert(

@@ -23,6 +23,7 @@ Val* IrBuilder::newScalar(DataType dtype) {
     case DataType::Int:
     case DataType::Int32:
     case DataType::Index:
+    case DataType::SMemAddress:
       return IrBuilder::create<Int>(dtype);
     case DataType::ComplexFloat:
     case DataType::ComplexDouble:
@@ -51,7 +52,13 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   // than just allowing the integer type promotion for the two inputs as below.
   // Note that this is only needed for integer types. See also PR #2228.
   if (lhs->dtype() != rhs->dtype()) {
-    if ((lhs->dtype() == DataType::Int && rhs->dtype() == DataType::Int32) ||
+    if (lhs->dtype() == DataType::SMemAddress ||
+        rhs->dtype() == DataType::SMemAddress) {
+      TORCH_INTERNAL_ASSERT(
+          op_type == BinaryOpType::Add || op_type == BinaryOpType::Sub);
+      dtype = DataType::SMemAddress;
+    } else if (
+        (lhs->dtype() == DataType::Int && rhs->dtype() == DataType::Int32) ||
         (lhs->dtype() == DataType::Int32 && rhs->dtype() == DataType::Int)) {
       dtype = DataType::Int;
     } else {

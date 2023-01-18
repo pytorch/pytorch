@@ -353,6 +353,26 @@ class TORCH_CUDA_CU_API UpdateMagicZero final : public Expr {
   std::string toInlineString(int indent_size = 0) const override;
 };
 
+class TORCH_CUDA_CU_API SMemAddress final : public Expr {
+ public:
+  using Expr::Expr;
+
+  explicit SMemAddress(IrBuilderPasskey passkey, Val* out, TensorView* smem_tv);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  virtual const char* getOpString() const override {
+    return "SMemAddress";
+  }
+
+  TensorView* smemTv() const {
+    return input(0)->as<TensorView>();
+  }
+
+  std::string toString(int indent_size = 0) const override;
+  std::string toInlineString(int indent_size = 0) const override;
+};
+
 // TODO(kir): promote to IR node
 class TORCH_CUDA_CU_API Scope {
  public:

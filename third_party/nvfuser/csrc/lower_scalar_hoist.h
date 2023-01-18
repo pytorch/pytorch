@@ -60,7 +60,7 @@ class TORCH_CUDA_CU_API CommonScalarMap {
  private:
   //! This is the underlying implementation of the public hoistScalar, with some
   //! additional arguments and return values.
-  //! Returns (hoisted value, has tensor dependency)
+  //! Returns (hoisted value, has tensor index dependency)
   std::pair<Val*, bool> hoistScalarImpl(
       Val* value,
       const std::vector<kir::ForLoop*>& loops,

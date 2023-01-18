@@ -76,6 +76,8 @@ enum class DataType {
   // TODO: add more vectorized types
   Double_2,
   Float_2,
+  // Pointers
+  SMemAddress,
   // Null
   Null
 };

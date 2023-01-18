@@ -332,6 +332,32 @@ std::string UpdateMagicZero::toInlineString(int indent_size) const {
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(UpdateMagicZero)
 
+SMemAddress::SMemAddress(
+    IrBuilderPasskey passkey,
+    Val* out,
+    TensorView* smem_tv)
+    : Expr(passkey) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+  addOutput(out);
+  addInput(smem_tv);
+}
+
+std::string SMemAddress::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "toSmem(" << ir_utils::varName(smemTv()) << ")\n";
+  return ss.str();
+}
+
+std::string SMemAddress::toInlineString(int indent_size) const {
+  std::stringstream ss;
+  ss << "toSmem(" << ir_utils::varName(smemTv()) << ")";
+  return ss.str();
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(SMemAddress)
+
 std::string Scope::toString(int indent_size) const {
   std::stringstream ss;
   for (auto expr : exprs()) {

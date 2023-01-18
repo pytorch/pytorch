@@ -508,13 +508,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     if (ldst->predicate() == nullptr) {
       // Out of line predicate variant
-      indent() << "Ampere::cpAsync("
-               << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+      indent() << "Ampere::cpAsync<" << dtype << ", " << vec_size << ">("
+               << genInline(ldst->out()->as<kir::TensorIndex>()->index()) << ","
                << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
     } else {
       // Inline predicate variant
-      indent() << "Ampere::cpAsync("
-               << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+      indent() << "Ampere::cpAsync<" << dtype << ", " << vec_size << ">("
+               << genInline(ldst->out()->as<kir::TensorIndex>()->index()) << ","
                << genVectorPointer(ldst->in(), dtype, vec_size) << ","
                << genInline(ldst->predicate()) << ");\n";
     }
@@ -528,8 +528,18 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
     code_ << " (";
     code_ << "*" << genVectorPointer(ldst->out(), dtype, vector_word_size)
-          << ","
-          << "&" << gen(ldst->in()) << ");\n";
+          << "," << genInline(ldst->in()->as<kir::TensorIndex>()->index())
+          << ");\n";
+  }
+
+  void handle(const kir::SMemAddress* sop) final {
+    if (!print_inline_) {
+      indent() << gen(sop->output(0)) << " = ";
+    }
+    code_ << "toSmem(" << ir_utils::varName(sop->smemTv()) << ")";
+    if (!print_inline_) {
+      code_ << ";\n";
+    }
   }
 
   void handle(const UnaryOp* uop) final {

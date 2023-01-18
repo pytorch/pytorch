@@ -55,6 +55,7 @@ void Val::dispatch(T handler, Val* val) {
         case DataType::Int:
         case DataType::Int32:
         case DataType::Index:
+        case DataType::SMemAddress:
           // Dispatch to Int even with Int32 as we don't have Int32 IR
           // node.
           ptr(handler)->handle(val->as<Int>());
@@ -270,6 +271,10 @@ void Expr::dispatch(T handler, Expr* expr) {
     ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
     return;
   }
+  if (expr->isStrictlyA<kir::SMemAddress>()) {
+    ptr(handler)->handle(expr->as<kir::SMemAddress>());
+    return;
+  }
   TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
 }
 
@@ -298,6 +303,7 @@ void Val::constDispatch(T handler, const Val* val) {
         case DataType::Int:
         case DataType::Index:
         case DataType::Int32:
+        case DataType::SMemAddress:
           // Dispatch to Int even with Int32 as we don't have Int32 IR
           // node.
           ptr(handler)->handle(val->as<Int>());
@@ -517,6 +523,10 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
     return;
   }
+  if (expr->isStrictlyA<kir::SMemAddress>()) {
+    ptr(handler)->handle(expr->as<kir::SMemAddress>());
+    return;
+  }
   TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
 }
 
@@ -558,6 +568,7 @@ void Val::mutatorDispatch(T mutator, Val* val) {
         case DataType::Int:
         case DataType::Int32:
         case DataType::Index:
+        case DataType::SMemAddress:
           ptr(mutator)->mutate(val->as<Int>());
           return;
         case DataType::ComplexFloat:
@@ -867,6 +878,9 @@ void OptOutConstDispatch::handle(const kir::VectorizedWelfordOp* stmt) {
 void OptOutConstDispatch::handle(const kir::AllocateFusedReduction* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::SMemAddress* stmt) {
+  unhandled(stmt);
+}
 
 void OptOutDispatch::unhandled(Statement*) {}
 
@@ -1033,6 +1047,9 @@ void OptOutDispatch::handle(kir::VectorizedWelfordOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::AllocateFusedReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::SMemAddress* stmt) {
   unhandled(stmt);
 }
 

@@ -222,7 +222,7 @@ Val* foldConstants(Val* value) {
 std::unordered_set<Val*> getSubexprDependency(
     Val* value,
     const std::unordered_set<Val*>& variables) {
-  if (value->isOneOf<TensorView, kir::TensorIndex>()) {
+  if (value->isA<kir::TensorIndex>()) {
     return {value};
   }
   if (variables.count(value) > 0) {
@@ -240,18 +240,12 @@ std::unordered_set<Val*> getSubexprDependency(
   return result;
 }
 
-bool hasTensor(const std::unordered_set<Val*>& variables) {
-  for (auto v : variables) {
-    if (v->isOneOf<TensorView, kir::TensorIndex>()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Apply `rule` to `value`, if `rule` returns a new `Val*` to replace `value`,
 // then return that new `Val*`, otherwise recursively goes down to its inputs.
 Val* recurseDown(Val* value, std::function<Val*(Val*)> rule) {
+  if (value->isOneOf<TensorView, kir::TensorIndex>()) {
+    return value;
+  }
   auto def = value->definition();
   if (def == nullptr) {
     return value;
@@ -519,10 +513,15 @@ class FlattenedAssocCommOp : public Expr {
       bool v1_is_left_of_v2 = false;
       auto deps1 = dependency.at(v1);
       auto deps2 = dependency.at(v2);
-      if (hasTensor(deps2)) {
+      auto hasTensorIndex = [](const auto& deps) {
+        return std::any_of(deps.begin(), deps.end(), [](auto val) {
+          return val->template isA<kir::TensorIndex>();
+        });
+      };
+      if (hasTensorIndex(deps2)) {
         return true;
       }
-      if (hasTensor(deps1)) {
+      if (hasTensorIndex(deps1)) {
         return false;
       }
       for (auto v : var_info.order()) {
@@ -706,9 +705,15 @@ Val* unflattenRule(Val* value, const VarInfoMap& var_info) {
     int64_t next = 1;
     while (next < (int64_t)sorted_inputs.size()) {
       auto rhs = unflatten(sorted_inputs.at(next), var_info);
-      auto output = IrBuilder::newScalar(*value->getDataType());
-      IrBuilder::create<BinaryOp>(fop->getOpType(), output, lhs, rhs);
-      lhs = output;
+      if (fop->getOpType() == BinaryOpType::Add) {
+        // For binary add op, we need to correctly handle the ptr + int -> ptr
+        // type promotion, so we use IrBuilder::addExpr here.
+        lhs = IrBuilder::addExpr(lhs, rhs);
+      } else {
+        auto output = IrBuilder::newScalar(*value->getDataType());
+        IrBuilder::create<BinaryOp>(fop->getOpType(), output, lhs, rhs);
+        lhs = output;
+      }
       next++;
     }
     return lhs;

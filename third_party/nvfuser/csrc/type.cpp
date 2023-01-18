@@ -77,6 +77,7 @@ bool isIntegralType(DataType dtype) {
     case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
+    case DataType::SMemAddress:
       return true;
     case DataType::Null:
       TORCH_CHECK(false, "Null type is not a valid argument to isIntegralType");
@@ -238,6 +239,8 @@ static const char* data_type2string(DataType t) {
       return "nvfuser_index_t";
     case DataType::Int32:
       return "int";
+    case DataType::SMemAddress:
+      return "unsigned";
     case DataType::ComplexFloat:
       return "std::complex<float>";
     case DataType::ComplexDouble:
@@ -1140,6 +1143,7 @@ std::string typePrefix(const DataType data_type) {
     case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
+    case DataType::SMemAddress:
       return "i";
     case DataType::ComplexFloat:
     case DataType::ComplexDouble:
@@ -1198,6 +1202,8 @@ size_t dataTypeSize(DataType type) {
       return sizeof(uint64_t);
     case DataType::Int32:
       return sizeof(uint32_t);
+    case DataType::SMemAddress:
+      return sizeof(unsigned);
     case DataType::Double_2:
       return sizeof(double) * 2;
     case DataType::Float_2:

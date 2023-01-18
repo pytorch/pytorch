@@ -16,19 +16,24 @@ namespace cuda {
 Val* IndexLowering::lowerSrcIndex(
     Val* src,
     Val* dst,
-    const std::unordered_map<IterDomain*, Val*>& override_index) const {
+    const std::unordered_map<IterDomain*, Val*>& override_index,
+    bool cvta_smem_address) const {
   if (auto tv = dynamic_cast<TensorView*>(src)) {
     TORCH_INTERNAL_ASSERT(dst->isA<TensorView>());
     return Index::getProducerIndex(
-        tv, dst->as<TensorView>(), for_loops_, override_index);
+        tv,
+        dst->as<TensorView>(),
+        for_loops_,
+        override_index,
+        cvta_smem_address);
   } else {
     return src;
   }
 }
 
-Val* IndexLowering::lowerDstIndex(Val* dst) const {
+Val* IndexLowering::lowerDstIndex(Val* dst, bool cvta_smem_address) const {
   if (auto tv = dynamic_cast<TensorView*>(dst)) {
-    return Index::getConsumerIndex(tv, for_loops_);
+    return Index::getConsumerIndex(tv, for_loops_, cvta_smem_address);
   } else {
     return dst;
   }
@@ -1157,8 +1162,8 @@ void IndexLowering::handleGroupedGridWelford(
 }
 
 void IndexLowering::handle(const LoadStoreOp* ldst) {
-  const auto in = lowerSrcIndex(ldst->in(), ldst->out());
-  const auto out = lowerDstIndex(ldst->out());
+  const auto in = lowerSrcIndex(ldst->in(), ldst->out(), {}, true);
+  const auto out = lowerDstIndex(ldst->out(), true);
   auto new_ldst = IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in)
                       ->withPredicate(ldst->predicate());
   pushBack(new_ldst);
