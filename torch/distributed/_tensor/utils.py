@@ -51,7 +51,8 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         # (i.e. native_layer_norm.backward)
         return tuple(
             dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            if e is not None and s is not None else None
+            if e is not None and s is not None
+            else None
             for e, s in zip(res, spec)
         )
     else:
