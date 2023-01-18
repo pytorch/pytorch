@@ -665,8 +665,15 @@ test_forward_backward_compatibility() {
   git reset --hard "${SHA_TO_COMPARE}"
   echo "::group::Installing Torch From Base Commit"
   pip install -r requirements.txt
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+    # TODO: in a few weeks, once most commits adopt .ci over .jenkins, remove the fallback
+  COMMON_BUILD_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  if [[ -f "$COMMON_BUILD_SCRIPT" ]]; then
+    # shellcheck source=./common-build.sh
+    bash "$COMMON_BUILD_SCRIPT"
+  else
+    # shellcheck source=./common-build.sh
+    bash .jenkins/pytorch/common-build.sh
+  fi
   python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
   python -mpip install base_dist/*.whl
   echo "::endgroup::"
