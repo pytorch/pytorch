@@ -3708,11 +3708,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
