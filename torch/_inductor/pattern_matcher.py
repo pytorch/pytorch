@@ -286,6 +286,7 @@ class LoweringPatternEntry(PatternEntry):
 class ReplacementPatternEntry(PatternEntry):
     replacement_graph: torch.fx.GraphModule
     signature: inspect.Signature
+    propagate: bool = False
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
         class Replacer(torch.fx.Interpreter):
@@ -295,18 +296,15 @@ class ReplacementPatternEntry(PatternEntry):
 
             def call_function(self, target, args, kwargs):
                 result = graph.call_function(target, args, kwargs)
-                if V.fake_mode:
+                if propagate and V.fake_mode:
                     fargs, fkwargs = torch.fx.map_arg(
                         (args, kwargs), lambda n: n.meta["val"]
                     )
-                    try:
-                        with V.fake_mode:
-                            result.meta["val"] = target(*fargs, **fkwargs)
-                    except AssertionError:
-                        # AssertionError: tensor's device must be `meta`, got cuda instead
+                    with V.fake_mode:
                         result.meta["val"] = target(*fargs, **fkwargs)
                 return result
 
+        propagate = self.propagate
         norm_args = self.signature.bind(*match.args, **match.kwargs)
         with graph.inserting_before(node):
             replacement = Replacer(self.replacement_graph).run(
