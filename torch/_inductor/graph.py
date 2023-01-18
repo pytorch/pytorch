@@ -246,6 +246,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
+        # todo(chilli): We can remove the last check once we turn buffers into
+        # static shape tensors. That's a hack to workaround Inductor believing
+        # the buffer should be static but us passing in a fake tensor with
+        # symbolic shapes.
         if (
             config.static_weight_shapes
             and (
@@ -255,7 +259,6 @@ class GraphLowering(torch.fx.Interpreter):
             and not example._has_symbolic_sizes_strides
         ):
             # the first N inputs are weights
-            # print(len(self.graph_inputs), self.num_static_inputs)
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
