@@ -31,9 +31,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
@@ -658,8 +656,8 @@ class FunctionInliner : public IRMutator {
   FunctionInliner(StorePtr producer, std::unordered_set<BufPtr> outputs)
       : buf_(producer->buf()),
         producer_(producer),
-        outputs_(std::move(outputs)) {
-    success_ = true;
+        outputs_(std::move(outputs)),
+        success_(true) {
     for (const auto& i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
@@ -3428,6 +3426,4 @@ bool LoopNest::rfactor(
   return true;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
