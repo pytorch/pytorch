@@ -16,7 +16,7 @@ from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater, CUDA11OrLater)
+    (SM53OrLater, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
@@ -39,7 +39,7 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
-) or (not IS_WINDOWS and CUDA11OrLater)
+) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
@@ -3419,9 +3419,9 @@ class TestSparse(TestSparseBase):
     @skipIfRocm
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if CUDA11OrLater and SM53OrLater else [],
-                                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
-                                      *[torch.complex64] if CUDA11OrLater else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater else [],
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      torch.complex64,
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
