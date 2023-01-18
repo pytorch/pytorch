@@ -11,6 +11,7 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <ATen/Config.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -50,7 +51,6 @@
 #include <ATen/ops/tanh_backward.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_like_ops.h>
-
 #include <utility>
 #endif
 
@@ -67,6 +67,17 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
                                 (input.is_cuda()) &&
                                 (at::globalContext().userEnabledCuDNN());
     return is_miopen_acceptable;
+}
+
+bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  return input.options().backend() == at::Backend::CPU &&
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
+#endif
+  return false;
 }
 
 template<typename T>
@@ -196,10 +207,10 @@ struct QuantizedCellParams : public CellParamsBase {
       Tensor _packed_hh,
       Tensor _col_offsets_ih,
       Tensor _col_offsets_hh,
-      const Scalar& _scale_ih,
-      const Scalar& _scale_hh,
-      const Scalar& _zero_point_ih,
-      const Scalar& _zero_point_hh)
+      Scalar _scale_ih,
+      Scalar _scale_hh,
+      Scalar _zero_point_ih,
+      Scalar _zero_point_hh)
       : w_ih(std::move(_w_ih)),
         w_hh(std::move(_w_hh)),
         b_ih_(std::move(_b_ih)),
@@ -208,13 +219,9 @@ struct QuantizedCellParams : public CellParamsBase {
         packed_hh(std::move(_packed_hh)),
         col_offsets_ih(std::move(_col_offsets_ih)),
         col_offsets_hh(std::move(_col_offsets_hh)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_ih(std::move(_scale_ih)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_hh(std::move(_scale_hh)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_ih(std::move(_zero_point_ih)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_hh(std::move(_zero_point_hh)) {}
 
   const Tensor w_ih;
@@ -259,11 +266,8 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(doubles_to_serialize),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(longs_to_serialize),
         {});
   }
@@ -1416,6 +1420,7 @@ DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 DEFINE_DISPATCH(lstm_miopen_stub);
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
+DEFINE_DISPATCH(lstm_mkldnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub);
@@ -1441,7 +1446,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
 #endif
   // if cells are of different size, that means projections are used
-  bool has_projections = (hx[0].size(2) != hx[1].size(2));
+  bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
   if (use_miopen(_input, dropout_p)) {
     if (!has_projections) {
       Tensor output, hy, cy;
@@ -1451,6 +1456,23 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
+  }
+
+  if (use_mkldnn(_input)) {
+    if (!has_projections) {
+      if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        TORCH_WARN_ONCE(
+          "LSTM with symbolic sizes and strides is not supported with oneDNN. Using default implementation.");
+      } else {
+        Tensor output, hy, cy;
+        lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      }
+    } else {
+      TORCH_WARN_ONCE(
+          "LSTM with projections is not supported with oneDNN. Using default implementation.");
     }
   }
 

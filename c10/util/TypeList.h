@@ -18,7 +18,7 @@ namespace typelist {
  */
 template <class... Items>
 struct typelist final {
- private:
+ public:
   typelist() = delete; // not for instantiation
 };
 
@@ -402,9 +402,9 @@ struct drop_if_nonempty final {
       "In typelist::drop<T, num>, the T argument must be typelist<...>.");
   using type = typename detail::take_elements<
       TypeList,
-      min(num, size<TypeList>::value),
+      std::min(num, size<TypeList>::value),
       std::make_index_sequence<
-          size<TypeList>::value - min(num, size<TypeList>::value)>>::type;
+          size<TypeList>::value - std::min(num, size<TypeList>::value)>>::type;
 };
 template <class TypeList, size_t num>
 using drop_if_nonempty_t = typename drop_if_nonempty<TypeList, num>::type;

@@ -8,7 +8,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 void atan2_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -36,4 +36,4 @@ void hypot_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native
