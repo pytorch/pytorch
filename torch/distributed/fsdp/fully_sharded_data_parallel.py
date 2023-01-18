@@ -317,9 +317,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             parameters will not be managed by this FSDP instance,
             that means these parameters will not be flattened and sharded by FSDP,
             their gradients will not be synchronized as well. With this newly added
-            argument, `ignored_modules` could be deprecated soon. For back compatiablity,
-            both `ignored_parameters` and `ignored_modules` are kept for now,
-            but only one of them could not be None.
+            argument, ``ignored_modules`` could be deprecated soon. For backward compatiablity,
+            both ``ignored_parameters`` and ``ignored_modules`` are kept for now,
+            but FSDP only allows one of them to be specified as not ``None``.
     """
 
     def __init__(
