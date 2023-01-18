@@ -391,6 +391,8 @@ class TestMkldnn(TestCase):
                                     dilation=dilation,
                                     bias=bias,
                                     groups=groups).to(dtype=torch.float32)
+            print(data.size(), data.stride())
+            print(conv)
             x = data.clone()
             x_ref = x.clone()
             if train:
