@@ -988,8 +988,11 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    unnormalized = torch.exp(x - x_max)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
@@ -1008,8 +1011,11 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    shifted = x - x_max
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -1516,6 +1522,7 @@ def _native_batch_norm_legit_functional(
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
+    assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -1546,9 +1553,7 @@ def _to_copy(
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
-        out = torch.empty_like(x, memory_format=memory_format)
-        out = aten.copy.default(out, x)
-        return out  # type: ignore[call-overload]
+        return torch.clone(x, memory_format=memory_format)
     return x
 
 
@@ -1841,6 +1846,31 @@ def index_add_(
     *,
     alpha: NumberType = 1,
 ):
+    return _index_add(x, dim, index, tensor, inplace=True, alpha=alpha)
+
+
+@register_decomposition(aten.index_add)
+@out_wrapper()
+def index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+
+
+def _index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    inplace: bool,
+    alpha: NumberType = 1,
+):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
         index.ndim <= 1,
@@ -1854,9 +1884,47 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
+    # Treat scalars as elements of \R^1
+    zero_dim = x.ndim == 0
+    x1 = x.unsqueeze(0) if zero_dim else x
     idx = (None,) * dim + (index,)
-    aten.index_put_(x, idx, tensor, accumulate=True)
-    return x
+    index_put = aten.index_put_ if inplace else aten.index_put
+    out = index_put(x1, idx, tensor, accumulate=True)
+    if inplace:
+        return x
+    else:
+        return out.squeeze(0) if zero_dim else out.contiguous()
+
+
+@register_decomposition(aten.index_copy_)
+def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return _index_copy(x, dim, index, tensor, inplace=True)
+
+
+@register_decomposition(aten.index_copy)
+@out_wrapper()
+def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return _index_copy(x, dim, index, tensor, inplace=False)
+
+
+def _index_copy(
+    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    zero_dim = x.ndim == 0
+    x1 = x.unsqueeze(0) if zero_dim else x
+    idx = (None,) * dim + (index,)
+    index_put = aten.index_put_ if inplace else aten.index_put
+    out = index_put(x1, idx, tensor)
+    if inplace:
+        return x
+    else:
+        return out.squeeze(0) if zero_dim else out.contiguous()
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
@@ -1896,6 +1964,12 @@ def uniform(
         dtype=x.dtype,
         device=x.device,
     )
+
+
+@register_decomposition(aten.uniform_)
+def uniform_(self, low=0, high=1, generator=None):
+    assert generator is None
+    return self.copy_((high - low) * torch.rand_like(self) + low)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -2649,7 +2723,12 @@ def upsample_bicubic2d_default(
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
     coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
-    return _upsample_cubic_interp1d(coeffs_y, t_y)
+    result = _upsample_cubic_interp1d(coeffs_y, t_y)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(a)
+    result = result.contiguous(memory_format=memory_format)
+    return result
 
 
 @register_decomposition(aten.upsample_bicubic2d.vec)
