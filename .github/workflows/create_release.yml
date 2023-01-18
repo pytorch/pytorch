@@ -41,7 +41,7 @@ jobs:
             cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
             mv "/tmp/$PT_RELEASE_NAME" .
             # Cleanup
-            rm -rf "$PT_RELEASE_NAME"/{.circleci,.jenkins}
+            rm -rf "$PT_RELEASE_NAME"/{.circleci,.ci}
             find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
             # Create archive
             tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
