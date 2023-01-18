@@ -1644,6 +1644,10 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fvisibility-inlines-hidden",
     "-fno-math-errno ",
     "-fno-trapping-math",
+    # Cruise: DEBUG checks slow down `torch.cat` (and potentially other structered kernels)
+    # by as much as 300x
+    # To mitigate it, we unconditionally disable debug on the :torch library
+    "-DNDEBUG",
 ]
 
 cu_library(
