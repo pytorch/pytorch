@@ -1067,6 +1067,21 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         self.assertTrue(isinstance(m.softmax.activation_post_process, FixedQParamsObserver))
         self.assertTrue(isinstance(m.tanh.activation_post_process, FixedQParamsObserver))
 
+    @skipIfNoFBGEMM
+    def test_mha_batch_first_attr_is_copied_in_prepare(self):
+        class TransformerDecoderLayer(nn.Module):
+            def __init__(self, d_model, nhead, batch_first):
+                super().__init__()
+                self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=0.1, batch_first=batch_first)
+
+        qengine = torch.backends.quantized.engine
+        for batch_first in [True, False]:
+            model = TransformerDecoderLayer(512, 8, batch_first)
+            quantization_config = torch.quantization.get_default_qconfig(qengine)
+            model.qconfig = quantization_config
+            prepared_model = torch.quantization.prepare(model, inplace=False)
+            self.assertTrue(prepared_model.self_attn.batch_first == model.self_attn.batch_first)
+
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
     def test_single_layer(self):
