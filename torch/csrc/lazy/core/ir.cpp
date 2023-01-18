@@ -87,6 +87,8 @@ Node::Node(
 
     AddOperand(operand.node, operand.index);
   }
+
+  operands_as_oplist_ = operands;
 }
 
 Node::Node(
@@ -149,6 +151,10 @@ const Output& Node::nullable_operand(size_t i) const {
   // We use kNullOutput instead of kNullValue here to avoid implicit casting,
   // which would prevent this method from returning a reference.
   return i < operands_as_outputs_.size() ? operand(i) : kNullOutput;
+}
+
+const OpList& Node::operands_as_oplist() const {
+  return operands_as_oplist_;
 }
 
 std::string Node::ToString() const {

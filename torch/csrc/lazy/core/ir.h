@@ -137,6 +137,8 @@ class TORCH_API Node {
   // Gets operand at index i if index is valid, or kNullOutput otherwise.
   virtual const Output& nullable_operand(size_t i) const;
 
+  virtual const OpList& operands_as_oplist() const;
+
   // Returns the hash of the dag used to look up the compiled graph
   virtual hash_t hash() const = 0;
 
@@ -180,6 +182,9 @@ class TORCH_API Node {
   // Outputs do not hold references on the nodes, and neither do the uses, since
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;
+  // In order to make copies of IR nodes, we need to access the operands in the
+  // format which is passed into the constructor.
+  OpList operands_as_oplist_;
 };
 
 inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
