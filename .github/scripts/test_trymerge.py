@@ -432,7 +432,6 @@ class TestTryMerge(TestCase):
                                            land_checks=False,
                                            mandatory_only=False)
 
-
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
     def test_revert_rules(self, mock_gql: Any, mock_mr: Any) -> None:
