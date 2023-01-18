@@ -367,33 +367,32 @@ def _get_target_activation_dtype_for_node(
             }
 
         # get qconfig to determine the eventual dtype of this node
-        if qconfig is not None:
-            if qhandler is not None:
-                act_dtype, weight_dtype, input_act_is_dynamic = \
-                    get_qconfig_dtypes(qconfig)
+        if qconfig is not None and qhandler is not None:
+            act_dtype, weight_dtype, input_act_is_dynamic = \
+                get_qconfig_dtypes(qconfig)
 
-                # Currently `QConfig` only has one `activation` field.
-                # For static quantization, it is reused for both input
-                # and output activation. For dynamic quantization, this
-                # field is currently only used for the input activation,
-                # with the output activation being in fp32.
-                # In the future this may change as we add more fields
-                # to the `QConfig` object.
-                output_act_dtype = act_dtype \
-                    if (not input_act_is_dynamic) else torch.float
+            # Currently `QConfig` only has one `activation` field.
+            # For static quantization, it is reused for both input
+            # and output activation. For dynamic quantization, this
+            # field is currently only used for the input activation,
+            # with the output activation being in fp32.
+            # In the future this may change as we add more fields
+            # to the `QConfig` object.
+            output_act_dtype = act_dtype \
+                if (not input_act_is_dynamic) else torch.float
 
-                bias_dtype = torch.float16 \
-                    if (
-                        act_dtype == torch.float16
-                        and weight_dtype == torch.float16
-                        and (not input_act_is_dynamic)
-                    ) else torch.float
-                return {
-                    "input_activation_dtype": (act_dtype, input_act_is_dynamic),
-                    "weight_dtype": (weight_dtype, False),
-                    "bias_dtype": (bias_dtype, False),
-                    "output_activation_dtype": (output_act_dtype, False),
-                }
+            bias_dtype = torch.float16 \
+                if (
+                    act_dtype == torch.float16
+                    and weight_dtype == torch.float16
+                    and (not input_act_is_dynamic)
+                ) else torch.float
+            return {
+                "input_activation_dtype": (act_dtype, input_act_is_dynamic),
+                "weight_dtype": (weight_dtype, False),
+                "bias_dtype": (bias_dtype, False),
+                "output_activation_dtype": (output_act_dtype, False),
+            }
         return {
             "input_activation_dtype": (torch.float, False),
             "output_activation_dtype": (torch.float, False),
