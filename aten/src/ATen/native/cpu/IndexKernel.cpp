@@ -185,7 +185,7 @@ void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
@@ -244,7 +244,7 @@ void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cpu", [&] {
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
