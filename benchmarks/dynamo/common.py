@@ -131,7 +131,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDUCTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
-    "dlrm",  # Fails on CI - unable to repro locally
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
