@@ -1,8 +1,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue readArchiveAndTensors(
     const std::string& archive_name,
@@ -73,5 +72,4 @@ bool check_zip_file(
   return !(first_short[0] == first_slot && first_short[1] == second_slot);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

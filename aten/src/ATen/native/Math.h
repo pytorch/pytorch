@@ -2169,7 +2169,7 @@ calc_erfcx(T x)
  */
 template <typename T>
 static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
-  T t = x * M_SQRT1_2;
+  T t = x * c10::frac_sqrt_2<T>;
   if (x < T{-1.0}) {
     return std::log(calc_erfcx(-t) / 2) - t * t;
   } else {
@@ -2295,7 +2295,7 @@ static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             agd = agd * (z * z) + AGD[index];
         }
 
-        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * M_PI;
+        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * c10::pi<T>;
 
         return T(5.64189583547756286948e-01) / std::sqrt(std::sqrt(-x)) * (std::sin(t) * (T(1.0) + z * z * afn / afd) - std::cos(t) * (z * agn / agd));
     }
