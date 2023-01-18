@@ -16,7 +16,8 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 void hardtanh_backward_kernel(
@@ -42,4 +43,5 @@ void hardtanh_backward_kernel(
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

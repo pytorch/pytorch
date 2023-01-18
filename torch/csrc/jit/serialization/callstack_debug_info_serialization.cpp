@@ -3,7 +3,8 @@
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 const int64_t kInvalidSourceRangeTag = -1;
@@ -247,4 +248,5 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
   return callstack_ptrs;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

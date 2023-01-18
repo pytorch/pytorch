@@ -10,8 +10,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <c10/util/irange.h>
 
-namespace at::native {
-namespace {
+namespace at { namespace native { namespace {
 
 template<typename scalar_t>
 struct Dist {
@@ -448,4 +447,4 @@ REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
-}  // namespace at::native
+}}  // namespace at::native

@@ -6,7 +6,7 @@
 #include <ATen/native/Fill.h>
 #include <c10/core/Scalar.h>
 
-namespace at::native {
+namespace at { namespace native {
 
 template<typename scalar_t>
 struct FillFunctor {
@@ -26,4 +26,5 @@ void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
 
 REGISTER_DISPATCH(fill_stub, &fill_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

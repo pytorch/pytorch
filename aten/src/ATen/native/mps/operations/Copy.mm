@@ -13,7 +13,8 @@
 #include <c10/util/Optional.h>
 
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace mps {
 
 void* pageAlignedBlockPtr(
@@ -334,5 +335,5 @@ Tensor _copy_from_mps(const at::Tensor& self, const at::Tensor& dst, bool non_bl
 {
   return mps::mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
 }
-
-} // namespace at::native
+} // namespace native
+} // namespace at

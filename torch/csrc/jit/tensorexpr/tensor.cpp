@@ -4,7 +4,9 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 StmtPtr Tensor::constructStmt(
     const std::vector<VarPtr>& args,
@@ -256,4 +258,6 @@ Tensor Reduce(
   return Reduce(name, dims, c10::nullopt, reducer, tensor, reduce_dims);
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

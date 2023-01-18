@@ -13,7 +13,8 @@
 #endif
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 /*
  * Helper functions to be used for mm/addmm for detecting the Transpositions
@@ -596,4 +597,5 @@ Tensor &addbmm_mps_(Tensor& self, const Tensor& batch1, const Tensor& batch2, co
   return addbmm_out_mps(self, batch1, batch2, beta, alpha, self);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

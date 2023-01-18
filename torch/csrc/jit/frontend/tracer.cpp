@@ -26,7 +26,9 @@
 #include <sstream>
 #include <string>
 
-namespace torch::jit::tracer {
+namespace torch {
+namespace jit {
+namespace tracer {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Recording the traces
@@ -1112,4 +1114,6 @@ void _do_warn(const char* _reason, const char* _kind) {
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
 }
-} // namespace torch::jit::tracer
+} // namespace tracer
+} // namespace jit
+} // namespace torch

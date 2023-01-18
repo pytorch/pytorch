@@ -5,7 +5,8 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 Object::Object(
     std::shared_ptr<CompilationUnit> cu,
@@ -37,4 +38,5 @@ Object Object::deepcopy() const {
   return Object(_ivalue()->deepcopy());
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -22,7 +22,8 @@
 #include <ATen/ops/slow_conv_transpose3d_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 static inline void slow_conv_transpose3d_shape_check(
@@ -1013,4 +1014,5 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cuda(
 
 REGISTER_CUDA_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

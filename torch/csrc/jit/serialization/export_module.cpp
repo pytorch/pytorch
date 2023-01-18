@@ -38,7 +38,8 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 CompilationOptions getOptionsFromGlobal() {
   CompilationOptions compilation_options;
@@ -975,4 +976,5 @@ void BytecodeEmitMode::set_default_emit_promoted_ops_enabled(bool enabled) {
   emitDefaultEmitPromotedOps = enabled;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

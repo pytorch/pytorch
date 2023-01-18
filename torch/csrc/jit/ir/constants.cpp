@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 bool insertableTensor(const at::Tensor& ten) {
   // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
@@ -213,4 +214,5 @@ c10::optional<IValue> toIValue(const Value* v) {
   }
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

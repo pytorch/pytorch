@@ -1445,7 +1445,6 @@ def _optim_state_dict(
         if is_named_optimizer:
             flat_param_fqns = set(flat_param_to_fqn.values())
             for key, value in optim_state_dict["state"].items():
-                clean_key = clean_tensor_name(key)
                 if key in fsdp_osd_state:
                     continue
                 if key in flat_param_fqns:

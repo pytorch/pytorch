@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/ReductionType.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/Optional.h>
 
@@ -10,8 +9,10 @@ class Tensor;
 
 namespace native {
 
+enum SegmentReductionType { MAX, MEAN, MIN, SUM, PROD};
+
 using segment_reduce_lengths_fn = Tensor (*)(
-    ReductionType,
+    SegmentReductionType,
     const Tensor&,
     const Tensor&,
     int64_t,
@@ -19,7 +20,7 @@ using segment_reduce_lengths_fn = Tensor (*)(
 DECLARE_DISPATCH(segment_reduce_lengths_fn, _segment_reduce_lengths_stub);
 
 using segment_reduce_offsets_fn = Tensor (*)(
-    ReductionType,
+    SegmentReductionType,
     const Tensor&,
     const Tensor&,
     int64_t,
@@ -30,7 +31,7 @@ using segment_reduce_lengths_backward_fn = Tensor (*)(
     const Tensor&,
     const Tensor&,
     const Tensor&,
-    ReductionType,
+    SegmentReductionType,
     const Tensor&,
     int64_t,
     const c10::optional<Scalar>&);
@@ -40,7 +41,7 @@ using segment_reduce_offsets_backward_fn = Tensor (*)(
     const Tensor&,
     const Tensor&,
     const Tensor&,
-    ReductionType,
+    SegmentReductionType,
     const Tensor&,
     int64_t,
     const c10::optional<Scalar>&);

@@ -23,7 +23,8 @@
 #include <sstream>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Controls whether graph source ranges are printed by default
 bool global_print_source_ranges = true;
@@ -1144,4 +1145,5 @@ void initPythonIRBindings(PyObject* module_) {
             return g.graph_output_to_symbolic_shape_dim_;
           });
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

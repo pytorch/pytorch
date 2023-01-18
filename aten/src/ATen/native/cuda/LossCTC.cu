@@ -36,7 +36,8 @@
 #include <type_traits>
 #include <numeric>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -780,4 +781,4 @@ Tensor ctc_loss_backward_gpu(const Tensor& grad, const Tensor& log_probs, const 
     });
 }
 
-} // at::native
+} } // at::native

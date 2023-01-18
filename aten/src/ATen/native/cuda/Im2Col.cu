@@ -20,7 +20,8 @@
 #include <ATen/ops/im2col_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 static void im2col_out_cuda_template(
@@ -162,4 +163,5 @@ Tensor im2col_cuda(
   return output;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

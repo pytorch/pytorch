@@ -16,7 +16,8 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
@@ -55,4 +56,5 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& value) {
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

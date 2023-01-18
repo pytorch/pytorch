@@ -28,7 +28,8 @@
 #include <cstring>
 #include <locale>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 #ifdef _MSC_VER
 double strtod_c(const char* nptr, char** endptr) {
@@ -47,4 +48,5 @@ float strtof_c(const char* nptr, char** endptr) {
   return (float)strtod_c(nptr, endptr);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

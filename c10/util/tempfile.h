@@ -68,7 +68,7 @@ struct TempFile {
   }
 
   TempFile& operator=(const TempFile&) = delete;
-  TempFile& operator=(TempFile&& other) noexcept {
+  TempFile& operator=(TempFile&& other) {
     fd = other.fd;
     name = std::move(other.name);
     other.fd = -1;
@@ -98,7 +98,7 @@ struct TempDir {
   }
 
   TempDir& operator=(const TempDir&) = delete;
-  TempDir& operator=(TempDir&& other) noexcept {
+  TempDir& operator=(TempDir&& other) {
     name = std::move(other.name);
     other.name.clear();
     return *this;

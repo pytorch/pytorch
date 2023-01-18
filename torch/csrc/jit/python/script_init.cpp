@@ -70,7 +70,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -2387,5 +2388,5 @@ void initJitScriptBindings(PyObject* module) {
   initScriptDictBindings(module);
   initScriptListBindings(module);
 }
-
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -9,7 +9,8 @@
 
 #include <regex>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -793,4 +794,5 @@ void SourceImporter::LEGACY_import_methods(
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -28,7 +28,8 @@
 #include <cmath>
 #include <cstddef>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor& eye_out_cuda(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
@@ -383,4 +384,4 @@ Tensor triu_indices_cuda(
   return tensor;
 }
 
-} // namespace at::native
+}} // namespace at::native

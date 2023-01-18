@@ -18,7 +18,8 @@
 
 #include <Python.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -1372,4 +1373,5 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

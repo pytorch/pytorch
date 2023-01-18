@@ -16,7 +16,8 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 void hardswish_kernel(TensorIterator& iter) {
@@ -60,4 +61,5 @@ void hardswish_backward_kernel(TensorIterator& iter) {
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

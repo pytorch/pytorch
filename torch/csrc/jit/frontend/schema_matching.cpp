@@ -14,7 +14,8 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
@@ -776,4 +777,5 @@ Value* emitBuiltinCall(
   }
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -7,7 +7,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Transforms a Loop that has both a trip count specified and a loop
 // body condition so that the iter count is no longer specified
@@ -65,4 +66,5 @@ TORCH_API void CanonicalizeModifiedLoops(std::shared_ptr<Graph>& graph) {
   canonicalizeModifiedLoops(graph->block());
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

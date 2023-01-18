@@ -9,7 +9,8 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 const char asinh_name[] = "asinh";
 void asinh_kernel_cuda(TensorIteratorBase& iter) {
@@ -51,4 +52,5 @@ void asinh_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(asinh_stub, &asinh_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

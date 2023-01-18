@@ -1796,9 +1796,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
-        except TypeError as e:
+        except TypeError as exc:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
             )
             unimplemented("arg mismatch inlining")
 
@@ -1822,15 +1822,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
-        try:
-            tracer.run()
-        except exc.SkipFrame as e:
-            msg = f"SKIPPED INLINING {code}: {e}"
-            log.debug(msg)
-            raise Unsupported(msg) from e
-        except Exception as e:
-            log.debug(f"FAILED INLINING {code}")
-            raise
+        tracer.run()
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 

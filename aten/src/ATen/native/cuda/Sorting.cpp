@@ -23,7 +23,8 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
@@ -204,4 +205,5 @@ Tensor nanmedian_cuda(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

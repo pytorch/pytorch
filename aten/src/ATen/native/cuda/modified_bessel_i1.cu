@@ -18,7 +18,8 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at::native {
+namespace at {
+    namespace native {
         namespace {
             const char modified_bessel_i1_name[] = "modified_bessel_i1_forward";
 
@@ -38,4 +39,5 @@ namespace at::native {
         }
 
         REGISTER_DISPATCH(special_modified_bessel_i1_stub, &modified_bessel_i1_kernel_cuda);
-} // namespace at::native
+    } // namespace native
+} // namespace at

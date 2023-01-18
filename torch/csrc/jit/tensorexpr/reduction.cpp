@@ -2,7 +2,9 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 ExprHandle Reducer::operator()(
     BufHandle result_buf,
@@ -63,4 +65,6 @@ ExprHandle ReduceOp::make(
       reducer));
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

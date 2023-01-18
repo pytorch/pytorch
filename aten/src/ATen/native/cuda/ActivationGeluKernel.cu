@@ -16,7 +16,8 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void GeluCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   if (approximate == GeluType::Tanh) {
@@ -85,4 +86,5 @@ void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   }
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

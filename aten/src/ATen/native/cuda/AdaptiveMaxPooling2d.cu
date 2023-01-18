@@ -23,7 +23,8 @@
 #include <cmath>
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -471,4 +472,5 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
     gradInput.copy_(gradInput_c);
   }
  }
-} // namespace at::native
+} // at::native
+} // at

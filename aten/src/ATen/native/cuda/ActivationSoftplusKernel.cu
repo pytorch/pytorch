@@ -16,7 +16,8 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 void softplus_kernel(
@@ -71,4 +72,5 @@ void softplus_backward_kernel(
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -11,7 +11,8 @@
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -237,7 +238,7 @@ size_t HashNode::operator()(const Node* k) const {
       fmap(k->outputs(), [](const Value* v) { return v->type()->kind(); }),
       fmap(k->inputs(), [](const Value* v) { return v->unique(); }),
       constant_hash);
-}
+};
 
 // Checks that two nodes have the same inputs, output types
 // and node attributes.
@@ -284,6 +285,7 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   }
 
   return true;
-}
+};
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

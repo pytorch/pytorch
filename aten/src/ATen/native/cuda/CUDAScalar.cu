@@ -10,7 +10,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Scalar _local_scalar_dense_cuda(const Tensor& self) {
   Scalar r;
@@ -24,4 +25,4 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
   return r;
 }
 
-} // at::native
+}} // at::native

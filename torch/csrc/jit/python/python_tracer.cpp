@@ -18,7 +18,9 @@ using namespace torch::autograd;
 using namespace torch::jit;
 using namespace torch::jit::tracer;
 
-namespace torch::jit::tracer {
+namespace torch {
+namespace jit {
+namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
@@ -283,4 +285,6 @@ void initPythonTracerBindings(PyObject* module) {
   });
 }
 
-} // namespace torch::jit::tracer
+} // namespace tracer
+} // namespace jit
+} // namespace torch

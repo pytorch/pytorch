@@ -30,7 +30,8 @@
 //
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor& eye_out_mps(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
@@ -114,4 +115,5 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 }
 
 
-} // namespace at::native
+}
+}

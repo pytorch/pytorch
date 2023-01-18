@@ -6,7 +6,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
@@ -292,4 +294,6 @@ bool immediateIsZero(const ExprPtr& e) {
   return false;
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

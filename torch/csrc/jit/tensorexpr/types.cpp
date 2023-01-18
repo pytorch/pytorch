@@ -5,7 +5,9 @@
 
 #include <c10/util/Logging.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 Dtype Dtype::scalar_dtype() const {
   return ToDtype(scalar_type_);
@@ -93,7 +95,9 @@ std::string Dtype::ToCppString() const {
   return "invalid";
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 namespace std {
 

@@ -19,7 +19,8 @@
 
 using namespace at::native;
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // TODO: remove this when CUDA <11.6 is no longer supported
 bool disable_sort_for_topk() {
@@ -894,3 +895,4 @@ void launch_gather_topk_kernel(
 }
 
 } // at::native
+} // at

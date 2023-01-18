@@ -716,7 +716,7 @@ def convert_weighted_module(
             "weight_ih": weight_qparams_ih,
             "weight_hh": weight_qparams_hh,
         })
-    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):
+    elif isinstance(float_module, torch.nn.LSTM):
         # format for wq_or_wq_dict (flattened attributes):
         # {"weight_ih_l0_scale": ..., "weight_ih_l0_qscheme": ..., ...}
         for wn in float_module._flat_weights_names:

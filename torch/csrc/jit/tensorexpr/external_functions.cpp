@@ -23,7 +23,9 @@
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 c10::MemoryFormat deduce_memory_format(
     c10::IntArrayRef strides,
@@ -1633,4 +1635,6 @@ const static RegisterNNCExternalFunction reg_nnc_prepacked_conv2d_clamp_run(
 } // extern "C"
 #endif
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

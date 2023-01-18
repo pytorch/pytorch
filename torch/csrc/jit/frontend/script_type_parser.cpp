@@ -5,7 +5,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 
 bool isTorch(const Expr& expr) {
@@ -483,4 +484,5 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   return *default_val.begin();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

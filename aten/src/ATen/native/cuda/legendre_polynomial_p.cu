@@ -8,7 +8,8 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at::native {
+namespace at {
+    namespace native {
         namespace {
             const char legendre_polynomial_p_name[] = "legendre_polynomial_p_forward";
 
@@ -28,4 +29,5 @@ namespace at::native {
         } // namespace (anonymous)
 
         REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel_cuda);
-} // namespace at::native
+    } // namespace native
+} // namespace at

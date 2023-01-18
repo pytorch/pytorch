@@ -16,7 +16,8 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // -----------------------------------
 // prelu
@@ -45,4 +46,5 @@ void prelu_backward_kernel(TensorIterator &iter) {
 REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
 REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

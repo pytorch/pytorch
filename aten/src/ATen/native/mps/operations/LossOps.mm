@@ -9,7 +9,8 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace mps {
 
 string reductionToString(int64_t reduction)
@@ -1614,4 +1615,5 @@ Tensor nll_loss2d_backward_mps(
 }
 
 
-} // namespace at::native
+} // namespace native
+} // namespace at

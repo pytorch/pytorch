@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 // Rewrites the variables' name according to valid C++ naming convention.
 // E.g. in Graph IR, variable name may contain '.', in C++, they are replaced
@@ -401,4 +403,6 @@ void CppCodeGen::call_raw(const std::vector<void*>& args) {
 
 RegisterCodeGen<CppCodeGen> cpp_codegen_reg("cpp_codegen");
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

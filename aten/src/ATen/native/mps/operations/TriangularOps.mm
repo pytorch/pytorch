@@ -11,7 +11,8 @@
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 TORCH_IMPL_FUNC(triu_mps_out)
 (const Tensor& self,
@@ -171,4 +172,5 @@ TORCH_IMPL_FUNC(tril_mps_out)
 
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

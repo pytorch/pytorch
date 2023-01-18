@@ -22,7 +22,8 @@
 
 using c10::QualifiedName;
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static bool isValidIdentifierChar(char c, size_t pos) {
   return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
@@ -1754,4 +1755,5 @@ void jitModuleToPythonCodeAndConstants(
   }
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

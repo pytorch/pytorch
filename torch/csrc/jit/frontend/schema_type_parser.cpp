@@ -40,7 +40,8 @@ using c10::TupleType;
 using c10::UnionType;
 using c10::VarType;
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -461,4 +462,5 @@ void SchemaTypeParser::parseList(
     L.expect(end);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

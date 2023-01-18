@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/external_functions_core.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 #ifdef C10_MOBILE
 extern "C" {
@@ -34,4 +36,6 @@ void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
 } // extern "C"
 #endif
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

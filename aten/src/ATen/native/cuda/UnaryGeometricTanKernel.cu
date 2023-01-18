@@ -9,7 +9,8 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 const char tan_name[] = "tan";
 void tan_kernel_cuda(TensorIteratorBase& iter) {
@@ -50,4 +51,5 @@ void tan_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(tan_stub, &tan_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

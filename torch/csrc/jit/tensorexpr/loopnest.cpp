@@ -31,7 +31,9 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
@@ -3426,4 +3428,6 @@ bool LoopNest::rfactor(
   return true;
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

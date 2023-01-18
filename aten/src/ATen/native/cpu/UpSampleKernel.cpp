@@ -17,7 +17,8 @@
 #include <ATen/ops/ones.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
@@ -1586,4 +1587,5 @@ REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
 REGISTER_DISPATCH(_upsample_bicubic2d_aa_kernel, &upsample_bicubic2d_aa_kernel_impl);
 REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa_backward_kernel_impl);
-} // namespace at::native
+} // namespace native
+} // namespace at
