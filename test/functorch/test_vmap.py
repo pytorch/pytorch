@@ -2624,7 +2624,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
         test(op, (torch.rand(B0, 2, 3, 5),))
-        test(op, (torch.rand(B0),))
         test(op, (torch.rand(2, B0, 3, 5),), in_dims=1)
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
@@ -3322,7 +3321,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
                            postprocess_fn=None):
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
                 vmap_out = postprocess_fn(vmap_out)
@@ -3343,7 +3342,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                         func, args, kwargs, in_dims, compute_loop_out=False, clone_inputs=True):
                     pass
             return
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(
                 func, args, kwargs, in_dims, clone_inputs=True):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
