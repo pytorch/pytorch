@@ -331,7 +331,6 @@ def _multi_tensor_adamax(
                 [exp_inf.unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
             )
             torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
-    
         bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         clr = _stack_if_compiling([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
         torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, clr)
