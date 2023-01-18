@@ -92,7 +92,7 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
         CUDA_KERNEL_ASSERT(input_val >= zero && input_val <= one);
 
         scalar_t log_input_val = std::log(input_val);
-        scalar_t log_1_minus_input_val = std::log(one - input_val);
+        scalar_t log_1_minus_input_val = std::log1p(-input_val);
 
         log_input_val = std::max(log_input_val, neg_100);
         log_1_minus_input_val = std::max(log_1_minus_input_val, neg_100);
