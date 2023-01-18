@@ -121,6 +121,12 @@ class GraphLowering(torch.fx.Interpreter):
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.warning(f"Using FallbackKernel: {name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
