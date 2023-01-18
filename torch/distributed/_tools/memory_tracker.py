@@ -120,7 +120,7 @@ class MemoryTracker:
         """
         Remove module hooks and exit ``MemoryProfileDispatchMode`` to stop
         tracking memory stats at operator level.
-        Get some aggregated stats when the memory_tracker() is enabled, like 
+        Get some aggregated stats when the memory_tracker() is enabled, like
         cuda ``num_alloc_retries``.
         """
         self._num_cuda_retries = torch.cuda.memory_stats().get("num_alloc_retries", 0)
