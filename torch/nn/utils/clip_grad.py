@@ -1,7 +1,8 @@
 import warnings
-from typing import Union, Iterable
+from typing import Union, Iterable, List, Dict, Tuple
 
 import torch
+from torch import Tensor
 from torch._six import inf
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -42,7 +43,8 @@ def clip_grad_norm_(
     if len(grads) == 0:
         return torch.tensor(0.)
     first_device = grads[0].device
-    grouped_grads = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])
+    grouped_grads: Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]] \
+        = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])  # type: ignore[assignment]
 
     if norm_type == inf:
         norms = [g.detach().abs().max().to(first_device) for g in grads]
@@ -118,7 +120,8 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
     clip_value = float(clip_value)
 
     grads = [p.grad for p in parameters if p.grad is not None]
-    grouped_grads = _group_tensors_by_device_and_dtype([grads])
+    grouped_grads: Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]] \
+        = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
     for ((device, _), [grads]) in grouped_grads.items():
         if (foreach is None or foreach) and device.type in {'cpu', 'cuda'}:
