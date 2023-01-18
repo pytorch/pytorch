@@ -327,7 +327,7 @@ def _multi_tensor_rmsprop(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
-    for (grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs, 
+    for (grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
          grouped_momentum_buffer_list) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
