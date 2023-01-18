@@ -95,15 +95,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout matthewgraca/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: pin-cmake-where-conda-is-used
           submodules: recursive
-          repository: pytorch/builder
+          repository: matthewgraca/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean matthewgraca/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -210,15 +210,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout matthewgraca/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: pin-cmake-where-conda-is-used
           submodules: recursive
-          repository: pytorch/builder
+          repository: matthewgraca/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean matthewgraca/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
