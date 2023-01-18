@@ -158,9 +158,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: libtinfo6_test
           submodules: recursive
-          repository: pytorch/builder
+          repository: jataylo/builder
           path: builder
           quiet-checkout: true
       - name: Clean pytorch/builder checkout
