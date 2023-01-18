@@ -240,30 +240,32 @@ class TestFSDPIgnoredModules(FSDPTest):
         layer1_ignored_modules = [
             m for m in model.layer1.modules() if isinstance(m, IgnoredModule)
         ]
-        if ignore_modules:
-            model.layer1 = FSDP(model.layer1, ignored_modules=layer1_ignored_modules)
-        else:
-            model.layer1 = FSDP(
-                model.layer1,
-                ignored_parameters=set(
+        ignore_kwargs = (
+            {"ignored_modules": layer1_ignored_modules}
+            if ignore_modules
+            else {
+                "ignored_parameters": set(
                     p for m in layer1_ignored_modules for p in m.parameters()
-                ),
-            )
+                )
+            }
+        )
+        model.layer1 = FSDP(model.layer1, **ignore_kwargs)
         model.layer3 = FSDP(model.layer3)
         model_ignored_modules = (
             [m for m in model.modules() if isinstance(m, IgnoredModule)]
             if pass_ignored_modules_to_root
             else []
         )
-        if ignore_modules:
-            wrapped_model = FSDP(model, ignored_modules=model_ignored_modules)
-        else:
-            wrapped_model = FSDP(
-                model,
-                ignored_parameters=set(
+        ignore_kwargs_top = (
+            {"ignored_modules": model_ignored_modules}
+            if ignore_modules
+            else {
+                "ignored_parameters": set(
                     p for m in model_ignored_modules for p in m.parameters()
-                ),
-            )
+                )
+            }
+        )
+        wrapped_model = FSDP(model, **ignore_kwargs_top)
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
 
@@ -272,33 +274,30 @@ class TestFSDPIgnoredModules(FSDPTest):
     def test_ignored_modules_not_under_wrapped_root(self, ignore_modules: bool):
         model = Model().cuda()
         ignored_modules = list(model.layer1.children())[1:]
-        if ignore_modules:
-            model.layer1 = FSDP(
-                model.layer1,
-                # sharding_strategy shouldn't matter here.
-                sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-                ignored_modules=ignored_modules,
-            )
-            model.layer3 = FSDP(
-                model.layer3,
-                # the ignored_modules contains submodule under model.layer1, which
-                # is out of the the local root model.layer3.
-                ignored_modules=ignored_modules,
-            )
-        else:
-            ignored_parameters = set(p for m in ignored_modules for p in m.parameters())
-            model.layer1 = FSDP(
-                model.layer1,
-                # sharding_strategy shouldn't matter here.
-                sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-                ignored_parameters=ignored_parameters,
-            )
-            model.layer3 = FSDP(
-                model.layer3,
-                # the ignored_parameters contains submodule under model.layer1, which
-                # is out of the the local root model.layer3.
-                ignored_parameters=ignored_parameters,
-            )
+
+        ignore_kwargs = (
+            {"ignored_modules": ignored_modules}
+            if ignore_modules
+            else {
+                "ignored_parameters": set(
+                    p for m in ignored_modules for p in m.parameters()
+                )
+            }
+        )
+
+        model.layer1 = FSDP(
+            model.layer1,
+            # sharding_strategy shouldn't matter here.
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            **ignore_kwargs,
+        )
+        model.layer3 = FSDP(
+            model.layer3,
+            # the ignored modules/parameters contains submodule under model.layer1, which
+            # is out of the local root model.layer3.
+            **ignore_kwargs,
+        )
+
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
         self._train_model(model, optim, 3)
 
