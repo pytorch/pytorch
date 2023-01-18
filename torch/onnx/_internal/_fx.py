@@ -17,7 +17,7 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
-from torch.onnx import _type_utils, symbolic_helper
+from torch.onnx import _type_utils
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.onnx._internal import jit_utils, registration
 from torch.utils import _pytree
@@ -235,7 +235,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     graph_context, fx_module_with_metadata, node, fx_name_to_ts_value
                 )
                 # TODO(titaiwang): ts_args to onnxscript args
-                onnx_inputs, onnx_attrs = torchscript_evaluator.decode_attributes(
+                onnx_inputs, onnx_attrs = graph_building.adapt_torchscript_inputs(
                     symbolic_fn, ts_args, {}
                 )
                 # TODO(titaiwang): ONNXFunction triggers adding custom Ops and record it
@@ -366,7 +366,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
             g, params_dict={}, opset_version=opset_version
         )
 
-    return g, ts_name_to_real_tensor, torchscript_evaluator.get_functions()
+    return g, ts_name_to_real_tensor, torchscript_evaluator.functions()
 
 
 def _ts_graph_to_onnx_model_in_protobuf(
