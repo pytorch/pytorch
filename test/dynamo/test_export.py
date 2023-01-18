@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.fx.experimental.proxy_tensor import make_fx
+from functorch.experimental.control_flow import cond
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1561,6 +1562,28 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
+
+    def test_export_cond_in_aten_symbolic(self):
+        class ConditionOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def true_fn(self, x, y):
+                return x * y
+
+            def false_fn(self, x, y):
+                return x + y
+
+            def forward(self, pred, x, y):
+                return cond(pred, self.true_fn, self.false_fn, [x, y])
+
+        model = ConditionOp()
+        inp = (torch.tensor(False), torch.empty(4, 4), torch.empty(4, 4),)
+        gm, _ = torch._dynamo.export(model, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        gm.print_readable()
+
+        self.assertEqual(gm(*inp), model(*inp))
 
 
 if __name__ == "__main__":
