@@ -1161,7 +1161,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model, False, False
             )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1209,7 +1211,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)

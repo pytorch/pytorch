@@ -1014,5 +1014,6 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs["l2_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_y"].dtype, torch.float32)
 
+
 if __name__ == "__main__":
     run_tests()
