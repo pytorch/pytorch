@@ -302,6 +302,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
+            subobj = None
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
@@ -313,6 +314,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, types.FunctionType):
+            return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
