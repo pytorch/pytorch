@@ -13,6 +13,47 @@ namespace jit {
 
 using namespace torch::jit::fuser::cuda;
 
+namespace {
+
+// check if x and y are equivalent expressions by checking that x == y
+// simplifies to true. We don't use x->sameAs(y), because we want to consider
+// a(b+c), ab+ac, (b+c)a, ba+ca as equivalent, but `sameAs` can not do this job.
+bool isEquivalent(Val* x, Val* y) {
+  return simplifyExpr(eq(x, y))->getBool() == true;
+}
+
+// assert that x/y -> z
+void assertSimplifiedDiv(Val* x, Val* y, Val* z) {
+  auto simplified = simplifyExpr(cpp_div(x, y));
+  TORCH_CHECK(
+      isEquivalent(simplified, z),
+      "Expect ",
+      x->toInlineString(),
+      " / ",
+      y->toInlineString(),
+      " to be simplified to ",
+      z->toInlineString(),
+      ", but get ",
+      simplified->toInlineString());
+}
+
+// assert that x % y -> z
+void assertSimplifiedMod(Val* x, Val* y, Val* z) {
+  auto simplified = simplifyExpr(mod(x, y));
+  TORCH_CHECK(
+      isEquivalent(simplified, z),
+      "Expect ",
+      x->toInlineString(),
+      " % ",
+      y->toInlineString(),
+      " to be simplified to ",
+      z->toInlineString(),
+      ", but get ",
+      simplified->toInlineString());
+}
+
+} // namespace
+
 TEST_F(NVFuserTest, FusionAssociativeAndCommutativeReordering_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
@@ -29,31 +70,55 @@ TEST_F(NVFuserTest, FusionAssociativeAndCommutativeReordering_CUDA) {
   auto six = IrBuilder::create<Int>(6);
   auto eight = IrBuilder::create<Int>(8);
 
-  // ((((c * d) + ((e + f) + 3)) + 3) * ((((a + b) + 3) + 5) + c)) * a
-  auto val =
-      mul(mul(add(add(mul(c, d), add(add(e, f), three)), three),
-              add(add(add(add(a, b), three), five), c)),
-          a);
-  std::vector<VarInfo> variables(6);
-  variables[0].variable = a;
-  variables[1].variable = b;
-  variables[2].variable = c;
-  variables[3].variable = d;
-  variables[4].variable = e;
-  variables[5].variable = f;
-  auto simplified = simplifyExpr(val, {variables.begin(), variables.end()});
+  {
+    // ((c * b) + d) + (a + 3)
+    auto val = add(add(mul(c, b), d), add(a, three));
+    std::vector<VarInfo> variables(4);
+    variables[0].variable = a;
+    variables[1].variable = b;
+    variables[2].variable = c;
+    variables[3].variable = d;
+    auto simplified = simplifyExpr(val, {variables.begin(), variables.end()});
+    // simplify it, expecting to get
+    // (((3 + a) + (b * c)) + d)
+    auto expect = add(add(add(three, a), mul(b, c)), d);
+    TORCH_CHECK(
+        expect->sameAs(simplified) && simplified->sameAs(expect),
+        "Expect the simplified expression",
+        simplified->toInlineString(),
+        " to be the same as ",
+        expect->toInlineString());
+  }
 
-  // simplify it, expecting to get
-  // (a * (((8 + a) + b) + c)) * (((6 + (c * d)) + e) + f)
-  auto expect =
-      mul(mul(a, add(add(add(eight, a), b), c)),
-          add(add(add(six, mul(c, d)), e), f));
-  TORCH_CHECK(
-      expect->sameAs(simplified) && simplified->sameAs(expect),
-      "Expect the simplified expression",
-      simplified->toInlineString(),
-      " to be the same as ",
-      expect->toInlineString());
+  {
+    // ((((c * d) + ((e + f) + 3)) + 3) * ((((a + b) + 3) + 5) + c)) * a
+    auto val =
+        mul(mul(add(add(mul(c, d), add(add(e, f), three)), three),
+                add(add(add(add(a, b), three), five), c)),
+            a);
+    std::vector<VarInfo> variables(6);
+    variables[0].variable = a;
+    variables[1].variable = b;
+    variables[2].variable = c;
+    variables[3].variable = d;
+    variables[4].variable = e;
+    variables[5].variable = f;
+    auto simplified = simplifyExpr(val, {variables.begin(), variables.end()});
+
+    // simplify it, expecting to get
+    // (a * (((8 + a) + b) + c)) * (((6 + (c * d)) + e) + f)
+    auto expect =
+        mul(mul(a, add(add(add(eight, a), b), c)),
+            add(add(add(six, mul(c, d)), e), f));
+    TORCH_CHECK(
+        // Use isEquivalent to check equivalence because distributeMul will
+        // expand the expression.
+        isEquivalent(simplified, expect),
+        "Expect the simplified expression",
+        simplified->toInlineString(),
+        " to be the same as ",
+        expect->toInlineString());
+  }
 }
 
 TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
@@ -142,14 +207,6 @@ TEST_F(NVFuserTest, FusionSimplifyDivisibleDivMod_CUDA) {
   auto c = NamedScalar::getParallelDim(ParallelType::TIDz);
   auto d = add(NamedScalar::getParallelIndex(ParallelType::TIDx), one);
 
-  // check if x and y are equivalent expressions by checking that
-  // x / y and y / x simplifies to 1, and x % y and y % x simplifies to 0
-  auto is_equivalent = [](Val* x, Val* y) {
-    return simplifyExpr(mod(x, y))->isZeroInt() &&
-        simplifyExpr(mod(y, x))->isZeroInt() &&
-        simplifyExpr(cpp_div(x, y))->isOneInt() &&
-        simplifyExpr(cpp_div(y, x))->isOneInt();
-  };
   // assert that our system can correctly find that x is a multiple of y and z,
   // and simplify:
   // x % y -> 0
@@ -157,47 +214,11 @@ TEST_F(NVFuserTest, FusionSimplifyDivisibleDivMod_CUDA) {
   // x / y -> z
   // and if x_div_z is true, also test
   // x / z -> y
-  auto assertSimplifiedDivMod = [&is_equivalent](Val* x, Val* y, Val* z) {
-    auto simplified = simplifyExpr(mod(x, y));
-    TORCH_CHECK(
-        simplified->isZeroInt(),
-        "Expect ",
-        x->toInlineString(),
-        " % ",
-        y->toInlineString(),
-        " to be simplified to zero, but get ",
-        simplified->toInlineString());
-    simplified = simplifyExpr(mod(x, z));
-    TORCH_CHECK(
-        simplified->isZeroInt(),
-        "Expect ",
-        x->toInlineString(),
-        " % ",
-        z->toInlineString(),
-        " to be simplified to zero, but get ",
-        simplified->toInlineString());
-    simplified = simplifyExpr(cpp_div(x, y));
-    TORCH_CHECK(
-        is_equivalent(simplified, z),
-        "Expect ",
-        x->toInlineString(),
-        " / ",
-        y->toInlineString(),
-        " to be simplified to ",
-        z->toInlineString(),
-        " but get ",
-        simplified->toInlineString());
-    simplified = simplifyExpr(cpp_div(x, z));
-    TORCH_CHECK(
-        is_equivalent(simplified, y),
-        "Expect ",
-        x->toInlineString(),
-        " / ",
-        z->toInlineString(),
-        " to be simplified to ",
-        y->toInlineString(),
-        " but get ",
-        simplified->toInlineString());
+  auto assertSimplifiedDivMod = [&fusion](Val* x, Val* y, Val* z) {
+    assertSimplifiedMod(x, y, fusion.zeroVal());
+    assertSimplifiedMod(x, z, fusion.zeroVal());
+    assertSimplifiedDiv(x, y, z);
+    assertSimplifiedDiv(x, z, y);
   };
 
   assertSimplifiedDivMod(six, three, two);
@@ -380,6 +401,64 @@ TEST_F(NVFuserTest, FusionEquivalenceSimplification_CUDA) {
   assertProvedEquiv(a, a);
   assertProvedEquiv(mul(a, b), mul(b, a));
   assertProvedEquiv(mod(mul(a, c), b), mod(mul(c, a), b));
+}
+
+TEST_F(NVFuserTest, FusionCancelDivMod_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto one = IrBuilder::create<Int>(1);
+  auto two = IrBuilder::create<Int>(2);
+  auto three = IrBuilder::create<Int>(3);
+  auto five = IrBuilder::create<Int>(5);
+  auto six = IrBuilder::create<Int>(6);
+  auto fifteen = IrBuilder::create<Int>(15);
+  auto a = NamedScalar::getParallelDim(ParallelType::TIDx);
+  auto b = NamedScalar::getParallelDim(ParallelType::TIDy);
+  auto c = NamedScalar::getParallelDim(ParallelType::TIDz);
+  assertSimplifiedDiv(
+      mul(six, mul(a, c)),
+      mul(fifteen, mul(a, b)),
+      cpp_div(mul(two, c), mul(five, b)));
+  assertSimplifiedMod(
+      mul(six, mul(a, c)),
+      mul(fifteen, mul(a, b)),
+      mul(mod(mul(two, c), mul(five, b)), mul(three, a)));
+  assertSimplifiedDiv(
+      mul(three, a), mul(fifteen, mul(a, b)), cpp_div(one, mul(five, b)));
+  assertSimplifiedMod(
+      mul(three, a),
+      mul(fifteen, mul(a, b)),
+      mul(mod(one, mul(five, b)), mul(three, a)));
+}
+
+TEST_F(NVFuserTest, FusionDistributeDivisibleDivMod_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto a = NamedScalar::getParallelDim(ParallelType::TIDx);
+  auto b = NamedScalar::getParallelDim(ParallelType::TIDy);
+  auto c = NamedScalar::getParallelDim(ParallelType::TIDz);
+
+  assertSimplifiedDiv(add(mul(a, b), c), a, add(b, cpp_div(c, a)));
+  assertSimplifiedMod(add(mul(a, b), c), a, mod(c, a));
+}
+
+TEST_F(NVFuserTest, FusionDistributeMul_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto a = IrBuilder::create<NamedScalar>("a", DataType::Int);
+  auto b = IrBuilder::create<NamedScalar>("b", DataType::Int);
+  auto c = IrBuilder::create<NamedScalar>("c", DataType::Int);
+  auto d = IrBuilder::create<NamedScalar>("d", DataType::Int);
+
+  TORCH_CHECK(isEquivalent(mul(a, add(b, c)), add(mul(a, b), mul(a, c))));
+  TORCH_CHECK(isEquivalent(
+      mul(a, add(add(b, c), d)), add(add(mul(a, b), mul(a, c)), mul(a, d))));
 }
 
 } // namespace jit
