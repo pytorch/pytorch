@@ -244,12 +244,10 @@ def sympy_str(expr: sympy.Expr):
 
 
 def sympy_symbol(name):
-    from torch.fx.experimental.symbolic_shapes import Symbol
-    # We should not be relying on the fact that sympy_symbol("s1") == sympy_symbol("s1")
-    # As all symbols representing symbolic shapes should be allocated before Inductor
-    # this should never trigger.
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
     assert name[0] != "s"
-    return Symbol(name, integer=True, positive=True)
+    return sympy.Symbol(name, integer=True, positive=True)
 
 
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):

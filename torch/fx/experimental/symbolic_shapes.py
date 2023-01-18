@@ -538,17 +538,17 @@ if HAS_SYMPY:
     # NB: This inherits from Dummy, not Symbol, because Symbols with the same
     # name get interned.  This is bad for us as we want the metadata
     # to vary across different invocations and not leak.
-    Symbol = sympy.Symbol
-    # class Symbol(sympy.Dummy):
-    #     __slots__: List[str] = ['sources', 'stack']
-    #     sources: List[Source]
-    #     stack: Optional[str]
+    # Symbol = sympy.Symbol
+    class Symbol(sympy.Dummy):
+        __slots__: List[str] = ['sources', 'stack']
+        sources: List[Source]
+        stack: Optional[str]
 
-    #     def __new__(cls, *args, **kwargs):
-    #         self = super().__new__(cls, *args, **kwargs)
-    #         self.sources = []
-    #         self.stack = None
-    #         return self
+        def __new__(cls, *args, **kwargs):
+            self = super().__new__(cls, *args, **kwargs)
+            self.sources = []
+            self.stack = None
+            return self
 
 
     class ShapeGuardPrinter(StrPrinter):
