@@ -11,7 +11,6 @@ ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 
 # Install common dependencies (so that this step can be cached separately)
-ARG EC2
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
