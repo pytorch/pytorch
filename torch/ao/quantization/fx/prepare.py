@@ -339,8 +339,6 @@ def _get_target_activation_dtype_for_node(
         'output_activation': {'dtype': torch.quint8, is_dynamic: True},
       }
 
-    Note: this is for activations only, weight dtypes are not handled here.
-
     TODO(future PR, if needed): explicitly spell out the non-Tensor
     dtypes.
     """
