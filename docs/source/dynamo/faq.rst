@@ -189,7 +189,7 @@ recompile that function (or part) up to
 hitting the cache limit, you will first need to determine which guard is
 failing and what part of your program is triggering it.
 
-The `recompilation profiler <#recompilation-profiler>`__ automates the
+The `recompilation profiler <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/utils.py>`__ automates the
 process of setting TorchDynamo’s cache limit to 1 and running your
 program under an observation-only ‘compiler’ that records the causes of
 any guard failures. You should be sure to run your program for at least
@@ -197,8 +197,9 @@ as long (as many iterations) as you were running when you ran into
 trouble, and the profiler will accumulate statistics over this duration.
 
 .. code-block:: python
+   from torch._dynamo.utils import CompileProfiler
 
-   prof = dynamo.utils.CompilationProfiler()
+   prof = CompileProfiler()
    @dynamo.optimize(prof)
    def my_model():
        ...
