@@ -571,10 +571,10 @@ def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     return a
 
 
-def zero_(a: TensorLikeType) -> TensorLikeType:
-    r = prims.fill(a, 0)
-    prims.copy_to(a, r)
-    return a
+@register_decomposition(aten.zero)
+@out_wrapper()
+def zero(input: TensorLikeType) -> TensorLikeType:
+    return torch.zeros_like(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -4129,7 +4129,7 @@ def new_zeros(
 
     return torch.full(
         size,
-        False if dtype == torch.bool else 0,
+        False if (dtype or a.dtype) == torch.bool else 0,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4181,7 +4181,7 @@ def new_ones(
 
     return torch.full(
         size,
-        True if dtype == torch.bool else 1,
+        True if (dtype or a.dtype) == torch.bool else 1,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4693,10 +4693,50 @@ def full_like(
     return fill(e, fill_value)
 
 
-zeros_like = partial(full_like, fill_value=False)
+@register_decomposition(aten.zeros_like)
+def zeros_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        False if (dtype or a.dtype) == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
-ones_like = partial(full_like, fill_value=True)
+@register_decomposition(aten.ones_like)
+def ones_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        True if (dtype or a.dtype) == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
 @register_decomposition(aten.randn.default)
@@ -5239,6 +5279,7 @@ true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
 exponential_ = _make_inplace(exponential)
+zero_ = _make_inplace(zero)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
