@@ -655,10 +655,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   Tensor grad_output = grad_output_.contiguous(memory_format);
   TORCH_CHECK(grad_weight.is_contiguous(memory_format), "grad_weight needs to be contiguous");
 
-  bool is_batch = false;
   if (input.dim() == 3) {
-    // Force batch
-    is_batch = true;
     input.resize_({1, input.size(0), input.size(1), input.size(2)});
     grad_output.resize_(
         {1, grad_output.size(0), grad_output.size(1), grad_output.size(2)});
