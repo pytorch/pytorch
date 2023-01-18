@@ -1955,9 +1955,7 @@ Tensor binary_cross_entropy_target_backward(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction) {
-  // TODO: Can also be written self.logit().neg_() but logit isn't
-  // implemented on MPS
-  auto grad_target = self.log1p().sub_(self.log());
+  auto grad_target = (1. - self).log_().sub_(self.log());
   if (!areAnyTensorSubclassLike({grad})) {
     grad_target.mul_(grad);
   } else {
