@@ -2,71 +2,14 @@ import math
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
+                        _differentiable_doc)
 from typing import List, Optional
 
 __all__ = ["RAdam", "radam"]
 
 
 class RAdam(Optimizer):
-    r"""Implements RAdam algorithm.
-
-    .. math::
-       \begin{aligned}
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
-                \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
-                \lambda \text{ (weightdecay)},                                                   \\
-            &\hspace{13mm} \epsilon \text{ (epsilon)}                                            \\
-            &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
-                v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
-            &\hspace{18mm} \rho_{\infty} \leftarrow 2/(1-\beta_2) -1                      \\[-1.ex]
-            &\rule{110mm}{0.4pt}  \\
-            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{6mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
-            &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
-            &\hspace{6mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
-            &\hspace{6mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
-            &\hspace{6mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
-            &\hspace{6mm}\rho_t \leftarrow \rho_{\infty} -
-                2 t \beta^t_2 /\big(1-\beta_2^t \big)                                    \\[0.1.ex]
-            &\hspace{6mm}\textbf{if} \: \rho_t > 5                                               \\
-            &\hspace{12mm} l_t \leftarrow \sqrt{ (1-\beta^t_2) / \big( v_t +\epsilon \big) }     \\
-            &\hspace{12mm} r_t \leftarrow
-      \sqrt{\frac{(\rho_t-4)(\rho_t-2)\rho_{\infty}}{(\rho_{\infty}-4)(\rho_{\infty}-2) \rho_t}} \\
-            &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t} r_t l_t        \\
-            &\hspace{6mm}\textbf{else}                                                           \\
-            &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}                \\
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-       \end{aligned}
-
-    For further details regarding the algorithm we refer to `On the variance of the adaptive learning rate and beyond`_.
-
-    This implementation uses the same weight_decay implementation as Adam (were the weight_decay is applied
-    to the gradient) and not the one from AdamW (were weight_decay is applied to the update). This
-    is different from the `author's implementation`_.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
-
-    .. _On the variance of the adaptive learning rate and beyond:
-        https://arxiv.org/abs/1908.03265
-    .. _author's implementation:
-        https://github.com/LiyuanLucasLiu/RAdam
-    """
-
     def __init__(
         self,
         params,
@@ -175,6 +118,67 @@ class RAdam(Optimizer):
             )
 
         return loss
+
+
+RAdam.__doc__ = r"""Implements RAdam algorithm.
+
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
+                \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
+                \lambda \text{ (weightdecay)},                                                   \\
+            &\hspace{13mm} \epsilon \text{ (epsilon)}                                            \\
+            &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
+                v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
+            &\hspace{18mm} \rho_{\infty} \leftarrow 2/(1-\beta_2) -1                      \\[-1.ex]
+            &\rule{110mm}{0.4pt}  \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+            &\hspace{6mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
+            &\hspace{6mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
+            &\hspace{6mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
+            &\hspace{6mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
+            &\hspace{6mm}\rho_t \leftarrow \rho_{\infty} -
+                2 t \beta^t_2 /\big(1-\beta_2^t \big)                                    \\[0.1.ex]
+            &\hspace{6mm}\textbf{if} \: \rho_t > 5                                               \\
+            &\hspace{12mm} l_t \leftarrow \sqrt{ (1-\beta^t_2) / \big( v_t +\epsilon \big) }     \\
+            &\hspace{12mm} r_t \leftarrow
+      \sqrt{\frac{(\rho_t-4)(\rho_t-2)\rho_{\infty}}{(\rho_{\infty}-4)(\rho_{\infty}-2) \rho_t}} \\
+            &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t} r_t l_t        \\
+            &\hspace{6mm}\textbf{else}                                                           \\
+            &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}                \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to `On the variance of the adaptive learning rate and beyond`_.
+
+    This implementation uses the same weight_decay implementation as Adam (were the weight_decay is applied
+    to the gradient) and not the one from AdamW (were weight_decay is applied to the update). This
+    is different from the `author's implementation`_.
+    """ + r"""
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-3)
+        betas (Tuple[float, float], optional): coefficients used for computing
+            running averages of gradient and its square (default: (0.9, 0.999))
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: None)
+        {differentiable}
+
+    .. _On the variance of the adaptive learning rate and beyond:
+        https://arxiv.org/abs/1908.03265
+    .. _author's implementation:
+        https://github.com/LiyuanLucasLiu/RAdam
+
+    """.format(differentiable=_differentiable_doc)
 
 
 def radam(

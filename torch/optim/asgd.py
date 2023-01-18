@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
+                        _differentiable_doc, _maximize_doc)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -14,28 +15,6 @@ def _to_tensor(x):
     return x
 
 class ASGD(Optimizer):
-    """Implements Averaged Stochastic Gradient Descent.
-
-    It has been proposed in `Acceleration of stochastic approximation by
-    averaging`_.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
-        lambd (float, optional): decay term (default: 1e-4)
-        alpha (float, optional): power for eta update (default: 0.75)
-        t0 (float, optional): point at which to start averaging (default: 1e6)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-
-    .. _Acceleration of stochastic approximation by averaging:
-        https://dl.acm.org/citation.cfm?id=131098
-    """
-
     def __init__(
         self,
         params,
@@ -155,6 +134,30 @@ class ASGD(Optimizer):
             )
 
         return loss
+
+
+ASGD.__doc__ = r"""Implements Averaged Stochastic Gradient Descent.
+
+    It has been proposed in `Acceleration of stochastic approximation by
+    averaging`_.
+
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        lambd (float, optional): decay term (default: 1e-4)
+        alpha (float, optional): power for eta update (default: 0.75)
+        t0 (float, optional): point at which to start averaging (default: 1e6)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: None)
+        {maximize}
+        {differentiable}
+
+    .. _Acceleration of stochastic approximation by averaging:
+        https://dl.acm.org/citation.cfm?id=131098
+
+    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def asgd(
