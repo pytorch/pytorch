@@ -1154,6 +1154,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/RegisterMkldnnOpContextClass.cpp",
     "aten/src/ATen/native/mkldnn/Relu.cpp",
+    "aten/src/ATen/native/mkldnn/RNN.cpp",
     "aten/src/ATen/native/mkldnn/SoftMax.cpp",
     "aten/src/ATen/native/mkldnn/TensorFactories.cpp",
     "aten/src/ATen/native/mkldnn/TensorShape.cpp",
@@ -1239,6 +1240,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
+    "aten/src/ATen/native/cpu/SampledAddmmKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]

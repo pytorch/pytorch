@@ -3,12 +3,20 @@ import functools
 import itertools
 import logging
 import sys
+import warnings
 from typing import List
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
+
+from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
+from torch._dynamo.optimizations.normalize import normalize_ir
+from torch._dynamo.optimizations.training import (
+    aot_autograd,
+    is_aot_autograd_safe_to_run,
+)
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
@@ -17,21 +25,11 @@ from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import (
-    dynamo_logging,
-    dynamo_optimizations,
-    dynamo_utils,
-    has_incompatible_cudagraph_ops,
-)
+from .utils import has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
-
-aot_autograd = dynamo_optimizations.training.aot_autograd
-normalize_ir = dynamo_optimizations.normalize.normalize_ir
-is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
-count_calls = dynamo_utils.count_calls
 
 
 @dataclasses.dataclass
@@ -84,6 +82,19 @@ def _step_logger():
     return dynamo_logging.get_step_logger(log)
 
 
+@functools.lru_cache(None)
+def _warn_tf32_disabled():
+    if (
+        torch.cuda.is_available()
+        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ):
+        warnings.warn(
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
+            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+        )
+
+
 @DebugContext.wrap
 def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
@@ -107,6 +118,8 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
+    _warn_tf32_disabled()
+
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
 

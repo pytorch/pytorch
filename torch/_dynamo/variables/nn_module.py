@@ -132,7 +132,9 @@ class NNModuleVariable(VariableTracker):
         else:
             if istype(subobj, property):
                 return variables.UserFunctionVariable(
-                    subobj.fget, guards=guards
+                    subobj.fget,
+                    guards=guards,
+                    source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
@@ -212,11 +214,18 @@ class NNModuleVariable(VariableTracker):
                 # for lazy modules, run the pre-hooks which will update the type
                 # TODO mlazos: we don't fully support all of the hooks that exist,
                 # so restrict using __call__ only to lazy modules for now
+                assert self.source, (
+                    "Must provide a valid source in order to inline, "
+                    "since inlined function may have default args which must be guarded."
+                )
+                class_source = AttrSource(self.source, "__class__")
                 if is_lazy:
                     fn = mod.__class__.__call__
+                    fn_source = AttrSource(class_source, "__call__")
                 else:
                     fn = mod.__class__.forward
-
+                    fn_source = AttrSource(class_source, "forward")
+                options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
                     [self] + args,
@@ -426,8 +435,9 @@ class NNModuleVariable(VariableTracker):
         elif name == "_get_abs_string_index":
             # Inline the function
             fn = getattr(module, name).__func__
+            src = AttrSource(AttrSource(self.source, name), "__func__")
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
+                variables.UserFunctionVariable(fn, source=src, **options),
                 [self] + args,
                 kwargs,
             )
@@ -537,12 +547,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # until we can support a larger swath of python
         if is_lazy_module(self.value):
             fn = self.value_type.__call__
+            source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
         else:
             fn = self.value_type.forward
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
 
-        return variables.UserFunctionVariable(fn, **options).call_function(
-            tx, [self] + list(args), kwargs
-        )
+        return variables.UserFunctionVariable(
+            fn, source=source, **options
+        ).call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -577,8 +589,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     items, mutable_local=MutableLocal(), **options
                 )
             elif isinstance(method, staticmethod):
+                source = AttrSource(
+                    AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
+                )
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(method.__func__, **options),
+                    variables.UserFunctionVariable(
+                        method.__func__, source=source, **options
+                    ),
                     args,
                     kwargs,
                 )
