@@ -216,7 +216,11 @@ std::list<VarInfo> getLoopIndices(const std::vector<kir::ForLoop*>& loops) {
       }
     } else {
       variables.push_back(
-          {loop->index(), loop->start(), loop->simplifiedStop(), loop->step()});
+          {loop->index(),
+           loop->start(),
+           loop->simplifiedStop(),
+           loop->step(),
+           loop->isUnrolled()});
     }
   }
   return variables;

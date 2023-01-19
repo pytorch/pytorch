@@ -3046,6 +3046,9 @@ TEST_F(NVFuserTest, FusionPredRemovalCheck_CUDA) {
       }
 
       if (is_local) {
+        if (scope_exprs_.empty()) {
+          return;
+        }
         if (auto ite = dynamic_cast<kir::IfThenElse*>(scope_exprs_.back())) {
           TORCH_INTERNAL_ASSERT(
               ite->predicate()->value()->isConst(),
@@ -6748,10 +6751,12 @@ TEST_F(NVFuserTest, FusionPropagateVectorizePredicate_CUDA) {
           auto vec_factor_it = std::find_if(
               cond_inputs.begin(), cond_inputs.end(), [](Val* inp) {
                 auto int_val = inp->getInt();
-                return int_val.has_value() && int_val.value() == vec_factor - 1;
+                return int_val.has_value() &&
+                    (int_val.value() == vec_factor - 1 ||
+                     int_val.value() == -(vec_factor - 1));
               });
-          // If vectorized, the predicate should use (vec_factor - 1)
-          // rather than the loop index.
+          // If vectorized, the predicate should use (vec_factor - 1) or
+          // -(vec_factor - 1) rather than the loop index.
           if (vectorized_) {
             TORCH_CHECK(
                 index_it == cond_inputs.end(),

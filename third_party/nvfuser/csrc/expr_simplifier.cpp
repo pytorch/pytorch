@@ -280,6 +280,45 @@ Val* recurseDown(Val* value, std::function<Val*(Val*)> rule) {
 
 } // namespace
 
+namespace reg {
+
+enum class RegisterType { GeneralPurpose, Uniform, Immediate, Unknown };
+
+RegisterType getRegisterType(Val* value, const VarInfoMap& var_info) {
+  if (auto ns = dynamic_cast<NamedScalar*>(value)) {
+    if (ns->getParallelIndex().has_value()) {
+      return RegisterType::GeneralPurpose;
+    }
+  }
+  if (value->isConstScalar()) {
+    return RegisterType::Immediate;
+  }
+  if (var_info.has(value) && var_info.info(value).is_compile_time_const) {
+    return RegisterType::Immediate;
+  }
+  if (auto def = value->definition()) {
+    RegisterType result = RegisterType::Unknown;
+    for (auto inp : def->inputs()) {
+      auto inp_rtype = getRegisterType(inp, var_info);
+      if (inp_rtype == RegisterType::GeneralPurpose) {
+        return RegisterType::GeneralPurpose;
+      }
+      if (result == RegisterType::Unknown) {
+        result = inp_rtype;
+        continue;
+      }
+      if (result == RegisterType::Uniform ||
+          inp_rtype == RegisterType::Uniform) {
+        result = RegisterType::Uniform;
+      }
+    }
+    return result;
+  }
+  return RegisterType::Uniform;
+}
+
+} // namespace reg
+
 namespace assoc_comm {
 
 // Note: [Reordering associative and commutative operators]
@@ -1093,6 +1132,15 @@ bool isPositive(Val* value, const VarInfoMap& var_info) {
   return false;
 }
 
+bool isZero(Val* value) {
+  value = foldConstants(value);
+  if (value->getBool() == false || value->isZeroInt() ||
+      value->getDouble() == 0.0) {
+    return true;
+  }
+  return false;
+}
+
 bool isNonZero(Val* value, const VarInfoMap& var_info) {
   value = foldConstants(value);
   if (value->getInt().has_value() && *value->getInt() != 0) {
@@ -1249,7 +1297,7 @@ Val* eliminateTrivialPredicate(Val* value, const VarInfoMap& var_info) {
       return value->fusion()->falseVal();
     }
   }
-  if (bop->rhs()->isZeroInt()) {
+  if (prove::isZero(bop->rhs())) {
     if (op == BinaryOpType::GE && prove::isNonNegative(bop->lhs(), var_info)) {
       return value->fusion()->trueVal();
     } else if (
@@ -1268,7 +1316,7 @@ Val* eliminateTrivialPredicate(Val* value, const VarInfoMap& var_info) {
         op == BinaryOpType::Eq && prove::isNonZero(bop->lhs(), var_info)) {
       return value->fusion()->falseVal();
     }
-  } else if (bop->lhs()->isZeroInt()) {
+  } else if (prove::isZero(bop->lhs())) {
     if (op == BinaryOpType::LE && prove::isNonNegative(bop->rhs(), var_info)) {
       return value->fusion()->trueVal();
     } else if (
@@ -1449,6 +1497,145 @@ Val* distributeMul(Val* value, const VarInfoMap& var_info) {
   return output;
 }
 
+// This pass optimizes register usage of predicate evaluation, especially for
+// unrolled for loop.
+// For example, if I have an unrolled for loop like below:
+//   base = ...
+//   for i in 4
+//     for j in 4
+//       if base + i* stride0 + j*stride1 < T.size:
+//         expr
+// Then the above for loop uses 4 * 4 = 16 general purposed registers to
+// evaluate the lhs of the predicate.
+// However, if I transform the predicate as:
+//   base = ...
+//   lhs = base - T.size
+//   for i in 4
+//     for j in 4
+//       if lhs < -i* stride0 - j*stride1:
+//         expr
+// Then it only takes 1 general purposed register for lhs, and the rhs is a
+// compile time constant for nvRTC, so it can use the immediate fields of the
+// instruction. This optimization results in a great save on registers.
+// See also: https://github.com/csarofeen/pytorch/pull/1976
+Val* reducePredicateRegisterUsage(Val* value, const VarInfoMap& var_info) {
+  auto bop = dynamic_cast<BinaryOp*>(value->definition());
+  if (!value->isABool() || bop == nullptr) {
+    return value;
+  }
+  auto op_type = bop->getBinaryOpType();
+  if (!isLogicalOp(op_type)) {
+    return value;
+  }
+  auto ltype = *bop->lhs()->getDataType();
+  auto rtype = *bop->rhs()->getDataType();
+  if (!hasSimilarType(ltype, rtype)) {
+    return value;
+  }
+  // Redistribute terms. We always put general purposed registers to the
+  // left, and immediates to the right. If there is no immediates, then
+  // we put uniform registers to the right, otherwise we put uniform
+  // registers to the left.
+  bool moved = false;
+  std::vector<Val*> new_lhs;
+  std::vector<Val*> new_rhs;
+  std::vector<Val*> lhs_uniform;
+  std::vector<Val*> rhs_uniform;
+  auto neg = [&](Val* x) {
+    moved = true;
+    return IrBuilder::negExpr(x);
+  };
+  // Redistribute lhs_terms into new_lhs, new_rhs, and lhs_uniform, can only
+  // be called once.
+  auto redist_lhs = [&](const std::vector<Val*>& lhs_terms) {
+    for (auto inp : lhs_terms) {
+      if (prove::isZero(inp)) {
+        continue;
+      }
+      switch (reg::getRegisterType(inp, var_info)) {
+        case reg::RegisterType::GeneralPurpose:
+          new_lhs.emplace_back(inp);
+          break;
+        case reg::RegisterType::Uniform:
+          lhs_uniform.emplace_back(inp);
+          break;
+        case reg::RegisterType::Immediate:
+          new_rhs.emplace_back(neg(inp));
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(false, "Unknown register type");
+      }
+    }
+  };
+  // Redistribute rhs_terms into new_lhs, new_rhs, and rhs_uniform, can only
+  // be called once.
+  auto redist_rhs = [&](const std::vector<Val*>& rhs_terms) {
+    for (auto inp : rhs_terms) {
+      if (prove::isZero(inp)) {
+        continue;
+      }
+      switch (reg::getRegisterType(inp, var_info)) {
+        case reg::RegisterType::GeneralPurpose:
+          new_lhs.emplace_back(neg(inp));
+          break;
+        case reg::RegisterType::Uniform:
+          rhs_uniform.emplace_back(inp);
+          break;
+        case reg::RegisterType::Immediate:
+          new_rhs.emplace_back(inp);
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(false, "Unknown register type");
+      }
+    }
+  };
+  if (auto lhs_fop = toFlattenedAdd(bop->lhs()->definition())) {
+    redist_lhs(lhs_fop->inputs());
+  } else {
+    redist_lhs({bop->lhs()});
+  }
+  if (auto rhs_fop = toFlattenedAdd(bop->rhs()->definition())) {
+    redist_rhs(rhs_fop->inputs());
+  } else {
+    redist_rhs({bop->rhs()});
+  }
+  if (new_rhs.empty()) {
+    new_rhs = rhs_uniform;
+    for (auto inp : lhs_uniform) {
+      new_rhs.emplace_back(neg(inp));
+    }
+  } else {
+    new_lhs.insert(new_lhs.end(), lhs_uniform.begin(), lhs_uniform.end());
+    for (auto inp : rhs_uniform) {
+      new_lhs.emplace_back(neg(inp));
+    }
+  }
+  if (!moved) {
+    return value;
+  }
+  Val* lhs = nullptr;
+  Val* rhs = nullptr;
+  if (new_lhs.size() == 0) {
+    lhs = IrBuilder::newConstant(0, ltype);
+  } else if (new_lhs.size() == 1) {
+    lhs = new_lhs.at(0);
+  } else {
+    lhs = IrBuilder::newScalar(ltype);
+    IrBuilder::create<FOp>(BinaryOpType::Add, lhs, std::move(new_lhs));
+  }
+  if (new_rhs.size() == 0) {
+    rhs = IrBuilder::newConstant(0, rtype);
+  } else if (new_rhs.size() == 1) {
+    rhs = new_rhs.at(0);
+  } else {
+    rhs = IrBuilder::newScalar(rtype);
+    IrBuilder::create<FOp>(BinaryOpType::Add, rhs, std::move(new_rhs));
+  }
+  auto output = IrBuilder::newScalar(DataType::Bool);
+  IrBuilder::create<BinaryOp>(op_type, output, lhs, rhs);
+  return output;
+}
+
 } // namespace rules
 
 #define RUN_PASS(pass_name)                                    \
@@ -1495,6 +1682,8 @@ Val* simplifyExpr(Val* value, const std::list<VarInfo>& variables) {
     RUN_PASS(distributeDivisibleDivMod);
     PASS_BARRIER;
     RUN_PASS(distributeMul);
+    PASS_BARRIER;
+    RUN_PASS(reducePredicateRegisterUsage);
   }
 
   auto unflattened = assoc_comm::unflatten(simplified, variables);

@@ -539,6 +539,14 @@ struct VarInfo {
   Val* start = nullptr;
   Val* stop = nullptr;
   Val* step = nullptr;
+  // If this variable is constant to nvRTC. Note that a constant to nvRTC might
+  // not be a constant to nvFuser. For example, if I have loop
+  // #pragma unroll
+  // FOR i1 in ...:
+  //   ...
+  // Then `i1` is a compile constant to nvRTC, but not a compile time constant
+  // to nvFuser.
+  bool is_compile_time_const = false;
 };
 
 // Simplify expressions with the given information of variables.
