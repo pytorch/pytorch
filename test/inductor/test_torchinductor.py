@@ -2124,6 +2124,36 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
+    @requires_multigpu()
+    def test_recompile_on_index(self):
+        torch.set_float32_matmul_precision("high")
+
+        def gemm(x, y):
+            return x @ y
+
+        failed_guard = None
+
+        def fail(guard):
+            nonlocal failed_guard
+            failed_guard = guard
+
+        gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
+
+        x0 = torch.randn(1024, 1024, device="cpu:0")
+        y0 = torch.randn(1024, 1024, device="cpu:0")
+
+        gemm_opt(x0, y0)
+
+        x1 = torch.randn(1024, 1024, device="cpu:1")
+        y1 = torch.randn(1024, 1024, device="cpu:1")
+
+        gemm_opt(x1, y1)
+        self.assertTrue(failed_guard is not None)
+        self.assertTrue(
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
+            in failed_guard.reason
+        )
+
     def test_unbind(self):
         def fn(a):
             return torch.unbind(a), torch.unbind(a, -1)
