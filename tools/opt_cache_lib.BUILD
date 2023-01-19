@@ -1,4 +1,1 @@
-sh_binary(
-    name = "nvcc",
-    srcs = ["nvcc"],
-)
+exports_files(["nvcc"])
