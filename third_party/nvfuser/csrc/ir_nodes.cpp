@@ -2638,37 +2638,23 @@ void TensorDomain::swizzle(
 
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
-  size_t size_out = 0;
-  for (auto id : td) {
-    if (!id->isReduction() && !id->isStride()) {
-      size_out++;
-    }
-  }
-  std::vector<IterDomain*> noReductionDomain(size_out);
-
-  int it = 0;
-  for (auto id : td) {
-    if (!id->isReduction() && !id->isStride()) {
-      noReductionDomain[it++] = id;
-    }
-  }
-
+  std::vector<IterDomain*> noReductionDomain;
+  std::copy_if(
+      td.begin(),
+      td.end(),
+      std::back_inserter(noReductionDomain),
+      [](IterDomain* id) { return !id->isReduction() && !id->isStride(); });
   return noReductionDomain;
 }
 
 std::vector<IterDomain*> TensorDomain::noBroadcasts(
     const std::vector<IterDomain*>& td) {
-  size_t size_out = 0;
-  for (auto id : td)
-    if (!id->isBroadcast())
-      size_out++;
-  std::vector<IterDomain*> noBroadcastDomain(size_out);
-
-  int it = 0;
-  for (auto id : td)
-    if (!id->isBroadcast())
-      noBroadcastDomain[it++] = id;
-
+  std::vector<IterDomain*> noBroadcastDomain;
+  std::copy_if(
+      td.begin(),
+      td.end(),
+      std::back_inserter(noBroadcastDomain),
+      [](IterDomain* id) { return !id->isBroadcast(); });
   return noBroadcastDomain;
 }
 
