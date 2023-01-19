@@ -10,6 +10,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dynamo.utils import get_fake_value
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -699,6 +700,69 @@ class TorchPyOperator(VariableTracker):
             tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name
 
+        def get_comparable_state(state):
+            # Nub out bits of state that we don't require to be
+            # equal
+            return state._replace(
+                output=state.output._replace(
+                    guard_state=GuardsCheckpointState(set()),
+                    nn_modules=None,
+                    # Timestamp is monotonically increasing so we don't
+                    # care about divergence
+                    timestamp=0,
+                    # Meh (problem is the nodes don't compare equal;
+                    # maybe nub out outputs only)
+                    name_to_input=OrderedDict(),
+                    # Unused in branches
+                    graphargs=[],
+                )
+            )
+
+        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+            # Setup the subgraph we're going to capture into
+            tx.output.graph = torch.fx.Graph()
+            tx.output.graphargs = []
+            tx.output.name_to_input.clear()
+
+            args = []
+            # One argument to graph per sub_args
+            for a in sub_args:
+                if isinstance(a, TensorVariable):
+                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    args.append(a)
+                else:
+                    # call_function() needs a TensorVariable, therefore we construct
+                    # one with inner graph proxy.
+                    assert isinstance(a, torch.Tensor)
+                    proxy = tx.output.create_graph_input("arg")
+                    args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
+                # NB: we don't bother populating graphargs, as
+                # they won't actually get used by anything
+
+            output = f.call_function(tx, args, {})
+
+            # Register output to graph
+            # Modeled off of compile_and_call_fx_graph
+            # TODO: support non single Tensor output
+            assert isinstance(output, TensorVariable)
+            tx.output.guards.update(output.guards)
+            tx.output.create_node(
+                "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+            )
+
+            tx.output.side_effects.prune_dead_object_new(tx)
+            state = tx.copy_graphstate()
+
+            guards = state.output.guards
+            nn_modules = state.output.nn_modules
+
+            comparable_state = get_comparable_state(state)
+            graph = tx.output.graph
+            tx.output.graph = graph_checkpoint
+            tx.restore_graphstate(checkpoint)
+
+            return output, graph, guards, nn_modules, comparable_state
+
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
@@ -735,58 +799,11 @@ class TorchPyOperator(VariableTracker):
             sub_args = args[3].unpack_var_sequence(tx)
 
             def speculate_branch(branch):
-                # Setup the subgraph we're going to capture into
-                tx.output.graph = torch.fx.Graph()
-                tx.output.graphargs = []
-                tx.output.name_to_input.clear()
-
-                # One argument to graph per sub_args
-                for a in sub_args:
-                    assert isinstance(a, TensorVariable)
-                    tx.output.create_graph_input(a.as_proxy().node.name)
-                    # NB: we don't bother populating graphargs, as
-                    # they won't actually get used by anything
-
                 # NB: 0 is predicate
                 ix = 1 if branch else 2
-
-                output = args[ix].call_function(tx, sub_args, {})
-
-                # Register output to graph
-                # Modeled off of compile_and_call_fx_graph
-                # TODO: support non single Tensor output
-                assert isinstance(output, TensorVariable)
-                tx.output.guards.update(output.guards)
-                tx.output.create_node(
-                    "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+                return speculate_subgraph(
+                    args[ix], sub_args, graph_checkpoint, checkpoint
                 )
-
-                tx.output.side_effects.prune_dead_object_new(tx)
-                state = tx.copy_graphstate()
-
-                guards = state.output.guards
-                nn_modules = state.output.nn_modules
-
-                # Nub out bits of state that we don't require to be
-                # equal
-                comparable_state = state._replace(
-                    output=state.output._replace(
-                        guard_state=GuardsCheckpointState(set()),
-                        nn_modules=None,
-                        # Timestamp is monotonically increasing so we don't
-                        # care about divergence
-                        timestamp=0,
-                        # Meh (problem is the nodes don't compare equal;
-                        # maybe nub out outputs only)
-                        name_to_input=OrderedDict(),
-                    )
-                )
-
-                graph = tx.output.graph
-                tx.output.graph = graph_checkpoint
-                tx.restore_graphstate(checkpoint)
-
-                return output, graph, guards, nn_modules, comparable_state
 
             (
                 true_r,
@@ -827,11 +844,62 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                tuple(a.as_proxy() for a in sub_args),
+                list(a.as_proxy() for a in sub_args),
             )
             # TODO: assert that the true/false return values are
             # consistent
             example_value = true_r.as_proxy().node.meta["example_value"]
+        elif self.value.__name__ == "map":
+            assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
+            assert type(args[1]) is TensorVariable
+
+            sample_shape = args[1].get_real_value().size()
+            if len(sample_shape) < 1 or sample_shape[0] == 0:
+                unimplemented(
+                    "map() operator doesn't support scalar or zero-sized tensors during tracing."
+                )
+
+            checkpoint = tx.copy_graphstate()
+            # To get the example output from map() we will need to prodive at least one sample to
+            # the loop body. In our case we will always use xs[0], and our map() won't support zero
+            # sized tensor during tracing.
+            (
+                body_r,
+                body_graph,
+                body_guards,
+                body_nn_modules,
+                body_cmp,
+            ) = speculate_subgraph(
+                args[0],
+                [
+                    get_fake_value(args[1].as_proxy().node, tx)[0],
+                    *args[2:],
+                ],
+                tx.output.graph,
+                checkpoint,
+            )
+
+            # We don't support side effects inside a map loop body for simplicity.
+            parent_cmp = get_comparable_state(checkpoint)
+            if parent_cmp != body_cmp:
+                diff = parent_cmp.diff(body_cmp)
+                raise unimplemented(
+                    f"Graph state change detected in map() loop body. Diagnostics: {diff}"
+                )
+
+            # Add guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+
+            body_name = add_subgraph(
+                "body", torch.fx.GraphModule(body_nn_modules, body_graph)
+            )
+
+            body_node = make_attr(body_name)
+            p_args = (body_node, *(arg.as_proxy() for arg in args[1:]))
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r.new_empty(
+                [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
+            )
         else:
             unimplemented(f"PyOperator {self.value.__name__}")
 
