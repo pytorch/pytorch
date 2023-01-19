@@ -1,6 +1,6 @@
 import contextlib
-from typing import Any, Callable, Dict, Iterator, List, Tuple, Union, Set, Optional
 import warnings
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -39,7 +39,7 @@ def _change_class(module, params_and_buffers) -> None:
 
 
 def _create_tied_weights_map(
-    module: 'torch.nn.Module', params_and_buffers: Dict[str, Tensor]
+    module: "torch.nn.Module", params_and_buffers: Dict[str, Tensor]
 ) -> Dict[str, str]:
     """
     _create_tied_weights_map(module: Module, params_and_buffers: Dict[str, Tensor]) -> Dict[str, str]
@@ -69,7 +69,9 @@ def _create_tied_weights_map(
     #     - for each element of all_tied_names, add {tied_name: name_given_by_user} to a new map
 
     names = params_and_buffers.keys()
-    weight_to_name_and_tied_names: Dict[torch.Tensor, Tuple[Optional[str], Set[str]]] = {}
+    weight_to_name_and_tied_names: Dict[
+        torch.Tensor, Tuple[Optional[str], Set[str]]
+    ] = {}
 
     # create a map keyed by tensor value so that tied weights get mapped to the same key. The value is the interesting
     # part at the end it's (used_name, (tied_names)).
@@ -90,7 +92,10 @@ def _create_tied_weights_map(
         first_seen_name = weight_to_name_and_tied_names[t][0]
 
         # if they didn't pass multiple names for tied weights or used the same tensor, we set the used name
-        if first_seen_name is None or params_and_buffers[n] is params_and_buffers[first_seen_name]:
+        if (
+            first_seen_name is None
+            or params_and_buffers[n] is params_and_buffers[first_seen_name]
+        ):
             weight_to_name_and_tied_names[t] = (n, weight_to_name_and_tied_names[t][1])
             return
 
@@ -109,7 +114,9 @@ def _create_tied_weights_map(
     # make {tied_name: name_given_by_user} from pairs of (name_given_by_user, set(all_tied_names))
     tied_weights_to_given_name = {}
     for name_given_by_user, tied_names in weight_to_name_and_tied_names.values():
-        if name_given_by_user is None:  # no mapping was passed for this tensor, use original tensor
+        if (
+            name_given_by_user is None
+        ):  # no mapping was passed for this tensor, use original tensor
             continue
         for tied_name in tied_names:
             tied_weights_to_given_name[tied_name] = name_given_by_user
@@ -118,7 +125,7 @@ def _create_tied_weights_map(
 
 @contextlib.contextmanager
 def _reparametrize_module(
-    module: 'torch.nn.Module',
+    module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
     tie_weights: bool = False,
     strict: bool = False,
@@ -132,10 +139,12 @@ def _reparametrize_module(
                 "Unexpected key(s): {}.".format(", ".join(map(repr, unexpected_keys)))
             )
         if len(missing_keys) > 0:
-            error_msgs.append("Missing key(s): {}.".format(", ".join(map(repr, missing_keys))))
+            error_msgs.append(
+                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
+            )
         if len(error_msgs) > 0:
             raise RuntimeError(
-                'Error(s) in reparameterizing for {}:\n\t{}'.format(
+                "Error(s) in reparameterizing for {}:\n\t{}".format(
                     module._get_name(), "\n\t".join(error_msgs)
                 )
             )
@@ -163,13 +172,17 @@ def _reparametrize_module(
         # the _parameters and _buffers dictionaries.
         # Write the changed parameters and buffers back to the original dict.
         parameters_and_buffers.update(
-            {k: v for k, v in new_parameters_and_buffers.items() if k in parameters_and_buffers}
+            {
+                k: new_parameters_and_buffers[k]
+                for k in parameters_and_buffers
+                if k in new_parameters_and_buffers
+            }
         )
 
 
 def _apply_func_submodules(
     func: Callable[..., None],
-    module: 'torch.nn.Module',
+    module: "torch.nn.Module",
     path: List[str],
     full_path: str,
     args: Tuple,
@@ -177,11 +190,13 @@ def _apply_func_submodules(
     if len(path) == 1:
         func(module, path[0], full_path, *args)
     else:
-        _apply_func_submodules(func, getattr(module, path[0]), path[1:], full_path, args)
+        _apply_func_submodules(
+            func, getattr(module, path[0]), path[1:], full_path, args
+        )
 
 
 def functional_call(
-    module: 'torch.nn.Module',
+    module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
@@ -256,12 +271,17 @@ def functional_call(
     )
 
     return _functional_call(
-        module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights, strict=strict
+        module,
+        parameters_and_buffers,
+        args,
+        kwargs,
+        tie_weights=tie_weights,
+        strict=strict,
     )
 
 
 def _functional_call(
-    module: 'torch.nn.Module',
+    module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
@@ -285,9 +305,7 @@ def _functional_call(
         raise RuntimeError("The stateless API can't be used with Jitted modules")
     if kwargs is None:
         kwargs = {}
+    if not isinstance(args, tuple):
+        args = (args,)
     with _reparametrize_module(module, parameters_and_buffers, tie_weights, strict):
-        if isinstance(args, tuple):
-            out = module(*args, **kwargs)
-        else:
-            out = module(args, **kwargs)
-    return out
+        return module(*args, **kwargs)

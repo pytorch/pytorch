@@ -14,10 +14,10 @@ def set_tensor(module: "torch.nn.Module", name: str, tensor: torch.Tensor) -> No
         raise TypeError(f"{module} is not an instance of torch.nn.Module")
     if not isinstance(tensor, torch.Tensor) and tensor is not None:
         raise TypeError(f"{tensor} is not an instance of torch.Tensor")
-    if '.' in name:
-        raise KeyError("tensor name can't contain \".\"")
-    if name == '':
-        raise KeyError("tensor name can't be empty string \"\"")
+    if "." in name:
+        raise KeyError('tensor name can\'t contain "."')
+    if name == "":
+        raise KeyError('tensor name can\'t be empty string ""')
     if name in module._parameters:
         module._parameters[name] = tensor  # type: ignore[assignment]
     elif name in module._buffers:
@@ -34,12 +34,16 @@ def swap_tensor(
 ) -> torch.Tensor:
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"{module} is not an instance of torch.nn.Module")
-    if tensor is not _MISSING and not isinstance(tensor, torch.Tensor) and tensor is not None:
+    if (
+        tensor is not _MISSING
+        and not isinstance(tensor, torch.Tensor)
+        and tensor is not None
+    ):
         raise TypeError(f"{tensor} is not an instance of torch.Tensor")
-    if '.' in name:
-        raise KeyError("tensor name can't contain \".\"")
-    if name == '':
-        raise KeyError("tensor name can't be empty string \"\"")
+    if "." in name:
+        raise KeyError('tensor name can\'t contain "."')
+    if name == "":
+        raise KeyError('tensor name can\'t be empty string ""')
 
     orig_tensor: torch.Tensor
     if name in module._parameters:
@@ -59,7 +63,9 @@ def swap_tensor(
             orig_tensor = getattr(module, name)
         except AttributeError as ex:
             if not allow_missing:
-                raise AttributeError(f"{module._get_name()} has no attribute `{name}`") from ex
+                raise AttributeError(
+                    f"{module._get_name()} has no attribute `{name}`"
+                ) from ex
             orig_tensor = _MISSING
         if (
             orig_tensor is not _MISSING
@@ -176,7 +182,9 @@ class NamedMemberAccessor:
         use accessor.swap_tensor("layer1.conv1.weight", value)
         """
         prefix, _, attr = name.rpartition(".")
-        return swap_tensor(self.get_submodule(prefix), attr, value, allow_missing=allow_missing)
+        return swap_tensor(
+            self.get_submodule(prefix), attr, value, allow_missing=allow_missing
+        )
 
     # Batched operations
 
@@ -228,7 +236,10 @@ class NamedMemberAccessor:
             self.del_tensor(name)
 
     def swap_tensors(
-        self, names: Iterable[str], values: Iterable[torch.Tensor], allow_missing: bool = False
+        self,
+        names: Iterable[str],
+        values: Iterable[torch.Tensor],
+        allow_missing: bool = False,
     ) -> List[torch.Tensor]:
         """
         Swap the attributes specified by the given paths to values.
@@ -275,7 +286,9 @@ class NamedMemberAccessor:
             # Swap back if any key is missing when allow_missing is False
             for name, orig_tensor in orig_named_tensors.items():
                 self.swap_tensor(name, orig_tensor, allow_missing=True)
-            raise RuntimeError("Missing key(s): {}.".format(", ".join(map(repr, missing_keys))))
+            raise RuntimeError(
+                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
+            )
         return orig_named_tensors, missing_keys
 
     def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:

@@ -1,4 +1,5 @@
-from typing import Dict, Union, Any, Tuple, List
+from collections import defaultdict
+from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -8,8 +9,8 @@ from torch._functorch.utils import exposed_in
 
 @exposed_in("torch.func")
 def functional_call(
-    module: 'torch.nn.Module',
-    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Tuple[Dict[str, Tensor], ...]],
+    module: "torch.nn.Module",
+    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
     *,
@@ -101,7 +102,7 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffers (Dict[str,Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
+        parameters_and_buffers (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
             the module call. If given a tuple of dictionaries, they must have distinct keys so that all dictionaries can
             be used together
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
@@ -117,27 +118,42 @@ def functional_call(
     Returns:
         Any: the result of calling ``module``.
     """
-    parameters_and_buffers = (
-        parameter_and_buffer_dicts if isinstance(parameter_and_buffer_dicts, dict) else {}
-    )
-    if isinstance(parameter_and_buffer_dicts, tuple):
-        key_list = [i for dct in parameter_and_buffer_dicts for i in dct.keys()]
-        key_set = set(key_list)
-        if len(key_set) != len(key_list):
-            repeated_key = list(filter(lambda key: key_list.count(key) > 1, key_set))[0]
+    if isinstance(parameter_and_buffer_dicts, dict):
+        parameters_and_buffers = parameter_and_buffer_dicts
+    elif isinstance(parameter_and_buffer_dicts, Sequence):
+        if not all(isinstance(d, dict) for d in parameter_and_buffer_dicts):
             raise ValueError(
-                f"{repeated_key} appeared in multiple dictionaries; behavior of functional call is ambiguous"
+                "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
-
-        parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
+        all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
+        repeated_keys = duplicate_keys(all_keys)
+        if len(repeated_keys) > 0:
+            raise ValueError(
+                f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
+            )
+        parameters_and_buffers = {
+            k: v for d in parameter_and_buffer_dicts for k, v in d.items()
+        }
+    else:
+        raise ValueError(
+            f"Expected parameter_and_buffer_dicts to be a dict, or a list/tuple of dicts, "
+            f"but got {type(parameter_and_buffer_dicts)}"
+        )
 
     return nn.utils.stateless._functional_call(
-        module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights, strict=strict
+        module,
+        parameters_and_buffers,
+        args,
+        kwargs,
+        tie_weights=tie_weights,
+        strict=strict,
     )
 
 
 @exposed_in("torch.func")
-def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def stack_module_state(
+    models: List[nn.Module],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -193,14 +209,16 @@ def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[st
         same mode (training vs eval).
     """
     if len(models) == 0:
-        raise RuntimeError('stack_module_state: Expected at least one model, got 0.')
+        raise RuntimeError("stack_module_state: Expected at least one model, got 0.")
     if not (all(m.training for m in models) or all(not m.training for m in models)):
         raise RuntimeError(
-            'stack_module_state: Expected all models to have the same training/eval mode.'
+            "stack_module_state: Expected all models to have the same training/eval mode."
         )
     model0_typ = type(models[0])
     if not all(type(m) == model0_typ for m in models):
-        raise RuntimeError('stack_module_state: Expected all models to be of the same class.')
+        raise RuntimeError(
+            "stack_module_state: Expected all models to be of the same class."
+        )
     all_params = [dict(model.named_parameters()) for model in models]
     params = {
         k: construct_stacked_leaf(tuple(params[k] for params in all_params), k)
@@ -215,12 +233,23 @@ def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[st
     return params, buffers
 
 
-def construct_stacked_leaf(tensors, name):
-    all_requires_grad = all([t.requires_grad for t in tensors])
-    none_requires_grad = all([not t.requires_grad for t in tensors])
+def construct_stacked_leaf(
+    tensors: Union[Tuple[Tensor, ...], List[Tensor]], name: str
+) -> Tensor:
+    all_requires_grad = all(t.requires_grad for t in tensors)
+    none_requires_grad = all(not t.requires_grad for t in tensors)
     if not all_requires_grad and not none_requires_grad:
-        raise RuntimeError(f'Expected {name} from each model to have the same .requires_grad')
+        raise RuntimeError(
+            f"Expected {name} from each model to have the same .requires_grad"
+        )
     result = torch.stack(tensors)
     if all_requires_grad:
         result = result.detach().requires_grad_()
     return result
+
+
+def duplicate_keys(keys: Iterable[Any]) -> List[Any]:
+    counts: Dict[Any, int] = defaultdict(int)
+    for key in keys:
+        counts[key] += 1
+    return [key for key, n in counts.items() if n > 1]

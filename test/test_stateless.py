@@ -1,12 +1,12 @@
 # Owner(s): ["module: nn"]
 
-import unittest
-import sys
 import os
+import re
 import subprocess
+import sys
+import unittest
 
 import torch
-
 import torch.nn.utils.stateless as stateless
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import run_tests, TestCase, parametrize, instantiate_parametrized_tests, \
@@ -381,7 +381,10 @@ class TestStatelessFunctionalAPI(TestCase):
         x = torch.rand((1, 1))
         parameters = {'l1.weight': torch.zeros((1, 1)), 'l1.bias': torch.zeros((1, 1))}
         repeated_parameters = {'l1.weight': torch.ones((1, 1))}
-        with self.assertRaisesRegex(ValueError, "l1.weight appeared in multiple dictionaries"):
+        with self.assertRaisesRegex(
+            ValueError,
+            re.escape("['l1.weight'] appeared in multiple dictionaries"),
+        ):
             torch.func.functional_call(mod, (parameters, repeated_parameters), x)
 
 
