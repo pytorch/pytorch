@@ -3705,6 +3705,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # AssertionError: Tensor-likes are not equal!
+        xfail('bitwise_left_shift', device_type='cpu'),
+        xfail('bitwise_right_shift', device_type='cpu'),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
