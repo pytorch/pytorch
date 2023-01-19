@@ -14,6 +14,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     NamedTuple,
     Optional,
@@ -1434,7 +1435,7 @@ def add_label_err_comment(pr: GitHubPR) -> None:
     if not any(is_label_err_comment(comment) for comment in pr.get_comments()):
         gh_post_pr_comment(pr.org, pr.project, pr.pr_num, LABEL_ERR_MSG)
 
-def categorize_checks(check_runs: Dict[str, WorkflowCheckState],
+def categorize_checks(check_runs: Dict[str, JobCheckState],
                       required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
     failed_checks: List[Tuple[str, Optional[str]]] = []

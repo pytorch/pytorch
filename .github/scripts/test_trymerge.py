@@ -18,8 +18,6 @@ from trymerge import (find_matching_merge_rule,
                       gh_get_team_members,
                       read_merge_rules,
                       validate_revert,
-                      filter_pending_checks,
-                      filter_failed_checks,
                       has_required_labels,
                       add_label_err_comment,
                       delete_all_label_err_comments,
@@ -456,22 +454,6 @@ class TestTryMerge(TestCase):
 
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
-
-    def test_checks_filter(self) -> None:
-        checks = [
-            WorkflowCheckState(name="check0", status="SUCCESS", url="url0"),
-            WorkflowCheckState(name="check1", status="FAILURE", url="url1"),
-            WorkflowCheckState(name="check2", status="STARTUP_FAILURE", url="url2"),
-            WorkflowCheckState(name="check3", status=None, url="url3"),
-        ]
-
-        checks_dict = {check.name : check for check in checks}
-
-        pending_checks = filter_pending_checks(checks_dict)
-        failing_checks = filter_failed_checks(checks_dict)
-
-        self.assertListEqual(failing_checks, [checks[1], checks[2]])
-        self.assertListEqual(pending_checks, [checks[3]])
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
