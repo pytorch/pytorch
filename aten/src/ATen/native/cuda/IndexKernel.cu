@@ -205,8 +205,8 @@ static void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     auto fill_val = source.to<scalar_t>();
@@ -223,8 +223,8 @@ static void index_copy_kernel(
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
   // this kernel will not be called when torch.use_deterministic_algorithms(True)
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
