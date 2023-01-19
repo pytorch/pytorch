@@ -2536,40 +2536,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         compute_non_overlapping_and_dense(type_id);
   }
 
-  SymBool compute_is_non_overlapping_and_dense_dim4(identity<SymBool> type_id) {
-    return extra_meta_->is_contiguous_ |
-        extra_meta_->is_channels_last_contiguous_ |
-        compute_non_overlapping_and_dense(type_id);
-  }
+  SymBool compute_is_non_overlapping_and_dense_dim4(identity<SymBool> type_id);
 
   bool compute_channels_last_contiguous_3d_dim5(identity<bool> type_id) {
     return !is_channels_last_contiguous_ &&
         compute_channels_last_contiguous_3d(type_id);
   }
 
-  SymBool compute_channels_last_contiguous_3d_dim5(identity<SymBool> type_id) {
-    return ~extra_meta_->is_channels_last_contiguous_ &
-        compute_channels_last_contiguous_3d(type_id);
-  }
+  SymBool compute_channels_last_contiguous_3d_dim5(identity<SymBool> type_id);
 
   bool compute_channels_last_2d_dim5(identity<bool> type_id) {
     return !is_channels_last_3d_contiguous_ &&
         compute_strides_like_channels_last_2d(type_id);
   }
 
-  SymBool compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-    return ~extra_meta_->is_channels_last_3d_contiguous_ &
-        compute_strides_like_channels_last_2d(type_id);
-  }
+  SymBool compute_channels_last_2d_dim5(identity<SymBool> type_id);
 
   bool compute_channels_last_3d_dim5(identity<bool> type_id) {
     return !is_channels_last_ && compute_strides_like_channels_last_3d(type_id);
   }
 
-  SymBool compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-    return ~extra_meta_->is_channels_last_ &
-        compute_strides_like_channels_last_3d(type_id);
-  }
+  SymBool compute_channels_last_3d_dim5(identity<SymBool> type_id);
 
   bool compute_is_non_overlapping_and_dense_dim5(identity<bool> type_id) {
     return is_contiguous_ || is_channels_last_contiguous_ ||
@@ -2577,22 +2564,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         compute_non_overlapping_and_dense(type_id);
   }
 
-  SymBool compute_is_non_overlapping_and_dense_dim5(identity<SymBool> type_id) {
-    return extra_meta_->is_contiguous_ |
-        extra_meta_->is_channels_last_contiguous_ |
-        extra_meta_->is_channels_last_3d_contiguous_ |
-        compute_non_overlapping_and_dense(type_id);
-  }
+  SymBool compute_is_non_overlapping_and_dense_dim5(identity<SymBool> type_id);
 
   bool compute_is_non_overlapping_and_dense_anydim(identity<bool> type_id) {
     return is_contiguous_ || compute_non_overlapping_and_dense(type_id);
   }
 
   SymBool compute_is_non_overlapping_and_dense_anydim(
-      identity<SymBool> type_id) {
-    return extra_meta_->is_contiguous_ |
-        compute_non_overlapping_and_dense(type_id);
-  }
+      identity<SymBool> type_id);
 
   template <typename T>
   void _refresh_contiguous() {

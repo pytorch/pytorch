@@ -446,6 +446,59 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
       extra_meta_->sizes_, extra_meta_->strides_);
 }
 
+// Glue compute
+// NB: intentionally not using bitwise operators.  Using bitwise operators
+// currently impedes ShapeEnv from getting crucial equalities which cause
+// python test/functorch/test_aotdispatch.py -k
+// test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
+// very slowly.  I think probably we just need to be able to reason through
+// And/Or, and then we can switch these to be symbolic.
+
+SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
+    identity<SymBool> type_id) {
+  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
+      extra_meta_->is_channels_last_contiguous_.guard_bool(
+          __FILE__, __LINE__) ||
+      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+}
+
+SymBool TensorImpl::compute_channels_last_contiguous_3d_dim5(
+    identity<SymBool> type_id) {
+  return !extra_meta_->is_channels_last_contiguous_.guard_bool(
+             __FILE__, __LINE__) &&
+      compute_channels_last_contiguous_3d(type_id).guard_bool(
+          __FILE__, __LINE__);
+}
+
+SymBool TensorImpl::compute_channels_last_2d_dim5(identity<SymBool> type_id) {
+  return !extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
+             __FILE__, __LINE__) &&
+      compute_strides_like_channels_last_2d(type_id).guard_bool(
+          __FILE__, __LINE__);
+}
+
+SymBool TensorImpl::compute_channels_last_3d_dim5(identity<SymBool> type_id) {
+  return !extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__) &&
+      compute_strides_like_channels_last_3d(type_id).guard_bool(
+          __FILE__, __LINE__);
+}
+
+SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim5(
+    identity<SymBool> type_id) {
+  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
+      extra_meta_->is_channels_last_contiguous_.guard_bool(
+          __FILE__, __LINE__) ||
+      extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
+          __FILE__, __LINE__) ||
+      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+}
+
+SymBool TensorImpl::compute_is_non_overlapping_and_dense_anydim(
+    identity<SymBool> type_id) {
+  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
+      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+}
+
 void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
