@@ -487,7 +487,6 @@ class MetaConverter:
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    # t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     # these are supported in meta conversion but the fallbacks
