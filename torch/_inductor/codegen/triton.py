@@ -142,7 +142,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def constant(value, dtype):
-        return triton_constant(value)
+        type_ = torch._prims_common.dtype_to_type(dtype)
+        return triton_constant(type_(value))
 
     @staticmethod
     def abs(x):
@@ -208,9 +209,7 @@ class TritonOverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(
-            new_mask, result, TritonOverrides.constant(other, torch.float32)
-        )
+        return ops.where(new_mask, result, triton_constant(other))
 
     @staticmethod
     def lgamma(x):
