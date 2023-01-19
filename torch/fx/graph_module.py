@@ -707,12 +707,12 @@ class {module_name}(torch.nn.Module):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         res = GraphModule(fake_mod, fake_mod.__dict__['_graph'])
-        res.meta = copy.deepcopy(self.meta)
+        res.meta = copy.deepcopy(getattr(self, 'meta', {}))
         return res
 
     def __copy__(self):
         res = GraphModule(self, self.graph)
-        res.meta = self.meta
+        res.meta = getattr(self, 'meta', {})
         return res
 
     @compatibility(is_backward_compatible=False)
