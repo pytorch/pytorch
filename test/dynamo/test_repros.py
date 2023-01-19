@@ -5,6 +5,7 @@ import inspect
 import itertools
 import random
 import unittest
+import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
@@ -2327,6 +2328,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
+
+    def test_grad_references_cleared(self):
+        model = torch.nn.Linear(2048, 2048, bias=False)
+        x = torch.ones(2048)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        def opt_step():
+            optimizer.step()
+
+        compiled_opt_step = torch._dynamo.optimize("eager")(opt_step)
+
+        def compiled_model_step(x):
+            optimizer.zero_grad(True)
+            y = model(x)
+            torch.sum(y).backward()
+            compiled_opt_step()
+
+        compiled_model_step(x)
+        param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
+        optimizer.zero_grad(True)
+        self.assertIsNone(param_grad_ref())
 
 
 if __name__ == "__main__":

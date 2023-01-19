@@ -1476,7 +1476,6 @@ class TestOperators(TestCase):
         # were not batched.
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
-        xfail('nn.functional.binary_cross_entropy'),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # ForwardAD not implemented and no decomposition
         xfail('nn.functional.dropout2d'),  # calls random op
         xfail('nn.functional.dropout3d'),  # calls random op
