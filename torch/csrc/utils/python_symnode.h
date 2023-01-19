@@ -141,10 +141,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__, other);
   }
 
-  c10::SymNode min(const c10::SymNode& other) override {
+  c10::SymNode sym_min(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
-  c10::SymNode max(const c10::SymNode& other) override {
+  c10::SymNode sym_max(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 
