@@ -1,4 +1,5 @@
 def _impl(repository_ctx):
+    print("TROLOLO " + repository_ctx.os.name.lower())
     archive = repository_ctx.attr.name + ".tar"
     reference = Label("@%s_unpatched//:README" % repository_ctx.attr.name)
     dirname = repository_ctx.path(reference).dirname
