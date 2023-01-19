@@ -306,7 +306,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -1747,7 +1747,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         _step_logger()(
