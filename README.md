@@ -184,7 +184,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 **Common**
 
 ```bash
-conda install astunparse numpy ninja pyyaml setuptools cmake cffi typing_extensions future six requests dataclasses
+conda install astunparse numpy ninja pyyaml setuptools cmake cffi typing_extensions six requests dataclasses
 ```
 
 **On Linux**

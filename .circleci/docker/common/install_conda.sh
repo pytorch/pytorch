@@ -75,7 +75,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi future six"
+  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi six"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
