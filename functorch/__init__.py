@@ -12,18 +12,16 @@ from . import _C
 # - very experimental things should go into functorch.experimental
 # - compilation related things should go into functorch.compile
 
-# functorch transforms
-from torch._functorch.vmap import vmap
-from torch._functorch.eager_transforms import (
-    grad, grad_and_value, vjp, jacrev, jvp, jacfwd, hessian, functionalize
-)
+# Was never documented
 from torch._functorch.python_key import make_fx
+
+from torch._functorch.deprecated import (
+    vmap, grad, grad_and_value, vjp, jvp, jacrev, jacfwd, hessian, functionalize,
+    make_functional, make_functional_with_buffers, combine_state_for_ensemble,
+)
 
 # utilities. Maybe these should go in their own namespace in the future?
 from torch._functorch.make_functional import (
-    make_functional_with_buffers,
-    make_functional,
-    combine_state_for_ensemble,
     FunctionalModule,
     FunctionalModuleWithBuffers,
 )
