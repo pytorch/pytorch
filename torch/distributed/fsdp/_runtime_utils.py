@@ -172,7 +172,10 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
     """
     cpu_device = torch.device("cpu")
     for handle in traversal_utils._get_fsdp_handles(module):
-        if not handle._offload_params and handle.flat_param.device != state.compute_device:
+        if (
+            not handle._offload_params
+            and handle.flat_param.device != state.compute_device
+        ):
             raise RuntimeError(
                 "An FSDP-managed module unexpectedly has parameters on "
                 f"{handle.flat_param.device}. Make sure to move the module to "
@@ -402,9 +405,7 @@ def _pre_forward(
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
     if state.mixed_precision.cast_forward_inputs:
-        args, kwargs = _cast_forward_inputs(
-            input_dtype, *args, **kwargs
-        )
+        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
 
@@ -527,16 +528,16 @@ def _root_pre_forward(
     # Prepares the forward inputs by moving them to ``compute_device``
     # TODO: Do not use the side stream for tensor copies for now; investigate
     # the perf with/without it.
-    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, state.compute_device.index, False)
+    args_tuple, kwargs_tuple = _to_kwargs(
+        args, kwargs, state.compute_device.index, False
+    )
     args = args_tuple[0]
     kwargs = kwargs_tuple[0]
 
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
 
     if state.mixed_precision.cast_root_forward_inputs:
-        args, kwargs = _cast_forward_inputs(
-            input_dtype, *args, **kwargs
-        )
+        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
 
@@ -1224,6 +1225,7 @@ def _register_post_backward_hooks(
             "register the post-backward hook",
         )
         acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
+        assert acc_grad is not None
         hook_handle = acc_grad.register_hook(
             functools.partial(_post_backward_hook, state, handle)
         )

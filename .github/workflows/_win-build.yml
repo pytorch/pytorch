@@ -71,18 +71,6 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      - name: Setup conda
-        shell: bash
-        run: |
-          # Windows conda is baked into the AMI at this location
-          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
-
-          {
-            echo "CONDA_RUN=${CONDA} run --no-capture-output";
-            echo "CONDA_BUILD=${CONDA} run conda-build";
-            echo "CONDA_INSTALL=${CONDA} install";
-          } >> "${GITHUB_ENV}"
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py

@@ -49,22 +49,6 @@ int64_t stride(const Tensor& self, int64_t dim) {
   return self.stride(dim);
 }
 
-c10::SymInt sym_size(const Tensor& self, int64_t dim) {
-  return self.sym_size(dim);
-}
-
-c10::SymInt sym_stride(const Tensor& self, int64_t dim) {
-  return self.sym_stride(dim);
-}
-
-c10::SymInt sym_numel(const Tensor& self) {
-  return self.sym_numel();
-}
-
-c10::SymInt sym_storage_offset(const Tensor& self) {
-  return self.sym_storage_offset();
-}
-
 int64_t size(const Tensor& self, Dimname dim) {
   size_t pos_dim = dimname_to_position(self, dim);
   return self.sizes()[pos_dim];
