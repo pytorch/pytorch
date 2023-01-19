@@ -732,7 +732,9 @@ class TestFSDPOptimStateDict(FSDPTest):
         optim_state_dict1 = FSDP._optim_state_dict(model1, optim1)
         optim_state_dict2 = FSDP._optim_state_dict(model2, optim2)
 
-        self.assertEqual(len(optim_state_dict1["state"]), len(optim_state_dict2["state"]))
+        self.assertEqual(
+            len(optim_state_dict1["state"]), len(optim_state_dict2["state"])
+        )
         for fqn, state in optim_state_dict1["state"].items():
             self.assertEqual(state, optim_state_dict2["state"][fqn], fqn)
 
@@ -751,7 +753,9 @@ class TestFSDPOptimStateDict(FSDPTest):
         orig_model = FSDP(orig_model)
         orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
 
-        self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
+        self._test_optim_state_save_load(
+            orig_model, orig_optim, composable_model, composable_optim
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_submodule_fully_shard(self):
@@ -763,7 +767,9 @@ class TestFSDPOptimStateDict(FSDPTest):
         orig_model = FSDP(orig_model)
         orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
 
-        self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
+        self._test_optim_state_save_load(
+            orig_model, orig_optim, composable_model, composable_optim
+        )
 
 
 if __name__ == "__main__":
