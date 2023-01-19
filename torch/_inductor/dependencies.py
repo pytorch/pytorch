@@ -7,7 +7,6 @@ from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
-from . import config
 from .codegen.common import index_prevent_reordering
 from .utils import (
     get_dtype_size,
@@ -165,23 +164,14 @@ class ReadWrites:
         )
 
 
-class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
+class _RecordLoadStoreInner(V.MockHandler):
     def __init__(self, var_ranges: VarRanges, normalize: bool):
-        super(RecordLoadStore, self).__init__()
+        super().__init__()
         self._reads: Set[MemoryDep] = set()
         self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
-
-    # Truncate the expr str by a threshold to prevent it's too long
-    # and cause process hanging. The result is not used.
-    # https://github.com/pytorch/torchdynamo/issues/1352
-    @staticmethod
-    def truncate_expr(expr):
-        if len(expr) > config.realize_bytes_threshold:
-            expr = f"{expr[:config.realize_bytes_threshold]}..."
-        return expr
 
     def canonicalize(
         self, index: sympy.Expr
@@ -228,6 +218,14 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
         return f"index_expr({sympy_str(index)}, {dtype})"
+
+
+class RecordLoadStore(V.KernelFormatterHandler):
+    def __init__(self, var_ranges: VarRanges, normalize: bool):
+        parent_handler = _RecordLoadStoreInner(
+            var_ranges=var_ranges, normalize=normalize
+        )
+        super().__init__(parent_handler=parent_handler)
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
@@ -279,8 +277,13 @@ def extract_read_writes(
     else:
         range_vars = [*itertools.chain(*args)]
 
+    inner = rw.parent_handler
     return ReadWrites(
-        set(rw._reads), set(rw._writes), rw._index_exprs, range_vars, var_ranges
+        set(inner._reads),
+        set(inner._writes),
+        inner._index_exprs,
+        range_vars,
+        var_ranges,
     )
 
 

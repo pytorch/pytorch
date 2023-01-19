@@ -11,7 +11,6 @@ ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 
 # Install common dependencies (so that this step can be cached separately)
-ARG EC2
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
@@ -26,9 +25,10 @@ COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
-ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ARG CONDA_CMAKE
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh

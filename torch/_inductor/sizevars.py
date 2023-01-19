@@ -350,8 +350,7 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            self.guard_equals(numerator % denominator, 0)
             return True
         return False
 
@@ -366,6 +365,9 @@ class SizeVarAllocator(object):
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
         return int(out)
+
+    def size_hints(self, exprs: List[Expr]) -> int:
+        return tuple(self.size_hint(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -609,6 +611,7 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
+        self.name = "SimplifyIndexing"
         self._simplify: Callable[
             [Expr], Expr
         ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)

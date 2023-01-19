@@ -10,6 +10,11 @@ We will recreate all the RNN modules as we require the modules to be decomposed
 into its building blocks to be able to observe.
 """
 
+__all__ = [
+    "LSTMCell",
+    "LSTM"
+]
+
 class LSTMCell(torch.nn.Module):
     r"""A quantizable long short-term memory (LSTM) cell.
 

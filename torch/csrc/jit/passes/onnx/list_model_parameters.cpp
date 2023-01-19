@@ -52,7 +52,7 @@ std::deque<std::string> findSubModuleAttr(
 Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
   auto schema = function->getSchema();
   auto args = schema.arguments();
-  args.emplace_back(Argument(name, nullptr, c10::nullopt, attr));
+  args.emplace_back(name, nullptr, c10::nullopt, attr);
   auto new_schema = FunctionSchema(
       schema.name(),
       schema.overload_name(),

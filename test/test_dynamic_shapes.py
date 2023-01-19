@@ -13,7 +13,6 @@ import itertools
 import random
 import contextlib
 import math
-import builtins
 import atexit
 import io
 import os
@@ -122,11 +121,16 @@ class FakeSymbolicTensor(torch.Tensor):
 
 
 def create_symbolic_tensor(name, arg, shape_env):
-    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg, sname=name)
+    from torch._dynamo.source import ConstantSource
+    sym_shapes, sym_strides, sym_storage_offset = \
+        shape_env.create_symbolic_sizes_strides_storage_offset(arg, source=ConstantSource(name))
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i):
-    return shape_env.create_symintnode(shape_env.create_symbol(i, sname=f"__testing_only{len(shape_env.var_to_val)}"))
+    from torch._dynamo.source import ConstantSource
+    return shape_env.create_symintnode(
+        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"))
+    )
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -503,11 +507,7 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        # These functions might return plain int/float
-        has_valid_downcast = fn in ["min", "max"]
-        if fn in symbolic_shapes.magic_methods_on_builtins:
-            lambda_apply = getattr(builtins, fn)
-        elif fn in symbolic_shapes.magic_methods_on_math:
+        if fn in symbolic_shapes.magic_methods_on_math:
             lambda_apply = getattr(math, fn)
         elif fn in symbolic_shapes.magic_methods_on_submodule:
             lambda_apply = getattr(symbolic_shapes, fn)
@@ -524,16 +524,10 @@ class TestSymNumberMagicMethods(TestCase):
             tp = "float" if any(isinstance(i, float) for i in [inp1, inp2]) else "int"
 
         def guard_fn(v):
-            try:
-                if fn in symbolic_shapes.always_bool_magic_methods:
-                    return bool(v)
-                else:
-                    return getattr(v.node, f"guard_{tp}")("", 0)
-            except Exception as e:
-                if has_valid_downcast:
-                    return v
-                else:
-                    raise e
+            if fn in symbolic_shapes.always_bool_magic_methods:
+                return bool(v)
+            else:
+                return getattr(v.node, f"guard_{tp}")("", 0)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
