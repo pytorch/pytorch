@@ -50,7 +50,8 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'sym_int', 'sym_float', 'compile', 'vmap']
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
+]
 
 ################################################################################
 # Load the extension module
@@ -259,6 +260,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __sym_max__(self, other):
+        raise AssertionError("type stub not overridden")
+
+    def __sym_min__(self, other):
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
         raise AssertionError("type stub not overridden")
 
@@ -303,6 +310,12 @@ class SymFloat:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __sym_max__(self, other):
+        raise AssertionError("type stub not overridden")
+
+    def __sym_min__(self, other):
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
@@ -342,6 +355,22 @@ def sym_int(a):
     elif isinstance(a, SymFloat):
         return _sym_floor(a) if a > 0 else _sym_ceil(a)
     return py_int(a)  # type: ignore[operator]
+
+def sym_max(a, b):
+    """ SymInt-aware utility for max()."""
+    if isinstance(a, (SymInt, SymFloat)):
+        return a.__sym_max__(b)
+    elif isinstance(b, (SymInt, SymFloat)):
+        return b.__sym_max__(a)
+    return builtins.max(a, b)  # type: ignore[operator]
+
+def sym_min(a, b):
+    """ SymInt-aware utility for max()."""
+    if isinstance(a, (SymInt, SymFloat)):
+        return a.__sym_min__(b)
+    elif isinstance(b, (SymInt, SymFloat)):
+        return b.__sym_min__(a)
+    return builtins.min(a, b)  # type: ignore[operator]
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
