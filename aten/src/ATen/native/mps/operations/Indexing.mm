@@ -628,6 +628,12 @@ Tensor& index_select_out_mps(const Tensor & self,
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
 
+  // Scalar input
+  if (self.dim() == 0 && self.numel() == 1){
+    output.copy_(self);
+    return output;
+  }
+
   // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph
   {
