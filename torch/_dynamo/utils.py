@@ -112,13 +112,19 @@ def reset_frame_count():
 # Total time: 25.00655s
 def print_time_report():
     total = 0
+    total_by_key = {}
     print("TIMING:")
     for frame, timings in frame_phase_timing.items():
         print(f"  frame #{frame}:")
         for key, time in timings.items():
             total += time
             print(f"    {key} : {time}")
-    print(f"Total time: {total}s")
+            if key not in total_by_key:
+                total_by_key[key] = time
+            else:
+                total_by_key[key] += time
+    for key, value in total_by_key.items():
+        print(f"{key}:{value}")
 
 
 # dynamo_timed API works as a function decorator
