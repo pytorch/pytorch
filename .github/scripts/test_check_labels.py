@@ -1,55 +1,77 @@
+"""test_check_labels.py"""
+
 from typing import Any
 from unittest import TestCase, mock, main
 
-from check_labels import main as check_labels_main
-from test_trymerge import (
-    mock_gh_get_info,
-    mock_add_label_err_comment,
-    mock_delete_all_label_err_comments,
-)
+from trymerge import GitHubPR
+from test_trymerge import mocked_gh_graphql
+from check_labels import has_required_labels
 
-def mock_parse_args() -> object:
-    class Object(object):
-        def __init__(self) -> None:
-            self.pr_num = 76123
+release_notes_labels = [
+    "release notes: AO frontend",
+    "release notes: autograd",
+    "release notes: benchmark",
+    "release notes: build",
+    "release notes: complex",
+    "release notes: composability",
+    "release notes: cpp",
+    "release notes: cuda",
+    "release notes: cudnn",
+    "release notes: dataloader",
+    "release notes: distributed (c10d)",
+    "release notes: distributed (ddp)",
+    "release notes: distributed (fsdp)",
+    "release notes: distributed (pipeline)",
+    "release notes: distributed (rpc)",
+    "release notes: distributed (sharded)",
+    "release notes: foreach_frontend",
+    "release notes: functorch",
+    "release notes: fx",
+    "release notes: hub",
+    "release notes: jit",
+    "release notes: lazy",
+    "release notes: linalg_frontend",
+    "release notes: memory format",
+    "release notes: Meta API",
+    "release notes: mobile",
+    "release notes: mps",
+    "release notes: nested tensor",
+    "release notes: nn",
+    "release notes: onnx",
+    "release notes: package/deploy",
+    "release notes: performance_as_product",
+    "release notes: profiler",
+    "release notes: python_frontend",
+    "release notes: quantization",
+    "release notes: releng",
+    "release notes: rocm",
+    "release notes: sparse",
+    "release notes: visualization",
+    "release notes: vulkan",
+]
 
-    return Object()
 
 class TestCheckLabels(TestCase):
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('check_labels.get_release_notes_labels', return_value=release_notes_labels)
+    def test_pr_with_missing_labels(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
+        "Test PR with no 'release notes:' label or 'topic: not user facing' label"
+        pr = GitHubPR("pytorch", "pytorch", 82169)
+        self.assertFalse(has_required_labels(pr))
 
-    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
-    @mock.patch('check_labels.parse_args', return_value=mock_parse_args())
-    @mock.patch('check_labels.has_required_labels', return_value=False)
-    @mock.patch('check_labels.delete_all_label_err_comments', side_effect=mock_delete_all_label_err_comments)
-    @mock.patch('check_labels.add_label_err_comment', side_effect=mock_add_label_err_comment)
-    def test_ci_fails_without_required_labels(
-        self,
-        mock_add_label_err_comment: Any,
-        mock_delete_all_label_err_comments: Any,
-        mock_has_required_labels: Any,
-        mock_parse_args: Any,
-        mock_gh_get_info: Any,
-    ) -> None:
-        check_labels_main()
-        mock_add_label_err_comment.assert_called_once()
-        mock_delete_all_label_err_comments.assert_not_called()
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('check_labels.get_release_notes_labels', return_value=release_notes_labels)
+    def test_pr_with_release_notes_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
+        "Test PR with 'release notes: nn' label"
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        self.assertTrue(has_required_labels(pr))
 
-    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
-    @mock.patch('check_labels.parse_args', return_value=mock_parse_args())
-    @mock.patch('check_labels.has_required_labels', return_value=True)
-    @mock.patch('check_labels.delete_all_label_err_comments', side_effect=mock_delete_all_label_err_comments)
-    @mock.patch('check_labels.add_label_err_comment', side_effect=mock_add_label_err_comment)
-    def test_ci_success_with_required_labels(
-        self,
-        mock_add_label_err_comment: Any,
-        mock_delete_all_label_err_comments: Any,
-        mock_has_required_labels: Any,
-        mock_parse_args: Any,
-        mock_gh_get_info: Any,
-    ) -> None:
-        check_labels_main()
-        mock_add_label_err_comment.assert_not_called()
-        mock_delete_all_label_err_comments.assert_called_once()
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('check_labels.get_release_notes_labels', return_value=release_notes_labels)
+    def test_pr_with_not_user_facing_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
+        "Test PR with 'topic: not user facing' label"
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        self.assertTrue(has_required_labels(pr))
 
 if __name__ == "__main__":
     main()
