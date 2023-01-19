@@ -18,6 +18,7 @@ class MockModule(torch.nn.Module):
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
         self.register_buffer('buffer', torch.ones(1))
+        self.foo = 0.0
 
     def forward(self, x):
         return self.l1(x) + self.buffer
@@ -226,7 +227,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_reparamertize_some_weights(self, functional_call):
         module = MockModule()
-        weight = torch.tensor([[2.0]],)
+        weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
         buffer = torch.tensor([3.0])
         extra = torch.tensor([1.0])
@@ -248,7 +249,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_reparamertize_strict(self, functional_call):
         module = MockModule()
-        weight = torch.tensor([[2.0]],)
+        weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
         buffer = torch.tensor([3.0])
         extra = torch.tensor([1.0])
@@ -330,6 +331,91 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
+    def test_reparamertize_special(self, functional_call):
+        class NonTensor:
+            def __repr__(self):
+                return f'<{self.__class__.__name__}>'
+
+        module = MockModule()
+        weight = torch.tensor([[2.0]])
+        bias = torch.tensor([5.0])
+        buffer = torch.tensor([3.0])
+        non_tensor = NonTensor()
+        orig_tensors = tuple(module.parameters()) + tuple(module.buffers())
+        orig_tensors_values = tuple(t.clone() for t in orig_tensors)
+
+        # Set to None
+        parameters = {'l1.weight': weight,
+                      'l1.bias': None,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        out = functional_call(module, parameters, x)
+        self.assertEqual(out, x * weight + buffer)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a successful call',
+        )
+
+        # Set non-tensor
+        parameters = {'l1.weight': non_tensor}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            TypeError,
+            re.escape("<NonTensor> is not an instance of torch.Tensor"),
+        ):
+            out = functional_call(module, parameters, x)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Set non-tensor attribute
+        parameters = {'l1.weight': weight, 'foo': torch.tensor([1.0])}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            TypeError,
+            re.escape("attribute `foo`: 0.0 is not an instance of torch.Tensor"),
+        ):
+            out = functional_call(module, parameters, x)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Set non-exist submodule
+        parameters = {'l1.weight': weight,
+                      'l2.bias': bias}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            AttributeError,
+            re.escape("MockModule has no attribute `l2`"),
+        ):
+            out = functional_call(module, parameters, x)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
     def test_tied_weights_warns(self, functional_call):
         module = MockModule()
         module.tied_bias = module.l1.bias
@@ -341,7 +427,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_reparamertize_tie_weights(self, functional_call):
         module = MockTiedModule()
-        weight = torch.tensor([[2.0]],)
+        weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
         buffer = torch.tensor([3.0])
         extra = torch.tensor([1.0])
@@ -367,7 +453,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_reparamertize_tie_some_weights(self, functional_call):
         module = MockTiedModule()
-        weight = torch.tensor([[2.0]],)
+        weight = torch.tensor([[2.0]])
         buffer = torch.tensor([3.0])
 
         parameters = {'l1.weight': weight,
@@ -382,7 +468,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_tied_weights_errors(self, functional_call):
         module = MockTiedModule()
-        weight = torch.tensor([[1.0]],)
+        weight = torch.tensor([[1.0]])
         bias = torch.tensor([0.0])
         buffer = torch.tensor([0.0])
 
@@ -416,7 +502,7 @@ class TestStatelessFunctionalAPI(TestCase):
 
     def test_tied_weights_no_error_without_flag(self):
         module = MockTiedModule()
-        weight = torch.tensor([[1.0]],)
+        weight = torch.tensor([[1.0]])
         bias = torch.tensor([0.0])
         buffer = torch.tensor([0.0])
 
@@ -437,7 +523,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_reparamertize_tie_weights_strict(self, functional_call):
         module = MockTiedModule()
-        weight = torch.tensor([[2.0]],)
+        weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
         buffer = torch.tensor([3.0])
         extra = torch.tensor([1.0])
@@ -564,17 +650,45 @@ class TestStatelessFunctionalAPI(TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('foo', torch.zeros(()))
+                self.register_buffer('foo', torch.tensor([0.0]))
 
             def forward(self, x):
                 self.foo = self.foo + 1
                 return x + self.foo
 
-        a = {'foo': torch.zeros(())}
+        foo = torch.tensor([2.0])
+        x = torch.randn(1)
+        a = {'foo': foo}
         mod = Foo()
-        functional_call(mod, a, torch.ones(()))
-        self.assertEqual(mod.foo, torch.zeros(()))
-        self.assertEqual(a['foo'], torch.ones(()))
+        functional_call(mod, a, x)
+        self.assertEqual(mod.foo, torch.tensor([0.0]))
+        self.assertEqual(a['foo'], torch.tensor([3.0]))
+        self.assertEqual(foo, torch.tensor([2.0]))
+        self.assertTrue(a['foo'] is not foo)
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_in_place_operator(self, functional_call):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('foo', torch.tensor([0.0]))
+
+            def forward(self, x):
+                self.foo.add_(1)
+                return x + self.foo
+
+        foo = torch.tensor([2.0])
+        x = torch.randn(1)
+        a = {'foo': foo}
+        mod = Foo()
+        functional_call(mod, a, x)
+        self.assertEqual(mod.foo, torch.tensor([0.0]))
+        self.assertEqual(a['foo'], torch.tensor([3.0]))
+        self.assertEqual(foo, torch.tensor([3.0]))
+        self.assertTrue(a['foo'] is foo)
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -690,17 +804,16 @@ class TestStatelessFunctionalAPI(TestCase):
                 return self.l1(x) + self.buffer, parameters, buffers
 
         module = Module()
-        weight = torch.tensor([[2.0]],)
-        weight = torch.tensor([[2.0]],)
+        weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
         buffer = torch.tensor([3.0])
-        extra =  torch.tensor([1.0])
+        extra = torch.tensor([1.0])
         extra_p = torch.nn.Parameter(extra)
 
         # All weights
         parameters = {'l1.weight': weight,
                       'l1.bias': bias,
-                      'buffer': buffer,}
+                      'buffer': buffer}
         x = torch.randn(1, 1)
         out, parameters, buffers = functional_call(module, parameters, x)
         self.assertEqual(out, x * weight + bias + buffer)
@@ -765,6 +878,17 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(parameters, (weight, module.l1.bias, extra_p))
         self.assertEqual(buffers, (module.buffer))
         self.assertTrue(all(t1 is t2 for t1, t2 in zip(parameters, (weight, module.l1.bias, extra_p))))
+        self.assertTrue(all(t1 is t2 for t1, t2 in zip(buffers, (module.buffer,))))
+
+        # Set None
+        parameters = {'l1.weight': weight,
+                      'l1.bias': None}
+        x = torch.randn(1, 1)
+        out, parameters, buffers = functional_call(module, parameters, x)
+        self.assertEqual(out, x * weight + module.buffer)
+        self.assertEqual(parameters, (weight,))
+        self.assertEqual(buffers, (module.buffer))
+        self.assertTrue(all(t1 is t2 for t1, t2 in zip(parameters, (weight,))))
         self.assertTrue(all(t1 is t2 for t1, t2 in zip(buffers, (module.buffer,))))
 
 
