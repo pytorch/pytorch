@@ -720,6 +720,8 @@ class ShapeEnv(object):
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
+            if (t.is_nested):
+                continue
             for i, s in enumerate(t.size()):
                 track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
             for i, s in enumerate(t.stride()):
