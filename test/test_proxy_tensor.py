@@ -986,7 +986,7 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj().expr == meta_d.meta['val'].node.expr)
+        self.assertTrue(meta_c.meta['val'].shape[0].node.expr == meta_d.meta['val'].node.expr)
 
     def test_metadata_fresh(self):
         def f(x):
@@ -996,10 +996,10 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
         meta_cos = _get_node(fx_g, lambda x: x.target == aten.cos.default)
         meta_inp = _get_node(fx_g, lambda x: x.op == 'placeholder')
-        self.assertTrue(meta_cos.meta['val'].shape[0].get_pyobj().expr == 3)
+        self.assertTrue(meta_cos.meta['val'].shape[0].node.expr == 3)
         # Checks if the input expr has been updated even though the constraint
         # happened afterwards
-        self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
+        self.assertTrue(meta_inp.meta['val'].shape[0].node.expr == 3)
 
     def test_elementwise_meta_with_sym_numbers(self):
         def f(x, offset, as_sym_float=False):
