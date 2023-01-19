@@ -37,7 +37,7 @@ cond = PyOperator("cond")
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    assert isinstance(operands, list), "Cond operands must be a list of tensors"
+    assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
     true_graph = get_isolated_graphmodule(true_fn, operands, {})

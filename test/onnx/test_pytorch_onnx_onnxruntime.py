@@ -1210,7 +1210,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x.T
 
         self.run_test(NumpyTranspose(), torch.randn(4, 7))
-        self.run_test(NumpyTranspose(), torch.tensor(-42.0))
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
@@ -8294,6 +8293,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(CrossEntropyLossMeanWeight(ignore_index), input_args=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_MSELoss(self):
+        class MSELoss(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.loss1 = torch.nn.MSELoss(reduction="none")
+                self.loss2 = torch.nn.MSELoss(reduction="sum")
+                self.loss3 = torch.nn.MSELoss(reduction="mean")
+
+            def forward(self, input, target):
+                return (
+                    self.loss1(input, target),
+                    self.loss2(input, target),
+                    self.loss3(input, target),
+                )
+
+        x = torch.randn(2, 3, 5)
+        y = torch.randn(2, 3, 5)
+        self.run_test(MSELoss(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
         x = torch.rand(5).log()
@@ -12517,6 +12536,35 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             (input, grid),
             **atol_rtol,
         )
+
+        # ONNX Opset 16 GridSample with 5D volumetric input is not supported.
+        d_in = 2
+        d_out = 3
+        volumetric_input_tensor = torch.randn(n, c, d_in, h_in, w_in)
+        volumetric_grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
+        for mode, padding_mode, align_corners in itertools.product(
+            (
+                "bilinear",
+                "nearest",
+            ),  # PyTorch grid_sample "bicubic" mode does not support 5D volumetric input.
+            (
+                "zeros",
+                "border",
+                "reflection",
+            ),
+            (
+                True,
+                False,
+            ),
+        ):
+            with self.assertRaises(
+                torch.onnx.errors.OnnxExporterError,
+            ):
+                self.run_test(
+                    GridSampleModule(mode, padding_mode, align_corners),
+                    (volumetric_input_tensor, volumetric_grid_tensor),
+                    **atol_rtol,
+                )
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
