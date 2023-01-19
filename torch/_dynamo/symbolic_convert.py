@@ -949,6 +949,61 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     **options,
                 )
             )
+        elif (
+            isinstance(left, BaseListVariable)
+            and all(
+                isinstance(l, (ConstantVariable, DynamicShapeVariable))
+                for l in left.items
+            )
+            and isinstance(right, BaseListVariable)
+            and all(
+                isinstance(r, (ConstantVariable, DynamicShapeVariable))
+                for r in right.items
+            )
+            and len(left.items) == len(right.items)
+            and op in supported_tensors
+        ):
+            # Invariant: at least one of the variables in the two lists being compared is a DynamicShape.
+            # If all were constants, then we would have hit the `left.is_python_constant() and right.is_python_constant()`
+            # case further up.
+            # This means that the output here will always be a DynamicShapeVariable.
+
+            # Special case lists, which are not represented directly as proxies.
+            # Instead, we need to take our list of proxies and manually reduce it.
+            if isinstance(left, ListVariable) and isinstance(right, ListVariable):
+                list_variable = [
+                    DynamicShapeVariable.create(
+                        self,
+                        supported_tensors[op](l.as_proxy(), r.as_proxy()),
+                        dyn_shape=None,
+                        **options,
+                    )
+                    for l, r in zip(left.items, right.items)
+                ]
+                # list_variable represents a pointwise comparison of our list elements.
+                # Now reduce across the list.
+                dyn_variable = functools.reduce(
+                    lambda a, b: DynamicShapeVariable.create(
+                        self,
+                        # TODO: morally, this should be "a and b",
+                        # but we don't have SymBool yet,
+                        # and we don't have "and" implemented on SymInts.
+                        # + should give us the same output though.
+                        operator.and_(a.as_proxy(), b.as_proxy()),
+                        dyn_shape=None,  # TODO: what's this do / do I need to mess with it
+                        **options,
+                    ),
+                    list_variable,
+                )
+            else:
+                dyn_variable = DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,  # TODO: what's this do / do I need to mess with it
+                    **options,
+                )
+
+            self.push(dyn_variable)
         elif op in ("in", "not in"):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":

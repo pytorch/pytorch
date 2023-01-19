@@ -261,6 +261,7 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'and': lambda a, b: sympy.And(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
     'ceil': lambda a: sympy.ceiling(a),
@@ -281,6 +282,8 @@ unary_magic_methods = {
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
+# operator.__and__ exists, operator.and does not.
+operator_dunder_only = {"and"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
 always_int_magic_methods = {"ceil", "floor"}
@@ -303,6 +306,8 @@ def _make_node_magic(method, func):
     def binary_magic_impl(self, other):
         if method in magic_methods_on_builtins:
             op = getattr(builtins, method)
+        elif method in operator_dunder_only:
+            op = getattr(operator, f'__{method}__')
         else:
             op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
