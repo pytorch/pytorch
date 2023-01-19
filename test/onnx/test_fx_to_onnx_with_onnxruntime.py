@@ -6,12 +6,12 @@ from typing import Any, Sequence, Tuple, Union
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
 import torch
+import transformers  # type: ignore[import]
 from torch import nn
 from torch.nn import functional as F
 from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
-from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
@@ -78,8 +78,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
-        model = AutoModel.from_pretrained(model_name)
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = transformers.AutoModel.from_pretrained(model_name)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
         # Transform input tokens
         inputs = tokenizer("Hello world!", return_tensors="pt")
@@ -92,6 +92,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
         ort_outputs = self._run_ort(onnx_model, (input_ids, attention_mask))
+        assert len(ref_outputs) == len(ort_outputs)
+        assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
 
