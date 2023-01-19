@@ -1860,7 +1860,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "__getattr__",
           [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
-            // LazyAwaitable semantic
+            // In eager mode allow Await[W] to be used as W, redirecting getattr
+            // to the result of delayed function.
             return py::getattr(self.wait(), name.c_str(), py::none());
           })
       .def(
