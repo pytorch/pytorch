@@ -260,15 +260,35 @@ class _NamedOptimizer(optim.Optimizer):
 
         self._optimizer.load_state_dict(new_state_dict)
 
-    # pyre-ignore [2]
-    def add_param_group(self, param_group: Any) -> None:
-        raise NotImplementedError(
-            "add_param_group not supported yet and might be implemented soon."
-        )
+    def add_param_group(self, param_group: Mapping[str, Any]) -> None:
+        """
+        Add a param group to the :class:`_NamedOptimizer` s `param_groups`.
+
+        Warning: This API is still in development and subject to change.
+        """
+        assert isinstance(param_group, dict), "param group must be a dict"
+
+        params = param_group["params"]
+        if isinstance(params, torch.Tensor):
+            param_group["params"] = [params]
+        else:
+            param_group["params"] = list(params)
+
+        param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+        for param in param_group["params"]:
+            if param not in param_to_key:
+                raise ValueError("some parameters are not in the module")
+            self.ordered_param_keys.append(param_to_key[param])
+
+        self._optimizer.add_param_group(param_group)
+        # Update param_groups from optimizer.
+        self.param_groups = self._optimizer.param_groups
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
+            return FSDP._load_optim_state_dict_pre_hook(
+                self.module, self._optimizer, state_dict
+            )
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:

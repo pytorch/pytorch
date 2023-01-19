@@ -214,6 +214,14 @@ def checkFloatingOrComplex(
         )
 
 
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
+    check(
+        A.dim() >= 2,
+        lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
+    )
+
+
 def checkUplo(uplo: str):
     uplo_uppercase = uplo.upper()
     assert (
@@ -250,6 +258,67 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     # infos
     infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
     return L, infos
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_inv_ex.default)
+def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
+    squareCheckInputs(A, "linalg.inv_ex")
+    checkFloatingOrComplex(A, "linalg.inv_ex", allow_low_precision_dtypes=False)
+
+    L = A.new_empty(A.shape)
+    L.as_strided_(A.shape, make_contiguous_strides_for(A.shape, row_major=False))
+
+    infos = A.new_empty(A.shape[:-2], dtype=torch.int32)
+    return L, infos
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+# NOTE: matching defaults in aten/src/ATen/native/native_functions.yaml
+@register_meta(aten._linalg_svd.default)
+def _linalg_svd_meta(
+    A: Tensor, full_matrices: bool = False, compute_uv: bool = True, driver: str = None
+):
+    checkIsMatrix(A, "linalg.svd")
+    checkFloatingOrComplex(A, "linalg.svd")
+
+    batch_dims = list(A.shape[:-2])
+    m = A.shape[-2]
+    n = A.shape[-1]
+    k = min(m, n)
+
+    if compute_uv:
+        U_shape = batch_dims + [m, m if full_matrices else k]
+        U = A.new_empty(U_shape)
+        U.as_strided_(U_shape, make_contiguous_strides_for(U_shape, row_major=False))
+
+        V_shape = batch_dims + [n if full_matrices else k, n]
+        V = A.new_empty(V_shape)
+        # TODO: need to distinguish cuSOLVER case? (see original code)
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=False))
+    else:
+        # doesn't matter
+        U = A.new_empty([0])
+        V = A.new_empty([0])
+
+    # S is always real, even when A is complex.
+    S = A.new_empty(batch_dims + [k], dtype=toRealValueType(A.dtype))
+    return U, S, V
+
+
+# From aten/src/ATen/native/LinearAlgebra.cpp
+@register_meta(aten._linalg_det.default)
+def _linalg_det_meta(A):
+    squareCheckInputs(A, "linalg.det")
+    checkFloatingOrComplex(A, "linalg.det")
+
+    det = A.new_empty(A.shape[:-2])
+
+    LU = A.new_empty(A.shape)
+    LU.as_strided_(A.shape, make_contiguous_strides_for(A.shape, row_major=False))
+
+    pivots = A.new_empty(A.shape[:-1], dtype=torch.int32)
+    return det, LU, pivots
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
@@ -1210,7 +1279,18 @@ def meta_embedding_bag(
         else:
             offset2bag = offsets.new_empty(0)
         bag_size = offsets.new_empty(num_bags)
-        max_indices = offsets.new_empty(bag_size.size())
+        # This part of the logic comes from make_max_indices_out in EmbeddingBag.cpp
+        numBags = offsets.shape[0]
+        if mode == MODE_MAX:
+            if include_last_offset:
+                check(
+                    numBags >= 1,
+                    lambda: "include_last_offset: numBags should be at least 1",
+                )
+                numBags -= 1
+            max_indices = offsets.new_empty(numBags, weight.shape[1])
+        else:
+            max_indices = offsets.new_empty(bag_size.size())
     return output, offset2bag, bag_size, max_indices
 
 
@@ -2310,6 +2390,46 @@ def _cudnn_rnn(
     return output, hy, cy, reserve, weight_buf
 
 
+@register_meta(aten.mkldnn_rnn_layer.default)
+def mkldnn_rnn_layer(
+    input,
+    w0,
+    w1,
+    w2,
+    w3,
+    hx_,
+    cx_,
+    reverse,
+    batch_sizes,
+    mode,
+    hidden_size,
+    num_layers,
+    has_biases,
+    bidirectional,
+    batch_first,
+    train,
+):
+    seq_length = input.shape[1] if batch_first else input.shape[0]
+    mini_batch = input.shape[0] if batch_first else input.shape[1]
+    output_chanels = hidden_size
+    out_shape = (
+        [mini_batch, seq_length, output_chanels]
+        if batch_first
+        else [seq_length, mini_batch, output_chanels]
+    )
+    output = input.new_empty(out_shape)
+    if hx_ is None:
+        hy = torch.empty(0, device=input.device)
+    else:
+        hy = hx_.new_empty(hx_.shape)
+    if cx_ is None:
+        cy = torch.empty(0, device=input.device)
+    else:
+        cy = cx_.new_empty(cx_.shape)
+    workspace = torch.empty(0, device=input.device, dtype=torch.uint8)
+    return output, hy, cy, workspace
+
+
 def zero_numel_check_dims(self, dim, fn_name):
     if self.ndim == 0:
         check(
@@ -2429,6 +2549,41 @@ def meta_pixel_shuffle(self, upscale_factor):
     out = self.new_empty(out_shape)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
+
+
+@register_meta(aten.mkldnn_rnn_layer_backward.default)
+def mkldnn_rnn_layer_backward(
+    input,
+    weight0,
+    weight1,
+    weight2,
+    weight3,
+    hx_,
+    cx_tmp,
+    output,
+    hy_,
+    cy_,
+    grad_output_r_opt,
+    grad_hy_r_opt,
+    grad_cy_r_opt,
+    reverse,
+    mode,
+    hidden_size,
+    num_layers,
+    has_biases,
+    train,
+    bidirectional,
+    batch_sizes,
+    batch_first,
+    workspace,
+):
+    diff_x = input.new_empty(input.shape)
+    diff_hx = hx_.new_empty(hx_.shape)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
+    diff_w1 = weight0.new_empty(weight0.shape)
+    diff_w2 = weight1.new_empty(weight1.shape)
+    diff_b = weight2.new_empty(weight2.shape)
+    return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
 # We must also trigger meta registrations from PrimTorch ref
