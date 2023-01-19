@@ -71,6 +71,7 @@ jobs:
             To forward remote desktop on your local machine ssh as follows:
               ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
             And then change password using `passwd` command.
+
             To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
             Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
