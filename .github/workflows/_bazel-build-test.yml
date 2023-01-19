@@ -32,7 +32,7 @@ jobs:
       contents: read
     steps:
       - name: Setup SSH outside of Meta (Click me for login details)
-        uses: chkimes/actions-ssh@v0.1
+        uses: huydhn/actions-ssh@sshd
         with:
           sshUser: huydhn
 
