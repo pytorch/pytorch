@@ -46,7 +46,7 @@ class _FSDPState(_State):
         self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
-        self._state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
+        self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._ignored_modules: Set[nn.Module] = set()
