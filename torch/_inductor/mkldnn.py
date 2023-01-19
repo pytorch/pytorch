@@ -529,18 +529,11 @@ def create_unary_module(node: torch.fx.node):
         torch.relu: nn.ReLU,
         torch.sigmoid: nn.Sigmoid,
         torch.tanh: nn.Tanh,
-        torch.Tensor.relu: nn.ReLU,
-        torch.Tensor.sigmoid: nn.Sigmoid,
-        torch.Tensor.tanh: nn.Tanh,
+        "relu": nn.ReLU,
+        "sigmoid": nn.Sigmoid,
+        "tanh": nn.Tanh,
     }
-    name_method_map = {
-        "relu": torch.Tensor.relu,
-        "sigmoid": torch.Tensor.sigmoid,
-        "tanh": torch.Tensor.tanh,
-    }
-    if node.op == "call_function":
-        return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
-    return unary_map[name_method_map[node.target]](*(node.args[1:]), **(node.kwargs))
+    return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
 
 
 def fuse_unary(gm: torch.fx.GraphModule):
@@ -796,9 +789,10 @@ unary_ops = [
     torch.relu,
     torch.sigmoid,
     torch.tanh,
-    torch.Tensor.relu,
-    torch.Tensor.sigmoid,
-    torch.Tensor.tanh,
+    # methods (torch.Tensor.xxx)
+    "relu",
+    "sigmoid",
+    "tanh",
 ]
 
 
