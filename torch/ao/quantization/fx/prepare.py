@@ -117,7 +117,7 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
-def _is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
+def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
 
@@ -1078,14 +1078,14 @@ def insert_observers_for_model(
     #   # information for input and bias node omitted
     #   # for getattr node
     #   # weight = getattr(self, 'weight')
-    #   weight_node.meta["target_dtype_info"] = {
+    #   weight.meta["target_dtype_info"] = {
     #      'output_activation_dtype': (torch.float, False)
     #   }
     #   # Note: False means it's not a dynamic quantization (but a static quantization)
     #   # for conv2d node
     #   # conv2d = call_function[target=torch.nn.functional.conv2d](
     #   #            args=(input, weight, bias))
-    #   conv2d_node.meta["target_dtype_info"] = {
+    #   conv2d.meta["target_dtype_info"] = {
     #     'input_activation_dtype': (torch.quint8, False),
     #     'weight_dtype': (torch.qint8, False),
     #     'bias_dtype': (torch.float, False),
@@ -1107,11 +1107,12 @@ def insert_observers_for_model(
             node.name, (None, None, None, None, None))
         input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
         output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
-        # Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]
-        node.meta["target_dtype_info"] = _get_target_activation_dtype_for_node(
-            node, qconfig, inputs_seen_counter, outputs_seen_counter,
-            input_quantized_idxs, output_quantized_idxs, qhandler,
-            named_modules, cache_for_no_tensor_check)
+        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = \
+            _get_target_activation_dtype_for_node(
+                node, qconfig, inputs_seen_counter, outputs_seen_counter,
+                input_quantized_idxs, output_quantized_idxs, qhandler,
+                named_modules, cache_for_no_tensor_check)
+        node.meta["target_dtype_info"] = target_dtype_info
         if node.op == "placeholder":
             inputs_seen_counter += 1
         if node.op == "output":
