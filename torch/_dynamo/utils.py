@@ -64,7 +64,6 @@ def tabulate(rows, headers):
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
 
-
 def dynamo_profiled(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
@@ -86,20 +85,60 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-def dynamo_timed(func):
-    @wraps(func)
-    def time_wrapper(*args, **kwargs):
-        key = func.__qualname__
-        if key not in compilation_metrics:
-            compilation_metrics[key] = []
-        t0 = time.time()
-        r = func(*args, **kwargs)
-        latency = time.time() - t0
-        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-        compilation_metrics[key].append(latency)
-        return r
+frame_phase_timing = collections.OrderedDict()
 
-    return time_wrapper
+curr_frame = 0
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def increment_frame():
+    global curr_frame
+    curr_frame = curr_frame + 1
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def reset_frame_count():
+    global curr_frame
+    curr_frame = 0
+
+
+# dynamo_timed API works as a function decorator
+# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# where the key is the functions name.
+# For example:
+#  
+#  @dynamo_timed
+#  def _foo(...):
+#
+# Would show up as an entry in our timing dict:
+# OrderedDict([('bar.<locals>._foo', [0.083690, 0.23949, 3.1425e-05])])
+# This is extremely useful for granular debugging.
+#
+# For a higher-level mode, pass a phase_name into dynamo_timed
+# phase_names record an extra record into a separate compilation timing structure,
+# one keyed on frame+name rather than function.
+# The frame is incremented outside of this function, in def increment_frame() above.
+def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed_inner(func):
+        @wraps(func)
+        def time_wrapper(*args, **kwargs):
+            key = func.__qualname__
+            if key not in compilation_metrics:
+                compilation_metrics[key] = []
+            t0 = time.time()
+            r = func(*args, **kwargs)
+            time_spent = time.time() - t0
+            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+            compilation_metrics[key].append(frame_phase_timing)
+            if phase_name:
+                frame_key = str(curr_frame)
+                if frame_key not in frame_phase_timing:
+                    frame_phase_timing[frame_key] = {}
+                assert phase_name not in frame_phase_timing[frame_key], f"Duplicate phase name {phase_name} for frame {frame_key}"
+                frame_phase_timing[frame_key][phase_name] = time_spent
+            return r
+        return time_wrapper
+    if original_function:
+        return dynamo_timed_inner(original_function)
+    return dynamo_timed_inner
 
 
 def compile_times(repr="str", aggregate=False):

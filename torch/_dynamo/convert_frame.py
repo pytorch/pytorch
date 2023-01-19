@@ -41,6 +41,7 @@ from .utils import (
     orig_code_map,
     troubleshooting_url,
     write_record_to_file,
+    increment_frame,
 )
 
 log = logging.getLogger(__name__)
@@ -196,6 +197,7 @@ def convert_frame_assert(
 
     @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+        increment_frame()
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -273,6 +275,7 @@ def convert_frame_assert(
     return wrap_convert_context(_convert_frame_assert)
 
 
+@dynamo_timed(phase_name="entire_frame_compile")
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],

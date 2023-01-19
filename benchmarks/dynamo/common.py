@@ -1775,6 +1775,9 @@ def parse_args(args=None):
         help="finds the largest batch size that could fit on GPUs",
     )
 
+    group.add_argument(
+        "--timing", action="store_true", help="Emits phase timing"
+    )
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument(
         "--accuracy",
@@ -2131,6 +2134,9 @@ def run(runner, args, original_dir=None):
             args.profiler_trace_name = args.profiler_trace_name
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
+
+    if args.timing is not None:
+        os.environ["TORCHDYNAMO_RECORD_TIMING"] = "1"
 
     if args.only:
         model_name = args.only

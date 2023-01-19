@@ -50,6 +50,7 @@ from .utils import (
     counters,
     format_graph_tabular,
     same,
+    dynamo_timed,
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
@@ -597,7 +598,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         with tracing(self.tracing_context):
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
-
+        from .utils import compilation_metrics
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
@@ -624,6 +625,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
+    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         try:
             name = (
@@ -677,6 +679,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         except Exception as e:
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
+        breakpoint()
         return compiled_fn
 
     def fake_example_inputs(self) -> List[torch.Tensor]:
