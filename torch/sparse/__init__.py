@@ -4,6 +4,8 @@ from typing import Optional, Tuple, List, Union
 import torch
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
+from torch.cuda import _lazy_call
+from torch._inductor.cuda_properties import get_device_capability
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -462,3 +464,30 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
                 return mth(*args, **kwargs)
 
         return test_mth
+
+# Triton registrations
+def _has_triton():
+    if not torch.cuda.is_available():
+        return False
+    try:
+        import triton
+
+        return triton is not None and get_device_capability() >= (7, 0)
+    except ImportError:
+        return False
+
+
+def _register_impls(lib):
+    """This function is called from torch/__init__.py to do any dynamic registrations. """
+
+
+    def register_sparse_cuda_impls(lib=lib):
+        from ._triton_ops import bsr_dense_mm
+
+        if bsr_dense_mm is not None:
+            lib.impl("aten::_triton_bsr_dense_mm",
+                     lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs), "SparseCsrCUDA")
+
+    # This code is evaluated on import torch and therefore cannot force initialization of the cuda rt
+    # We must schedule the registration to occur lazily.
+    _lazy_call(register_sparse_cuda_impls)

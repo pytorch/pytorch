@@ -484,88 +484,93 @@ def _multi_tensor_adam(params: List[Tensor],
 
     assert grad_scale is None and found_inf is None
 
-    if maximize:
-        grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
-
     assert not differentiable, "_foreach ops don't support autograd"
-    # Handle complex parameters
-    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
-    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
-    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
-    params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
 
-    # update steps
-    torch._foreach_add_(state_steps, 1)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
+         device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
 
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        if maximize:
+            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
 
-    # Decay the first and second moment running average coefficient
-    torch._foreach_mul_(exp_avgs, beta1)
-    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+        # Handle complex parameters
+        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
+        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
+        device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
+        params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
-    torch._foreach_mul_(exp_avg_sqs, beta2)
-    torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
+        # update steps
+        torch._foreach_add_(device_state_steps, 1)
 
-    if capturable:
-        # TODO: use foreach_pow if/when foreach_pow is added
-        bias_correction1 = [torch.pow(beta1, step) for step in state_steps]
-        bias_correction2 = [torch.pow(beta2, step) for step in state_steps]
-        # foreach_sub doesn't allow a scalar as the first arg
-        torch._foreach_sub_(bias_correction1, 1)
-        torch._foreach_sub_(bias_correction2, 1)
-        torch._foreach_neg_(bias_correction1)
-        torch._foreach_neg_(bias_correction2)
+        if weight_decay != 0:
+            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
 
-        # foreach_div doesn't allow a scalar as the first arg
-        step_size = torch._foreach_div(bias_correction1, lr)
-        torch._foreach_reciprocal_(step_size)
-        torch._foreach_neg_(step_size)
+        # Decay the first and second moment running average coefficient
+        torch._foreach_mul_(device_exp_avgs, beta1)
+        torch._foreach_add_(device_exp_avgs, device_grads, alpha=1 - beta1)
 
-        bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2)
+        torch._foreach_mul_(device_exp_avg_sqs, beta2)
+        torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+        if capturable:
+            # TODO: use foreach_pow if/when foreach_pow is added
+            bias_correction1 = [torch.pow(beta1, step) for step in device_state_steps]
+            bias_correction2 = [torch.pow(beta2, step) for step in device_state_steps]
+            # foreach_sub doesn't allow a scalar as the first arg
+            torch._foreach_sub_(bias_correction1, 1)
+            torch._foreach_sub_(bias_correction2, 1)
+            torch._foreach_neg_(bias_correction1)
+            torch._foreach_neg_(bias_correction2)
 
-            # Use the max. for normalizing running avg. of gradient
-            max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-            # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
-            # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-            torch._foreach_div_(max_exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
-            eps_over_step_size = torch._foreach_div(step_size, eps)
-            torch._foreach_reciprocal_(eps_over_step_size)
-            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+            # foreach_div doesn't allow a scalar as the first arg
+            step_size = torch._foreach_div(bias_correction1, lr)
+            torch._foreach_reciprocal_(step_size)
+            torch._foreach_neg_(step_size)
+
+            bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2)
+
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)  # type: ignore[assignment]
+
+                # Use the max. for normalizing running avg. of gradient
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
+                # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
+                # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+                eps_over_step_size = torch._foreach_div(step_size, eps)
+                torch._foreach_reciprocal_(eps_over_step_size)
+                denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+            else:
+                exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                torch._foreach_div_(exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+                eps_over_step_size = torch._foreach_div(step_size, eps)
+                torch._foreach_reciprocal_(eps_over_step_size)
+                denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+
+            torch._foreach_addcdiv_(params_, device_exp_avgs, denom)
         else:
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
-            eps_over_step_size = torch._foreach_div(step_size, eps)
-            torch._foreach_reciprocal_(eps_over_step_size)
-            denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+            bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
+            bias_correction2 = [1 - beta2 ** _get_value(step) for step in device_state_steps]
 
-        torch._foreach_addcdiv_(params_, exp_avgs, denom)
-    else:
-        bias_correction1 = [1 - beta1 ** _get_value(step) for step in state_steps]
-        bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
+            step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-        step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
+            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
 
-        bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
 
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
+                # Use the max. for normalizing running avg. of gradient
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
+                denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
+            else:
+                exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
+                denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-            # Use the max. for normalizing running avg. of gradient
-            max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-            torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
-            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
-        else:
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
-            denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
-
-        torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
+            torch._foreach_addcdiv_(params_, device_exp_avgs, denom, step_size)
 
 
 def _fused_adam(
