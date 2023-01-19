@@ -56,7 +56,6 @@ from functorch.experimental import chunk_vmap
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
-from torch.autograd.function import _set_autograd_function_extension_enabled
 from torch._functorch.vmap import restore_vmap
 
 FALLBACK_REGEX = 'There is a performance drop'
@@ -619,7 +618,7 @@ class TestVmapAPI(TestCase):
         x = torch.randn(11)
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
-            vmap(op)(x, y)
+            torch.vmap(op)(x, y)
             # The single warning here is the "vmap is experimental"
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
@@ -634,7 +633,7 @@ class TestVmapAPI(TestCase):
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
             with EnableVmapFallbackWarnings():
-                vmap(op)(x, y)
+                torch.vmap(op)(x, y)
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
@@ -2625,7 +2624,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
         test(op, (torch.rand(B0, 2, 3, 5),))
-        test(op, (torch.rand(B0),))
         test(op, (torch.rand(2, B0, 3, 5),), in_dims=1)
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
@@ -3323,7 +3321,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
                            postprocess_fn=None):
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
                 vmap_out = postprocess_fn(vmap_out)
@@ -3344,7 +3342,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                         func, args, kwargs, in_dims, compute_loop_out=False, clone_inputs=True):
                     pass
             return
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(
                 func, args, kwargs, in_dims, clone_inputs=True):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
@@ -3512,7 +3510,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('ne', device_type='cuda'),
     }
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
@@ -3542,7 +3539,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bitwise_left_shift', device_type='cpu'),
         decorate('bitwise_right_shift', device_type='cpu',
                  decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
-        xfail('narrow_copy', device_type='cpu'),
 
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
@@ -3559,7 +3555,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
@@ -3603,8 +3598,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
-        xfail('all'),
-        xfail('any'),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional._scaled_dot_product_attention'),  # randomness
@@ -3690,7 +3683,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_binary', device_type='cuda'),
         xfail('special.modified_bessel_i0'),
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
-        xfail('linalg.vander', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
@@ -3721,11 +3713,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('le'),
         xfail('lt'),
         xfail('ne'),
-        # AssertionError
-        # Mismatched elements: 18 / 20 (90.0%)
-        # Greatest absolute difference: 14.031710147857666 at index (0, 5) (up to 0.0001 allowed)
-        # Greatest relative difference: 2.9177700113052603 at index (0, 3) (up to 0.0001 allowed)
-        xfail('narrow_copy', device_type='cpu'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
         decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # RuntimeError: Expected all tensors to be on the same device,
@@ -4159,8 +4146,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.vector_norm'),  # can accept vector inputs
         xfail('linalg.norm'),  # can accept vector inputs
         xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
+        xfail('linalg.vander'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
-        xfail('linalg.vander'),
         xfail('linalg.vecdot'),
         # throws in vmap on CUDA
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)

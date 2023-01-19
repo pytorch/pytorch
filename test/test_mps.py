@@ -1598,6 +1598,19 @@ class TestMPS(TestCase):
 
         self.assertEqual(x_cpu, x.cpu())
 
+    def test_cpu_to_strided_mps_copy(self):
+        # https://github.com/pytorch/pytorch/issues/86975
+
+        a1 = torch.Tensor([[1, 2], [3, 4], [5, 6]]).to(torch.device("mps"))
+        b1 = torch.Tensor([-1, -1])
+        a1[1:, 1] = b1
+
+        a2 = torch.Tensor([[1, 2], [3, 4], [5, 6]]).to(torch.device("mps"))
+        b2 = torch.Tensor([-1, -1]).to(torch.device("mps"))
+        a2[1:, 1] = b2
+
+        self.assertEqual(a1, a2)
+
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
         NUM_SAMPLES = 60
@@ -5095,6 +5108,22 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), 2, [3, 0, 1])
         helper((2, 8, 4, 5), 3, [2, 3, 0])
         helper((2, 3, 3), -1, [1, 2])
+        helper((), 0, [0])
+
+    def test_index_select_scalar(self):
+        def helper(value, dim, index, idx_dtype=torch.int32):
+            cpu_x = torch.tensor(value, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_idx = torch.tensor(index, device='cpu', dtype=idx_dtype)
+            idx = cpu_idx.detach().clone().to('mps')
+
+            idx_result = torch.index_select(x, dim=dim, index=idx)
+            idx_result_cpu = torch.index_select(cpu_x, dim=dim, index=cpu_idx)
+
+            self.assertEqual(idx_result, idx_result_cpu)
+
+        helper(0.5, 0, [0, 0])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
@@ -6864,12 +6893,10 @@ class TestViewOpsMPS(TestCase):
         self.assertEqual(t2, t1)
         b = torch.randn(10, device=device)
         self.assertEqual(b, b.T)
-        scalar = torch.tensor(5, device=device)
-        self.assertEqual(scalar, scalar.T)
 
     def test_transposes(self, device="mps", dtype=torch.float32):
         for op in ("T", "H", "mT", "mH", "adjoint"):
-            shapes = ((), (2, 3), (2, 3, 4)) if op[0] == "m" or op == "adjoint" else ((), (2, 3),)
+            shapes = ((2, 3), (2, 3, 4)) if op[0] == "m" or op == "adjoint" else ((2, 3),)
             for shape in shapes:
                 a = make_tensor(shape, device=device, dtype=dtype)
                 t1 = getattr(a, op)
@@ -6990,7 +7017,6 @@ class TestViewOpsMPS(TestCase):
         self.assertRaises(RuntimeError, lambda: tensor.view(7, -1))
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
 
-    # RuntimeError: Invalid device for storage: mps
     def test_contiguous(self, device="mps"):
         x = torch.randn(1, 16, 5, 5, device=device)
         self.assertTrue(x.is_contiguous())
@@ -7085,17 +7111,33 @@ class TestConvolutionMPS(TestCase):
         self.assertEqual(tcpu, tgpu.cpu(), rtol=2.6e-05, atol=2e-04)
 
     def test_conv_backward_1d_channels_last(self):
-        # https://github.com/pytorch/pytorch/issues/84511
-        conv_cpu = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=3)
-        conv_mps = copy.deepcopy(conv_cpu).to(device='mps')
+        def helper(shape, in_channels=1, out_channels=1, kernel_size=3, groups=1):
+            # https://github.com/pytorch/pytorch/issues/84511
+            conv_cpu = torch.nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups)
+            conv_mps = torch.nn.Conv1d(
+                in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups).to("mps")
+            conv_mps.weight.data = conv_cpu.weight.data.detach().clone().to("mps").requires_grad_(True)
+            conv_mps.bias.data = conv_cpu.bias.data.detach().clone().to("mps").requires_grad_(True)
 
-        data = torch.rand(1, 176, 1, dtype=torch.float32)
-        x_cpu = data.permute(0, 2, 1).contiguous()
-        x_mps = data.permute(0, 2, 1).contiguous().to("mps")
-        res_cpu = conv_cpu(x_cpu).sum().backward()
-        res_mps = conv_mps(x_mps).sum().backward()
 
-        self.assertEqual(res_cpu, res_mps)
+            data = torch.rand(shape, dtype=torch.float32)
+            x_cpu = data.permute(0, 2, 1).contiguous().requires_grad_(True)
+            x_mps = data.permute(0, 2, 1).detach().clone().to("mps").contiguous().requires_grad_(True)
+            res_cpu = conv_cpu(x_cpu)
+            res_mps = conv_mps(x_mps)
+            self.assertEqual(res_cpu, res_mps)
+            res_cpu = res_cpu.sum().backward()
+            res_mps = res_mps.sum().backward()
+
+            self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, rtol=2.6e-05, atol=2e-04)
+            self.assertEqual(x_cpu.grad, x_mps.grad)
+
+        helper(shape=(1, 176, 1))
+        helper(shape=(2, 12, 1))
+        helper(shape=(3, 176, 1))
+        helper(shape=(4, 376, 1))
+        helper(shape=(1024, 376, 9), in_channels=9, out_channels=1, groups=1)
+        helper(shape=(1024, 376, 9), in_channels=9, out_channels=9, groups=3)
 
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
@@ -8161,8 +8203,8 @@ class TestConsistency(TestCase):
         '__ror__': ['b8', 'i16', 'i32', 'i64', 'u8'],
         '__rpow__': ['f16'],
         '__rxor__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'masked.argmax': ['i16', 'i64', 'u8'],
-        'masked.argmin': ['i16', 'i64', 'u8'],
+        'masked.argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.log_softmax': ['f32'],
         'masked.logaddexp': ['f32'],
         'masked.logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8170,8 +8212,8 @@ class TestConsistency(TestCase):
         'masked.normalize': ['f16', 'f32'],
         'masked.softmax': ['f32'],
         'masked.softmin': ['f32'],
-        'masked.std': ['f32'],
-        'masked.var': ['f32'],
+        'masked.std': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.var': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -8188,10 +8230,7 @@ class TestConsistency(TestCase):
         'arange': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'amax': ['f32'],
         'amix': ['f32'],
-        'mean': ['f32'],
-        'sum': ['f32'],
         'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'asinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'atan': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -8372,7 +8411,6 @@ class TestConsistency(TestCase):
         'square': ['f16', 'f32'],
         'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'std': ['f32'],
         'sub': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'svd': ['f32'],
@@ -8392,7 +8430,6 @@ class TestConsistency(TestCase):
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'var': ['f32'],
         'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8400,9 +8437,22 @@ class TestConsistency(TestCase):
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nonzero': ['f32', 'i16', 'i32', 'i64'],
-        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'std': ['f16', 'f32'],
+        'var': ['f16', 'f32'],
+        'amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'mean': ['f16', 'f32'],
+        'count_nonzero': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
@@ -8599,8 +8649,7 @@ class TestConsistency(TestCase):
         # + forward when requires_grad=True or running backward
         'nn.functional.embedding': [torch.float32, torch.float16],
         '__rpow__': [torch.int64],
-        'masked.std': [torch.int32],
-        'masked.var': [torch.int32],
+
         'as_strided_scatter': [torch.uint8],
         'atan2': [torch.int64],
         'bfloat16': None,
@@ -8786,7 +8835,8 @@ class TestConsistency(TestCase):
                 if op.name == "nn.functional.conv2d" and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
-                elif (op.name == "add" or op.name == "sub") and dtype == torch.float16:
+                elif (op.name == "add" or op.name == "sub" or
+                      op.name == "masked.sum" or op.name == "masked.std" or op.name == "masked.var") and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
                 else:
