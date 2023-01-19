@@ -1079,14 +1079,14 @@ def insert_observers_for_model(
     #   # information for input and bias node omitted
     #   # for getattr node
     #   # weight = getattr(self, 'weight')
-    #   weight_node.meta["target_dtype_info"] = {
+    #   weight.meta["target_dtype_info"] = {
     #      'output_activation_dtype': (torch.float, False)
     #   }
     #   # Note: False means it's not a dynamic quantization (but a static quantization)
     #   # for conv2d node
     #   # conv2d = call_function[target=torch.nn.functional.conv2d](
     #   #            args=(input, weight, bias))
-    #   conv2d_node.meta["target_dtype_info"] = {
+    #   conv2d.meta["target_dtype_info"] = {
     #     'input_activation_dtype': (torch.quint8, False),
     #     'weight_dtype': (torch.qint8, False),
     #     'bias_dtype': (torch.float, False),
@@ -1108,11 +1108,12 @@ def insert_observers_for_model(
             node.name, (None, None, None, None, None))
         input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
         output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
-        # Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]
-        node.meta["target_dtype_info"] = _get_target_activation_dtype_for_node(
-            node, qconfig, inputs_seen_counter, outputs_seen_counter,
-            input_quantized_idxs, output_quantized_idxs, qhandler,
-            modules, cache_for_no_tensor_check)
+        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = \
+            _get_target_activation_dtype_for_node(
+                node, qconfig, inputs_seen_counter, outputs_seen_counter,
+                input_quantized_idxs, output_quantized_idxs, qhandler,
+                modules, cache_for_no_tensor_check)
+        node.meta["target_dtype_info"] = target_dtype_info
         if node.op == "placeholder":
             inputs_seen_counter += 1
         if node.op == "output":
