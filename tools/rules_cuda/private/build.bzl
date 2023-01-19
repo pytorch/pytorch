@@ -81,7 +81,7 @@ cuda_toolchain_info = rule(
             default = Label("//cuda:cuda_targets"),
         ),
         "_nvcc": attr.label(
-            default = if_local_cuda(Label("@local_cuda//:cuda/bin/nvcc"), None),
+            default = if_local_cuda(Label("@opt_cache_lib//:nvcc"), None),
             allow_single_file = True,
             executable = True,
             cfg = "host",
