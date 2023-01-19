@@ -22,7 +22,7 @@ import types
 import typing
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Any, Dict, List
 
 try:
@@ -66,6 +66,7 @@ def tabulate(rows, headers):
 
 
 def dynamo_profiled(func):
+    @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         datafn = (
@@ -86,6 +87,7 @@ def dynamo_profiled(func):
 
 
 def dynamo_timed(func):
+    @wraps(func)
     def time_wrapper(*args, **kwargs):
         key = func.__qualname__
         if key not in compilation_metrics:
@@ -179,22 +181,6 @@ def init_logging():
         config.log_level, log_file_name=config.log_file_name
     )
     graph_break_dup_warning_checker.reset()
-
-
-# filter out all frames after entering dynamo
-def filter_stack(stack):
-    user_stack = []
-    for frame in stack:
-        if "convert_frame" in frame.filename:
-            break
-        if (
-            "eval_frame" in frame.filename
-            or f"{config.dynamo_import}.optimize(" in frame.line
-        ):
-            continue
-        user_stack.append(frame)
-
-    return user_stack
 
 
 def format_graph_tabular(graph):
