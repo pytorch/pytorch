@@ -31,7 +31,6 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     get_debug_level,
     Work,
-    _register_process_group,
     _lookup_process_group
 )
 from torch._six import string_classes
@@ -1239,7 +1238,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             return pg.recv([tensor], group_src_rank, tag)
 
 
-def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
+def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
 
@@ -1271,7 +1270,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group.send([tensor], group_dst_rank, tag).wait()
 
 
-def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
+def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
 
@@ -1607,28 +1606,6 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     else:
         work.wait()
 
-"""
-To enable mostly the usual process-group functionality for users, and have access to it inside inductor,
-but keep native_func API primitive, we indirect a process group to its ID as it transits between tracing/API layer
-and execution.
-
-This is the simplest way to do it, but it might not be sufficient-
-certainly we could do this in C++ ProcessGroup instead.
-"""
-# _registered_process_groups = {}
-
-def register_process_group(group):
-    assert isinstance(group, ProcessGroup), "Must pass a valid process group"
-    # g_id = id(group)
-    # _registered_process_groups[g_id] = group
-    g_id = _register_process_group(group)
-    # _registered_process_groups[g_id] = group
-
-    return g_id
-
-# def lookup_process_group(g_id):
-#     assert g_id in _registered_process_groups, "must call `register_process_group` before using a process group by ID"
-#     return _registered_process_groups[g_id]
 
 @exception_handler
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
@@ -1649,7 +1626,6 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        ranks (list[int], optional): list of ranks to use, must be used without specifying a 'group' argument.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -3796,7 +3772,8 @@ def all_reduce_cuda(self, group_id, reduce_op):
     assert reduce_op == "sum", "Unable to convert str to ReduceOp, so only default sum works"
 
     # without using `lookup_pg` helper, I get this error trying to invoke c10d.allreduce_
-    # RuntimeError: c10d::allreduce_() Expected a value of type '__torch__.torch.classes.c10d.ProcessGroup (of Python compilation unit at: 0)' for argument 'process_group' but instead found type 'ProcessGroup'.
+    # RuntimeError: c10d::allreduce_() Expected a value of type '__torch__.torch.classes.c10d.ProcessGroup
+    # (of Python compilation unit at: 0)' for argument 'process_group' but instead found type 'ProcessGroup'.
     timeout = 100
     _, work = torch.ops.c10d.allreduce_([self], group, torch.classes.c10d.ReduceOp(), timeout)
     work.wait()

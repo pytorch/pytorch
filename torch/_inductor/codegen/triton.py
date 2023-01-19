@@ -142,7 +142,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def constant(value, dtype):
-        return triton_constant(value)
+        type_ = torch._prims_common.dtype_to_type(dtype)
+        return triton_constant(type_(value))
 
     @staticmethod
     def abs(x):
@@ -208,9 +209,7 @@ class TritonOverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(
-            new_mask, result, TritonOverrides.constant(other, torch.float32)
-        )
+        return ops.where(new_mask, result, triton_constant(other))
 
     @staticmethod
     def lgamma(x):
@@ -475,8 +474,7 @@ class IterationRangesRoot(IterationRanges):
                     f"{self.name} = {x}offset + {self.ranges_code()}",
                 ]
             )
-        if self.numel != 1:
-            code.writeline(f"{x}mask = {self.name} < {x}numel")
+        code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
 class IterationRangesEntry(IterationRanges):
@@ -758,6 +756,8 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
+            elif var.name.startswith("s"):
+                pass
             else:
                 # var is one of xN, yN or rN
                 assert var.name[0] in "xyr", var.name
@@ -800,15 +800,10 @@ class TritonKernel(Kernel):
         if self._load_mask:
             mask_vars.add(self._load_mask)
 
-        for tree in self.range_trees:
-            # Masks are superfluous if we only have one element
-            # or if numel is a multiple of BLOCK
-            # (We use the fact that BLOCK is required by triton to be a power of 2)
-            if tree.prefix.upper() not in config.triton.max_block:
-                continue
-            max_block = config.triton.max_block[tree.prefix.upper()]
-            if tree.numel == 1 or tree.numel % max_block == 0:
-                mask_vars.discard(f"{tree.prefix}mask")
+        if mask_vars == {"xmask"} and index == 0 and self.range_trees[0].numel == 1:
+            # This causes a triton error:
+            # https://github.com/openai/triton/issues/633
+            mask_vars = set()
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return index_str, mask_vars, mask_str
@@ -903,7 +898,7 @@ class TritonKernel(Kernel):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
-        masks = [f"{tree.prefix}mask" for tree in self.range_trees if tree.numel != 1]
+        masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [":" for _ in self.range_trees]

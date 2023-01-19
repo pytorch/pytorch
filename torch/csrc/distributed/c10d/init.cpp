@@ -227,21 +227,23 @@ void _register_builtin_comm_hook(
 }
 
 std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>>& get_process_group_table() {
-    static std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> _pg_table;
-    return _pg_table;
+  static std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> _pg_table;
+  return _pg_table;
 }
 
-int64_t _register_process_group(const c10::intrusive_ptr<::c10d::ProcessGroup>& pg) {
-    auto& pg_table = get_process_group_table();
-    int64_t id = pg_table.size();
-    pg_table.push_back(pg);
-    return id;
+int64_t _register_process_group(
+    const c10::intrusive_ptr<::c10d::ProcessGroup>& pg) {
+  auto& pg_table = get_process_group_table();
+  int64_t id = pg_table.size();
+  pg_table.push_back(pg);
+  return id;
 }
 
-c10::intrusive_ptr<::c10d::ProcessGroup> _lookup_process_group(int64_t group_id) {
-    auto& pg_table = get_process_group_table();
-    // TODO safety checks.  And.. make this a map and use a better ID scheme
-    return pg_table[group_id];
+c10::intrusive_ptr<::c10d::ProcessGroup> _lookup_process_group(
+    int64_t group_id) {
+  auto& pg_table = get_process_group_table();
+  // TODO safety checks.  And.. make this a map and use a better ID scheme
+  return pg_table[group_id];
 }
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
 // https://github.com/pytorch/pytorch/pull/84243 changed ::c10d::ReduceOp to
@@ -2433,39 +2435,18 @@ PyMethodDef* python_functions() {
 
 namespace ops {
 
-at::Tensor traceable_allreduce(at::Tensor const& self, int64_t group_id, const c10::string_view reduce_op) {    
-    
-    // map group_id to group
-    
-    // use pg to do allreduce
-    
-    // call into python to wrap w/ subclass
-
-    return self;
-}
-
-c10::intrusive_ptr<::c10d::ProcessGroup> lookup_pg(at::Tensor const& useless_tensor_so_dispatch_works, int64_t group_id) {
-    auto& pg_table = get_process_group_table();
-    return pg_table[group_id];
+c10::intrusive_ptr<::c10d::ProcessGroup> lookup_pg(
+    at::Tensor const& useless_tensor_so_dispatch_works,
+    int64_t group_id) {
+  auto& pg_table = get_process_group_table();
+  return pg_table[group_id];
 }
 
 } // namespace ops
 namespace {
 
-TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+TORCH_LIBRARY_IMPL(c10d, BackendSelect, m) {
   m.impl("lookup_pg", ops::lookup_pg);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
-  m.impl("lookup_pg", ops::lookup_pg);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CPU, m) {
-  m.impl("traceable_allreduce", ops::traceable_allreduce);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
-  m.impl("traceable_allreduce", ops::traceable_allreduce);
 }
 
 } // namespace

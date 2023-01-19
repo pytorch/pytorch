@@ -3,8 +3,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Cross.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static const char* METAL_CROSS = R"CROSS_METAL(
 
@@ -203,5 +202,4 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 
 REGISTER_DISPATCH(cross_stub, &cross_mps_impl);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

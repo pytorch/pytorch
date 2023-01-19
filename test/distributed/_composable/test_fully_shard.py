@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 import contextlib
 import copy
 import functools
@@ -15,11 +14,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import (
-    _FSDPState,
-    _is_fsdp_flattened,
-    clean_tensor_name,
-)
+from torch.distributed.fsdp._common_utils import _FSDPState, _is_fsdp_flattened
 from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
@@ -262,9 +257,7 @@ class TestFSDPInitialization(FSDPTest):
             composable_module.named_parameters(),
             fsdp_wrapped_model.named_parameters(),
         ):
-            self.assertEqual(
-                composable_param_name, clean_tensor_name(fsdp_wrapped_param_name)
-            )
+            self.assertEqual(composable_param_name, fsdp_wrapped_param_name)
             self.assertEqual(
                 composable_param.device,
                 torch.device("cuda", torch.cuda.current_device()),
@@ -739,7 +732,9 @@ class TestFSDPOptimStateDict(FSDPTest):
         optim_state_dict1 = FSDP._optim_state_dict(model1, optim1)
         optim_state_dict2 = FSDP._optim_state_dict(model2, optim2)
 
-        self.assertEqual(len(optim_state_dict1["state"]), len(optim_state_dict2["state"]))
+        self.assertEqual(
+            len(optim_state_dict1["state"]), len(optim_state_dict2["state"])
+        )
         for fqn, state in optim_state_dict1["state"].items():
             self.assertEqual(state, optim_state_dict2["state"][fqn], fqn)
 
@@ -749,7 +744,6 @@ class TestFSDPOptimStateDict(FSDPTest):
             for key, value in group1.items():
                 self.assertEqual(value, group2[key])
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_save_load(self):
         orig_model = CompositeParamModel(device=torch.device("cuda"))
@@ -759,9 +753,10 @@ class TestFSDPOptimStateDict(FSDPTest):
         orig_model = FSDP(orig_model)
         orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
 
-        self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
+        self._test_optim_state_save_load(
+            orig_model, orig_optim, composable_model, composable_optim
+        )
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_submodule_fully_shard(self):
         orig_model = CompositeParamModel(device=torch.device("cuda"))
@@ -772,7 +767,9 @@ class TestFSDPOptimStateDict(FSDPTest):
         orig_model = FSDP(orig_model)
         orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
 
-        self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
+        self._test_optim_state_save_load(
+            orig_model, orig_optim, composable_model, composable_optim
+        )
 
 
 if __name__ == "__main__":

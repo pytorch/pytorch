@@ -5,8 +5,8 @@ from functools import partial
 from torch._dynamo.utils import same
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.distributed.distributed_c10d import _get_default_group, register_process_group
-from torch._C._distributed_c10d import ReduceOp
+from torch.distributed.distributed_c10d import _get_default_group
+from torch._C._distributed_c10d import _register_process_group
 
 def matmul_cat_col(a, b, c, d, e, f, *, pg_id):
     x = torch.matmul(a, b)
@@ -35,7 +35,7 @@ if __name__ == '__main__':
     # however, i did it to demonstrate the API proposed, whereby pg as int is passed
     # to collective APIs and pg object is recovered in execution layer
     pg = _get_default_group()
-    pg_id = register_process_group(pg)
+    pg_id = _register_process_group(pg)
     matmul_cat_col = partial(matmul_cat_col, pg_id=pg_id)
 
     inputs = (torch.ones(4, 4, device="cuda") + rank,) * 6
