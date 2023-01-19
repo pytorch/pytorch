@@ -36,10 +36,10 @@ class ShardingPropagator(object):
         Propagate the sharding for an operator given the op_schema.
         """
 
-        op_to_trace = self.decomposition_table[op_overload] if op_overload in self.decomposition_table else op_overload
+        # op_to_trace = self.decomposition_table[op_overload] if op_overload in self.decomposition_table else op_overload
 
-        with self.fake_mode:
-            op_g = make_fx
+        # with self.fake_mode:
+        #     op_g = make_fx
 
         sharding_prop_func = self.op_to_rules.get(op_overload, None)
 
