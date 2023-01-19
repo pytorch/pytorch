@@ -2,10 +2,10 @@
 
 SCRIPT_PARENT_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-# shellcheck source=.jenkins/pytorch/common.sh
+# shellcheck source=.ci/pytorch/common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-cd .jenkins/pytorch/perf_test
+cd .ci/pytorch/perf_test
 
 echo "Running CPU perf test for PyTorch..."
 
