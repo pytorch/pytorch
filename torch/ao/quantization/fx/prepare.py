@@ -77,6 +77,9 @@ from .utils import (
     NON_QUANTIZABLE_WEIGHT_OPS,
 )
 
+from torch.ao.quantization import (
+    PlaceholderObserver
+)
 from torch.ao.quantization.quantize import (
     convert
 )
@@ -104,7 +107,7 @@ from .custom_config import (
 
 from torch._subclasses import FakeTensor
 
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union, Callable
 
 
 __all__ = [
@@ -120,6 +123,16 @@ _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
+
+def _get_dtype_and_is_dynamic(obs_or_fq_ctr: Optional[Callable]) -> Tuple[torch.dtype, bool]:
+    """ Given a constructor for observer or fake quant module, returns
+    a Tuple of dtype and is_dynamic
+    """
+    if obs_or_fq_ctr is None:
+        return None, None
+    else:
+        obs_or_fq = obs_or_fq_ctr()
+        return obs_or_fq.dtype, getattr(obs_or_fq, "is_dynamic", False)
 
 def _is_input_arg_dtype_supported_by_backend(
     arg: Argument,
@@ -142,11 +155,8 @@ def _is_input_arg_dtype_supported_by_backend(
     is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
     if is_activation:
-        qconfig_info = node.meta["target_dtype_info"].get("input_activation_dtype")
-        if qconfig_info is not None:
-            qconfig_dtype, qconfig_is_dynamic = qconfig_info
-        else:
-            qconfig_dtype, qconfig_is_dynamic = None, None
+        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr")
+        qconfig_dtype, qconfig_is_dynamic = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
         # TODO(future PR): remove the cast to bool below after figuring
         # out why backend_config has is_dynamic set to None in some cases.
         return (dtype_config.input_dtype is None) or (
@@ -156,19 +166,21 @@ def _is_input_arg_dtype_supported_by_backend(
         )
     elif is_weight:
         # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
-        weight_dtype = dtype_config.weight_dtype
-        dtype_matches = "weight_dtype" in node.meta["target_dtype_info"] and \
-            node.meta["target_dtype_info"]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
+        weight_obs_or_fq_ctr = None
+        if "weight_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
+            weight_obs_or_fq_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"]
+        qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
+        dtype_matches = qconfig_weight_dtype == backend_config_weight_dtype
         qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
             qconfig, dtype_config.weight_dtype_with_constraints, is_activation=False)
-        return weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
+        return backend_config_weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
     else:  # bias
-        bias_dtype = dtype_config.bias_dtype
-        return bias_dtype is None or \
-            (
-                "bias_dtype" in node.meta["target_dtype_info"] and
-                node.meta["target_dtype_info"]["bias_dtype"][0] == bias_dtype  # type: ignore[index]
-            )
+        # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
+        bias_obs_or_fq_ctr = None
+        if "bias_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
+            bias_obs_or_fq_ctr = node.meta["target_dtype_info"]["bias_obs_or_fq_ctr"]
+        qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
+        return backend_config_bias_dtype is None or qconfig_bais_dtype == backend_config_bias_dtype
 
 def _is_output_dtype_supported_by_backend(
     node: Node,
@@ -178,11 +190,19 @@ def _is_output_dtype_supported_by_backend(
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
-    output_dtype = dtype_config.output_dtype
-    dtype_matches = node.meta["target_dtype_info"]["output_activation_dtype"][0] == output_dtype  # type: ignore[index]
+    # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
+    backend_config_output_dtype = dtype_config.output_dtype
+    # TODO: we should check is_dynamic here as well, the code from _is_input_arg_dtype_supported_by_backend
+    # from input activation check can be reused here
+    qconfig_output_dtype = None
+    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
+    if output_act_obs_or_fq_ctr is not None:
+        output_act_obs_or_fq = output_act_obs_or_fq_ctr()
+        qconfig_output_dtype = output_act_obs_or_fq.dtype
+    dtype_matches = qconfig_output_dtype == backend_config_output_dtype
     qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
         qconfig, dtype_config.output_dtype_with_constraints)
-    return output_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
+    return backend_config_output_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
 
 def _is_observer_in_same_graph(node: Node, named_modules: Dict[str, torch.nn.Module]):
     """ Check if observer in same graph
@@ -332,16 +352,20 @@ def _get_target_activation_dtype_for_node(
     """
     if node.op == 'placeholder':
         if inputs_seen_counter in input_quantized_idxs:
+            # users are not supposed to call calculate_qparams on PlaceholderObserver, and
+            # this is OK because we are using this as a way to encode the dtypes of input
+            # tensor, we won't actually insert these observers in the graph and won't
+            # actually call calculate_qparams
             return {
-                "input_activation_dtype": (torch.quint8, False),
-                "output_activation_dtype": (torch.quint8, False),
+                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
+                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
             }
         else:
             # if dtype is fp32 (default), do nothing
             # note: other dtypes are not supported
             return {
-                "input_activation_dtype": (torch.float, False),
-                "output_activation_dtype": (torch.float, False),
+                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
+                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32)
             }
 
     elif node.op in ('call_module', 'call_method', 'call_function'):
@@ -350,8 +374,8 @@ def _get_target_activation_dtype_for_node(
                 node, named_modules, cache_for_no_tensor_check)
         if args_have_no_tensors:
             return {
-                "input_activation_dtype": None,
-                "output_activation_dtype": None,
+                "input_act_obs_or_fq_ctr": None,
+                "output_act_obs_or_fq_ctr": None,
             }
 
         # get qconfig to determine the eventual dtype of this node
@@ -376,34 +400,34 @@ def _get_target_activation_dtype_for_node(
                     and (not input_act_is_dynamic)
                 ) else torch.float
             return {
-                "input_activation_dtype": (act_dtype, input_act_is_dynamic),
-                "weight_dtype": (weight_dtype, False),
-                "bias_dtype": (bias_dtype, False),
-                "output_activation_dtype": (output_act_dtype, False),
+                "input_act_obs_or_fq_ctr": qconfig.activation,
+                "weight_obs_or_fq_ctr": qconfig.weight,
+                "bias_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=bias_dtype),
+                "output_act_obs_or_fq_ctr": qconfig.activation,
             }
         return {
-            "input_activation_dtype": (torch.float, False),
-            "output_activation_dtype": (torch.float, False),
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
         }
 
     elif node.op == 'get_attr':
         return {
-            "input_activation_dtype": (torch.float, False),
-            "output_activation_dtype": (torch.float, False),
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
         }
 
     elif node.op == 'output':
         if outputs_seen_counter in output_quantized_idxs:
             return {
-                "input_activation_dtype": (torch.quint8, False),
-                "output_activation_dtype": (torch.quint8, False),
+                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
+                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
             }
         else:
             # if dtype is fp32 (default), do nothing
             # note: other dtypes are not supported
             return {
-                "input_activation_dtype": (torch.float, False),
-                "output_activation_dtype": (torch.float, False),
+                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
+                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
             }
 
     else:
@@ -426,14 +450,14 @@ def _get_arg_target_dtype_as_output(
     # not be able to accurately detect whether this node is a consumer of custom module LSTM.
     custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
     if custom_module_lstm_node is not None:
-        return custom_module_lstm_node.meta["target_dtype_info"]["output_activation_dtype"][0]  # type: ignore[index]
+        return custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"][0]  # type: ignore[index]
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
-        return observed_arg.meta["target_dtype_info"]["output_activation_dtype"][0]  # type: ignore[index]
+        return observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"][0]  # type: ignore[index]
     else:
         output_act_dtype_info = \
-            arg.meta["target_dtype_info"]["output_activation_dtype"]
+            arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
         if output_act_dtype_info is not None:
             return output_act_dtype_info[0]
         else:
@@ -453,14 +477,25 @@ def _get_arg_target_dtype_as_input_to_node(
     is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
     if is_activation:
-        return node.meta["target_dtype_info"]["input_activation_dtype"][0]  # type: ignore[index]
+        qconfig_dtype = None
+        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr")
+        qconfig_dtype, _ = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
+        return qconfig_dtype
     elif is_weight:
         if node.target in NON_QUANTIZABLE_WEIGHT_OPS:
             return None
         else:
-            return node.meta["target_dtype_info"]["weight_dtype"][0]  # type: ignore[index]
+            weight_obs_or_fq_ctr = None
+            if "weight_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
+                weight_obs_or_fq_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"]
+            qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
+            return qconfig_weight_dtype
     else:
-        return node.meta["target_dtype_info"]["bias_dtype"][0]  # type: ignore[index]
+        bias_obs_or_fq_ctr = None
+        if "bias_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
+            bias_obs_or_fq_ctr = node.meta["target_dtype_info"]["bias_obs_or_fq_ctr"]
+        qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
+        return qconfig_bias_dtype
 
 def _get_arg_target_is_dynamic_as_input_to_node(
     arg: Node,
@@ -475,9 +510,10 @@ def _get_arg_target_is_dynamic_as_input_to_node(
     is_weight = node_arg_is_weight(node, arg, backend_config)
     is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
-    if is_activation and \
-       "input_activation_dtype" in node.meta["target_dtype_info"]:
-        return node.meta["target_dtype_info"]["input_activation_dtype"][1]
+    if is_activation and "input_act_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
+        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr")
+        _, qconfig_is_dynamic = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
+        return qconfig_is_dynamic
     else:
         return False
 
@@ -742,8 +778,9 @@ def _maybe_insert_output_observer_for_node(
 
     is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
 
-    dtype, is_dynamic = node.meta["target_dtype_info"]["output_activation_dtype"]  # type: ignore[misc]
-    should_insert_observer = dtype not in _DO_NOT_OBS_DTYPE_LIST + [torch.float]
+    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
+    qconfig_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    should_insert_observer = qconfig_dtype not in _DO_NOT_OBS_DTYPE_LIST + [torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -866,11 +903,12 @@ def _maybe_propagate_dtype_for_node(
     is a general tensor shape op, also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
-    node.meta["target_dtype_info"]["input_activation_dtype"] = (target_dtype, False)
-    node.meta["target_dtype_info"]["output_activation_dtype"] = (target_dtype, False)
+    node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"] = None
+    node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"] = None
     # if this is a copy node, propagate to first arg
     root_node, _, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
+    # TODO: probably need to remove `is_general_tensor_value_op`
     if qhandler is not None and qhandler.is_general_tensor_value_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
@@ -1074,23 +1112,22 @@ def insert_observers_for_model(
     # node.meta["target_dtype_info"] stores the target dtype information
     # that's derived from qconfig for the Node, for example, if we have
     # a conv2d node that has a qconfig
-    # {
-    #   # information for input and bias node omitted
-    #   # for getattr node
-    #   # weight = getattr(self, 'weight')
-    #   weight.meta["target_dtype_info"] = {
-    #      'output_activation_dtype': (torch.float, False)
-    #   }
-    #   # Note: False means it's not a dynamic quantization (but a static quantization)
-    #   # for conv2d node
-    #   # conv2d = call_function[target=torch.nn.functional.conv2d](
-    #   #            args=(input, weight, bias))
-    #   conv2d.meta["target_dtype_info"] = {
-    #     'input_activation_dtype': (torch.quint8, False),
-    #     'weight_dtype': (torch.qint8, False),
-    #     'bias_dtype': (torch.float, False),
-    #     'output_activation_dtype': (torch.quint8, False),
-    #   }
+    # qconfig = QConfig(activation=..., weight=...)
+    # # information for input and bias node omitted
+    # # for getattr node
+    # # weight = getattr(self, 'weight')
+    # weight.meta["target_dtype_info"] = {
+    #    'output_act_obs_or_fq_ctr': qconfig.weight,
+    # }
+    # # for conv2d node
+    # # conv2d = call_function[target=torch.nn.functional.conv2d](
+    # #            args=(input, weight, bias))
+    # conv2d.meta["target_dtype_info"] = {
+    #   'input_act_obs_or_fq_ctr': qconfig.activation
+    #   'weight_obs_or_fq_ctr': qconfig.weight,
+    #   'bias_obs_or_fq_ctr': PlaceholderObserver.with_args(dtype=torch.float32),
+    #   'output_act_obs_or_fq_ctr': qconfig.activation,
+    # }
     #
     cache_for_no_tensor_check: Dict[Node, bool] = {}
 
