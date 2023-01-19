@@ -3758,23 +3758,10 @@ def new_subgroups_by_enumeration(
 
     return cur_subgroup, subgroups
 
-from torch.library import Library, impl
-aten_cpu_lib = Library("aten", "IMPL", "CPU")
-aten_cuda_lib = Library("aten", "IMPL", "CUDA")
+# from torch.library import Library, impl
+# aten_cpu_lib = Library("aten", "IMPL", "CPU")
+# aten_cuda_lib = Library("aten", "IMPL", "CUDA")
 
-@impl(aten_cpu_lib, 'all_reduce')
-def all_reduce_cpu(self, group_id, reduce_op):
-    return self
-
-@impl(aten_cuda_lib, 'all_reduce')
-def all_reduce_cuda(self, group_id, reduce_op):
-    group = torch.ops.c10d.lookup_pg(torch.empty(()), group_id)
-    assert reduce_op == "sum", "Unable to convert str to ReduceOp, so only default sum works"
-
-    # without using `lookup_pg` helper, I get this error trying to invoke c10d.allreduce_
-    # RuntimeError: c10d::allreduce_() Expected a value of type '__torch__.torch.classes.c10d.ProcessGroup
-    # (of Python compilation unit at: 0)' for argument 'process_group' but instead found type 'ProcessGroup'.
-    timeout = 100
-    _, work = torch.ops.c10d.allreduce_([self], group, torch.classes.c10d.ReduceOp(), timeout)
-    work.wait()
-    return self
+# @impl(aten_cpu_lib, 'all_reduce')
+# def all_reduce_cpu(self, group_id, reduce_op):
+#     return self
