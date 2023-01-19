@@ -1,5 +1,6 @@
 import contextlib
 from typing import Any, Callable, Dict, Iterator, List, Tuple, Union, Set, Optional
+import warnings
 
 import torch
 from torch import Tensor
@@ -178,6 +179,12 @@ def functional_call(
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
 
+    .. warning::
+
+        This API is deprecated as of PyTorch 2.0 and will be removed in a future
+        version of PyTorch. Please use :func:`torch.func.functional_call` instead,
+        which is a drop-in replacement for this API.
+
     .. note:: If the module has active parametrizations, passing a value in the
         :attr:`parameters_and_buffers` argument with the name set to the regular parameter
         name will completely disable the parametrization.
@@ -226,6 +233,22 @@ def functional_call(
     Returns:
         Any: the result of calling ``module``.
     """
+    warnings.warn(
+        "This API is deprecated as of PyTorch 2.0 and will be removed in a future "
+        "version of PyTorch. Please use torch.func.functional_call instead "
+        "which is a drop-in replacement for this API.")
+
+    return _functional_call(module, parameters_and_buffers, args, kwargs,
+                            tie_weights=tie_weights)
+
+def _functional_call(
+    module: 'torch.nn.Module',
+    parameters_and_buffers: Dict[str, Tensor],
+    args: Union[Any, Tuple],
+    kwargs: Dict[str, Any] = None,
+    *,
+    tie_weights: bool = True,
+):
     # TODO allow kwargs such as unsafe and others for parametrization
     if (
             torch.jit.is_tracing()
