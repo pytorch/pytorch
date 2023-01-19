@@ -380,6 +380,9 @@ public:
   Vectorized<BFloat16> exp() const {
     return map(Sleef_expf16_u10);
   }
+  Vectorized<BFloat16> exp2() const {
+    return map(Sleef_exp2f16_u10);
+  }
   Vectorized<BFloat16> expm1() const {
     return map(Sleef_expm1f16_u10);
   }
