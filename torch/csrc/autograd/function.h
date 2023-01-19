@@ -55,6 +55,11 @@ class NodeGuard {
   std::shared_ptr<Node> last_evaluating_node_;
 };
 
+// Return the Node currently being evaluated (if any)
+// This is only set during the backward pass while a Node is being
+// executed.
+TORCH_API std::shared_ptr<Node> get_current_node();
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

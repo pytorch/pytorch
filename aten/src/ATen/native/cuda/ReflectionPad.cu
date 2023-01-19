@@ -24,8 +24,7 @@
 
 #include <thrust/pair.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 using at::cuda::detail::canUse32BitIndexMath;
@@ -678,5 +677,4 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
       });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

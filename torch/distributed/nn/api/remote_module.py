@@ -68,8 +68,10 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_forward_pre_hooks",
     "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
     "_load_state_dict_post_hooks",
+    "_state_dict_pre_hooks",
     "_modules",
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
@@ -365,7 +367,10 @@ class _RemoteModule(nn.Module):
 
     def register_forward_pre_hook(  # type: ignore[return]
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
         prepend: bool = False,
         with_kwargs: bool = False,
     ) -> RemovableHandle:
@@ -373,7 +378,10 @@ class _RemoteModule(nn.Module):
 
     def register_forward_hook(  # type: ignore[return]
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
         prepend: bool = False,
         with_kwargs: bool = False,
     ) -> RemovableHandle:

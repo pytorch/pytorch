@@ -1,36 +1,21 @@
-import math
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
+                        _differentiable_doc, _maximize_doc)
+from torch._utils import is_compiling
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
 
+def _to_tensor(x):
+    if not isinstance(x, torch.Tensor):
+        return torch.tensor(x)
+
+    return x
 
 class ASGD(Optimizer):
-    """Implements Averaged Stochastic Gradient Descent.
-
-    It has been proposed in `Acceleration of stochastic approximation by
-    averaging`_.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
-        lambd (float, optional): decay term (default: 1e-4)
-        alpha (float, optional): power for eta update (default: 0.75)
-        t0 (float, optional): point at which to start averaging (default: 1e6)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-
-    .. _Acceleration of stochastic approximation by averaging:
-        https://dl.acm.org/citation.cfm?id=131098
-    """
-
     def __init__(
         self,
         params,
@@ -152,6 +137,30 @@ class ASGD(Optimizer):
         return loss
 
 
+ASGD.__doc__ = r"""Implements Averaged Stochastic Gradient Descent.
+
+    It has been proposed in `Acceleration of stochastic approximation by
+    averaging`_.
+
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        lambd (float, optional): decay term (default: 1e-4)
+        alpha (float, optional): power for eta update (default: 0.75)
+        t0 (float, optional): point at which to start averaging (default: 1e6)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: None)
+        {maximize}
+        {differentiable}
+
+    .. _Acceleration of stochastic approximation by averaging:
+        https://dl.acm.org/citation.cfm?id=131098
+
+    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
+
+
 def asgd(
     params: List[Tensor],
     grads: List[Tensor],
@@ -221,6 +230,10 @@ def _single_tensor_asgd(
     maximize: bool,
     differentiable: bool,
 ):
+    def _to_tensor(x):
+        if not isinstance(x, torch.Tensor):
+            return torch.tensor(x)
+        return x
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -237,26 +250,27 @@ def _single_tensor_asgd(
 
         # update step
         step_t += 1
-        step = step_t.item()
+        step = _get_value(step_t)
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        eta_value = _get_value(eta)
         # decay term
-        param.mul_(1 - lambd * eta.item())
+        param.mul_(1 - lambd * eta_value)
 
         # update parameter
-        param.add_(grad, alpha=-eta.item())
+        param.add_(grad, alpha=-eta_value)
 
         # averaging
-        if mu.item() != 1:
+        if is_compiling() or mu.item() != 1:
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
 
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * step), alpha))
+        new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
         eta.copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, step - t0))
+        new_mu = _to_tensor(1 / max(1, step - t0))
         mu.copy_(new_mu)
 
 
@@ -282,43 +296,46 @@ def _multi_tensor_asgd(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    if maximize:
-        grads = torch._foreach_neg(grads)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
+    for (grouped_params, grouped_grads, grouped_axs, grouped_mus,
+         grouped_etas, grouped_state_steps) in grouped_tensors.values():
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)
 
-    def _view_complex_as_real(tensor_list):
-        return [
-            torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-        ]
+        def _view_complex_as_real(tensor_list):
+            return [
+                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
+            ]
 
-    grads = _view_complex_as_real(grads)
-    params = _view_complex_as_real(params)
-    axs = _view_complex_as_real(axs)
+        grouped_grads = _view_complex_as_real(grouped_grads)
+        grouped_params = _view_complex_as_real(grouped_params)
+        grouped_axs = _view_complex_as_real(grouped_axs)
 
-    # update step
-    torch._foreach_add_(state_steps, 1)
+        # update step
+        torch._foreach_add_(grouped_state_steps, 1)
 
-    if weight_decay != 0:
-        grads = torch._foreach_add(grads, params, alpha=weight_decay)
+        if weight_decay != 0:
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-    # decay term
-    eta = etas[0].item()
-    torch._foreach_mul_(params, 1 - lambd * eta)
+        # decay term
+        eta = _get_value(grouped_etas[0])
+        torch._foreach_mul_(grouped_params, 1 - lambd * eta)
 
-    # update parameter
-    torch._foreach_add_(params, grads, alpha=-eta)
+        # update parameter
+        torch._foreach_add_(grouped_params, grouped_grads, alpha=-eta)
 
-    # averaging
-    for i in range(len(axs)):
-        if mus[i].item() != 1:
-            axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
-        else:
-            axs[i].copy_(params[i])
+        # averaging
+        for i in range(len(grouped_axs)):
+            if is_compiling() or grouped_mus[i].item() != 1:
+                grouped_axs[i].add_(grouped_params[i].sub(grouped_axs[i]).mul(grouped_mus[i]))
+            else:
+                grouped_axs[i].copy_(grouped_params[i])
 
-    # update eta and mu
-    for i in range(len(mus)):
-        new_eta = torch.tensor(
-            lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha)
-        )
-        etas[i].copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
-        mus[i].copy_(new_mu)
+        # update eta and mu
+        for i in range(len(grouped_mus)):
+            new_eta = _to_tensor(
+                lr / (1 + lambd * lr * _get_value(grouped_state_steps[i]) ** alpha)
+            )
+            grouped_etas[i].copy_(new_eta)
+            new_mu = _to_tensor(1 / max(1, _get_value(grouped_state_steps[i]) - t0))
+            grouped_mus[i].copy_(new_mu)

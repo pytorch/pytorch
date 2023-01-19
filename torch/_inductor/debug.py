@@ -9,26 +9,33 @@ import pstats
 import shutil
 import subprocess
 from typing import Any, List
+from unittest.mock import patch
 
-from functorch.compile import draw_graph, get_graph_being_compiled
+from functorch.compile import (
+    config,
+    draw_graph,
+    get_aot_graph_name,
+    get_graph_being_compiled,
+)
 
 import torch
 from torch import fx as fx
+
+from torch._dynamo import config as dynamo_config
+from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.utils import get_debug_dir, init_logging
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
-from . import config, ir
+from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
     BaseSchedulerNode,
-    ExternKernelSchedulerNode,
     FusedSchedulerNode,
     NopKernelSchedulerNode,
     OutputNode,
     SchedulerNode,
-    TemplateSchedulerNode,
 )
-from .utils import dynamo_config, dynamo_debug_utils, dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -104,10 +111,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        if isinstance(snode, ExternKernelSchedulerNode):
+        if snode.is_extern():
             node_type = "extern"
             group = node_type
-        elif isinstance(snode, TemplateSchedulerNode):
+        elif snode.is_template():
             node_type = "template"
             group = node_type
         elif isinstance(snode, NopKernelSchedulerNode):
@@ -166,6 +173,46 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
+@contextlib.contextmanager
+def enable_aot_logging():
+    if not bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
+        yield
+        return
+
+    # Enable all graphs to be logged to a file by setting the flags to True
+    # and the log level of the file logger to DEBUG
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
+    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
+    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
+    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
+
+    import torch._functorch.aot_autograd
+
+    log = logging.getLogger(torch._functorch.aot_autograd.__name__)
+    path = os.path.join(get_debug_dir(), "aot_torchinductor")
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    fh = logging.FileHandler(
+        os.path.join(
+            path,
+            f"aot_{get_aot_graph_name()}_debug.log",
+        )
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(
+        logging.Formatter("[%(filename)s:%(lineno)d %(levelname)s] %(message)s")
+    )
+    log.addHandler(fh)
+    try:
+        yield
+    finally:
+        log.removeHandler(fh)
+        stack.close()
+
+
 class DebugContext:
     _counter = itertools.count()
 
@@ -176,15 +223,15 @@ class DebugContext:
             with DebugContext():
                 return fn(*args, **kwargs)
 
-        return dynamo_debug_utils.wrap_compiler_debug(inner, compiler_name="inductor")
+        return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
-    def create_debug_dir():
+    def create_debug_dir(folder_name):
         for n in DebugContext._counter:
             dirname = os.path.join(
-                dynamo_utils.get_debug_dir(),
-                "torchinductor",
-                f"debug.{os.getpid()}.{n}",
+                get_debug_dir(),
+                "aot_torchinductor",
+                f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
@@ -230,9 +277,14 @@ class DebugContext:
     def __enter__(self):
         log = logging.getLogger(config.inductor_import)
         if not log.handlers:
-            dynamo_utils.init_logging()
+            init_logging()
 
         if config.debug:
+
+            def reset_log_level(level):
+                dynamo_config.log_level = level
+
+            self._stack.callback(reset_log_level, dynamo_config.log_level)
             dynamo_config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))
@@ -240,7 +292,7 @@ class DebugContext:
         if not config.trace.enabled:
             return
 
-        self._path = self.create_debug_dir()
+        self._path = self.create_debug_dir(get_aot_graph_name())
 
         if config.trace.debug_log:
             self._setup_log_capture("debug.log", logging.DEBUG)
@@ -307,7 +359,7 @@ class DebugFormatter:
 
     def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
         with self.fopen("fx_graph_runnable.py") as fd:
-            dynamo_debug_utils.save_graph_repro(fd, gm, inputs, "inductor")
+            save_graph_repro(fd, gm, inputs, "inductor")
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))

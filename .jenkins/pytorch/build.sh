@@ -49,7 +49,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
+  echo "Caffe2 build is ON"
   export BUILD_CAFFE2=ON
 fi
 
@@ -191,9 +192,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  tools/bazel build --config=no-tty //...
+  # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
+  # the runner
+  BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
+  BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
+
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   # Build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty --config=cpu-only :torch :_C.so :all_tests
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
 
 else
   # check that setup.py would fail with bad arguments
