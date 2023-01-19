@@ -1,4 +1,3 @@
-#if defined(USE_CUDA)
 #include <gtest/gtest.h>
 
 #include <arith.h>
@@ -463,4 +462,3 @@ TEST_F(NVFuserTest, FusionDistributeMul_CUDA) {
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)

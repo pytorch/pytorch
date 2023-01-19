@@ -1,4 +1,3 @@
-#if defined(USE_CUDA)
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
@@ -396,4 +395,3 @@ __global__ void CUDAGeneratedKernel(int64_t i0, int64_t i1, int64_t i2, Tensor<i
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)

@@ -1,4 +1,3 @@
-#if defined(USE_CUDA)
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
@@ -74,4 +73,3 @@ TEST_F(NVFuserTest, KernelDb_Write_CUDA) {
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)

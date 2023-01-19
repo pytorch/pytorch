@@ -1,4 +1,3 @@
-#if defined(USE_CUDA)
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
@@ -133,4 +132,3 @@ TEST_F(NVFuserTest, RecordFunctorEquality_CUDA) {
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)

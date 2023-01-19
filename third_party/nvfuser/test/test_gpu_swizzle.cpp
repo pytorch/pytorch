@@ -1,4 +1,3 @@
-#if defined(USE_CUDA)
 #include <gtest/gtest.h>
 
 #include <kernel_cache.h>
@@ -611,4 +610,3 @@ TEST_F(NVFuserTest, FusionSwizzleExampleCyclicShift_CUDA) {
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)

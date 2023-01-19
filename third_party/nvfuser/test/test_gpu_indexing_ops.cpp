@@ -1,4 +1,3 @@
-#if defined(USE_CUDA)
 #include <gtest/gtest.h>
 
 #include <kernel_cache.h>
@@ -676,4 +675,3 @@ TEST_F(NVFuserTest, FusionIndexSelectDim2InRank4_CUDA) {
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)
