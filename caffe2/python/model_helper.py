@@ -444,7 +444,7 @@ class ModelHelper(object):
     def __dir__(self):
         return sorted(set(chain(
             dir(type(self)),
-            self.__dict__,keys(),
+            self.__dict__.keys(),
             _known_working_ops
         )))
 
