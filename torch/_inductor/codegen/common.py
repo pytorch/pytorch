@@ -448,9 +448,9 @@ class CSE:
         if append_broadcast:
             assert isinstance(append_broadcast, str)
             cache_key = expr + append_broadcast
-        if expr not in self.cache:
+        if cache_key not in self.cache:
             var = self.newvar()
-            self.cache[expr] = var
+            self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -468,7 +468,7 @@ class CSE:
                         f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
                     )
 
-        return self.cache[expr]
+        return self.cache[cache_key]
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
