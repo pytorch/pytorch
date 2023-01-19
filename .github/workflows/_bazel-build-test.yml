@@ -31,11 +31,6 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup SSH outside of Meta (Click me for login details)
         uses: chkimes/actions-ssh@v0.1
         with:
