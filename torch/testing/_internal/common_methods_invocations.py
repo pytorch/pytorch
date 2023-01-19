@@ -13741,7 +13741,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if SM53OrLaterh or TEST_WITH_ROCM else []),
+                                                       if SM53OrLater or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes

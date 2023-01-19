@@ -5878,7 +5878,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         is_supported = True
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
-            is_supported = TEST_WITH_ROCM or and SM53OrLater
+            is_supported = TEST_WITH_ROCM or SM53OrLater
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
