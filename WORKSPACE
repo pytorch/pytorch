@@ -54,6 +54,12 @@ http_archive(
 )
 
 new_local_repository(
+    name = "opt_cache_lib",
+    build_file = "//tools:opt_cache_lib.BUILD",
+    path = "/opt/cache/lib",
+)
+
+new_local_repository(
     name = "gloo",
     build_file = "//third_party:gloo.BUILD",
     path = "third_party/gloo",
