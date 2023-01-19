@@ -39,43 +39,6 @@
 namespace at { namespace native {
 
 using namespace at::sparse;
-using at::cuda::detail::TensorInfo;
-using at::cuda::detail::getTensorInfo;
-
-namespace {
-
-template <typename scalar_t>
-C10_LAUNCH_BOUNDS_1(1024)
-__global__ void _sparse_mask_copy_kernel(
-    int64_t total_threads,
-    int64_t t_nnz,
-    const TensorInfo<int64_t, int64_t> t_indices_ti,
-    const TensorInfo<int64_t, int64_t> mask_indices_ti,
-    const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
-    const TensorInfo<scalar_t, int64_t> t_values_ti,
-    TensorInfo<scalar_t, int64_t> r_values_ti) {
-  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= total_threads) return;
-  const int64_t j = t_indices_pos_ti.data[i];
-
-  bool has_match = false;
-  if (j >= 0 &&  j < t_nnz && t_indices_ti.data[j] == mask_indices_ti.data[i]) {
-    has_match = true;
-  }
-
-  int64_t values_stride0 = r_values_ti.strides[0];
-  int64_t out_start = i * values_stride0;
-  int64_t out_end = (i + 1) * values_stride0;
-  int64_t in_start = j * t_values_ti.strides[0];
-
-  if (has_match) {
-    for (int64_t out_i = out_start, in_i = in_start; out_i < out_end; out_i++, in_i++) {
-      r_values_ti.data[out_i] = t_values_ti.data[in_i];
-    }
-  }
-}
-
-} // end namespace
 
 SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();

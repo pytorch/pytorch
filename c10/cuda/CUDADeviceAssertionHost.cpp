@@ -13,8 +13,17 @@
 #include <string>
 #include <thread>
 
-#define CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS() \
-  c10_cuda_check_implementation(__FILE__, __FUNCTION__, __LINE__, false)
+#define C10_CUDA_CHECK_WO_DSA(EXPR)                                 \
+  do {                                                              \
+    const cudaError_t __err = EXPR;                                 \
+    c10::cuda::c10_cuda_check_implementation(                       \
+        static_cast<int32_t>(__err),                                \
+        __FILE__,                                                   \
+        __func__, /* Line number data type not well-defined between \
+                      compilers, so we perform an explicit cast */  \
+        static_cast<uint32_t>(__LINE__),                            \
+        false);                                                     \
+  } while (0)
 
 namespace c10 {
 namespace cuda {
@@ -27,8 +36,7 @@ namespace {
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_id() {
   int device = -1;
-  C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
+  C10_CUDA_CHECK_WO_DSA(cudaGetDevice(&device));
   return device;
 }
 
@@ -41,9 +49,8 @@ int dsa_get_device_id() {
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_compute_capability(const int device_num) {
   int compute_capability = -1;
-  C10_CUDA_ERROR_HANDLED(cudaDeviceGetAttribute(
+  C10_CUDA_CHECK_WO_DSA(cudaDeviceGetAttribute(
       &compute_capability, cudaDevAttrComputeCapabilityMajor, device_num));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
   return compute_capability;
 }
 #endif
@@ -53,8 +60,7 @@ int dsa_get_device_compute_capability(const int device_num) {
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_count() {
   int device_count = -1;
-  C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&device_count));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
+  C10_CUDA_CHECK_WO_DSA(cudaGetDeviceCount(&device_count));
   return device_count;
 }
 
@@ -288,25 +294,22 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   // system
   DeviceAssertionsData* uvm_assertions_ptr = nullptr;
 
-  C10_CUDA_ERROR_HANDLED(
+  C10_CUDA_CHECK_WO_DSA(
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
 
-  C10_CUDA_ERROR_HANDLED(cudaMemAdvise(
+  C10_CUDA_CHECK_WO_DSA(cudaMemAdvise(
       uvm_assertions_ptr,
       sizeof(DeviceAssertionsData),
       cudaMemAdviseSetPreferredLocation,
       cudaCpuDeviceId));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
 
   // GPU will establish direct mapping of data in CPU memory, no page faults
   // will be generated
-  C10_CUDA_ERROR_HANDLED(cudaMemAdvise(
+  C10_CUDA_CHECK_WO_DSA(cudaMemAdvise(
       uvm_assertions_ptr,
       sizeof(DeviceAssertionsData),
       cudaMemAdviseSetAccessedBy,
       cudaCpuDeviceId));
-  CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS();
 
   // Initialize the memory from the CPU; otherwise, pages may have to be created
   // on demand. We think that UVM documentation indicates that first access may
