@@ -10,7 +10,13 @@ __all__ = ["functional_call"]
 
 # We avoid typing module here because module attributes are declared as Union[Parameter, Tensor] by default
 # and using other types causes mypy errors
+# TODO: remove this unreferenced function when `torch.nn.utils._stateless` is removed
 def _change_class(module, params_and_buffers) -> None:
+    warnings.warn(
+        "The function `torch.nn.utils.stateless._change_class` is private "
+        "and it is deprecated now. It may be removed in a future release.",
+        DeprecationWarning,
+    )
     cls = module.__class__
     attr_to_path: Dict[str, str] = module._attr_to_path
 
@@ -180,6 +186,7 @@ def _reparametrize_module(
         )
 
 
+# TODO: remove this unreferenced function when `torch.nn.utils._stateless` is removed
 def _apply_func_submodules(
     func: Callable[..., None],
     module: "torch.nn.Module",
@@ -187,6 +194,11 @@ def _apply_func_submodules(
     full_path: str,
     args: Tuple,
 ):
+    warnings.warn(
+        "The function `torch.nn.utils.stateless._apply_func_submodules` is private "
+        "and it is deprecated now. It may be removed in a future release.",
+        DeprecationWarning,
+    )
     if len(path) == 1:
         func(module, path[0], full_path, *args)
     else:
