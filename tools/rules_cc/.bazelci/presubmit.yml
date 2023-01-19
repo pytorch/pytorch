@@ -1,0 +1,62 @@
+---
+x_defaults:
+  # YAML has a feature for "repeated nodes", BazelCI is fine with extra nodes
+  # it doesn't know about; so that is used to avoid repeating common subparts.
+  common: &common
+    # We have to list every package because even with exclusion notation -//foo
+    # Bazel will load the excluded package and it will be an error because at
+    # release Bazel the cc_libraries do not have all the attributes.
+    build_targets:
+    - "//:all"
+    - "//cc:all"
+    - "//cc/private/rules_impl:all"
+    - "//cc/private/toolchain:all"
+    - "//distro:all"
+    - "//examples:all"
+    - "//examples/my_c_archive:all"
+    - "//examples/my_c_compile:all"
+    - "//examples/write_cc_toolchain_cpu:all"
+    - "//tools/migration:all"
+    - "//tools/runfiles:all"
+    test_flags:
+    - "--test_timeout=120"
+    test_targets:
+    - "//:all"
+    - "//cc:all"
+    - "//cc/private/rules_impl:all"
+    - "//cc/private/toolchain:all"
+    - "//distro:all"
+    - "//examples:all"
+    - "//examples/my_c_archive:all"
+    - "//examples/my_c_compile:all"
+    - "//examples/write_cc_toolchain_cpu:all"
+    - "//tools/migration:all"
+    - "//tools/runfiles:all"
+
+buildifier:
+  version: latest
+  warnings: "all"
+
+tasks:
+  ubuntu1604:
+    <<: *common
+  ubuntu1804:
+    <<: *common
+  macos:
+    <<: *common
+  windows:
+    <<: *common
+  examples:
+    platform: ubuntu1804
+    bazel: last_downstream_green
+    build_targets:
+    - "//examples/test_cc_shared_library/..."
+    build_flags:
+    - "--experimental_cc_shared_library"
+    - "--//examples:incompatible_link_once=True"
+    test_flags:
+    - "--test_timeout=120"
+    - "--experimental_cc_shared_library"
+    - "--//examples:incompatible_link_once=True"
+    test_targets:
+    - "//examples/test_cc_shared_library/..."
