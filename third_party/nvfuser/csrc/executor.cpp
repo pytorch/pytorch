@@ -1116,7 +1116,6 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
 
     if (kernel()->summary().has_cooperative_grid_reduction) {
-#ifndef USE_ROCM
       int num_blocks_per_SM = -1;
       at::globalContext().getNVRTC().cuOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_SM,
@@ -1145,10 +1144,6 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
           " * ",
           at::cuda::getDeviceProperties(options_.device.index())
               ->multiProcessorCount);
-#else
-      TORCH_INTERNAL_ASSERT(
-          false, "Cross grid communication not supported with HIP.");
-#endif
     }
 
     executor_utils::validateVectorizedTensors(

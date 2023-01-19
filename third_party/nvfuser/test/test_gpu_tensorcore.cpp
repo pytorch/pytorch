@@ -156,6 +156,9 @@ std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
     GTEST_SKIP() << "not enough shared memory space on device to run test"; \
   }
 
+// Disable magic zero
+CompileParams cparams{DataType::Int32, 255, false};
+
 } // namespace
 
 // MMA unit test for a single instruction tile. VoltaTT
@@ -245,7 +248,7 @@ TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
+      7, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
@@ -312,7 +315,7 @@ TEST_F(NVFuserTest, FusionVoltaMMATN_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
+      7, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
@@ -381,7 +384,7 @@ TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}));
+      7, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
@@ -423,7 +426,10 @@ TEST_F(NVFuserTest, FusionVoltaMatmul_CUDA) {
 
     FusionExecutor fe;
     NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-        7, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+        7,
+        0,
+        fe.compileFusion(
+            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -468,7 +474,10 @@ TEST_F(NVFuserTest, FusionVoltaMatmulRegDoubleBuffer_CUDA) {
 
     FusionExecutor fe;
     NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-        7, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+        7,
+        0,
+        fe.compileFusion(
+            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -540,7 +549,7 @@ TEST_F(NVFuserTest, FusionAmpereMMATN_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
@@ -616,7 +625,7 @@ TEST_F(NVFuserTest, FusionAmpereMMATT_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -695,7 +704,7 @@ TEST_F(NVFuserTest, FusionAmpereMMANT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
@@ -742,7 +751,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmul_CUDA) {
 
     FusionExecutor fe;
     NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-        8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+        8,
+        0,
+        fe.compileFusion(
+            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -793,7 +805,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmulPipelineGmem_CUDA) {
 
       FusionExecutor fe;
       NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-          8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+          8,
+          0,
+          fe.compileFusion(
+              &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
       auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
       auto tref = atMatmul(
           inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -845,7 +860,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmulRegDbouleBuffer_CUDA) {
 
       FusionExecutor fe;
       NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-          8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+          8,
+          0,
+          fe.compileFusion(
+              &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
       auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
       auto tref = atMatmul(
           inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -1125,7 +1143,7 @@ TEST_F(NVFuserTest, FusionMatmulMatmulAmpere_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1, t2}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1, t2}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1, t2});
 
@@ -1504,7 +1522,7 @@ TEST_F(NVFuserTest, FusionMatmulSoftmaxMatmulAmpere_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1, t2}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1, t2}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1, t2});
 
@@ -1576,7 +1594,7 @@ TEST_F(NVFuserTest, FusionTuringMMATN_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
+      7, 5, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -1650,7 +1668,7 @@ TEST_F(NVFuserTest, FusionTuringMMATT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
+      7, 5, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -1727,7 +1745,7 @@ TEST_F(NVFuserTest, FusionTuringMMANT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}));
+      7, 5, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -1910,7 +1928,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulTNcpAsync_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -2076,7 +2094,7 @@ TEST_F(NVFuserTest, FusionAmpereStridedBatchedMatmulTN_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -2246,7 +2264,7 @@ TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -2412,7 +2430,7 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTNCrossWarp_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams);
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
@@ -2582,7 +2600,7 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTNCrossCTA_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams);
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
@@ -2756,7 +2774,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulTNSwizzled_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion);
+  fe.compileFusion(&fusion, {}, LaunchParams(), cparams);
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
@@ -2802,7 +2820,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmulLargeLoad_CUDA) {
 
     FusionExecutor fe;
     NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-        8, 0, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+        8,
+        0,
+        fe.compileFusion(
+            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -2846,7 +2867,10 @@ TEST_F(NVFuserTest, FusionTuringMatmulLargeLoad_CUDA) {
 
     FusionExecutor fe;
     NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-        7, 5, fe.compileFusion(&fusion, {inputs.first, inputs.second}));
+        7,
+        5,
+        fe.compileFusion(
+            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);

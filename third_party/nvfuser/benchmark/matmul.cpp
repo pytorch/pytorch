@@ -162,9 +162,13 @@ static void SingleMatmulBase(
   // Always use 32b indexing mode for now.
   TORCH_INTERNAL_ASSERT(args.getIndexMode() == KernelIndexMode::INT32);
 
+  // Disable magic zero
+  CompileParams cparams;
+  cparams.enable_magic_zero = false;
+
   // Compile kernel
   FusionExecutor fe;
-  fe.compileFusion(fusion, args, LaunchParams());
+  fe.compileFusion(fusion, args, LaunchParams(), cparams);
 
   // Warm up run
   auto outputs = fe.runFusion({inputs.first, inputs.second});
