@@ -720,7 +720,10 @@ class TestOptim(TestCase):
             return
         assert flag in ("foreach", "fused")
 
-        kIterations = 4
+        # why 7? iteration 7 is where we start to see differences for RAdam
+        # params interacting with the small eps value, because that's right
+        # after rho_t becomes greater than 5 in step 6.
+        kIterations = 7
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
             res, state = [], []
@@ -802,7 +805,9 @@ class TestOptim(TestCase):
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
             ),
+            (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
@@ -840,7 +845,9 @@ class TestOptim(TestCase):
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
             ),
+            (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
