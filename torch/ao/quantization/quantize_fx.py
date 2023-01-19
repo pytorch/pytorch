@@ -74,7 +74,6 @@ def _fuse_fx(
         model: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
     """
     _check_is_graph_module(model)
-    _attach_meta_to_node_if_not_exist(model)
     return fuse(
         model, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
@@ -111,8 +110,6 @@ forward graph of the parent module,
             "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
-    _attach_meta_to_node_if_not_exist(model)
-
     # swap FloatFunctional with FXFloatFunctional
     _swap_ff_with_fxff(model)
 
@@ -122,6 +119,8 @@ forward graph of the parent module,
     # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
+    _attach_meta_to_node_if_not_exist(model)
+
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
     fuse_custom_config = FuseCustomConfig().set_preserved_attributes(prepare_custom_config.preserved_attributes)
@@ -219,6 +218,7 @@ def fuse_fx(
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     graph_module = torch.fx.symbolic_trace(model)
+    _attach_meta_to_node_if_not_exist(model)
     preserved_attributes: Set[str] = set()
     if fuse_custom_config:
         preserved_attributes = set(fuse_custom_config.preserved_attributes)
