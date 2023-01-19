@@ -1124,10 +1124,8 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
-    if isinstance(a, TensorLike) and a.dtype != dtype:
-        a = prims.to_dtype(a, dtype)
-    if isinstance(b, TensorLike) and b.dtype != dtype:
-        b = prims.to_dtype(b, dtype)
+    a = _maybe_convert_to_dtype(a, dtype)
+    b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
     return pow(a, b)
@@ -4428,7 +4426,7 @@ def logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return prims.to_dtype(torch.pow(base, ret), dtype)
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
 
 
 @overload
@@ -5004,8 +5002,8 @@ def tril_indices(
     b = m_first_row - 0.5
     row_inds1 = torch.floor(-b + torch.sqrt(b * b + 2 * xs1))
     col_inds1 = torch.floor(xs1 - (2 * m_first_row - 1 + row_inds1) * row_inds1 * 0.5)
-    row_inds1 = prims.to_dtype(row_inds1 + row_offset, dtype)
-    col_inds1 = prims.to_dtype(col_inds1, dtype)
+    row_inds1 = _maybe_convert_to_dtype(row_inds1 + row_offset, dtype)
+    col_inds1 = _maybe_convert_to_dtype(col_inds1, dtype)
 
     # then bottom rectangle
     xs2 = arange_kw(0, rectangle_size, dtype=dtype)
@@ -5068,8 +5066,8 @@ def triu_indices(
     b = -0.5 - m_first_row
     row_inds1 = torch.floor(-b - torch.sqrt(b * b - 2 * xs1))
     col_inds1 = torch.floor(xs1 - ((2 * m_first_row - 1 - row_inds1) * row_inds1) * 0.5)
-    row_inds1 = prims.to_dtype(row_inds1, dtype)
-    col_inds1 = prims.to_dtype(col_inds1, dtype)
+    row_inds1 = _maybe_convert_to_dtype(row_inds1, dtype)
+    col_inds1 = _maybe_convert_to_dtype(col_inds1, dtype)
 
     if col:
         row_inds1 = row_inds1 + (rectangle_size // col)
@@ -5137,6 +5135,17 @@ def bucketize(
             start = torch.where((~cond_mid) & cond_update, mid + 1, start)
 
     return start.to(dtype=out_dtype)
+
+
+@register_decomposition(aten.exponential)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def exponential(self, rate=1, generator=None):
+    assert generator is None
+    return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
 # inplace
@@ -5227,6 +5236,7 @@ triu_ = _make_inplace(triu)
 true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
+exponential_ = _make_inplace(exponential)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function

@@ -143,14 +143,14 @@ SymInt SymInt::min(const SymInt& sci) const {
     return std::min(data_, sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt(res[0]->min(res[1]));
+  return SymInt(res[0]->sym_min(res[1]));
 }
 SymInt SymInt::max(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return std::max(data_, sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt(res[0]->max(res[1]));
+  return SymInt(res[0]->sym_max(res[1]));
 }
 
 void SymInt::operator*=(const SymInt& sci) {

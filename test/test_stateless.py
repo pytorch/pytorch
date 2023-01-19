@@ -264,7 +264,7 @@ class TestStatelessFunctionalAPI(TestCase):
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
-        subtest(stateless.functional_call, "stateless")
+        subtest(stateless._functional_call, "stateless")
     ])
     def test_tied_weights_errors(self, functional_call):
         module = MockTiedModule()
@@ -305,12 +305,12 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         x = torch.randn(1, 1)
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
+        self.assertNotWarn(lambda: stateless._functional_call(module, parameters, x, tie_weights=False))
         parameters['tied_bias'] = torch.tensor([5.0])
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
+        self.assertNotWarn(lambda: stateless._functional_call(module, parameters, x, tie_weights=False))
         del parameters['tied_bias']
         parameters['tied_buffer'] = torch.tensor([5.0])
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
+        self.assertNotWarn(lambda: stateless._functional_call(module, parameters, x, tie_weights=False))
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -407,6 +407,13 @@ exit(len(w))
             self.assertEqual(e.returncode, 1)
         else:
             self.assertTrue(False, "No warning was raised.")
+
+    def test_stateless_functional_call_warns(self):
+        m = torch.nn.Linear(1, 1)
+        params = dict(m.named_parameters())
+        x = torch.randn(3, 1)
+        with self.assertWarnsRegex(UserWarning, "Please use torch.func.functional_call"):
+            stateless.functional_call(m, params, x)
 
 class TestPythonOptimizeMode(TestCase):
     def test_runs_with_optimize_flag(self):
