@@ -2628,6 +2628,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
         if op.name == "mv" and no_mkl_sparse and self.device_type == 'cpu':

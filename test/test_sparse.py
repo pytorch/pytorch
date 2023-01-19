@@ -1881,6 +1881,7 @@ class TestSparse(TestSparseBase):
         test_shape([3, 4], [1, 4], [4, 4, 4], [3, 4, 4])
         test_shape([3, 4, 0], [1, 4], [4, 4, 4, 0], [3, 4, 4, 0])
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @dtypes(torch.double, torch.cdouble)
     def test_add_noncontiguous(self, device, dtype):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
