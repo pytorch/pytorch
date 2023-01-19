@@ -39,7 +39,9 @@ int64_t findOutermostPosWithSatisfiedDependency(
   // TensorIndex is a tensor data access, but TensorView only contains meta data
   // access like `T1.data`, or `toSmem(T1)`.
   if (TensorView* tv = dynamic_cast<TensorView*>(value)) {
-    return lower_utils::getAllocInformation(tv, loops).alloc_pos;
+    // In getAllocInformation, position i means before the ith loop, in this
+    // function, i means after the ith loop, so we need to -1 here.
+    return lower_utils::getAllocInformation(tv, loops).alloc_pos - 1;
   }
 
   auto def = value->definition();

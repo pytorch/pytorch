@@ -369,6 +369,19 @@ class TORCH_CUDA_CU_API SMemAddress final : public Expr {
     return input(0)->as<TensorView>();
   }
 
+  bool sameAs(const Statement* other) const override {
+    auto other_saddr = dynamic_cast<const SMemAddress*>(other);
+    if (other_saddr == nullptr) {
+      return false;
+    }
+    // For shared memory address, we compare pointer of the TVs, instead of
+    // using sameAs to compare TVs. Because, for example, if I have:
+    // T1_s = set(T0)
+    // T2_s = set(T0)
+    // Then T1_s and T2_s has different address although T1_s->sameAs(T2_s)
+    return other_saddr->smemTv() == smemTv();
+  }
+
   std::string toString(int indent_size = 0) const override;
   std::string toInlineString(int indent_size = 0) const override;
 };
