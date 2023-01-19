@@ -252,6 +252,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
   OP_DECOMPOSE(tensordot);
+  OP_DECOMPOSE(_test_check_tensor);
   OP_DECOMPOSE(tile);
   OP_DECOMPOSE2(trapezoid, x);
   OP_DECOMPOSE2(trapezoid, dx);
