@@ -3706,6 +3706,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
         # AssertionError: Tensor-likes are not equal!
+        # Issue: https://github.com/pytorch/pytorch/issues/70904
         xfail('bitwise_left_shift', device_type='cpu'),
         xfail('bitwise_right_shift', device_type='cpu'),
         # One or more of the overload doesn't have a Batch rule.
