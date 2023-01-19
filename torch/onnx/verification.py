@@ -40,7 +40,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 from torch.onnx import _constants, _experimental, _exporter_states, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, _fx, onnx_proto_utils
+from torch.onnx._internal import _beartype, fx as fx_onnx, onnx_proto_utils
 from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
@@ -1790,16 +1790,14 @@ def verify_model_with_fx_to_onnx_exporter(
     model: Union[torch.nn.Module, Callable],
     input_args: Union[torch.Tensor, Tuple[Any, ...]],
     input_kwargs: Optional[Dict[str, Any]] = None,
-    check_shape: bool = True,
-    check_dtype: bool = True,
-    rtol: float = 0.001,
-    atol: float = 1e-7,
-    acceptable_error_percentage: Optional[float] = None,
+    options: Optional[VerificationOptions] = None,
     opset_version: Optional[int] = GLOBALS.export_onnx_opset_version,
     **_,
 ):
     if input_kwargs is None:
         input_kwargs = {}
+    if options is None:
+        options = VerificationOptions()
 
     # Make reference FX model.
     #
@@ -1816,24 +1814,12 @@ def verify_model_with_fx_to_onnx_exporter(
 
     # Make ONNX model.
     onnx_args, onnx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
-    onnx_model = _fx.export(model, opset_version, *onnx_args, **onnx_kwargs)
+    onnx_model = fx_onnx.export(model, opset_version, *onnx_args, **onnx_kwargs)
 
     with torch.no_grad(), contextlib.ExitStack() as stack:
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
         model_file_path: str = os.path.join(tmpdir_path, "model.onnx")
         onnx.save(onnx_model, model_file_path)
-
-        options = VerificationOptions(
-            rtol=rtol,
-            atol=atol,
-            check_shape=check_shape,
-            check_dtype=check_dtype,
-            acceptable_error_percentage=acceptable_error_percentage,
-            remained_onnx_input_idx=None,
-            flatten=False,
-            ignore_none=True,
-            backend=OnnxBackend.ONNX_RUNTIME_CPU,
-        )
 
         _compare_onnx_pytorch_model(
             fx_model,
