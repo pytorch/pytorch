@@ -220,10 +220,11 @@ class IndexingDiv(sympy.Function):
     """
 
     nargs = (2,)
+    precedence = 50  # precedence of mul  # noqa: F811
 
     def _sympystr(self, printer):
-        base = printer.parenthesize(self.args[0], 50)
-        divisor = printer.parenthesize(self.args[1], 50)
+        base = printer.parenthesize(self.args[0], self.precedence)
+        divisor = printer.parenthesize(self.args[1], self.precedence)
         return f"{base}//{divisor}"
 
     @classmethod
