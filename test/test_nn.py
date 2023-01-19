@@ -13,6 +13,7 @@ from itertools import product
 from functools import partial
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
+from unittest import SkipTest
 
 import torch
 
@@ -11966,6 +11967,9 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
+        if torch.device(device).type == 'xla' and foreach:
+            raise SkipTest('foreach not supported on XLA')
+
         l = nn.Linear(10, 10).to(device)
         clip_value = 2.5
 
@@ -11991,6 +11995,9 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
+        if torch.device(device).type == 'xla' and foreach:
+            raise SkipTest('foreach not supported on XLA')
+
         l = nn.Linear(10, 10).to(device)
         max_norm = 2
 
