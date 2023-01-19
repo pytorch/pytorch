@@ -898,18 +898,18 @@ class ComplexFloatStorage(_CudaLegacyStorage):
 del _LegacyStorage
 del _CudaLegacyStorage
 
-torch._storage_classes.add(DoubleStorage)
-torch._storage_classes.add(FloatStorage)
-torch._storage_classes.add(LongStorage)
-torch._storage_classes.add(IntStorage)
-torch._storage_classes.add(ShortStorage)
-torch._storage_classes.add(CharStorage)
-torch._storage_classes.add(ByteStorage)
-torch._storage_classes.add(HalfStorage)
-torch._storage_classes.add(BoolStorage)
-torch._storage_classes.add(BFloat16Storage)
-torch._storage_classes.add(ComplexDoubleStorage)
-torch._storage_classes.add(ComplexFloatStorage)
+torch._storage_classes.add(DoubleStorage)  # type: ignore[has-type]
+torch._storage_classes.add(FloatStorage)  # type: ignore[has-type]
+torch._storage_classes.add(LongStorage)  # type: ignore[has-type]
+torch._storage_classes.add(IntStorage)  # type: ignore[has-type]
+torch._storage_classes.add(ShortStorage)  # type: ignore[has-type]
+torch._storage_classes.add(CharStorage)  # type: ignore[has-type]
+torch._storage_classes.add(ByteStorage)  # type: ignore[has-type]
+torch._storage_classes.add(HalfStorage)  # type: ignore[has-type]
+torch._storage_classes.add(BoolStorage)  # type: ignore[has-type]
+torch._storage_classes.add(BFloat16Storage)  # type: ignore[has-type]
+torch._storage_classes.add(ComplexDoubleStorage)  # type: ignore[has-type]
+torch._storage_classes.add(ComplexFloatStorage)  # type: ignore[has-type]
 
 from . import sparse
 from . import profiler

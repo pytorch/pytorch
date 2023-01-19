@@ -756,6 +756,8 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
+            elif var.name.startswith("s"):
+                pass
             else:
                 # var is one of xN, yN or rN
                 assert var.name[0] in "xyr", var.name

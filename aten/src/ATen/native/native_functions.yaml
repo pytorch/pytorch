@@ -3741,6 +3741,16 @@
     CompositeExplicitAutograd: mkldnn_convolution
   autogen: mkldnn_convolution.out
 
+- func: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: mkldnn_rnn_layer
+  autogen: mkldnn_rnn_layer.out
+
+- func: mkldnn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: mkldnn_rnn_layer_backward
+  autogen: mkldnn_rnn_layer_backward.out
+
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: miopen_batch_norm
@@ -5020,27 +5030,6 @@
   device_check: NoCheck
   device_guard: False
 
-- func: sym_size.int(Tensor self, int dim) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: canonical
-  manual_cpp_binding: True
-
-- func: sym_numel(Tensor self) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: canonical
-  manual_cpp_binding: True
-
-- func: sym_storage_offset(Tensor self) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: canonical
-  manual_cpp_binding: True
-
 - func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5314,13 +5303,6 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-
-- func: sym_stride.int(Tensor self, int dim) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: canonical
-  manual_cpp_binding: True
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6473,6 +6455,12 @@
     # broadcasting
     SparseCPU: s_addmm_sparse_dense_cpu_
     SparseCUDA: s_addmm_sparse_dense_cuda_
+
+- func: _triton_bsr_dense_mm(Tensor bsr, Tensor dense) -> Tensor
+  variants: function
+  dispatch:
+    CPU: triton_bsr_dense_mm
+  autogen: _triton_bsr_dense_mm.out
 
 - func: _addmm_activation.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
