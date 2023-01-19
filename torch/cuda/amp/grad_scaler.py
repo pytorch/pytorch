@@ -2,7 +2,7 @@ import torch
 from collections import defaultdict, abc
 import warnings
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 from .common import amp_definitely_not_available
 
 
@@ -329,7 +329,16 @@ class GradScaler(object):
             # The contract with custom optimizers is that their step() should accept an additional,
             # optional grad_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
             # it can query its own state, invoke unscale_ on itself, etc
-            retval = optimizer.step(*args, **dict(kwargs, grad_scaler=self))
+            scaler = self._get_scale_async()
+            found_inf = cast(
+                torch.Tensor,
+                sum([
+                    t.to(scaler.device, non_blocking=True) for t in self._check_inf_per_device(optimizer).values()
+                ])
+            )
+            optimizer.grad_scale = scaler
+            optimizer.found_inf = found_inf
+            retval = optimizer.step(*args)
             optimizer_state["stage"] = OptState.STEPPED
             return retval
 
