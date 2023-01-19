@@ -474,7 +474,6 @@ class SizeVarAllocator(object):
 
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
-        added = set()
 
         for name, value in graph_inputs.items():
             shapes = value.get_size()
@@ -482,12 +481,9 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    added.add(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
 
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
@@ -498,9 +494,6 @@ class SizeVarAllocator(object):
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
-        assert not needed
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr

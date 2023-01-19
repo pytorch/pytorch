@@ -4,6 +4,7 @@ import logging
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
+import math
 
 import sympy
 
@@ -1536,11 +1537,10 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
-    if isinstance(value, (int, float)):
 
+    if isinstance(value, (int, float, sympy.Expr)):
         def inner_fn(index):
             return ops.constant(value, dtype)
-
     else:
         assert len(value.get_size()) == 0
         value_loader = value.make_loader()
@@ -3681,10 +3681,29 @@ def op_mul(a, b):
 def op_add(a, b):
     return a + b
 
+@register_lowering(operator.sub)
+def op_add(a, b):
+    return a - b
 
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
     return IndexingDiv(a, b)
+
+@register_lowering(operator.truediv)
+def op_truediv(a, b):
+    return a / b
+
+@register_lowering(math.ceil)
+def op_ceil(a):
+    return sympy.ceiling(a)
+
+@register_lowering(math.floor)
+def op_floor(a):
+    return sympy.floor(a)
+
+@register_lowering(torch.sym_float)
+def op_sym_float(a):
+    return a
 
 
 @register_lowering(aten._foobar)
