@@ -56,7 +56,7 @@ http_archive(
 new_local_repository(
     name = "opt_cache_lib",
     build_file = "//:tools/opt_cache_lib.BUILD",
-    path = "/opt/cache/lib",
+    path = "tools/opt_cache_lib",
 )
 
 new_local_repository(

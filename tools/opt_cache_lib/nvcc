@@ -1,0 +1,6 @@
+#!/bin/sh
+if [ $(env -u LD_PRELOAD ps -p $PPID -o comm=) != sccache ]; then
+  exec sccache /usr/local/cuda/bin/nvcc "$@"
+else
+  exec /usr/local/cuda/bin/nvcc "$@"
+fi
