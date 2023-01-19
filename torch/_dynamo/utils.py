@@ -150,7 +150,7 @@ def dynamo_timed(original_function=None, phase_name=None):
             r = func(*args, **kwargs)
             time_spent = time.time() - t0
             # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-            compilation_metrics[key].append(frame_phase_timing)
+            compilation_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
