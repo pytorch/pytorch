@@ -531,7 +531,7 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   }
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
 
-  auto retains_grad_hook = [weak_self](const at::TensorBase& grad_base) {
+  auto retain_grad_hook = [weak_self](const at::TensorBase& grad_base) {
     at::Tensor grad{grad_base};
     if (!weak_self.expired() && grad.defined()) {
       auto var = weak_self.lock();
@@ -550,7 +550,7 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
 
   const auto& fn = self.grad_fn();
   std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionSingleTensorPreHook(
-      std::move(retains_grad_hook), self.output_nr())};
+      std::move(retain_grad_hook), self.output_nr())};
   fn->add_retains_grad_hook(std::move(hook_ptr), self.output_nr());
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
@@ -702,6 +702,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
+
       torch::autograd::impl::update_cpp_hooks_on_new_gradfn(
           self, old_fn, diff_view_meta->grad_fn_);
     }

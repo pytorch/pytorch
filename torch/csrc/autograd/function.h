@@ -501,7 +501,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   std::unique_ptr<FunctionPreHook> pop_retains_grad_hook(int output_idx) {
     auto ret = std::move(retains_grad_hooks_[output_idx]);
     retains_grad_hooks_.erase(output_idx);
-    return std::move(ret);
+    return ret;
   }
 
   const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks()
