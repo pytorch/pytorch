@@ -851,6 +851,56 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 6)
 
 
+    def test_meth_default_tensor_args_2(self):
+        from collections import UserDict
+
+        class BatchEncoding(UserDict):
+            """
+            Copied from tokenization
+            """
+
+            def __init__(
+                self,
+                data,
+            ):
+                super().__init__(data)
+
+            def func(self, default_tensor=torch.ones(1, 4)):
+                default_tensor.add_(1)
+                return default_tensor
+
+
+        def tokenization(x):
+            encoding = BatchEncoding({"key": x})
+            out = encoding.func()
+            return out
+
+        inp = torch.ones((1, 4))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_tokenization = torch.compile(tokenization, backend=cnts)
+        for i in range(4):
+            if i % 2 == 0:
+                x = tokenization(inp)
+            else:
+                x = opt_tokenization(inp)
+            print(f"i {i}: x={x}")
+            # the inner func mutates += 1 each call
+            self.assertTrue(same(x, torch.ones_like(inp) + i + 1))
+        # Calling compiled_func twice does not recompile
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        # But with a change to the guarded default tensor, we do recompile
+        with patch.object(
+            BatchEncoding.func,
+            "__defaults__",
+            (torch.ones((1, 4) * 10),),
+        ):
+            x = opt_tokenization(x)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
