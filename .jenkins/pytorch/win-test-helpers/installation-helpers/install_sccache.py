@@ -13,16 +13,22 @@ if 'REBUILD' not in os.environ:
         try:
             result = subprocess.run(tmp_dir_win + '\\bin\\sccache.exe --show-stats', shell=True)
             result.check_returncode()
-            
+
             break
 
         except Exception as e:
 
             subprocess.run('taskkill /im sccache.exe /f /t', shell=True)
 
-            os.remove(tmp_dir_win + '\\bin\\sccache.exe')
+            try:
+                os.remove(tmp_dir_win + '\\bin\\sccache.exe')
+            except Exception as e:
+                pass
 
-            os.remove(tmp_dir_win + '\\bin\\sccache-cl.exe')
+            try:
+                os.remove(tmp_dir_win + '\\bin\\sccache-cl.exe')
+            except Exception as e:
+                pass
 
 
             if 'BUILD_ENVIRONMENT' not in os.environ:
