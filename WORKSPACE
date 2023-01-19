@@ -3,10 +3,9 @@ workspace(name = "pytorch")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
-http_archive(
+local_repository(
     name = "rules_cuda",
-    strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
-    urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
+    path = "tools/rules_cuda",
 )
 
 load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
