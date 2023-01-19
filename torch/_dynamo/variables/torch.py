@@ -761,7 +761,15 @@ class TorchPyOperator(VariableTracker):
                     "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
                 )
 
-                tx.output.side_effects.prune_dead_object_new(tx)
+                tx.output.side_effects.prune_dead_object_new(
+                    tx,
+                    # New cells are created for all closure variables, including functions in outer scope.
+                    # These "side effects" should not be pruned, o/w it causes a diff between branches.
+                    # We shouldn't care when branches call different sets of functions in outer scope.
+                    live_new_objects=set(
+                        checkpoint.output.side_effects.store_attr_mutations.keys()
+                    ),
+                )
                 state = tx.copy_graphstate()
 
                 guards = state.output.guards
