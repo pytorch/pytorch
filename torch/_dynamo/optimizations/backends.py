@@ -28,6 +28,11 @@ def register_backend(fn):
 
 
 def create_backend(fn):
+    """
+    WARNING: We do not recommend using this for new backends.  This is
+    primarily used to support legacy TorchScript-based backends.
+    """
+
     @functools.wraps(fn)
     def inner(model, example_inputs=None, **kwargs):
         if model is None:
@@ -46,6 +51,14 @@ def create_backend(fn):
 
     BACKENDS[fn.__name__] = inner
     return inner
+
+
+@register_backend
+def inductor(*args, **kwargs):
+    # do import here to avoid loading inductor into memory when it is not used
+    from torch._inductor.compile_fx import compile_fx
+
+    return compile_fx(*args, **kwargs)
 
 
 @create_backend

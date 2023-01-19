@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo
 )
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 
@@ -645,6 +646,75 @@ class TestOptim(TestCase):
                 )
             )
 
+
+    def _test_derived_optimizers_varying_tensors(self, optimizer_with_kwargs, kwarg):
+        if not torch.cuda.is_available():
+            return
+        assert kwarg in ("foreach", "fused")
+
+        # Specifically test that inputting params of different dtypes and devices
+        # is handled equivalently on the foreach and fused implementations as the
+        # single tensor implementations. We need multiple GPUs (vs just a CPU and
+        # GPU) because fused adam only works on GPUs. (Thus we only run the tests
+        # that call into this helper when TEST_MULTIGPU.)
+        params = [
+            torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float32, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float16, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float64, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float32, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float16, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:1', requires_grad=True),
+            torch.randint(1024, (2, 3), dtype=torch.int64, device='cuda:1', requires_grad=False),
+        ]
+
+        for p in params:
+            if p.requires_grad:
+                p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
+
+        for optimizer_constructor, kwargs in optimizer_with_kwargs:
+            res, state = [], []
+            for enabled in (False, True):
+                kwargs_clone = deepcopy(kwargs)
+                kwargs_clone[kwarg] = enabled
+
+                params_clone = []
+                for p in params:
+                    p_clone = p.clone().detach()
+                    if p.requires_grad:
+                        p_clone.requires_grad = True
+                        p_clone.grad = p.grad.clone().detach()
+                        params_clone.append(p_clone)
+
+                optimizer = optimizer_constructor(params_clone, **kwargs_clone)
+                optimizer.step()
+
+                state.append(optimizer.state)
+                res.append(params_clone)
+
+            st_state = state[0]
+            mt_state = state[1]
+            for st_p, mt_p in zip(res[0], res[1]):
+                self.assertEqual(st_p, mt_p)
+
+                # check that optimizer states are the same
+                st_p_state = st_state[st_p]
+                mt_p_state = mt_state[mt_p]
+
+                for k in st_p_state:
+                    actual = mt_p_state[k]
+                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
+                    # `step` Tensor is 1D while usually it's 0D.
+                    if (
+                        k == "step"
+                        and isinstance(actual, torch.Tensor)
+                        and actual.ndim == 1
+                    ):
+                        actual = actual[0]
+                    self.assertEqual(st_p_state[k], actual)
+
+
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
@@ -750,6 +820,44 @@ class TestOptim(TestCase):
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags, "foreach")
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_multi_tensor_optimizers_with_varying_tensors(self):
+        optimizer_pairs_with_flags = [
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, fused=False)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=False, fused=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=True, fused=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, fused=False)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False)),
+            # TODO: add NAdam, which currently is not accurate enough for the standard atols.
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
+            ),
+            (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
+            (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.ASGD, dict(weight_decay=0)),
+            (optim.ASGD, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0)),
+            (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adadelta, dict(weight_decay=0)),
+            (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0)),
+            (optim.Adagrad, dict(weight_decay=1)),
+        ]
+        self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
+
     def test_fused_optimizers(self):
         optimizer_pairs_with_flags = [
             (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
@@ -758,6 +866,16 @@ class TestOptim(TestCase):
             (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_fused_optimizers_with_varying_tensors(self):
+        optimizer_pairs_with_flags = [
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
+        ]
+        self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "fused")
 
     def test_adam(self):
         self._test_basic_cases(

@@ -9,10 +9,11 @@ import threading
 from typing import List
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 
 from .. import config
 from ..ir import ReductionHint, TileHint
-from ..utils import conditional_product, dynamo_utils, has_triton
+from ..utils import conditional_product, has_triton
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -139,7 +140,7 @@ class CachingAutotuner(KernelInterface):
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides

@@ -78,7 +78,6 @@ fi
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
-TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 _UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
 _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 
@@ -273,12 +272,6 @@ case "$image" in
   ;;
 esac
 
-# Set Jenkins UID and GID if running Jenkins
-if [ -n "${JENKINS:-}" ]; then
-  JENKINS_UID=$(id -u jenkins)
-  JENKINS_GID=$(id -g jenkins)
-fi
-
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 #when using cudnn version 8 install it separately from cuda
@@ -295,17 +288,12 @@ fi
 docker build \
        --no-cache \
        --progress=plain \
-       --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "THRIFT=${THRIFT:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
-       --build-arg "EC2=${EC2:-}" \
-       --build-arg "JENKINS=${JENKINS:-}" \
-       --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
-       --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
