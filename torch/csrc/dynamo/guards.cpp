@@ -34,13 +34,17 @@ class TensorCheck {
         requires_grad_(state.grad_mode_enabled && v.requires_grad()),
         dynamic_shapes_(dynamic_shapes) {
     auto ndim = v.ndimension();
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
-    sizes_.reserve(ndim);
-    strides_.reserve(ndim);
-    for (auto i : c10::irange(ndim)) {
-      sizes_.emplace_back(sizes[i]);
-      strides_.emplace_back(strides[i]);
+    // FIXME: add path for nested when removing graph break
+    // this seemed to be hit despite breaking the graph on nested tensors
+    if (!v.is_nested()) {
+      const auto& sizes = v.sizes();
+      const auto& strides = v.strides();
+      sizes_.reserve(ndim);
+      strides_.reserve(ndim);
+      for (auto i : c10::irange(ndim)) {
+        sizes_.emplace_back(sizes[i]);
+        strides_.emplace_back(strides[i]);
+      }
     }
   }
 
@@ -50,6 +54,11 @@ class TensorCheck {
         device_index_ != v.device().index() ||
         requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
       return false;
+    }
+    // FIXME: skipping size stride logic for nested for now
+    // this shouldn't be hit because of graph breaks on nested
+    if (v.is_nested()) {
+      return true;
     }
     auto ndim = static_cast<size_t>(v.ndimension());
     if (ndim != sizes_.size()) {
@@ -99,6 +108,11 @@ class TensorCheck {
       fail_reason << "requires_grad mismatch. expected requires_grad="
                   << requires_grad_;
       return fail_reason.str();
+    }
+    // FIXME: skipping size stride logic for nested for now
+    // this shouldn't be hit because of graph breaks on nested
+    if (v.is_nested()) {
+      return "";
     }
     size_t ndim = static_cast<size_t>(v.ndimension());
     if (ndim != sizes_.size()) {

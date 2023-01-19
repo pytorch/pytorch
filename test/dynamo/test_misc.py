@@ -1227,6 +1227,47 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    def test_graph_breaks_on_nested_tensor(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, y, z):
+            # this should be the first subgraph
+            a = torch.cos(x)
+            b = torch.sin(y)
+            # graph should break here
+            c = torch.nested.nested_tensor([a, b])
+            d = torch.tanh(c)
+            e = torch.nested.to_padded_tensor(d, padding=0)
+            # this should be the second subgraph
+            f = torch.cos(z)
+            g = torch.tanh(e)
+            return f, g
+
+        opt_fn_cnts = torch._dynamo.optimize(cnts)(fn)
+        opt_fn_cnts(torch.randn(4, 5), torch.randn(2, 3), torch.randn(3, 4))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+        a, b, c = torch.randn(4, 5), torch.randn(2, 3), torch.randn(3, 4)
+        ref = fn(a, b, c)
+        torch._dynamo.reset()
+        opt_fn_eager = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn_eager(a, b, c)
+        self.assertTrue(same(ref, res))
+
+    def test_nested_tensor_no_graph_when_no_dense(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, y):
+            c = torch.nested.nested_tensor([x, y])
+            d = torch.tanh(c)
+            return d
+
+        opt_fn_cnts = torch._dynamo.optimize(cnts)(fn)
+        opt_fn_cnts(torch.randn(4, 5), torch.randn(2, 3))
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
+
     def test_torch_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

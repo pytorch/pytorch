@@ -1049,6 +1049,10 @@ def get_fake_value(node, tx):
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.UnsupportedFakeTensorException
+        ):
+            unimplemented(f"unsupported fake operator: {cause.reason}")
         raise TorchRuntimeError() from e
 
 
