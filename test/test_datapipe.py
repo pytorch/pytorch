@@ -436,6 +436,7 @@ class TestIterableDataPipeBasic(TestCase):
                 rec[i][1].close()
         self.assertEqual(count, 8)
 
+        # testing the keep_key option
         datapipe4 = dp.iter.Grouper(datapipe1, group_key_fn=group_fn, keep_key=True, group_size=2)
 
         def order_fn(data):

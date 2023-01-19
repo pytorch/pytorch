@@ -1,10 +1,10 @@
 from collections import defaultdict
 from enum import IntEnum
+from typing import Any, Callable, DefaultDict, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
-from typing import Any, Callable, DefaultDict, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 __all__ = [
     "BatcherIterDataPipe",
@@ -217,7 +217,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         datapipe: Iterable datapipe to be grouped
         group_key_fn: Function used to generate group key from the data of the source datapipe
         keep_key: Option to yield the matching key along with the items in a tuple,
-            resulting in `(key, item)`        
+            resulting in `(key, [items])` otherwise returning [items]
         buffer_size: The size of buffer for ungrouped data
         group_size: The max size of each group, a batch is yielded as soon as it reaches this size
         guaranteed_group_size: The guaranteed minimum group size to be yielded in case the buffer is full
@@ -245,9 +245,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 group_key_fn: Callable,
+                 group_key_fn: Callable[[T_co], Any],
                  *,
-                 keep_key: bool = False,                 
+                 keep_key: bool = False,
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
@@ -256,7 +256,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
 
-        self.keep_key = keep_key        
+        self.keep_key = keep_key
         self.max_buffer_size = buffer_size
         self.buffer_elements: DefaultDict[Any, List] = defaultdict(list)
         self.curr_buffer_size = 0
@@ -299,7 +299,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.curr_buffer_size += 1
 
             if self.group_size is not None and self.group_size == len(self.buffer_elements[key]):
-                result = self.wrapper_class(self.buffer_elements[key])
+                result: DataChunk[Any] = self.wrapper_class(self.buffer_elements[key])
                 yield (key, result) if self.keep_key else result
                 self.curr_buffer_size -= len(self.buffer_elements[key])
                 del self.buffer_elements[key]
@@ -311,12 +311,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                     yield (key, result) if self.keep_key else result
 
         for key in tuple(self.buffer_elements.keys()):
-            res = self.buffer_elements.pop(key)
-            self.curr_buffer_size -= len(res)
-            if self.keep_key:
-                yield key, self.wrapper_class(res)
-            else:
-                yield self.wrapper_class(res)
+            result = self.wrapper_class(self.buffer_elements.pop(key))
+            self.curr_buffer_size -= len(result)
+            yield (key, result) if self.keep_key else result
 
     def reset(self) -> None:
         self.curr_buffer_size = 0
@@ -343,7 +340,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         (
             self.datapipe,
             self.group_key_fn,
-            self.keep_key,            
+            self.keep_key,
             self.max_buffer_size,
             self.group_size,
             self.guaranteed_group_size,
