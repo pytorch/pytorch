@@ -272,10 +272,6 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
-    # For BC; direct access of node is OK too
-    def get_pyobj(self):
-        return self.node
-
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -318,10 +314,6 @@ class SymFloat:
 
     def __repr__(self):
         return self.node.str()
-
-    # For BC; direct access of node is OK too
-    def get_pyobj(self):
-        return self.node
 
 def sym_float(a):
     r""" SymInt-aware utility for float casting.
