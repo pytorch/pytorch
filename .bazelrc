@@ -21,6 +21,9 @@ build --@rules_cuda//cuda:cuda_targets=sm_52
 build --@rules_cuda//cuda:compiler=nvcc
 build --repo_env=CUDA_PATH=/usr/local/cuda
 
+# TEMP DEBUG
+build --sandbox_debug
+
 # Configuration to build without GPU support
 build:cpu-only --define=cuda=false
 # define a separate build folder for faster switching between configs
