@@ -2,11 +2,9 @@ import functools
 import itertools
 import logging
 import os
-import traceback
 import types
 import weakref
-from traceback import FrameSummary
-from typing import cast, Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -17,7 +15,9 @@ from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
+    augment_exc_message,
     BackendCompilerFailed,
+    format_error_msg,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -32,7 +32,6 @@ from .utils import (
     CleanupManager,
     counters,
     dynamo_timed,
-    filter_stack,
     format_bytecode,
     gen_record_file_name,
     guard_failures,
@@ -171,84 +170,6 @@ def has_tensor_in_frame(frame):
     )
 
     return False
-
-
-def format_error_msg(exc, code, record_filename=None, frame=None):
-    msg = os.linesep * 2
-
-    if config.verbose:
-        msg = format_bytecode(
-            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
-        )
-        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-        msg += traceback.format_exc()
-        if hasattr(exc, "real_stack"):
-            msg += (
-                "\n"
-                + "=" * 10
-                + " The above exception occurred while processing the following code "
-                + "=" * 10
-                + "\n\n"
-            )
-            stack_above_dynamo = []
-            if frame is not None:
-                stack_above_dynamo = filter_stack(traceback.extract_stack(frame))
-
-            msg += "".join(
-                traceback.format_list(
-                    stack_above_dynamo + list(reversed(get_real_stack(exc)))
-                )
-            )
-            msg += "\n"
-            msg += "=" * 10
-
-    else:
-        msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
-
-    return msg
-
-
-def get_real_stack(exc) -> List[FrameSummary]:
-    assert hasattr(exc, "real_stack")
-    return cast(List[FrameSummary], exc.real_stack)
-
-
-def augment_exc_message(exc, msg="\n"):
-    if (
-        hasattr(exc, "real_stack")
-        and len(exc.real_stack) > 0
-        and not (config.verbose and config.suppress_errors)
-    ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
-
-    if config.replay_record_enabled and hasattr(exc, "record_filename"):
-        msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
- {config.dynamo_import}.replay('{exc.record_filename}').\n"
-
-    if not config.verbose:
-        msg += (
-            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
-        )
-
-    if hasattr(exc, "inner_exception") and hasattr(
-        exc.inner_exception, "minifier_path"
-    ):
-        msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
-            "this script to find the smallest traced graph which reproduces this error.\n"
-        )
-
-    if not config.suppress_errors:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
-
-    old_msg = "" if len(exc.args) == 0 else exc.args[0]
-    new_msg = old_msg + msg
-    exc.args = (new_msg,) + exc.args[1:]
 
 
 def exception_handler(e, code, frame=None):

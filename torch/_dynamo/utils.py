@@ -183,22 +183,6 @@ def init_logging():
     graph_break_dup_warning_checker.reset()
 
 
-# filter out all frames after entering dynamo
-def filter_stack(stack):
-    user_stack = []
-    for frame in stack:
-        if "convert_frame" in frame.filename:
-            break
-        if (
-            "eval_frame" in frame.filename
-            or f"{config.dynamo_import}.optimize(" in frame.line
-        ):
-            continue
-        user_stack.append(frame)
-
-    return user_stack
-
-
 def format_graph_tabular(graph):
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
