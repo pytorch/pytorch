@@ -192,14 +192,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # Bazel build is run on a linux.2xlarge (or c5.2xlarge) runner with 8 CPU and 16GB of memory.
-  # The build job sometimes fails with 'runner lost communication with the server' flaky error
-  # which indicates that something there crashes the runner process. The most likely reason is
-  # that the build runs out of memory. So trying to follow https://bazel.build/docs/user-manual
-  # to limit the memory the CPU and memory usage, so that we will know even if it crashes with
-  # OOM error instead of crashing the runner and losing all the logs.
-  #
-  # Leave 1 CPU free and use only up to 80% of memory
+  # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
+  # the runner
   BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
   BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
 
