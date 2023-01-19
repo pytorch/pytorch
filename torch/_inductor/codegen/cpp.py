@@ -225,6 +225,14 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.exp()"
 
     @staticmethod
+    def exp2(x):
+        return f"{x}.exp2()"
+
+    @staticmethod
+    def expm1(x):
+        return f"{x}.expm1()"
+
+    @staticmethod
     def erf(x):
         return f"{x}.erf()"
 
@@ -391,10 +399,6 @@ class CppVecOverrides(OpOverrides):
         return f"({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"{x}.expm1()"
-
-    @staticmethod
     def log1p(x):
         return f"{x}.log1p()"
 
@@ -425,6 +429,14 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def exp2(x):
+        return f"std::exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def erf(x):
         return f"std::erf({x})"
 
@@ -439,10 +451,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"std::log1p({x})"
-
-    @staticmethod
-    def expm1(x):
-        return f"std::expm1({x})"
 
     @staticmethod
     def tanh(x):
