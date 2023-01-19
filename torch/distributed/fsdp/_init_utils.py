@@ -239,10 +239,10 @@ def _init_ignored_module_states(
     ignored_modules: Optional[Iterable[torch.nn.Module]],
     ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> _FSDPState:
-    assert ignored_modules is None or ignored_parameters is None, (
-        "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
+    assert (
+        ignored_modules is None or ignored_parameters is None
+    ), "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
         Please either pass `ignored_modules` or `ignored_parameters`."
-    )
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params = _get_ignored_params(
         module,
@@ -600,19 +600,14 @@ def _get_ignored_params(
     all_ignored_params: Set[torch.nn.Parameter] = set()
 
     params_in_ignored_modules = set(
-        p
-        for m in ignored_modules
-        for p in m.parameters()
-        if not _is_fsdp_flattened(p)
+        p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
     )
 
     all_ignored_params.update(params_in_ignored_modules)
 
     if ignored_parameters is not None:
         params_in_ignored_parameters = set(
-            p
-            for p in ignored_parameters
-            if not _is_fsdp_flattened(p)
+            p for p in ignored_parameters if not _is_fsdp_flattened(p)
         )
         all_ignored_params.update(params_in_ignored_parameters)
 

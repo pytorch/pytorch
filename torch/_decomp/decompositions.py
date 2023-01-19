@@ -535,7 +535,7 @@ def binary_cross_entropy(
     #     "all elements of input should be between 0 and 1"
     # )
     loss = (target - 1) * torch.maximum(
-        torch.log(1 - self), self.new_full((), -100)
+        torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
     if weight is not None:
         loss = loss * weight
@@ -2754,16 +2754,6 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
-@register_decomposition(aten.zero)
-def zero(input: Tensor) -> Tensor:
-    return torch.fill(input, 0)
-
-
-@register_decomposition([aten.zeros_like])
-def zeros_like(self: Tensor, *args, **kwargs) -> Tensor:
-    return torch.full_like(self, 0, *args, **kwargs)
-
-
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -2773,12 +2763,24 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-register_inplace(aten.add_, aten.add)
-register_inplace(aten.sub_, aten.sub)
-register_inplace(aten.mul_, aten.mul)
-register_inplace(aten.relu_, aten.relu)
-register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.addbmm_, aten.addbmm)
+register_inplace(aten.addmm_, aten.addmm)
+register_inplace(aten.addmv_, aten.addmv)
+register_inplace(aten.baddbmm_, aten.baddbmm)
+register_inplace(aten.cumprod_, aten.cumprod)
+register_inplace(aten.fill_, aten.fill)
+register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
+register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.hardsigmoid_, aten.hardsigmoid)
+register_inplace(aten.index_put_, aten.index_put)
+register_inplace(aten.index_reduce_, aten.index_reduce)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
+register_inplace(aten.logit_, aten.logit)
+register_inplace(aten.relu_, aten.relu)
+register_inplace(aten.renorm_, aten.renorm)
+register_inplace(aten.round_, aten.round)
+register_inplace(aten.scatter_, aten.scatter)
+register_inplace(aten.scatter_add_, aten.scatter_add)
+register_inplace(aten.scatter_reduce_, aten.scatter_reduce)
 register_inplace(aten.silu_, aten.silu)
-register_inplace(aten.zero_, aten.zero)

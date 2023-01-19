@@ -3,7 +3,6 @@ from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import itertools
 import operator
-import builtins
 import math
 import functools
 import threading
@@ -15,7 +14,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, sym_float, sym_int  # noqa: F401
+from torch import SymInt, SymFloat, sym_float, sym_int, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 log = logging.getLogger(__name__)
@@ -24,7 +23,6 @@ try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
-    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -33,7 +31,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
+    "SymDispatchMode", "FloorDiv", "guard_int", "wrap_node",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -103,12 +101,6 @@ def guard_int(a):
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
     assert isinstance(a, int)
-    return a
-
-def guard_float(a):
-    if isinstance(a, SymFloat):
-        return a.node.guard_float("", 0)  # NB: uses Python backtrace
-    assert isinstance(a, float)
     return a
 
 # Drop in replacement for math.sqrt
@@ -205,15 +197,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        # Because there is no SymBool, we wrap bools into SymInt during
-        # construction. So we have to handle bools here.
-        res = self.shape_env.evaluate_expr(self.expr)
-        if res is sympy.sympify(False):
-            return 0
-        elif res is sympy.sympify(True):
-            return 1
-        else:
-            return int(res)
+        return int(self.shape_env.evaluate_expr(self.expr))
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
@@ -225,41 +209,6 @@ class SymNode:
 
 
 if HAS_SYMPY:
-    # Overloaded to be compatible with regular Python.
-    # https://github.com/pytorch/pytorch/issues/90900
-    class Pow(sympy.Function):
-        @classmethod
-        def eval(cls, base, exp):
-            if exp == 0:
-                return sympy.Integer(1)
-            elif base == 0 and exp < 0:
-                raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
-            else:
-                return base ** exp
-
-    # Overloaded to be compatible with regular Python.
-    # https://github.com/pytorch/pytorch/issues/90900
-    class TrueDiv(sympy.Function):
-        @classmethod
-        def eval(cls, base, divisor):
-            if divisor == 0:
-                raise ZeroDivisionError("division by zero")
-            else:
-                return base / divisor
-
-    # NOTE [ SymPy eval and assumptions ]
-    # In eval, we only return values in cases where we always want to evaluate.
-    # In other cases, the result will just be FloorDiv(a, b), which needs to be
-    # evaluated later if necessary.
-    #
-    # We also define is_real=True and provide _eval_* methods to make the SymPy
-    # assumptions system aware of Python floordiv semantics. For instance, this
-    # ensures that correct assumptions are propagated when working with SymPy
-    # Symbols. Two integer Symbols should return an integer result.
-    #
-    # https://peps.python.org/pep-0238/#semantics-of-floor-division
-    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
-    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -269,61 +218,21 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
-        # Default return type. For instance, this applies when both arguments
-        # are Symbols without any assumptions.
-        # See NOTE [ SymPy eval and assumptions ]
-        is_real = True
-
-        @property
-        def base(self):
-            return self.args[0]
-
-        @property
-        def divisor(self):
-            return self.args[1]
-
         def _sympystr(self, printer):
-            base = printer.parenthesize(self.base, self.precedence)
-            divisor = printer.parenthesize(self.divisor, self.precedence)
-            return f"{base}//{divisor}"
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer.parenthesize(lhs, self.precedence)
+            rhs_str = printer.parenthesize(rhs, self.precedence)
+            return f"{lhs_str}//{rhs_str}"
 
-        # Assumptions based on argument types.
-        # See NOTE [ SymPy eval and assumptions ]
-        def _eval_is_real(self):
-            return fuzzy_or([self.base.is_real, self.divisor.is_real])
-
-        def _eval_is_integer(self):
-            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
-
-        # Automatic evaluation.
-        # See NOTE [ SymPy eval and assumptions ]
         @classmethod
         def eval(cls, base, divisor):
-            def check_supported_type(x):
-                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
-                    raise TypeError(
-                        f"unsupported operand type(s) for //: "
-                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                        f", expected integer or real")
-
-            check_supported_type(base)
-            check_supported_type(divisor)
-
-            # We don't provide the same error message as in Python because SymPy
-            # makes it difficult to check the types.
-            if divisor.is_zero:
-                raise ZeroDivisionError("division by zero")
-
-            # We don't cast the return type as in Python because SymPy makes it
-            # difficult to check the types.
-            if base.is_zero:
-                return sympy.S.Zero
+            if base == 0:
+                return sympy.Integer(0)
             if divisor == 1:
-                return sympy.floor(base)
+                return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
-            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
-                return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
@@ -333,15 +242,14 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
-    'pow': lambda a, b: Pow(a, b),
-    'truediv': lambda a, b: TrueDiv(a, b),
+    'pow': lambda a, b: a ** b,
+    'truediv': lambda a, b: a / b,
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
@@ -356,8 +264,8 @@ magic_methods = {
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
-    'min': lambda a, b: sympy.Min(a, b),
-    'max': lambda a, b: sympy.Max(a, b),
+    'sym_min': lambda a, b: sympy.Min(a, b),
+    'sym_max': lambda a, b: sympy.Max(a, b),
     'sym_sqrt': lambda a: sympy.sqrt(a),
 }
 
@@ -369,11 +277,10 @@ unary_magic_methods = {
     'sym_sqrt',
 }
 
-magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max"}
 
-always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
@@ -392,9 +299,10 @@ def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     def binary_magic_impl(self, other):
-        if method in magic_methods_on_builtins:
-            op = getattr(builtins, method)
+        if method in magic_methods_on_submodule:
+            op = getattr(sys.modules[__name__], method)
         else:
+            assert method not in magic_methods_on_math
             op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
@@ -412,30 +320,13 @@ def _make_node_magic(method, func):
             raise
         out = sympy.expand(out)
         pytype: Type
-        # This is not strictly correct. In Python, a**b may return complex when
-        # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
-        # returns a float while both arguments are ints: 2**(-1). Also, max and
-        # min do not type promote. To avoid having data-dependent control flow
-        # here, we just set the type to float if one of the args is a float. In
-        # case of a type mismatch, we assume that it will be detected during
-        # evaluation.
         if method in always_float_magic_methods:
-            pytype = float
-        elif method in ("min", "max") and self.pytype is int and other.pytype is int:
-            # These ops don't type promote. The result type depends on arg
-            # values. But when both args are ints, we can be sure the result is
-            # an int as well. Otherwise, we assume the result is a float and let
-            # one of the cases below handle that. That's not strictly correct,
-            # but it's the best we can do without being data-dependent.
-            pytype = int
-        elif method in always_bool_magic_methods:
-            # This should return bool, but we have no SymBool, see wrap_node.
-            pytype = int
-        elif self.pytype is float or other.pytype is float:
             pytype = float
         else:
             pytype = self.pytype
 
+        # TODO: relational operators actually technically return a
+        # PySymBool, this is a type error
         return SymNode(out, self.shape_env, pytype)
 
     def unary_magic_impl(self):
