@@ -218,6 +218,17 @@ class DeviceMeshTestNDim(DTensorTestBase):
                 if self.rank in ranks:
                     self.assertEqual(global_ranks, ranks.tolist())
 
+    @with_comms
+    def test_device_mesh_hash(self):
+        mesh_tensor_2d = torch.arange(8).reshape(4, 2)
+        mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
+        mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
+        self.assertNotEqual(hash(mesh), hash(mesh2))
+        mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
+        mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
+        self.assertNotEqual(hash(mesh), hash(mesh3))
+        self.assertNotEqual(hash(mesh2), hash(mesh3))
+
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
     @property

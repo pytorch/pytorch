@@ -461,6 +461,7 @@ dtensor_fails = {
     xfail("split"),
     xfail("split", "list_args"),
     xfail("split_with_sizes"),
+    xfail("squeeze", "multiple"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),
