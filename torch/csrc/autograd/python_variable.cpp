@@ -10,10 +10,10 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
-#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -275,8 +275,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   }
 
   c10::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter());
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
   c10::impl::PyInterpreterStatus status;
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
@@ -1760,8 +1759,8 @@ static PyObject* THPVariable_NewWithVar(
     c10::impl::PyInterpreterStatus status) {
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-      getPyInterpreter());
+  auto mb_obj =
+      _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       !mb_obj.has_value() || !mb_obj.value(),
       "Creating a new Tensor subclass ",
