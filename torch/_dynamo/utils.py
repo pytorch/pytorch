@@ -119,8 +119,12 @@ def print_time_report():
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
+    
+    out = ""
     for key, value in total_by_key.items():
-        print(f"{key}:{round(value, 5)}")
+        out = f"{out} {key}:{round(value, 5)}"
+
+    print(out)
 
 
 # dynamo_timed API works as a function decorator
@@ -158,7 +162,7 @@ def dynamo_timed(original_function=None, phase_name=None):
                 assert (
                     phase_name not in frame_phase_timing[frame_key]
                 ), f"Duplicate phase name {phase_name} for frame {frame_key}"
-                frame_phase_timing[frame_key][phase_name] = round(time_spent, 5)
+                frame_phase_timing[frame_key][phase_name] = time_spent
             return r
 
         return time_wrapper
