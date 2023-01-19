@@ -283,6 +283,8 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        if output.is_meta:
+            return output
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
