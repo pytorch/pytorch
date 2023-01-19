@@ -193,6 +193,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    def test_max_intlist(self):
+        def max_intlist(a, b):
+            # try all of list, iterator, tuple.
+            x = max(a.shape)
+            y = max(list(a.shape))
+            z = max(tmp for tmp in b.shape)
+            # only bothering to include this in the test because the testing infra
+            # expects at least one frame in the captured dynamo graph.
+            return a + (x + y + z)
+
+        torch._dynamo.testing.standard_test(self, max_intlist, 2)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()

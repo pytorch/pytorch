@@ -358,7 +358,39 @@ class BuiltinVariable(VariableTracker):
             )
         return super().call_function(tx, args, kwargs)
 
-    def _call_min_max(self, tx, a, b):
+    def _call_min_max(self, tx, *args):
+        if all(isinstance(a, variables.ConstantVariable) for a in args):
+            if self.fn is max:
+                return variables.ConstantVariable(max(a.value for a in args))
+            else:
+                return variables.ConstantVariable(min(a.value, b.value))
+
+        # torch min/max only support two arguments, but python min/max support a variable number.
+        # When given more than 2, reduce over the arguments.
+        if len(args) != 2:
+            if len(args) == 1 and isinstance(args[0], variables.BaseListVariable):
+                args_to_reduce = args[0].items
+            elif len(args) == 1 and isinstance(args[0], variables.ListIteratorVariable):
+                # Need to treat ListIterator specially from BaseList: max() on a python iterator will "use up" the iterator.
+                # Is there / should there be a more idiomatic way to do this?
+                # Maybe manually evaluating an interator in dynamo is uncommon.
+                args_to_reduce = []
+                curr_iter = args[0]
+                while curr_iter.index < len(curr_iter.items):
+                    val, next_iter = curr_iter.next_variables()
+                    args_to_reduce.append(val)
+                    tx.replace_all(curr_iter, next_iter)
+                    curr_iter = next_iter
+            else:
+                assert len(args) > 2, f"min/max was given an invalid set of arguments: {', '.join([type(x) for x in args])}"
+                args_to_reduce = args
+            # manually handle the base case for lists: max(single_element_list) = single_element_list[0]
+            if len(args_to_reduce) == 1:
+                return args_to_reduce[0]
+            return functools.reduce(lambda a, b: self._call_min_max(tx, a, b), args_to_reduce)
+
+        # The normal case: min/max called with two args.
+        a, b = args
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
@@ -427,13 +459,6 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
-        elif isinstance(a, variables.ConstantVariable) and isinstance(
-            b, variables.ConstantVariable
-        ):
-            if self.fn is max:
-                return variables.ConstantVariable(max(a.value, b.value))
-            else:
-                return variables.ConstantVariable(min(a.value, b.value))
         elif isinstance(a, DynamicShapeVariable) or isinstance(b, DynamicShapeVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
