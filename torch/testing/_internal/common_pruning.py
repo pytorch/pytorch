@@ -7,7 +7,10 @@ import torch.nn.functional as F
 from torch import nn
 
 
-def elements_are_subset(subset_tensor, superset_tensor):
+def rows_are_subset(subset_tensor, superset_tensor) -> bool:
+    """
+    Checks to see if all rows in subset tensor are present in the superset tensor
+    """
     i = 0
     for row in subset_tensor:
         while i < len(superset_tensor):

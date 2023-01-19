@@ -16,13 +16,11 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
                 mask = cast(torch.Tensor, p.mask)
 
                 # select weights based on magnitude
-                if weights.dim() > 1:
-                    # take norm over all but first dim
-                    dims = tuple(range(1, weights.dim()))
-                    saliency = weights.abs().norm(dim=dims, p=1)
-                else:
-                    # 1d param: use weights directly
-                    saliency = weights.abs()
+                if weights.dim() <= 1:
+                    raise Exception("Structured pruning can only be applied to a 2+dim weight tensor!")
+                # take norm over all but first dim
+                dims = tuple(range(1, weights.dim()))
+                saliency = weights.norm(dim=dims, p=1)
 
                 # handle weights in 4 groups
                 split_size = len(mask) // 4

@@ -375,9 +375,6 @@ def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: Opt
                 parametrize.remove_parametrizations(
                     lstm, f"weight_ih_l{i}", leave_parametrized=True
                 )
-                parametrize.remove_parametrizations(
-                    lstm, f"bias_ih_l{i}", leave_parametrized=True
-                )
                 setattr(
                     lstm,
                     f"weight_ih_l{i}",
@@ -397,9 +394,6 @@ def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: Opt
             with torch.no_grad():
                 parametrize.remove_parametrizations(
                     lstm, f"weight_hh_l{i}", leave_parametrized=True
-                )
-                parametrize.remove_parametrizations(
-                    lstm, f"bias_hh_l{i}", leave_parametrized=True
                 )
                 # splitting out hidden-hidden masks
                 W_hi, W_hf, W_hg, W_ho = torch.split(

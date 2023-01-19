@@ -29,7 +29,7 @@ from torch.testing._internal.common_pruning import (
     Conv2dPoolFlattenFunctional,
     LSTMLinearModel,
     LSTMLayerNormLinearModel,
-    elements_are_subset,
+    rows_are_subset,
 )
 
 
@@ -107,10 +107,10 @@ class TestSaliencyPruner(TestCase):
                                        [2, 2],
                                        [2, 2],
                                        [1, 1],
-                                       [1, 1],
-                                       [2, 2],
-                                       [2, 2],
-                                       [1, 1]])
+                                       [-1, -1],
+                                       [-2, -2],
+                                       [-2, -2],
+                                       [-1, -1]])
 
         with torch.no_grad():
             model.lstm.weight_ih_l0 = nn.Parameter(manual_weights)
@@ -121,8 +121,6 @@ class TestSaliencyPruner(TestCase):
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.bias_ih_l0"},
-            {"tensor_fqn": "lstm.bias_hh_l0"},
         ]
         lstm_input = torch.ones((1, 2))
         fx_pruner = LSTMSaliencyPruner({"sparsity_level": 0.5})
@@ -141,21 +139,21 @@ class TestSaliencyPruner(TestCase):
         # make sure lowest saliency rows are pruned
         expected = torch.Tensor([[2, 2],
                                  [2, 2],
-                                 [2, 2],
-                                 [2, 2]])
+                                 [-2, -2],
+                                 [-2, -2]])
         pruned = model.lstm.weight_ih_l0
         assert expected.shape == pruned.shape
         assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
 
         expected = torch.Tensor([[2],
                                  [2],
-                                 [2],
-                                 [2]])
+                                 [-2],
+                                 [-2]])
         pruned = model.lstm.weight_hh_l0
         assert expected.shape == pruned.shape
         assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
 
-        expected = torch.Tensor([2, 2, 2, 2])
+        expected = torch.Tensor([2, 2, -2, -2])
         for pruned in [model.lstm.bias_ih_l0, model.lstm.bias_hh_l0]:
             assert expected.shape == pruned.shape
             assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
@@ -768,12 +766,8 @@ class TestBaseStructuredSparsifier(TestCase):
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.bias_ih_l0"},
-            {"tensor_fqn": "lstm.bias_hh_l0"},
             {"tensor_fqn": "lstm.weight_ih_l1"},
             {"tensor_fqn": "lstm.weight_hh_l1"},
-            {"tensor_fqn": "lstm.bias_ih_l1"},
-            {"tensor_fqn": "lstm.bias_hh_l1"},
         ]
 
         lstm_input = torch.ones((1, 8))
@@ -795,7 +789,7 @@ class TestBaseStructuredSparsifier(TestCase):
             # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
             # Instead we check that the weights of the new LSTM are a subset of the weights of
             # the old LSTM
-            assert elements_are_subset(param, expected_params[name])
+            assert rows_are_subset(param, expected_params[name])
             del expected_params[name]
 
         # assert we haven't deleted any keys
@@ -815,8 +809,6 @@ class TestBaseStructuredSparsifier(TestCase):
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.bias_ih_l0"},
-            {"tensor_fqn": "lstm.bias_hh_l0"},
         ]
 
         lstm_input = torch.ones((1, 8))
@@ -857,12 +849,8 @@ class TestBaseStructuredSparsifier(TestCase):
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.bias_ih_l0"},
-            {"tensor_fqn": "lstm.bias_hh_l0"},
             {"tensor_fqn": "lstm.weight_ih_l1"},
             {"tensor_fqn": "lstm.weight_hh_l1"},
-            {"tensor_fqn": "lstm.bias_ih_l1"},
-            {"tensor_fqn": "lstm.bias_hh_l1"},
         ]
 
         lstm_input = torch.ones((1, 8))
@@ -884,7 +872,7 @@ class TestBaseStructuredSparsifier(TestCase):
             # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
             # Instead we check that the weights of the new LSTM are a subset of the weights of
             # the old LSTM
-            assert elements_are_subset(param, expected_params[name])
+            assert rows_are_subset(param, expected_params[name])
             del expected_params[name]
 
         # assert we haven't deleted any keys
@@ -904,8 +892,6 @@ class TestBaseStructuredSparsifier(TestCase):
         config = [
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.bias_ih_l0"},
-            {"tensor_fqn": "lstm.bias_hh_l0"},
         ]
 
         lstm_input = torch.ones((1, 8))
