@@ -112,7 +112,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
-          TORCH_CUDA_ARCH_LIST: "8.6"
+          TORCH_CUDA_ARCH_LIST: "7.0"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
