@@ -2116,7 +2116,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(a=hu.tensor(),
            src=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM.keys())),
-           dst=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM,keys())),
+           dst=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM.keys())),
            use_name=st.booleans(),
            **hu.gcs)
     @settings(deadline=1000)
