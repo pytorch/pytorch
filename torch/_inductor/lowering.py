@@ -288,7 +288,7 @@ def promote_constants(inputs, override_return_dtype=None):
             *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
         return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
-    ex = next(x for x in inputs if isinstance(x, TensorBox))
+    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
