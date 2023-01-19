@@ -571,10 +571,10 @@ def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     return a
 
 
-def zero_(a: TensorLikeType) -> TensorLikeType:
-    r = prims.fill(a, 0)
-    prims.copy_to(a, r)
-    return a
+@register_decomposition(aten.zero)
+@out_wrapper()
+def zero(input: TensorLikeType) -> TensorLikeType:
+    return torch.zeros_like(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -4129,7 +4129,7 @@ def new_zeros(
 
     return torch.full(
         size,
-        False if dtype == torch.bool else 0,
+        False if (dtype or a.dtype) == torch.bool else 0,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4181,7 +4181,7 @@ def new_ones(
 
     return torch.full(
         size,
-        True if dtype == torch.bool else 1,
+        True if (dtype or a.dtype) == torch.bool else 1,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4693,10 +4693,50 @@ def full_like(
     return fill(e, fill_value)
 
 
-zeros_like = partial(full_like, fill_value=False)
+@register_decomposition(aten.zeros_like)
+def zeros_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        False if (dtype or a.dtype) == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
-ones_like = partial(full_like, fill_value=True)
+@register_decomposition(aten.ones_like)
+def ones_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        True if (dtype or a.dtype) == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
 @register_decomposition(aten.randn.default)
@@ -4781,13 +4821,12 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
         # `masked_fill` allows cpu scalar to be moved to cuda but not otherwise.
+        is_cpu_scalar = a.device.type == "cuda" and value.device.type == "cpu"
         check(
-            a.device.type == "cuda" or value.device == a.device,
+            is_cpu_scalar or value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",
         )
         value_type = utils.dtype_to_type(value.dtype)
-        if utils.is_cpu_scalar_tensor(value):
-            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -4801,15 +4840,21 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
-    if isinstance(value, Number):
-        r = torch.where(mask, python_type(value), a)
-    else:
-        assert isinstance(value, TensorLike)
-        r = torch.where(mask, prims.to_dtype(value, a.dtype), a)
+    value = _maybe_convert_to_dtype(value, a.dtype)
+    r = torch.where(mask, value, a)  # type: ignore[arg-type]
 
     # aten.mask_fill always return a new contiguous tensor
     # contiguous() is needed to correctly model the output stride
     return r.contiguous()
+
+
+@register_decomposition(aten.masked_fill_)
+def masked_fill_(
+    a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType
+) -> TensorLikeType:
+    b = torch.masked_fill(a, mask, value)  # type: ignore[arg-type]
+    a.copy_(b)
+    return a
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -5134,10 +5179,22 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+@register_decomposition(aten.exponential)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def exponential(self, rate=1, generator=None):
+    assert generator is None
+    return -1 / rate * torch.log1p(-torch.rand_like(self))
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
 acosh_ = _make_inplace(acosh)
+add_ = _make_inplace(add)
 addcmul_ = _make_inplace(addcmul)
 addcdiv_ = _make_inplace(addcdiv)
 asin_ = _make_inplace(asin)
@@ -5145,6 +5202,12 @@ asinh_ = _make_inplace(asinh)
 atan_ = _make_inplace(atan)
 atanh_ = _make_inplace(atanh)
 atan2_ = _make_inplace(atan2)
+bitwise_and_ = _make_inplace(bitwise_and)
+bitwise_left_shift_ = _make_inplace(bitwise_left_shift)
+bitwise_not_ = _make_inplace(bitwise_not)
+bitwise_or_ = _make_inplace(bitwise_or)
+bitwise_right_shift_ = _make_inplace(bitwise_right_shift)
+bitwise_xor_ = _make_inplace(bitwise_xor)
 ceil_ = _make_inplace(ceil)
 clamp_ = _make_inplace(clamp)
 clamp_min_ = _make_inplace(clamp_min)
@@ -5168,12 +5231,15 @@ floor_ = _make_inplace(floor)
 floor_divide_ = _make_inplace(floor_divide)
 fmod_ = _make_inplace(fmod)
 frac_ = _make_inplace(frac)
+gcd_ = _make_inplace(gcd)
 ge_ = _make_inplace(ge)
 gt_ = _make_inplace(gt)
 heaviside_ = _make_inplace(heaviside)
 hypot_ = _make_inplace(hypot)
 igamma_ = _make_inplace(igamma)
 igammac_ = _make_inplace(igammac)
+i0_ = _make_inplace(i0)
+lcm_ = _make_inplace(lcm)
 le_ = _make_inplace(le)
 lerp_ = _make_inplace(lerp)
 lgamma_ = _make_inplace(lgamma)
@@ -5182,9 +5248,11 @@ log1p_ = _make_inplace(log1p)
 log2_ = _make_inplace(log2)
 log_ = _make_inplace(log)
 logical_and_ = _make_inplace(logical_and)
+logical_not_ = _make_inplace(logical_not)
 logical_or_ = _make_inplace(logical_or)
 logical_xor_ = _make_inplace(logical_xor)
 lt_ = _make_inplace(lt)
+mul_ = _make_inplace(mul)
 mvlgamma_ = _make_inplace(mvlgamma)
 nan_to_num_ = _make_inplace(nan_to_num)
 ne_ = _make_inplace(ne)
@@ -5202,6 +5270,7 @@ sinc_ = _make_inplace(sinc)
 sinh_ = _make_inplace(sinh)
 sqrt_ = _make_inplace(sqrt)
 square_ = _make_inplace(square)
+sub_ = _make_inplace(sub)
 tan_ = _make_inplace(tan)
 tanh_ = _make_inplace(tanh)
 tril_ = _make_inplace(tril)
@@ -5209,6 +5278,8 @@ triu_ = _make_inplace(triu)
 true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
+exponential_ = _make_inplace(exponential)
+zero_ = _make_inplace(zero)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
