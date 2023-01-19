@@ -30,8 +30,11 @@ __host__ __device__ c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<sca
 template <typename scalar_t>
 __host__ __device__ scalar_t _log_add_exp_helper(scalar_t x, scalar_t y) {
   // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
-  scalar_t min = at::_isnan(y) ? y : std::min(x, y); // std::min returns first arg if one of the args is nan
-  scalar_t max = at::_isnan(y) ? y : std::max(x, y); // std::max returns first arg if one of the args is nan
+  // Using the original expression: `at::_isnan(y) ? y : std::min(x, y)` causes an error in ROCM
+  auto isnan_x = at::_isnan(x);
+  auto isnan_y = at::_isnan(y);
+  scalar_t min = isnan_y ? y : (isnan_x ? x : std::min(x, y));
+  scalar_t max = isnan_y ? y : (isnan_x ? x : std::max(x, y));
   if (min != max || ::isfinite(min)) {
     // nan will be propagated here
     return ::log1p(std::exp(min - max)) + max;
