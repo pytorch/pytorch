@@ -260,41 +260,6 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     return L, infos
 
 
-@register_meta(aten.unsafe_split_with_sizes.default)
-def unsafe_split_with_sizes_meta(self, split_sizes, dim=0):
-    num_splits = len(split_sizes)
-    start_idx = 0
-    splits = []
-    for i in range(num_splits):
-        length = split_sizes[i]
-        splits.append(
-            torch.ops.aten.slice.Tensor(self, dim, start_idx, start_idx + length, 1)
-        )
-        start_idx += length
-    return splits
-
-
-@register_meta(aten.unsafe_split.Tensor)
-def unsafe_split_with_meta(self, split_size, dim=0):
-    def get_num_splits(self, split_size, dim=0):
-        dim_size = self.size(dim)
-        num_splits = 1
-        if split_size != 0:
-            num_splits = max((dim_size + split_size - 1) // split_size, 1)
-        return num_splits
-
-    num_splits = get_num_splits(self, split_size, dim)
-
-    last_split_size = split_size - (split_size * num_splits - self.size(dim))
-    splits = []
-    for i in range(num_splits):
-        if i < num_splits - 1:
-            splits.append(self.narrow(dim, i * split_size, split_size))
-        else:
-            splits.append(self.narrow(dim, i * split_size, last_split_size))
-    return splits
-
-
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_inv_ex.default)
 def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
