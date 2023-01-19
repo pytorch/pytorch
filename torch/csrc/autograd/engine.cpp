@@ -1384,8 +1384,6 @@ auto Engine::start_device_threads() -> void {
     }
   }
 
-  num_devices = std::min(num_devices, (c10::DeviceIndex) device_ids.size());
-
   // If there are no device except cpu, no need to create worker threads
   if (num_devices == 0) {
     return;
@@ -1403,7 +1401,12 @@ auto Engine::start_device_threads() -> void {
   }
 
   for (const auto i : c10::irange(num_devices)) {
-    std::thread t(&Engine::thread_init, this, device_ids[i], device_ready_queues_[i], true);
+    std::thread t(
+        &Engine::thread_init,
+        this,
+        device_ids.back(),
+        device_ready_queues_[i],
+        true);
     t.detach();
   }
   // Wait for the threads to start

@@ -1419,10 +1419,12 @@ class TestAutogradFunctional(TestCase):
     @base_and_logging_tensor
     def test_mixed_cpu_and_cuda_devices(self, ctors):
         a = torch.rand(10, requires_grad=True)
-        a.sum().backward() # This call creates the worker threads, no cuda context here
+        torch.sin(a).sum().backward()
+        self.assertEqual(a.grad, torch.cos(a))
 
         b = torch.rand(10, device="cuda", requires_grad=True)
-        b.sum().backward() # This one will now run with no current device set!!
+        torch.sin(b).sum().backward()
+        self.assertEqual(b.grad, torch.cos(b))
 
 instantiate_parametrized_tests(TestAutogradFunctional)
 
