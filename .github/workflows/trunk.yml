@@ -18,27 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  parallelnative-linux-focal-py3_7-gcc7-build:
-    name: parallelnative-linux-focal-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: parallelnative-linux-focal-py3.7-gcc7
-      docker-image-name: pytorch-linux-focal-py3.7-gcc7
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-        ]}
-
-  parallelnative-linux-focal-py3_7-gcc7-test:
-    name: parallelnative-linux-focal-py3.7-gcc7
-    uses: ./.github/workflows/_linux-test.yml
-    needs: parallelnative-linux-focal-py3_7-gcc7-build
-    with:
-      build-environment: parallelnative-linux-focal-py3.7-gcc7
-      docker-image: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.test-matrix }}
-
   # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-focal-py3_7-gcc7-build:
     name: caffe2-linux-focal-py3.7-gcc7
