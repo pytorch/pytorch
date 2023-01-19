@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+from torch._C import parse_schema
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.dispatch import OpSchema
 
@@ -16,7 +17,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch._C import parse_schema
 
 
 class CommonRulesTest(DTensorTestBase):
@@ -143,9 +143,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        mm_func_schema = parse_schema(
-            "aten::mm(Tensor self, Tensor mat2) -> Tensor"
-        )
+        mm_func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
 
         mat1, mat2 = [0, -1], [-1, -1]
         mat1_spec = DTensorSpec.from_dim_map(mesh, mat1, [1], shape=torch.Size([8, 4]))
