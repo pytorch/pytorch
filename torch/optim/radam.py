@@ -144,7 +144,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             &\hspace{6mm}\rho_t \leftarrow \rho_{\infty} -
                 2 t \beta^t_2 /\big(1-\beta_2^t \big)                                    \\[0.1.ex]
             &\hspace{6mm}\textbf{if} \: \rho_t > 5                                               \\
-            &\hspace{12mm} l_t \leftarrow \sqrt{ (1-\beta^t_2) / \big( v_t +\epsilon \big) }     \\
+            &\hspace{12mm} l_t \leftarrow \frac{\sqrt{ (1-\beta^t_2) }}{ \sqrt{v_t} +\epsilon  } \\
             &\hspace{12mm} r_t \leftarrow
       \sqrt{\frac{(\rho_t-4)(\rho_t-2)\rho_{\infty}}{(\rho_{\infty}-4)(\rho_{\infty}-2) \rho_t}} \\
             &\hspace{12mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t} r_t l_t        \\
@@ -354,6 +354,7 @@ def _multi_tensor_radam(
         unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
+        torch._foreach_add_(exp_avg_sq_sqrt, eps)
         bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
         denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
         step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)])
