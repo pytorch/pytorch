@@ -1,0 +1,8 @@
+#!/bin/bash
+
+if [[ $# != 2 ]]; then
+   echo "Usage: $0 <so> <interface so>" 1>&2
+   exit 1
+fi
+
+exec cp $1 $2

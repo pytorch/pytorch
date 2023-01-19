@@ -1,0 +1,547 @@
+// Copyright 2014 The Bazel Authors. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// File format for Blaze to configure Crosstool releases.
+
+syntax = "proto2";
+
+package com.google.devtools.build.lib.view.config.crosstool;
+
+// option java_api_version = 2;  // copybara-comment-this-out-please
+option java_package = "com.google.devtools.build.lib.view.config.crosstool";
+
+// A description of a toolchain, which includes all the tools generally expected
+// to be available for building C/C++ targets, based on the GNU C compiler.
+//
+// System and cpu names are two overlapping concepts, which need to be both
+// supported at this time. The cpu name is the blaze command-line name for the
+// target system. The most common values are 'k8' and 'piii'. The system name is
+// a more generic identification of the executable system, based on the names
+// used by the GNU C compiler.
+//
+// Typically, the system name contains an identifier for the cpu (e.g. x86_64 or
+// alpha), an identifier for the machine (e.g. pc, or unknown), and an
+// identifier for the operating system (e.g. cygwin or linux-gnu). Typical
+// examples are 'x86_64-unknown-linux-gnu' and 'i686-unknown-cygwin'.
+//
+// The system name is used to determine if a given machine can execute a given
+// executable. In particular, it is used to check if the compilation products of
+// a toolchain can run on the host machine.
+message CToolchain {
+  // A group of correlated flags. Supports parametrization via variable
+  // expansion.
+  //
+  // To expand a variable of list type, flag_group has to be annotated with
+  // `iterate_over` message. Then all nested flags or flag_groups will be
+  // expanded repeatedly for each element of the list.
+  //
+  // For example:
+  // flag_group {
+  //   iterate_over: 'include_path'
+  //   flag: '-I'
+  //   flag: '%{include_path}'
+  // }
+  // ... will get expanded to -I /to/path1 -I /to/path2 ... for each
+  // include_path /to/pathN.
+  //
+  // To expand a variable of structure type, use dot-notation, e.g.:
+  //    flag_group {
+  //      iterate_over: "libraries_to_link"
+  //      flag_group {
+  //        iterate_over: "libraries_to_link.libraries"
+  //        flag: "-L%{libraries_to_link.libraries.directory}"
+  //      }
+  //    }
+  //
+  // Flag groups can be nested; if they are, the flag group must only contain
+  // other flag groups (no flags) so the order is unambiguously specified.
+  // In order to expand a variable of nested lists, 'iterate_over' can be used.
+  //
+  // For example:
+  // flag_group {
+  //   iterate_over: 'object_files'
+  //   flag_group { flag: '--start-lib' }
+  //   flag_group {
+  //     iterate_over: 'object_files'
+  //     flag: '%{object_files}'
+  //   }
+  //   flag_group { flag: '--end-lib' }
+  // }
+  // ... will get expanded to
+  //   --start-lib a1.o a2.o ... --end-lib --start-lib b1.o b2.o .. --end-lib
+  //   with %{object_files} being a variable of nested list type
+  //   [['a1.o', 'a2.o', ...], ['b1.o', 'b2.o', ...], ...].
+  //
+  // TODO(bazel-team): Write more elaborate documentation and add a link to it.
+  message FlagGroup {
+    repeated string flag = 1;
+
+    repeated FlagGroup flag_group = 2;
+
+    optional string iterate_over = 3;
+
+    repeated string expand_if_all_available = 4;
+
+    repeated string expand_if_none_available = 5;
+
+    optional string expand_if_true = 6;
+
+    optional string expand_if_false = 7;
+
+    optional VariableWithValue expand_if_equal = 8;
+  }
+
+  message VariableWithValue {
+    required string variable = 1;
+
+    required string value = 2;
+  }
+
+  // A key/value pair to be added as an environment variable. The value of
+  // this pair is expanded in the same way as is described in FlagGroup.
+  // The key remains an unexpanded string literal.
+  message EnvEntry {
+    required string key = 1;
+    required string value = 2;
+  }
+
+  // A set of features; used to support logical 'and' when specifying feature
+  // requirements in Feature.
+  message FeatureSet {
+    repeated string feature = 1;
+  }
+
+  // A set of positive and negative features. This stanza will
+  // evaluate to true when every 'feature' is enabled, and every
+  // 'not_feature' is not enabled.
+  message WithFeatureSet {
+    repeated string feature = 1;
+    repeated string not_feature = 2;
+  }
+
+  // A set of flags that are expanded in the command line for specific actions.
+  message FlagSet {
+    // The actions this flag set applies to; each flag set must specify at
+    // least one action.
+    repeated string action = 1;
+
+    // The flags applied via this flag set.
+    repeated FlagGroup flag_group = 2;
+
+    // A list of feature sets defining when this flag set gets applied.  The
+    // flag set will be applied when any one of the feature sets evaluate to
+    // true. (That is, when when every 'feature' is enabled, and every
+    // 'not_feature' is not enabled.)
+    //
+    // If 'with_feature' is omitted, the flag set will be applied
+    // unconditionally for every action specified.
+    repeated WithFeatureSet with_feature = 3;
+
+    // Deprecated (https://github.com/bazelbuild/bazel/issues/7008) - use
+    // expand_if_all_available in flag_group
+    //
+    // A list of build variables that this feature set needs, but which are
+    // allowed to not be set. If any of the build variables listed is not
+    // set, the feature set will not be expanded.
+    //
+    // NOTE: Consider alternatives before using this; usually tools should
+    // consistently create the same set of files, even if empty; use this
+    // only for backwards compatibility with already existing behavior in tools
+    // that are currently not worth changing.
+    repeated string expand_if_all_available = 4;
+  }
+
+  // A set of environment variables that are expanded in the command line for
+  // specific actions.
+  message EnvSet {
+    // The actions this env set applies to; each env set must specify at
+    // least one action.
+    repeated string action = 1;
+
+    // The environment variables applied via this env set.
+    repeated EnvEntry env_entry = 2;
+
+    // A list of feature sets defining when this env set gets applied.  The
+    // env set will be applied when any one of the feature sets evaluate to
+    // true. (That is, when when every 'feature' is enabled, and every
+    // 'not_feature' is not enabled.)
+    //
+    // If 'with_feature' is omitted, the env set will be applied
+    // unconditionally for every action specified.
+    repeated WithFeatureSet with_feature = 3;
+  }
+
+  // Contains all flag specifications for one feature.
+  // Next ID: 8
+  message Feature {
+    // The feature's name. Feature names are generally defined by Bazel; it is
+    // possible to introduce a feature without a change to Bazel by adding a
+    // 'feature' section to the toolchain and adding the corresponding string as
+    // feature in the BUILD file.
+    optional string name = 1;
+
+    // If 'true', this feature is enabled unless a rule type explicitly marks it
+    // as unsupported. Such features cannot be turned off from within a BUILD
+    // file or the command line.
+    optional bool enabled = 7;
+
+    // If the given feature is enabled, the flag sets will be applied for the
+    // actions in the modes that they are specified for.
+    repeated FlagSet flag_set = 2;
+
+    // If the given feature is enabled, the env sets will be applied for the
+    // actions in the modes that they are specified for.
+    repeated EnvSet env_set = 6;
+
+    // A list of feature sets defining when this feature is supported by the
+    // toolchain. The feature is supported if any of the feature sets fully
+    // apply, that is, when all features of a feature set are enabled.
+    //
+    // If 'requires' is omitted, the feature is supported independently of which
+    // other features are enabled.
+    //
+    // Use this for example to filter flags depending on the build mode
+    // enabled (opt / fastbuild / dbg).
+    repeated FeatureSet requires = 3;
+
+    // A list of features or action configs that are automatically enabled when
+    // this feature is enabled. If any of the implied features or action configs
+    // cannot be enabled, this feature will (silently) not be enabled either.
+    repeated string implies = 4;
+
+    // A list of names this feature conflicts with.
+    // A feature cannot be enabled if:
+    // - 'provides' contains the name of a different feature or action config
+    //  that we want to enable.
+    // - 'provides' contains the same value as a 'provides' in a different
+    //   feature or action config that we want to enable.
+    //
+    // Use this in order to ensure that incompatible features cannot be
+    // accidentally activated at the same time, leading to hard to diagnose
+    // compiler errors.
+    repeated string provides = 5;
+  }
+
+  // Describes a tool associated with a crosstool action config.
+  message Tool {
+    // Describes the origin of a path.
+    enum PathOrigin {
+      // Indicates that `tool_path` is relative to the location of the
+      // crosstool. For legacy reasons, absolute paths are als0 allowed here.
+      CROSSTOOL_PACKAGE = 0;
+
+      // Indicates that `tool_path` is an absolute path.
+      // This is enforced by Bazel.
+      FILESYSTEM_ROOT = 1;
+
+      // Indicates that `tool_path` is relative to the current workspace's
+      // exec root.
+      WORKSPACE_ROOT = 2;
+    }
+
+    // Path to the tool, relative to the location of the crosstool.
+    required string tool_path = 1;
+
+    // Origin of `tool_path`.
+    // Optional only for legacy reasons. New crosstools should set this value!
+    optional PathOrigin tool_path_origin = 4 [default = CROSSTOOL_PACKAGE];
+
+    // A list of feature sets defining when this tool is applicable.  The tool
+    // will used when any one of the feature sets evaluate to true. (That is,
+    // when when every 'feature' is enabled, and every 'not_feature' is not
+    // enabled.)
+    //
+    // If 'with_feature' is omitted, the tool will apply for any feature
+    // configuration.
+    repeated WithFeatureSet with_feature = 2;
+
+    // Requirements on the execution environment for the execution of this tool,
+    // to be passed as out-of-band "hints" to the execution backend.
+    // Ex. "requires-darwin"
+    repeated string execution_requirement = 3;
+  }
+
+  // The name for an artifact of a given category of input or output artifacts
+  // to an action.
+  message ArtifactNamePattern {
+    // The category of artifacts that this selection applies to.  This field
+    // is compared against a list of categories defined in bazel. Example
+    // categories include "linked_output" or "debug_symbols". An error is thrown
+    // if no category is matched.
+    required string category_name = 1;
+    // The prefix and extension for creating the artifact for this selection.
+    // They are used to create an artifact name based on the target name.
+    required string prefix = 2;
+    required string extension = 3;
+  }
+
+  // An action config corresponds to a blaze action, and allows selection of
+  // a tool based on activated features.  Action configs come in two varieties:
+  // automatic (the blaze action will exist whether or not the action config
+  // is activated) and attachable (the blaze action will be added to the
+  // action graph only if the action config is activated).
+  //
+  // Action config activation occurs by the same semantics as features: a
+  // feature can 'require' or 'imply' an action config in the same way that it
+  // would another feature.
+  // Next ID: 9
+  message ActionConfig {
+    // The name other features will use to activate this action config.  Can
+    // be the same as action_name.
+    required string config_name = 1;
+
+    // The name of the blaze action that this config applies to, ex. 'c-compile'
+    // or 'c-module-compile'.
+    required string action_name = 2;
+
+    // If 'true', this feature is enabled unless a rule type explicitly marks it
+    // as unsupported.  Such action_configs cannot be turned off from within a
+    // BUILD file or the command line.
+    optional bool enabled = 8;
+
+    // The tool applied to the action will be the first Tool with a feature
+    // set that matches the feature configuration.  An error will be thrown
+    // if no tool matches a provided feature configuration - for that reason,
+    // it's a good idea to provide a default tool with an empty feature set.
+    repeated Tool tool = 3;
+
+    // If the given action config is enabled, the flag sets will be applied
+    // to the corresponding action.
+    repeated FlagSet flag_set = 4;
+
+    // If the given action config is enabled, the env sets will be applied
+    // to the corresponding action.
+    repeated EnvSet env_set = 5;
+
+    // A list of feature sets defining when this action config
+    // is supported by the toolchain. The action config is supported if any of
+    // the feature sets fully apply, that is, when all features of a
+    // feature set are enabled.
+    //
+    // If 'requires' is omitted, the action config is supported independently
+    // of which other features are enabled.
+    //
+    // Use this for example to filter actions depending on the build
+    // mode enabled (opt / fastbuild / dbg).
+    repeated FeatureSet requires = 6;
+
+    // A list of features or action configs that are automatically enabled when
+    // this action config is enabled. If any of the implied features or action
+    // configs cannot be enabled, this action config will (silently)
+    // not be enabled either.
+    repeated string implies = 7;
+  }
+
+  repeated Feature feature = 50;
+  repeated ActionConfig action_config = 53;
+  repeated ArtifactNamePattern artifact_name_pattern = 54;
+
+  // The unique identifier of the toolchain within the crosstool release. It
+  // must be possible to use this as a directory name in a path.
+  // It has to match the following regex: [a-zA-Z_][\.\- \w]*
+  required string toolchain_identifier = 1;
+
+  // A basic toolchain description.
+  required string host_system_name = 2;
+  required string target_system_name = 3;
+  required string target_cpu = 4;
+  required string target_libc = 5;
+  required string compiler = 6;
+
+  required string abi_version = 7;
+  required string abi_libc_version = 8;
+
+  // Tool locations. Relative paths are resolved relative to the configuration
+  // file directory.
+  // NOTE: DEPRECATED. Prefer specifying an ActionConfig for the action that
+  // needs the tool.
+  // TODO(b/27903698) migrate to ActionConfig.
+  repeated ToolPath tool_path = 9;
+
+  // Feature flags.
+  // TODO(bazel-team): Sink those into 'Feature' instances.
+  // Legacy field, ignored by Bazel.
+  optional bool supports_gold_linker = 10 [default = false];
+  // Legacy field, ignored by Bazel.
+  optional bool supports_thin_archives = 11 [default = false];
+  // Legacy field, use 'supports_start_end_lib' feature instead.
+  optional bool supports_start_end_lib = 28 [default = false];
+  // Legacy field, use 'supports_interface_shared_libraries' instead.
+  optional bool supports_interface_shared_objects = 32 [default = false];
+  // Legacy field, use 'static_link_cpp_runtimes' feature instead.
+  optional bool supports_embedded_runtimes = 40 [default = false];
+  // If specified, Blaze finds statically linked / dynamically linked runtime
+  // libraries in the declared crosstool filegroup. Otherwise, Blaze
+  // looks in "[static|dynamic]-runtime-libs-$TARGET_CPU".
+  // Deprecated, see https://github.com/bazelbuild/bazel/issues/6942
+  optional string static_runtimes_filegroup = 45;
+  // Deprecated, see https://github.com/bazelbuild/bazel/issues/6942
+  optional string dynamic_runtimes_filegroup = 46;
+  // Legacy field, ignored by Bazel.
+  optional bool supports_incremental_linker = 41 [default = false];
+  // Legacy field, ignored by Bazel.
+  optional bool supports_normalizing_ar = 26 [default = false];
+  // Legacy field, use 'per_object_debug_info' feature instead.
+  optional bool supports_fission = 43 [default = false];
+  // Legacy field, ignored by Bazel.
+  optional bool supports_dsym = 51 [default = false];
+  // Legacy field, use 'supports_pic' feature instead
+  optional bool needsPic = 12 [default = false];
+
+  // Compiler flags for C/C++/Asm compilation.
+  repeated string compiler_flag = 13;
+  // Additional compiler flags for C++ compilation.
+  repeated string cxx_flag = 14;
+  // Additional unfiltered compiler flags for C/C++/Asm compilation.
+  // These are not subject to nocopt filtering in cc_* rules.
+  // Note: These flags are *not* applied to objc/objc++ compiles.
+  repeated string unfiltered_cxx_flag = 25;
+  // Linker flags.
+  repeated string linker_flag = 15;
+  // Additional linker flags when linking dynamic libraries.
+  repeated string dynamic_library_linker_flag = 27;
+  // Additional test-only linker flags.
+  repeated string test_only_linker_flag = 49;
+  // Objcopy flags for embedding files into binaries.
+  repeated string objcopy_embed_flag = 16;
+  // Ld flags for embedding files into binaries. This is used by filewrapper
+  // since it calls ld directly and needs to know what -m flag to pass.
+  repeated string ld_embed_flag = 23;
+  // Ar flags for combining object files into archives. If this is not set, it
+  // defaults to "rcsD".
+  // TODO(b/37271982): Remove after blaze with ar action_config release
+  repeated string ar_flag = 47;
+  // Legacy field, ignored by Bazel.
+  repeated string ar_thin_archives_flag = 48;
+  // Legacy field, ignored by Bazel.
+  repeated string gcc_plugin_compiler_flag = 34;
+
+  // Additional compiler and linker flags depending on the compilation mode.
+  repeated CompilationModeFlags compilation_mode_flags = 17;
+
+  // Additional linker flags depending on the linking mode.
+  repeated LinkingModeFlags linking_mode_flags = 18;
+
+  // Legacy field, ignored by Bazel.
+  repeated string gcc_plugin_header_directory = 19;
+  // Legacy field, ignored by Bazel.
+  repeated string mao_plugin_header_directory = 20;
+
+  // Make variables that are made accessible to rules.
+  repeated MakeVariable make_variable = 21;
+
+  // Built-in include directories for C++ compilation. These should be the exact
+  // paths used by the compiler, and are generally relative to the exec root.
+  // The paths used by the compiler can be determined by 'gcc -Wp,-v some.c'.
+  // We currently use the C++ paths also for C compilation, which is safe as
+  // long as there are no name clashes between C++ and C header files.
+  //
+  // Relative paths are resolved relative to the configuration file directory.
+  //
+  // If the compiler has --sysroot support, then these paths should use
+  // %sysroot% rather than the include path, and specify the sysroot attribute
+  // in order to give blaze the information necessary to make the correct
+  // replacements.
+  repeated string cxx_builtin_include_directory = 22;
+
+  // The built-in sysroot. If this attribute is not present, blaze does not
+  // allow using a different sysroot, i.e. through the --grte_top option. Also
+  // see the documentation above.
+  optional string builtin_sysroot = 24;
+
+  // Legacy field, ignored by Bazel.
+  optional string default_python_top = 29;
+  // Legacy field, ignored by Bazel.
+  optional string default_python_version = 30;
+  // Legacy field, ignored by Bazel.
+  optional bool python_preload_swigdeps = 42;
+
+  // The default GRTE to use. This should be a label, and gets the same
+  // treatment from Blaze as the --grte_top option. This setting is only used in
+  // the absence of an explicit --grte_top option. If unset, Blaze will not pass
+  // -sysroot by default. The local part must be 'everything', i.e.,
+  // '//some/label:everything'. There can only be one GRTE library per package,
+  // because the compiler expects the directory as a parameter of the -sysroot
+  // option.
+  // This may only be set to a non-empty value if builtin_sysroot is also set!
+  optional string default_grte_top = 31;
+
+  // Legacy field, ignored by Bazel.
+  repeated string debian_extra_requires = 33;
+
+  // Legacy field, ignored by Bazel. Only there for compatibility with
+  // things internal to Google.
+  optional string cc_target_os = 55;
+
+  // Next free id: 56
+}
+
+message ToolPath {
+  required string name = 1;
+  required string path = 2;
+}
+
+enum CompilationMode {
+  FASTBUILD = 1;
+  DBG = 2;
+  OPT = 3;
+  // This value is ignored and should not be used in new files.
+  COVERAGE = 4;
+}
+
+message CompilationModeFlags {
+  required CompilationMode mode = 1;
+  repeated string compiler_flag = 2;
+  repeated string cxx_flag = 3;
+  // Linker flags that are added when compiling in a certain mode.
+  repeated string linker_flag = 4;
+}
+
+enum LinkingMode {
+  FULLY_STATIC = 1;
+  MOSTLY_STATIC = 2;
+  DYNAMIC = 3;
+  MOSTLY_STATIC_LIBRARIES = 4;
+}
+
+message LinkingModeFlags {
+  required LinkingMode mode = 1;
+  repeated string linker_flag = 2;
+}
+
+message MakeVariable {
+  required string name = 1;
+  required string value = 2;
+}
+
+message DefaultCpuToolchain {
+  required string cpu = 1;
+  required string toolchain_identifier = 2;
+}
+
+// An entire crosstool release, containing the version number, and a set of
+// toolchains.
+message CrosstoolRelease {
+  // The major and minor version of the crosstool release.
+  required string major_version = 1;
+  required string minor_version = 2;
+
+  // Legacy field, ignored by Bazel.
+  optional string default_target_cpu = 3;
+  // Legacy field, ignored by Bazel.
+  repeated DefaultCpuToolchain default_toolchain = 4;
+
+  // All the toolchains in this release.
+  repeated CToolchain toolchain = 5;
+}
