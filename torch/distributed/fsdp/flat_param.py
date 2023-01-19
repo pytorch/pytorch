@@ -857,7 +857,6 @@ class FlatParamHandle:
         communication and is what should be all-gathered. This means that it
         matches the dtype of the expected unsharded parameter.
         """
-        ret = False
         if self._use_orig_params:
             ret = self._writeback_orig_params()
         if (
@@ -865,16 +864,14 @@ class FlatParamHandle:
             and not self._offload_params
             and not self.needs_unshard()
         ):
-            pass  # no-op
+            return False  # no-op
         elif self._uses_param_mixed_precision and not self._force_full_precision:
             self._use_low_precision_shard()
-            ret = True
         elif self._offload_params and self.flat_param.device != self.device:
             # NOTE: This creates a new tensor distinct from any attributes.
             self.flat_param_to(self.device, non_blocking=True)
-            ret = True
         self._check_on_compute_device(self.flat_param)
-        return ret
+        return True
 
     def _use_low_precision_shard(self):
         """
