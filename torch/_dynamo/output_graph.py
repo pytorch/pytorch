@@ -778,9 +778,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        torch_api_call = tx.torch_api_call
-        if torch_api_call:
-            rv.node.meta["torch_api_call"] = torch_api_call
+        source_fn = tx.source_fn
+        if source_fn:
+            rv.node.meta["source_fn"] = source_fn
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

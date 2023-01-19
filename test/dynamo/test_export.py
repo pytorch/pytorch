@@ -895,7 +895,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
-                self.assertTrue(node.meta["torch_api_call"] is not None)
+                self.assertTrue(node.meta["source_fn"] is not None)
 
         torch._dynamo.reset()
 
@@ -905,9 +905,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
-                self.assertTrue(node.meta["torch_api_call"] is not None)
-
-                # print(node.target, node.meta["torch_api_call"])
+                self.assertTrue(node.meta["source_fn"] is not None)
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])

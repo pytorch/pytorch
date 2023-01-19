@@ -3,8 +3,8 @@ import logging
 import math
 import re
 import types
-from contextlib import contextmanager
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import Dict, List
 
 import torch._C
@@ -192,22 +192,26 @@ class TorchVariable(VariableTracker):
         from .builder import wrap_fx_proxy
 
         @contextmanager
-        def record_torch_api_call():
+        def record_source_fn():
             try:
-                tx.torch_api_call = f"{self.value.__module__}.{self.value.__name__}"
+                tx.source_fn = f"{self.value.__module__}.{self.value.__name__}"
                 yield
             finally:
-                tx.torch_api_call = None
+                tx.source_fn = None
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        with record_torch_api_call():
+        with record_source_fn():
             if self.value in config.constant_functions:
                 assert not args and not kwargs
-                return ConstantVariable(config.constant_functions[self.value], **options)
-            elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
+                return ConstantVariable(
+                    config.constant_functions[self.value], **options
+                )
+            elif self.can_constant_fold_through() and (
+                constant_args or unspec_python_args
+            ):
                 args, kwargs = specialize_args_kwargs(tx, args, kwargs)
                 # constant fold
                 return ConstantVariable(
@@ -272,7 +276,9 @@ class TorchVariable(VariableTracker):
             elif self.value is torch.enable_grad:
                 return GradModeVariable.create(tx, True, **options)
             elif self.value is torch.set_grad_enabled and len(args) == 1:
-                return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
+                return GradModeVariable.create(
+                    tx, args[0].as_python_constant(), **options
+                )
             elif self.value is torch.is_grad_enabled:
                 assert not (args or kwargs)
                 return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
@@ -290,15 +296,17 @@ class TorchVariable(VariableTracker):
                 # instead of assuming the relevant override is in the first argument.
                 args[0] = args[0].tensor_variable
 
-                unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-                    tx,
-                    self,
-                    tensor_with_tf_override.orig_tensor_variable_source,
-                    tensor_with_tf_override.subclass_torch_function__func,
-                    tensor_with_tf_override.subclass_type,
-                    options,
-                    args,
-                    kwargs,
+                unwrapped = (
+                    TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+                        tx,
+                        self,
+                        tensor_with_tf_override.orig_tensor_variable_source,
+                        tensor_with_tf_override.subclass_torch_function__func,
+                        tensor_with_tf_override.subclass_type,
+                        options,
+                        args,
+                        kwargs,
+                    )
                 )
 
                 # The wrapping here follows the logic in
@@ -421,7 +429,9 @@ class TorchVariable(VariableTracker):
             ):
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
-                result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
+                result = TorchVariable(torch.div, **options).call_function(
+                    tx, args[1:], {}
+                )
                 result = TorchVariable(torch.mul, **options).call_function(
                     tx, [result, kwargs["value"]], {}
                 )
@@ -435,7 +445,11 @@ class TorchVariable(VariableTracker):
                 all_ints_or_floats = all(
                     [
                         isinstance(
-                            x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                            x,
+                            (
+                                variables.ConstantVariable,
+                                variables.DynamicShapeVariable,
+                            ),
                         )
                         for x in args
                     ]
