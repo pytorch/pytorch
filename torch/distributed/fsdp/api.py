@@ -316,6 +316,7 @@ class OptimStateDictConfig:
     (i.e. ``FullOptimStateDictConfig``) in order to configure settings for the
     particular type of ``optim_state_dict`` implementation FSDP will use.
     """
+
     # TODO: actually use this flag in the _optim_utils.py
     offload_to_cpu: bool = True
 
@@ -324,9 +325,11 @@ class OptimStateDictConfig:
 class FullOptimStateDictConfig(OptimStateDictConfig):
     rank0_only: bool = False
 
+
 @dataclass
 class LocalOptimStateDictConfig(OptimStateDictConfig):
     offload_to_cpu: bool = False
+
 
 @dataclass
 class ShardedOptimStateDictConfig(OptimStateDictConfig):
