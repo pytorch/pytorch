@@ -274,6 +274,5 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-
 } // namespace native
 } // namespace at
