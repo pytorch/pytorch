@@ -61,17 +61,17 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python
     # This should be called as
     #   conda_install pkg1 pkg2 ... [-c channel]
-    as_jenkins conda install -q -y python="$ANACONDA_PYTHON_VERSION" $*
+    as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
   }
 
   pip_install() {
-    as_jenkins pip install --progress-bar off $*
+    as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
