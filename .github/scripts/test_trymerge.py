@@ -18,10 +18,16 @@ from trymerge import (find_matching_merge_rule,
                       gh_get_team_members,
                       read_merge_rules,
                       validate_revert,
+                      has_required_labels,
+                      add_label_err_comment,
+                      delete_all_label_err_comments,
+                      GitHubComment,
                       GitHubPR,
                       MergeRule,
                       MandatoryChecksMissingError,
                       PostCommentError,
+                      BOT_AUTHORS,
+                      LABEL_ERR_MSG_TITLE,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
@@ -30,6 +36,49 @@ from urllib.error import HTTPError
 
 if 'GIT_REMOTE_URL' not in os.environ:
     os.environ['GIT_REMOTE_URL'] = "https://github.com/pytorch/pytorch"
+
+release_notes_labels = [
+    "release notes: AO frontend",
+    "release notes: autograd",
+    "release notes: benchmark",
+    "release notes: build",
+    "release notes: complex",
+    "release notes: composability",
+    "release notes: cpp",
+    "release notes: cuda",
+    "release notes: cudnn",
+    "release notes: dataloader",
+    "release notes: distributed (c10d)",
+    "release notes: distributed (ddp)",
+    "release notes: distributed (fsdp)",
+    "release notes: distributed (pipeline)",
+    "release notes: distributed (rpc)",
+    "release notes: distributed (sharded)",
+    "release notes: foreach_frontend",
+    "release notes: functorch",
+    "release notes: fx",
+    "release notes: hub",
+    "release notes: jit",
+    "release notes: lazy",
+    "release notes: linalg_frontend",
+    "release notes: memory format",
+    "release notes: Meta API",
+    "release notes: mobile",
+    "release notes: mps",
+    "release notes: nested tensor",
+    "release notes: nn",
+    "release notes: onnx",
+    "release notes: package/deploy",
+    "release notes: performance_as_product",
+    "release notes: profiler",
+    "release notes: python_frontend",
+    "release notes: quantization",
+    "release notes: releng",
+    "release notes: rocm",
+    "release notes: sparse",
+    "release notes: visualization",
+    "release notes: vulkan",
+]
 
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
@@ -100,9 +149,36 @@ def mock_merge(pr_num: int, repo: GitRepo,
                stale_pr_days: int = 3) -> None:
     pass
 
+def mock_add_label_err_comment(pr: GitHubPR) -> None:
+    pass
+
+def mock_delete_all_label_err_comments(pr: GitHubPR) -> None:
+    pass
+
 def mock_gh_get_info() -> Any:
     return {"closed": False, "isCrossRepository": False}
 
+def mock_get_comments() -> List[GitHubComment]:
+    return [
+        # Case 1 - a non label err comment
+        GitHubComment(
+            body_text="mock_body_text",
+            created_at="",
+            author_login="",
+            author_association="",
+            editor_login=None,
+            database_id=1,
+        ),
+        # Case 2 - a label err comment
+        GitHubComment(
+            body_text=" #" + LABEL_ERR_MSG_TITLE,
+            created_at="",
+            author_login=BOT_AUTHORS[1],
+            author_association="",
+            editor_login=None,
+            database_id=2,
+        ),
+    ]
 
 def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
     return [
@@ -142,7 +218,7 @@ class DummyGitRepo(GitRepo):
     def commit_message(self, ref: str) -> str:
         return "super awsome commit message"
 
-class TestGitHubPR(TestCase):
+class TestTryMerge(TestCase):
     def test_merge_rules_valid(self) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
@@ -319,7 +395,12 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, True))
     @mock.patch('trymerge.merge', side_effect=mock_merge)
-    def test_main_force(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
+    def test_main_force(
+        self,
+        mock_merge: Any,
+        mock_parse_args: Any,
+        mock_gh_get_info: Any,
+    ) -> None:
         trymerge_main()
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
@@ -333,7 +414,12 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
     @mock.patch('trymerge.merge', side_effect=mock_merge)
-    def test_main_merge(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
+    def test_main_merge(
+        self,
+        mock_merge: Any,
+        mock_parse_args: Any,
+        mock_gh_get_info: Any,
+    ) -> None:
         trymerge_main()
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
@@ -368,6 +454,61 @@ class TestGitHubPR(TestCase):
 
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
+    def test_pr_with_missing_labels(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
+        "Test PR with no 'release notes:' label or 'topic: not user facing' label"
+        pr = GitHubPR("pytorch", "pytorch", 82169)
+        self.assertFalse(has_required_labels(pr))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
+    def test_pr_with_release_notes_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
+        "Test PR with 'release notes: nn' label"
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        self.assertTrue(has_required_labels(pr))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
+    def test_pr_with_not_user_facing_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
+        "Test PR with 'topic: not user facing' label"
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        self.assertTrue(has_required_labels(pr))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.GitHubPR.get_comments', return_value=[mock_get_comments()[0]])
+    @mock.patch('trymerge.gh_post_pr_comment')
+    def test_correctly_add_label_err_comment(
+        self, mock_gh_post_pr_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
+    ) -> None:
+        "Test add label err comment when similar comments don't exist."
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        add_label_err_comment(pr)
+        mock_gh_post_pr_comment.assert_called_once()
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.GitHubPR.get_comments', return_value=[mock_get_comments()[1]])
+    @mock.patch('trymerge.gh_post_pr_comment')
+    def test_not_add_label_err_comment(
+        self, mock_gh_post_pr_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
+    ) -> None:
+        "Test not add label err comment when similar comments exist."
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        add_label_err_comment(pr)
+        mock_gh_post_pr_comment.assert_not_called()
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.GitHubPR.get_comments', return_value=mock_get_comments())
+    @mock.patch('trymerge.delete_comment')
+    def test_correctly_delete_all_label_err_comments(
+        self, mock_delete_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
+    ) -> None:
+        "Test only delete label err comment."
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        delete_all_label_err_comments(pr)
+        mock_delete_comment.assert_called_once_with(2)
+
 
 if __name__ == "__main__":
     main()
