@@ -262,7 +262,6 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
 
 @register_meta(aten.unsafe_split_with_sizes.default)
 def unsafe_split_with_sizes_meta(self, split_sizes, dim=0):
-    dim_size = self.size(dim)
     num_splits = len(split_sizes)
     start_idx = 0
     splits = []
