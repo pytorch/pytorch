@@ -81,40 +81,27 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 
 ### Tips and Debugging
 
-* Uninstall all existing PyTorch installs. You may need to run `pip
-uninstall torch` multiple times. You'll know `torch` is fully
-uninstalled when you see `WARNING: Skipping torch as it is not
-installed`. (You should only have to `pip uninstall` a few times, but
-you can always `uninstall` with `timeout` or in a loop if you're feeling
-lazy.)
-
-```bash
-conda uninstall pytorch -y
-yes | pip uninstall torch
-```
-
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-* Instead of installing PyTorch via `python setup.py install`, use `python setup.py develop`.
+* When installing with `python setup.py develop` (in contrast to `python setup.py install`) you will symlink
+   the Python files from the current local source-tree into the Python install.
+  This way you do not need to repeatedly install after modifying Python files (`.py`).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
+   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
-  This mode will symlink the Python files from the current local source
-  tree into the Python install.  This way when you modify a Python file, you
-  won't need to reinstall PyTorch again and again.  This is especially
-  useful if you are only changing Python files.
+  To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
+  uninstall torch` multiple times. You'll know `torch` is fully
+  uninstalled when you see `WARNING: Skipping torch as it is not
+  installed`. (You should only have to `pip uninstall` a few times, but
+  you can always `uninstall` with `timeout` or in a loop if you're feeling
+  lazy.)
 
-  For example:
-  - Install local PyTorch in `develop` mode
-  - modify your Python file `torch/__init__.py` (for example)
-  - test functionality
+  ```bash
+  conda uninstall pytorch -y
+  yes | pip uninstall torch
+  ```
 
-  You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
-  if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
-
-  In case you want to reinstall, make sure that you uninstall PyTorch
-  first by running `pip uninstall torch` until you see `WARNING: Skipping
-  torch as it is not installed`; next run `python setup.py clean`. After
-  that, you can install in `develop` mode again.
-
+  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
 
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
