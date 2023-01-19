@@ -522,19 +522,6 @@ std::tuple<Tensor, optional<int64_t>> narrow_copy_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<std::vector<Tensor>, optional<int64_t>> unsafe_split_batch_rule(
-    const Tensor& self,
-    optional<int64_t> self_bdim,
-    c10::SymInt split_size,
-    int64_t dim) {
-  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
-  dim = maybe_wrap_dim(dim, logical_rank) + 1;
-  auto result = self_.unsafe_split_symint(split_size, dim);
-  return std::make_tuple(result, 0);
-}
-
 std::tuple<Tensor, optional<int64_t>> movedim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef source, IntArrayRef destination) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto source_ = getPhysicalDims(self_, self_bdim.has_value(), source);
@@ -586,7 +573,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
-  VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
 }
 
 }}
