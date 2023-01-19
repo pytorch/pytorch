@@ -387,32 +387,38 @@ class VariableBuilder:
             # equality, this allows us to handle non-literal values
             return ConstantVariable(
                 value=value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif isinstance(value, enum.Enum):
             return EnumVariable(
                 value=value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif is_builtin_callable(value):
             return BuiltinVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
         elif is_allowed(value):
             return TorchVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif value is inspect.signature:
             return LambdaVariable(
                 InspectSignatureVariable.create,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif value is comptime:
@@ -420,11 +426,13 @@ class VariableBuilder:
         elif value is dataclasses.fields:
             return LambdaVariable(
                 _dataclasses_fields_lambda,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif is_numpy(value):
             return NumpyVariable(
                 value,
+                source=self.source,
                 guards=make_guards(
                     GuardBuilder.FUNCTION_MATCH
                     if callable(value)
@@ -434,6 +442,7 @@ class VariableBuilder:
         elif value in tensor_dunder_fns:
             return TorchVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif (
@@ -442,26 +451,33 @@ class VariableBuilder:
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif value in tensor_dunder_fns:
             return TorchVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, types.FunctionType):
             return UserFunctionVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             return PythonModuleVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
         elif type(value) is torch.autograd.function.FunctionMeta:
             return AutogradFunctionVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif (
             isinstance(value, types.MethodType)
@@ -473,7 +489,9 @@ class VariableBuilder:
             # handle aliased autograd function `apply` calls
             return GetAttrVariable(
                 AutogradFunctionVariable(
-                    value.__self__, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                    value.__self__,
+                    source=self.source,
+                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
                 "apply",
             )
@@ -507,11 +525,14 @@ class VariableBuilder:
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(
                 value,
+                source=self.source,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
