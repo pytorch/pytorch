@@ -93,11 +93,32 @@ curr_frame = 0
 def increment_frame():
     global curr_frame
     curr_frame = curr_frame + 1
-
+    
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count():
     global curr_frame
     curr_frame = 0
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+#   frame #1:
+#     entire_frame_compile : 0.00428
+#     convert_frame : 0.00433
+#   frame #2:
+#     entire_frame_compile : 1.58477
+#     convert_frame : 1.58483
+#  .... truncated ...
+# Total time: 25.00655s
+def print_time_report():
+    total = 0
+    print("TIMING:")
+    for frame, timings in frame_phase_timing.items():
+        print(f"  frame #{frame}:")
+        for key, time in timings.items():
+            total += time
+            print(f"    {key} : {time}")
+    print(f"Total time: {total}s")
 
 
 # dynamo_timed API works as a function decorator
@@ -133,7 +154,7 @@ def dynamo_timed(original_function=None, phase_name=None):
                 if frame_key not in frame_phase_timing:
                     frame_phase_timing[frame_key] = {}
                 assert phase_name not in frame_phase_timing[frame_key], f"Duplicate phase name {phase_name} for frame {frame_key}"
-                frame_phase_timing[frame_key][phase_name] = time_spent
+                frame_phase_timing[frame_key][phase_name] = round(time_spent, 5)
             return r
         return time_wrapper
     if original_function:

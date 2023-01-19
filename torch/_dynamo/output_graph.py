@@ -679,7 +679,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         except Exception as e:
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
-        breakpoint()
         return compiled_fn
 
     def fake_example_inputs(self) -> List[torch.Tensor]:

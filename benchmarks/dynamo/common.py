@@ -1425,6 +1425,10 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if self.args.timing:
+            from torch._dynamo.utils import print_time_report
+            print_time_report()
+
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if explain:
@@ -1683,6 +1687,9 @@ def parse_args(args=None):
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
     )
+    parser.add_argument(
+        "--timing", action="store_true", help="Emits phase timing"
+    )
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1775,9 +1782,6 @@ def parse_args(args=None):
         help="finds the largest batch size that could fit on GPUs",
     )
 
-    group.add_argument(
-        "--timing", action="store_true", help="Emits phase timing"
-    )
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument(
         "--accuracy",
@@ -2134,9 +2138,6 @@ def run(runner, args, original_dir=None):
             args.profiler_trace_name = args.profiler_trace_name
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
-
-    if args.timing is not None:
-        os.environ["TORCHDYNAMO_RECORD_TIMING"] = "1"
 
     if args.only:
         model_name = args.only
