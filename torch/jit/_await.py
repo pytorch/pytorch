@@ -2,9 +2,9 @@ import torch
 
 from torch.utils import set_module
 from torch.jit._builtins import _register_builtin
-from torch._jit_internal import Await
+from torch._jit_internal import _Await
 
-set_module(Await, "torch.jit")
+set_module(_Await, "torch.jit")
 
 def _awaitable(func, *args, **kwargs):
     r"""
@@ -27,5 +27,5 @@ def _awaitable_nowait(o):
     return torch._C._awaitable_nowait(o)
 
 
-_register_builtin(_awaitable_wait, "aten::awaitable_wait")
-_register_builtin(_awaitable_nowait, "aten::awaitable_nowait")
+_register_builtin(_awaitable_wait, "prim::awaitable_wait")
+_register_builtin(_awaitable_nowait, "prim::awaitable_nowait")

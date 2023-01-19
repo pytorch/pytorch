@@ -1848,7 +1848,7 @@ void initJITBindings(PyObject* module) {
           py::call_guard<py::gil_scoped_release>());
 
   py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
-      m, "Await")
+      m, "_Await")
       .def(
           "wait",
           &PythonAwaitWrapper::wait,
@@ -1867,7 +1867,7 @@ void initJITBindings(PyObject* module) {
           py::pickle(
               /* __getstate__ */
               [](const PythonAwaitWrapper& /* unused */) {
-                TORCH_CHECK(false, "Can not pickle torch.Await");
+                TORCH_CHECK(false, "Can not pickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy Pybind API's
                 // requirement.
@@ -1875,7 +1875,7 @@ void initJITBindings(PyObject* module) {
               },
               /* __setstate__ */
               [](const py::tuple& /* unused */) { // NOLINT
-                TORCH_CHECK(false, "Can not unpickle torch.Await");
+                TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
                 // requirement.

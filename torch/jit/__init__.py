@@ -8,9 +8,9 @@ from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
-    Await,
     Final,
     Future,
+    _Await,
     _IgnoreContextManager,
     _overload,
     _overload_method,

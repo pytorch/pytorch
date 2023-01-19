@@ -85,7 +85,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return FutureType::create(elem_type);
-  } else if (typeName == "Await" || typeName == "torch.jit.Await") {
+  } else if (typeName == "Await" || typeName == "torch.jit._Await") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "

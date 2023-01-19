@@ -38,8 +38,8 @@ import torch
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
 import torch.package._mangling as package_mangling
-from torch._awaits import Await
-from torch._C import Await as CAwait, Future as CFuture
+from torch._awaits import _Await
+from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
@@ -344,8 +344,7 @@ def get_annotation_str(annotation):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
         subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore[attr-defined]
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
-    elif isinstance(annotation, ast.Tuple) or isinstance(annotation, ast.List):
-        strs = [get_annotation_str(elt) for elt in annotation.elts]
+    elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
     elif isinstance(annotation, ast.Constant) or isinstance(
         annotation, ast.NameConstant
@@ -1044,9 +1043,9 @@ def is_future(ann) -> bool:
 
 
 def is_await(ann) -> bool:
-    if ann is Await:
+    if ann is _Await:
         return True
-    return getattr(ann, "__origin__", None) is Await
+    return getattr(ann, "__origin__", None) is _Await
 
 
 if torch.distributed.rpc.is_available():

@@ -240,12 +240,23 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 };
 
+// The PythonAwaitWrapper for ivalue::Await
+//
+// Expresses delayed function execution with Lazy semantic.
+// i.e. Await[W] in eager mode can be used as W.
+// When the attribute of W type is requested, Await[W] will return the
+// attribute of W, transparently calling wait() beforehand.
+// No Lazy semantic for script, explicit wait(Await[W]) -> W must be called to
+// convert to type W.
+//
+// The Await object takes shared ownership of specified function and the
+// arguments. After first call for wait() it owns the result. Deliberately no
+// type inference for eager mode.
 struct VISIBILITY_HIDDEN PythonAwaitWrapper
     : std::enable_shared_from_this<PythonAwaitWrapper> {
   explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
       : aw_(std::move(aw)) {}
   explicit PythonAwaitWrapper(py::handle input) {
-    // eager mode (no type inference) nowait
     args_ = py::tuple(1u);
     args_[0] = input;
     auto type = PyObjectType::get();
@@ -254,7 +265,6 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   }
 
   explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
-    // eager mode (no type inference) awaitable
     pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
     args_ = std::move(args);
     std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
@@ -273,6 +283,8 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     return toPyObject(aw_->wait());
   }
 
+  // Nowait semantic means trivial case when Await is constructed from the
+  // result
   bool is_nowait() {
     return pyfg_ == nullptr;
   }
@@ -292,7 +304,6 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   }
 
   c10::intrusive_ptr<c10::ivalue::Await> aw_;
-  // Only for eager mode fx tracing
   std::shared_ptr<torch::jit::PythonFunctionGuard> pyfg_;
   py::tuple args_;
 
@@ -465,7 +476,7 @@ inline InferredType tryToInferType(py::handle input) {
 #endif
   }
 
-  auto await_type = py::module::import("torch._awaits").attr("Await");
+  auto await_type = py::module::import("torch._awaits").attr("_Await");
   py::bool_ is_await = py::isinstance(input, await_type);
   if (py::cast<bool>(is_await)) {
     auto awptr = input.cast<std::shared_ptr<PythonAwaitWrapper>>();

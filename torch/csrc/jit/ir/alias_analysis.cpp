@@ -640,9 +640,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case aten::wait:
       return analyzeWait(node);
     case prim::awaitable:
-    case aten::awaitable_nowait:
+    case prim::awaitable_nowait:
       return analyzeAwaitable(node);
-    case aten::awaitable_wait:
+    case prim::awaitable_wait:
       return analyzeAwaitableWait(node);
     case prim::rpc_async:
     case prim::rpc_sync:
@@ -1075,10 +1075,13 @@ void AliasDb::analyzeAwaitable(Node* node) {
 }
 
 void AliasDb::analyzeAwaitableWait(Node* node) {
-  TORCH_INTERNAL_ASSERT(node->kind() == aten::awaitable_wait);
+  TORCH_INTERNAL_ASSERT(node->kind() == prim::awaitable_wait);
   for (const auto output : node->outputs()) {
     setWildcard(output);
   }
+  // the awaitable subgraph that `wait` is waiting on may write to any of its
+  // inputs. We don't have a reliable way of recovering the awaitable inputs, so
+  // for safety we just register a write to every wildcard.
   writeRegistry_->registerWriteToAllWildcards(node);
 }
 

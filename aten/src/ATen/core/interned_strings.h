@@ -166,6 +166,8 @@ namespace c10 {
   _(prim, awaitable)                 \
   _(prim, forkClosure)               \
   _(prim, awaitableClosure)          \
+  _(prim, awaitable_nowait)          \
+  _(prim, awaitable_wait)            \
   _(prim, RaiseException)            \
   _(prim, Closure)                   \
   _(prim, CreateObject)              \
@@ -206,8 +208,6 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, dict)                      \
   _(aten, wait)                      \
-  _(aten, awaitable_wait)            \
-  _(aten, awaitable_nowait)          \
   _(aten, save)                      \
   _(aten, keys)                      \
   _(aten, ord)                       \

@@ -316,7 +316,7 @@ RegisterOperators reg({
         },
         aliasAnalysisSpecialCase()),
     Operator(
-        "aten::awaitable_wait(Await(t) self) -> t",
+        "prim::awaitable_wait(Await(t) self) -> t",
         [](Stack& stack) {
           auto aw = stack.back().toAwait();
           aw->wait();
@@ -325,7 +325,7 @@ RegisterOperators reg({
         },
         aliasAnalysisSpecialCase()),
     Operator(
-        "aten::awaitable_nowait(t self) -> Await(t)",
+        "prim::awaitable_nowait(t self) -> Await(t)",
         [](Stack& stack) {
           auto aw =
               c10::make_intrusive<c10::ivalue::Await>(stack.back().type());
