@@ -11,7 +11,7 @@ namespace {
 // rel: https://github.com/pytorch/pytorch/blob/9cf84347767c8abb8feba18a9a1baba321eeb8b9/tools/autograd/gen_inplace_or_view_type.py#L481-L482
 inline void maybe_increment_version(TensorList tensors) {
   for (const auto & t : tensors) {
-    if (t.requires_grad() && at::GradMode::is_enabled()) {
+    if (at::GradMode::is_enabled()) {
       t.unsafeGetTensorImpl()->bump_version();
     }
   }
