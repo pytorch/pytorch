@@ -180,6 +180,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    def test_int_neg(self):
+        def int_neg(a):
+            x = a.shape[0]
+            return -x
+
+        torch._dynamo.testing.standard_test(self, int_neg, 1)
+
     def test_fold(self):
         def fn(a):
             return a + math.sqrt(63)

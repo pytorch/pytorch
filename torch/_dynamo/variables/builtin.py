@@ -175,6 +175,12 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
+    def dyn_shape_args(self, *args, **kwargs):
+        return any(
+            isinstance(i, variables.DynamicShapeVariable)
+            for i in itertools.chain(args, kwargs.values())
+        )
+
     def unspec_python_args(self, *args, **kwargs):
         return check_unspec_python_args(args, kwargs)
 
@@ -207,6 +213,7 @@ class BuiltinVariable(VariableTracker):
 
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
+        dyn_shape_args = self.dyn_shape_args(*args, **kwargs)
         unspec_python_args = self.unspec_python_args(*args, **kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
         has_constant_handler = self.can_constant_fold_through() and (
@@ -233,7 +240,11 @@ class BuiltinVariable(VariableTracker):
 
         if (
             self.can_insert_in_graph()
-            and tensor_args
+            # Many operators that we allow into an FX graph work for both tensors and SymInts.
+            # For those that don't, we should be able to rely on SymInt erroring.
+            # (Alternative would be to directly read off the list of allowed SymInt operations,
+            # although I'm not sure what that buys us).
+            and (tensor_args or dyn_shape_args)
             and not (
                 self.fn is operator.getitem
                 and isinstance(args[0], ConstDictVariable)
@@ -276,6 +287,13 @@ class BuiltinVariable(VariableTracker):
                         proxy,
                         raw_value=raw_value,
                         need_unwrap=need_unwrap,
+                        **options,
+                    )
+                elif all(isinstance(x, DynamicShapeVariable) for x in args):
+                    return wrap_fx_proxy_cls(
+                        DynamicShapeVariable,
+                        tx,
+                        proxy,
                         **options,
                     )
                 else:
