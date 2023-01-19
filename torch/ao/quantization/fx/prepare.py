@@ -117,19 +117,7 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
-def _attach_meta_to_node_if_not_exist(model: GraphModule):
-    """ Attach meta field to all nodes of the graph if it does not exist,
-    meta field is a field stores some meta information about the node, such
-    as dtype and shape information for output of the node, this only exists
-    if the program is captured by make_fx (used in quantize_pt2e flow), if
-    the program is captured by torch.fx symbolic tracing, this field may not exist,
-    so we add it here to avoid checking this all over the places
-    """
-    for node in model.graph.nodes:
-        if not hasattr(node, "meta"):
-            node.meta = {}
-
-def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
+def _is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
 
@@ -1449,8 +1437,6 @@ def prepare(
     assert(isinstance(_equalization_config, QConfigMapping))
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     _equalization_config = copy.deepcopy(_equalization_config)
-
-    _attach_meta_to_node_if_not_exist(model)
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
