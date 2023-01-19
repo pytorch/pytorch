@@ -1,0 +1,101 @@
+Metadata-Version: 2.1
+Name: MarkupSafe
+Version: 2.1.1
+Summary: Safely add untrusted strings to HTML/XML markup.
+Home-page: https://palletsprojects.com/p/markupsafe/
+Author: Armin Ronacher
+Author-email: armin.ronacher@active-4.com
+Maintainer: Pallets
+Maintainer-email: contact@palletsprojects.com
+License: BSD-3-Clause
+Project-URL: Donate, https://palletsprojects.com/donate
+Project-URL: Documentation, https://markupsafe.palletsprojects.com/
+Project-URL: Changes, https://markupsafe.palletsprojects.com/changes/
+Project-URL: Source Code, https://github.com/pallets/markupsafe/
+Project-URL: Issue Tracker, https://github.com/pallets/markupsafe/issues/
+Project-URL: Twitter, https://twitter.com/PalletsTeam
+Project-URL: Chat, https://discord.gg/pallets
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Topic :: Internet :: WWW/HTTP :: Dynamic Content
+Classifier: Topic :: Text Processing :: Markup :: HTML
+Requires-Python: >=3.7
+Description-Content-Type: text/x-rst
+License-File: LICENSE.rst
+
+MarkupSafe
+==========
+
+MarkupSafe implements a text object that escapes characters so it is
+safe to use in HTML and XML. Characters that have special meanings are
+replaced so that they display as the actual characters. This mitigates
+injection attacks, meaning untrusted user input can safely be displayed
+on a page.
+
+
+Installing
+----------
+
+Install and update using `pip`_:
+
+.. code-block:: text
+
+    pip install -U MarkupSafe
+
+.. _pip: https://pip.pypa.io/en/stable/getting-started/
+
+
+Examples
+--------
+
+.. code-block:: pycon
+
+    >>> from markupsafe import Markup, escape
+
+    >>> # escape replaces special characters and wraps in Markup
+    >>> escape("<script>alert(document.cookie);</script>")
+    Markup('&lt;script&gt;alert(document.cookie);&lt;/script&gt;')
+
+    >>> # wrap in Markup to mark text "safe" and prevent escaping
+    >>> Markup("<strong>Hello</strong>")
+    Markup('<strong>hello</strong>')
+
+    >>> escape(Markup("<strong>Hello</strong>"))
+    Markup('<strong>hello</strong>')
+
+    >>> # Markup is a str subclass
+    >>> # methods and operators escape their arguments
+    >>> template = Markup("Hello <em>{name}</em>")
+    >>> template.format(name='"World"')
+    Markup('Hello <em>&#34;World&#34;</em>')
+
+
+Donate
+------
+
+The Pallets organization develops and supports MarkupSafe and other
+popular packages. In order to grow the community of contributors and
+users, and allow the maintainers to devote more time to the projects,
+`please donate today`_.
+
+.. _please donate today: https://palletsprojects.com/donate
+
+
+Links
+-----
+
+-   Documentation: https://markupsafe.palletsprojects.com/
+-   Changes: https://markupsafe.palletsprojects.com/changes/
+-   PyPI Releases: https://pypi.org/project/MarkupSafe/
+-   Source Code: https://github.com/pallets/markupsafe/
+-   Issue Tracker: https://github.com/pallets/markupsafe/issues/
+-   Website: https://palletsprojects.com/p/markupsafe/
+-   Twitter: https://twitter.com/PalletsTeam
+-   Chat: https://discord.gg/pallets
+
+

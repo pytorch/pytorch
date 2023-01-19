@@ -1,0 +1,14 @@
+MarkupSafe-2.1.1.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+MarkupSafe-2.1.1.dist-info/LICENSE.rst,sha256=SJqOEQhQntmKN7uYPhHg9-HTHwvY-Zp5yESOf_N9B-o,1475
+MarkupSafe-2.1.1.dist-info/METADATA,sha256=DC93VszmzjLQcrVChRUjtW4XbUwjTdbaplpgdlbFdbs,3242
+MarkupSafe-2.1.1.dist-info/RECORD,,
+MarkupSafe-2.1.1.dist-info/WHEEL,sha256=paN2rHE-sLfyg0Z4YvQnentMRWXxZnkclRDH8E5J6qk,148
+MarkupSafe-2.1.1.dist-info/top_level.txt,sha256=qy0Plje5IJuvsCBjejJyhDCjEAdcDLK_2agVcex8Z6U,11
+markupsafe/__init__.py,sha256=xfaUQkKNRTdYWe6HnnJ2HjguFmS-C_0H6g8-Q9VAfkQ,9284
+markupsafe/__pycache__/__init__.cpython-38.pyc,,
+markupsafe/__pycache__/_native.cpython-38.pyc,,
+markupsafe/_native.py,sha256=GR86Qvo_GcgKmKreA1WmYN9ud17OFwkww8E-fiW-57s,1713
+markupsafe/_speedups.c,sha256=X2XvQVtIdcK4Usz70BvkzoOfjTCmQlDkkjYSn-swE0g,7083
+markupsafe/_speedups.cpython-38-x86_64-linux-gnu.so,sha256=gBmi2f9vNFVvJs2gdtjYKwK0tIgrxEqVUMbyL-1roRo,45008
+markupsafe/_speedups.pyi,sha256=vfMCsOgbAXRNLUXkyuyonG8uEWKYU4PDqNuMaDELAYw,229
+markupsafe/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0

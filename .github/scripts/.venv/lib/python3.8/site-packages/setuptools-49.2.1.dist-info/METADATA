@@ -1,0 +1,109 @@
+Metadata-Version: 2.1
+Name: setuptools
+Version: 49.2.1
+Summary: Easily download, build, install, upgrade, and uninstall Python packages
+Home-page: https://github.com/pypa/setuptools
+Author: Python Packaging Authority
+Author-email: distutils-sig@python.org
+License: UNKNOWN
+Project-URL: Documentation, https://setuptools.readthedocs.io/
+Keywords: CPAN PyPI distutils eggs package management
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: System :: Archiving :: Packaging
+Classifier: Topic :: System :: Systems Administration
+Classifier: Topic :: Utilities
+Requires-Python: >=3.5
+Description-Content-Type: text/x-rst; charset=UTF-8
+Provides-Extra: certs
+Requires-Dist: certifi (==2016.9.26) ; extra == 'certs'
+Provides-Extra: docs
+Requires-Dist: sphinx ; extra == 'docs'
+Requires-Dist: jaraco.packaging (>=6.1) ; extra == 'docs'
+Requires-Dist: rst.linker (>=1.9) ; extra == 'docs'
+Requires-Dist: pygments-github-lexers (==0.0.5) ; extra == 'docs'
+Provides-Extra: ssl
+Requires-Dist: wincertstore (==0.2) ; (sys_platform == "win32") and extra == 'ssl'
+Provides-Extra: tests
+Requires-Dist: mock ; extra == 'tests'
+Requires-Dist: pytest-flake8 ; extra == 'tests'
+Requires-Dist: virtualenv (>=13.0.0) ; extra == 'tests'
+Requires-Dist: pytest-virtualenv (>=1.2.7) ; extra == 'tests'
+Requires-Dist: pytest (>=3.7) ; extra == 'tests'
+Requires-Dist: wheel ; extra == 'tests'
+Requires-Dist: coverage (>=4.5.1) ; extra == 'tests'
+Requires-Dist: pytest-cov (>=2.5.1) ; extra == 'tests'
+Requires-Dist: pip (>=19.1) ; extra == 'tests'
+Requires-Dist: futures ; (python_version == "2.7") and extra == 'tests'
+Requires-Dist: flake8-2020 ; (python_version >= "3.6") and extra == 'tests'
+Requires-Dist: paver ; (python_version >= "3.6") and extra == 'tests'
+
+.. image:: https://img.shields.io/pypi/v/setuptools.svg
+   :target: `PyPI link`_
+
+.. image:: https://img.shields.io/pypi/pyversions/setuptools.svg
+   :target: `PyPI link`_
+
+.. _PyPI link: https://pypi.org/project/setuptools
+
+.. image:: https://dev.azure.com/jaraco/setuptools/_apis/build/status/pypa.setuptools?branchName=master
+   :target: https://dev.azure.com/jaraco/setuptools/_build/latest?definitionId=1&branchName=master
+
+.. image:: https://img.shields.io/travis/pypa/setuptools/master.svg?label=Linux%20CI&logo=travis&logoColor=white
+   :target: https://travis-ci.org/pypa/setuptools
+
+.. image:: https://img.shields.io/appveyor/ci/pypa/setuptools/master.svg?label=Windows%20CI&logo=appveyor&logoColor=white
+   :target: https://ci.appveyor.com/project/pypa/setuptools/branch/master
+
+.. image:: https://img.shields.io/readthedocs/setuptools/latest.svg
+    :target: https://setuptools.readthedocs.io
+
+.. image:: https://img.shields.io/codecov/c/github/pypa/setuptools/master.svg?logo=codecov&logoColor=white
+   :target: https://codecov.io/gh/pypa/setuptools
+
+.. image:: https://tidelift.com/badges/github/pypa/setuptools?style=flat
+   :target: https://tidelift.com/subscription/pkg/pypi-setuptools?utm_source=pypi-setuptools&utm_medium=readme
+
+See the `Installation Instructions
+<https://packaging.python.org/installing/>`_ in the Python Packaging
+User's Guide for instructions on installing, upgrading, and uninstalling
+Setuptools.
+
+Questions and comments should be directed to the `distutils-sig
+mailing list <http://mail.python.org/pipermail/distutils-sig/>`_.
+Bug reports and especially tested patches may be
+submitted directly to the `bug tracker
+<https://github.com/pypa/setuptools/issues>`_.
+
+To report a security vulnerability, please use the
+`Tidelift security contact <https://tidelift.com/security>`_.
+Tidelift will coordinate the fix and disclosure.
+
+
+For Enterprise
+==============
+
+Available as part of the Tidelift Subscription.
+
+Setuptools and the maintainers of thousands of other packages are working with Tidelift to deliver one enterprise subscription that covers all of the open source you use.
+
+`Learn more <https://tidelift.com/subscription/pkg/pypi-setuptools?utm_source=pypi-setuptools&utm_medium=referral&utm_campaign=github>`_.
+
+Code of Conduct
+===============
+
+Everyone interacting in the setuptools project's codebases, issue trackers,
+chat rooms, and mailing lists is expected to follow the
+`PSF Code of Conduct <https://github.com/pypa/.github/blob/main/CODE_OF_CONDUCT.md>`_.
+
+

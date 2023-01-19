@@ -1,0 +1,3 @@
+[console_scripts]
+normalizer = charset_normalizer.cli.normalizer:cli_detect
+

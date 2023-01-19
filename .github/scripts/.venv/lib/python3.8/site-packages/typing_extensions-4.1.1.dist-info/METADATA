@@ -1,0 +1,35 @@
+Metadata-Version: 2.1
+Name: typing_extensions
+Version: 4.1.1
+Summary: Backported and Experimental Type Hints for Python 3.6+
+Keywords: annotations,backport,checker,checking,function,hinting,hints,type,typechecking,typehinting,typehints,typing
+Author-email: "Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com>
+Requires-Python: >=3.6
+Description-Content-Type: text/x-rst
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Python Software Foundation License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Topic :: Software Development
+Project-URL: Home, https://github.com/python/typing/blob/master/typing_extensions/README.rst
+
+Typing Extensions -- Backported and Experimental Type Hints for Python
+
+The ``typing`` module was added to the standard library in Python 3.5, but
+many new features have been added to the module since then.
+This means users of older Python versions who are unable to upgrade will not be
+able to take advantage of new types added to the ``typing`` module, such as
+``typing.Protocol`` or ``typing.TypedDict``.
+
+The ``typing_extensions`` module contains backports of these changes.
+Experimental types that may eventually be added to the ``typing``
+module are also included in ``typing_extensions``.
+

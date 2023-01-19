@@ -1,0 +1,13 @@
+certifi-2021.10.8.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+certifi-2021.10.8.dist-info/LICENSE,sha256=vp2C82ES-Hp_HXTs1Ih-FGe7roh4qEAEoAEXseR1o-I,1049
+certifi-2021.10.8.dist-info/METADATA,sha256=iB_zbT1uX_8_NC7iGv0YEB-9b3idhQwHrFTSq8R1kD8,2994
+certifi-2021.10.8.dist-info/RECORD,,
+certifi-2021.10.8.dist-info/WHEEL,sha256=ADKeyaGyKF5DwBNE0sRE5pvW-bSkFMJfBuhzZ3rceP4,110
+certifi-2021.10.8.dist-info/top_level.txt,sha256=KMu4vUCfsjLrkPbSNdgdekS-pVJzBAJFO__nI8NF6-U,8
+certifi/__init__.py,sha256=xWdRgntT3j1V95zkRipGOg_A1UfEju2FcpujhysZLRI,62
+certifi/__main__.py,sha256=xBBoj905TUWBLRGANOcf7oi6e-3dMP4cEoG9OyMs11g,243
+certifi/__pycache__/__init__.cpython-38.pyc,,
+certifi/__pycache__/__main__.cpython-38.pyc,,
+certifi/__pycache__/core.cpython-38.pyc,,
+certifi/cacert.pem,sha256=-og4Keu4zSpgL5shwfhd4kz0eUnVILzrGCi0zRy2kGw,265969
+certifi/core.py,sha256=V0uyxKOYdz6ulDSusclrLmjbPgOXsD0BnEf0SQ7OnoE,2303
