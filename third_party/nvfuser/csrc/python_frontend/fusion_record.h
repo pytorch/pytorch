@@ -26,6 +26,7 @@ enum class RecordType {
   End,
   FullOp,
   IndexSelectOp,
+  TorchGatherOp,
   Op,
   Output,
   PermuteOp,
@@ -1355,6 +1356,45 @@ struct IndexSelectOpRecord : RecordFunctor {
 
     Nvf::Val* output = Nvf::index_select(arg1, dim_, arg3);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+ private:
+  //! Dimension to select.
+  int64_t dim_;
+};
+
+struct TorchGatherOpRecord : RecordFunctor {
+  TorchGatherOpRecord(
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      int64_t dim)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "ops.gather",
+            RecordType::TorchGatherOp),
+        dim_(dim) {}
+  virtual ~TorchGatherOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new TorchGatherOpRecord(*this);
+  }
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg1 =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg3 =
+        fd.getFusionState(args_.at(1).index)->template as<Nvf::TensorView>();
+
+    Nvf::Val* output = Nvf::torch_gather(arg1, dim_, arg3);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  void print(std::ostream& os, bool close_function = true) const final {
+    RecordFunctor::print(os, false);
+    os << ", dim=" << dim_;
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:

@@ -611,5 +611,32 @@ class TestNvFuserFrontend(TestCase):
         self.assertEqual(eager_out2, inputs[0])
         self.assertEqual(eager_out3, nvf_out[1])
 
+    def test_gather(self):
+        inputs = [
+            torch.randn(8, 16, device='cuda'),
+            torch.randn(8, 16, device='cuda'),
+            torch.randint(0, 8, (4, 4), device="cuda").to(dtype=torch.long)
+        ]
+
+        def fusion_func(fd: FusionDefinition) :
+            t0 = fd.define_tensor(2)
+            t1 = fd.define_tensor(2)
+            t2 = fd.define_tensor(2, DataType.Int)
+            t3 = fd.ops.add(t0, t1)
+            t4 = fd.ops.gather(t3, t2, 0)
+            fd.add_output(t4)
+
+        nvf_out1, _ = self.exec_nvfuser(fusion_func, inputs)
+        # Create a new fusion with the same definition, it should hit the cache!
+        nvf_out2, fs2 = self.exec_nvfuser(fusion_func, inputs, new_fusion_expected=False)
+        # Create a fusion from a fusion id and make sure it executes!
+        fs3 = Fusion(fs2.id())
+        nvf_out3 = fs3.execute(inputs)
+
+        eager_out = torch.gather(inputs[0] + inputs[1], 0, inputs[2])
+        self.assertEqual(eager_out, nvf_out1[0])
+        self.assertEqual(eager_out, nvf_out2[0])
+        self.assertEqual(eager_out, nvf_out3[0])
+
 if __name__ == '__main__':
     run_tests()
