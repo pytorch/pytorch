@@ -435,7 +435,11 @@ class CSE:
         )
 
     def generate(
-        self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True, append_broadcast = None
+        self,
+        buffer: IndentedBuffer,
+        expr: typing.Union[str, CSEVariable],
+        write=True,
+        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
@@ -456,9 +460,13 @@ class CSE:
                     var_suffix = "_load"
                 else:
                     var_suffix = ""
-                buffer.writeline(f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}")
+                buffer.writeline(
+                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
+                )
                 if append_broadcast:
-                    buffer.writeline(f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})")
+                    buffer.writeline(
+                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
+                    )
 
         return self.cache[expr]
 

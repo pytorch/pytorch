@@ -876,9 +876,13 @@ class TritonKernel(Kernel):
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            result_var = self.cse.generate(self.body, line, append_broadcast=append_broadcast)
+            result_var = self.cse.generate(
+                self.body, line, append_broadcast=append_broadcast
+            )
         else:
-            result_var = self.cse.generate(self.loads, line, append_broadcast=append_broadcast)
+            result_var = self.cse.generate(
+                self.loads, line, append_broadcast=append_broadcast
+            )
 
         result_var.mask_vars = mask_vars
 
