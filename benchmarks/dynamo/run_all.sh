@@ -19,6 +19,8 @@
 # WARNING: this will silently clobber .csv and .log files in your CWD!
 
 set -x
+
+# Some QoL for people running this script on Meta servers
 if getent hosts fwdproxy; then
     export https_proxy=http://fwdproxy:8080 http_proxy=http://fwdproxy:8080 no_proxy=.fbcdn.net,.facebook.com,.thefacebook.com,.tfbnw.net,.fb.com,.fburl.com,.facebook.net,.sb.fbsbx.com,localhost
 fi
@@ -26,11 +28,14 @@ fi
 # Feel free to edit these, but we expect most users not to need to modify this
 BASE_FLAGS=( --accuracy --explain )
 DATE="$(date)"
+WORK="$PWD"
 
-python "$(dirname "$BASH_SOURCE")"/torchbench.py --output "$PWD"/torchbench.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee torchbench.log
-python "$(dirname "$BASH_SOURCE")"/huggingface.py --output "$PWD"/huggingface.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee huggingface.log
-python "$(dirname "$BASH_SOURCE")"/timm_models.py --output "$PWD"/timm_models.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee timm_models.log
-cat "$PWD"/torchbench.log "$PWD"/huggingface.log "$PWD"/timm_models.log | tee "$PWD"/sweep.log
-gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $* - $(git rev-parse HEAD) $DATE" "$PWD"/sweep.log | tee -a "$PWD"/sweep.log
-python "$(dirname "$BASH_SOURCE")"/parse_logs.py "$PWD"/sweep.log > "$PWD"/final.csv
-gh gist create "$PWD"/final.csv
+cd "$(dirname "$BASH_SOURCE")"/../..
+
+python benchmarks/dynamo/torchbench.py --output "$WORK"/torchbench.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/torchbench.log
+python benchmarks/dynamo/huggingface.py --output "$WORK"/huggingface.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/huggingface.log
+python benchmarks/dynamo/timm_models.py --output "$WORK"/timm_models.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/timm_models.log
+cat "$WORK"/torchbench.log "$WORK"/huggingface.log "$WORK"/timm_models.log | tee "$WORK"/sweep.log
+gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $* - $(git rev-parse HEAD) $DATE" "$WORK"/sweep.log | tee -a "$WORK"/sweep.log
+python benchmarks/dynamo/parse_logs.py "$WORK"/sweep.log > "$WORK"/final.csv
+gh gist create "$WORK"/final.csv
