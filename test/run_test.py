@@ -138,7 +138,6 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
-        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -320,6 +319,7 @@ CI_SERIAL_LIST = [
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
+    'dynamo/test_dynamic_shapes',   # flaky on MacOS when running in parallel https://github.com/pytorch/pytorch/issues/92196
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
