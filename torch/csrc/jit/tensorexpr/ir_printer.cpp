@@ -6,9 +6,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 std::string IRPrinter::dtypeToCppString(const Dtype& dtype) {
   return dtype.ToCppString();
@@ -667,9 +665,7 @@ void print(const Tensor& t) {
   std::cout << std::to_string(t);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 namespace std {
 std::string to_string(ExprPtr expr) {

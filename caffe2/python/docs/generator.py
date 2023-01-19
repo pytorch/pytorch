@@ -8,7 +8,6 @@ import argparse
 import os
 from caffe2.python import core, workspace
 from caffe2.python.docs.formatter import Markdown
-from future.utils import viewitems, viewvalues
 
 OpSchema = workspace.C.OpSchema
 
@@ -76,13 +75,13 @@ class OpDocGenerator(DocGenerator):
                 priority = 4
                 self.operators[name] = self.getOperatorDoc(name, schema, priority)
 
-        for name, engines in viewitems(self.engines):
+        for name, engines in self.engines.items():
             if name in self.operators:
                 self.operators[name].addEngines(engines)
 
         # Generate a sorted list of operators
         return sorted(
-            viewvalues(self.operators),
+            self.operators.values(),
             key=lambda op: (op.priority, op.name)
         )
 
