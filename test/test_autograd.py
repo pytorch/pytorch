@@ -122,22 +122,36 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
             @torch.no_grad()
             class Foo():
-                pass
+                def __init__(self):
+                    assert not torch.is_grad_enabled()
+
+                def foo(self):
+                    # Not applied to methods
+                    assert torch.is_grad_enabled()
+
+            # Show that we can actually construct the class
+            foo = Foo()
+            foo.foo()
 
         # Decorating functions or methods is fine though
         with warnings.catch_warnings(record=True) as w:
             @torch.no_grad()
             def foo():
-                pass
+                assert not torch.is_grad_enabled()
+
+            foo()
 
             class Foo2():
                 @torch.no_grad()
                 def __init__(self):
-                    pass
+                    assert not torch.is_grad_enabled()
 
                 @torch.no_grad()
                 def foo(self):
-                    pass
+                    assert not torch.is_grad_enabled()
+
+            foo2 = Foo2()
+            foo2.foo()
 
         self.assertEqual(len(w), 0)
 
@@ -544,6 +558,15 @@ class TestAutograd(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
             torch._C._will_engine_execute_node(out)
+
+    def test_autograd_function_extension_enabled_by_default(self):
+        # This feature flag is enabled by default. We're not deleting it yet
+        # so we can easily turn the feature off, but we want it enabled by
+        # default so that people can begin to test with it.
+        # We'll keep it around until approx. after next PyTorch release.
+        # Tracking issue: https://github.com/pytorch/pytorch/issues/90224
+        enabled = torch._C._is_autograd_function_extension_enabled()
+        self.assertTrue(enabled)
 
     def test_custom_function_setup_context_simple(self):
         class MySquare(Function):
