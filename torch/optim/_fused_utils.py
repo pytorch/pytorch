@@ -6,7 +6,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 
 
-__all__ = ["_MultiDeviceReplicator", "_get_fp16AMP_params", "_group_params_by_device_and_dtype"]
+__all__ = []
 
 
 # NOTE(crcrpar): Almost the same as `_MultiDeviceReplicator` defined in
@@ -44,27 +44,3 @@ def _get_fp16AMP_params(
     with torch.no_grad():
         found_inf_combined = cast(torch.Tensor, sum(found_infs))
     return _MultiDeviceReplicator(found_inf_combined)
-
-
-# TODO(crcrpar): Make this generic when there's more fused optimizers.
-# TODO(crcrpar): Think of rewriting this in C++.
-@torch.no_grad()
-def _group_params_by_device_and_dtype(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    max_exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-) -> Dict[Tuple[str, torch.dtype], List[List[Tensor]]]:
-    per_device_and_dtype_tensors: Dict[Tuple[str, torch.dtype], List[List[Tensor]]] = defaultdict(lambda: [[] for _ in range(6)])
-    for i, (p, step) in enumerate(zip(params, state_steps)):
-        key = (str(p.device), p.dtype)
-        per_device_and_dtype_tensors[key][0].append(p)
-        per_device_and_dtype_tensors[key][1].append(grads[i])
-        per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
-        per_device_and_dtype_tensors[key][3].append(exp_avg_sqs[i])
-        if max_exp_avg_sqs:
-            per_device_and_dtype_tensors[key][4].append(max_exp_avg_sqs[i])
-        per_device_and_dtype_tensors[key][5].append(step)
-    return per_device_and_dtype_tensors
