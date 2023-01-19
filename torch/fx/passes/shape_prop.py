@@ -182,4 +182,6 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
-        return super().run(*args)
+        # clone inputs to avoid side effects caused by inpalce ops during run_node
+        new_args = [x.clone() for x in args]
+        return super().run(*new_args)

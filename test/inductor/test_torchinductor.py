@@ -6062,7 +6062,8 @@ if HAS_CPU:
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
                 config.dynamic_shapes = dynamic_shapes
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                out = fn(*args)
+                with torch.no_grad():
+                    out = fn(*args)
                 assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
                 assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
                 assert out.equal(args[0])
