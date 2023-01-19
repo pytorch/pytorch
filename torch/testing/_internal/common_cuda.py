@@ -6,7 +6,6 @@ import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS, TEST_WITH_ROCM
 import inspect
 import contextlib
-from distutils.version import LooseVersion
 
 
 TEST_CUDA = torch.cuda.is_available()
