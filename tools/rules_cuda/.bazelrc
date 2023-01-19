@@ -1,0 +1,10 @@
+# Convenient flag shortcuts.
+build --flag_alias=cuda=//cuda:enable_cuda
+build --flag_alias=cuda_gpu_arch=//cuda:cuda_targets
+
+# CUDA 10.2 supports no later than gcc 8.
+build --repo_env=CC=/usr/bin/gcc-8
+
+# Use --config=clang to build with clang instead of gcc and nvcc.
+build:clang --repo_env=CC=clang
+build:clang --//cuda:compiler=clang
