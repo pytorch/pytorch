@@ -244,6 +244,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 with evaluator.default_as(torchscript_evaluator):
                     # v is tuple[torch._C.Value, ...] or torch._C.Value
                     v = symbolic_fn(*onnx_inputs, **onnx_attrs)
+                    v = graph_building._convert_result_to_torchscript(v)
                 assert (
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
