@@ -224,6 +224,112 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
+    def test_reparamertize_some_weights(self, functional_call):
+        module = MockModule()
+        weight = torch.tensor([[2.0]],)
+        bias = torch.tensor([5.0])
+        buffer = torch.tensor([3.0])
+        extra = torch.tensor([1.0])
+
+        parameters = {'l1.weight': weight}
+        x = torch.randn(1, 1)
+        out = functional_call(module, parameters, x)
+        self.assertEqual(out, x * weight + module.l1.bias + module.buffer)
+
+        parameters = {'l1.weight': weight,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        out = functional_call(module, parameters, x)
+        self.assertEqual(out, x * weight + module.l1.bias + module.buffer)
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparamertize_strict(self, functional_call):
+        module = MockModule()
+        weight = torch.tensor([[2.0]],)
+        bias = torch.tensor([5.0])
+        buffer = torch.tensor([3.0])
+        extra = torch.tensor([1.0])
+        orig_tensors = tuple(module.parameters()) + tuple(module.buffers())
+        orig_tensors_values = tuple(t.clone() for t in orig_tensors)
+
+        # All weights no error
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        out = functional_call(module, parameters, x, strict=True)
+        self.assertEqual(out, x * weight + bias + buffer)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a successful call',
+        )
+
+        # Some weights
+        parameters = {'l1.weight': weight}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Missing key(s): 'buffer', 'l1.bias'."),
+        ):
+            out = functional_call(module, parameters, x, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Extra keys
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'."),
+        ):
+            out = functional_call(module, parameters, x, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Some weights with extra keys
+        parameters = {'l1.weight': weight,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'.") + r'\s+' + re.escape("Missing key(s): 'buffer', 'l1.bias'."),
+        ):
+            out = functional_call(module, parameters, x, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
     def test_tied_weights_warns(self, functional_call):
         module = MockModule()
         module.tied_bias = module.l1.bias
@@ -238,6 +344,7 @@ class TestStatelessFunctionalAPI(TestCase):
         weight = torch.tensor([[2.0]],)
         bias = torch.tensor([5.0])
         buffer = torch.tensor([3.0])
+        extra = torch.tensor([1.0])
 
         parameters = {'l1.weight': weight,
                       'l1.bias': bias,
@@ -246,6 +353,13 @@ class TestStatelessFunctionalAPI(TestCase):
         out = functional_call(module, parameters, x, tie_weights=True)
         self.assertEqual(out, x * weight + bias + bias + buffer + buffer)
 
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        out = functional_call(module, parameters, x, tie_weights=True)
+        self.assertEqual(out, x * weight + bias + bias + buffer + buffer)
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -300,7 +414,6 @@ class TestStatelessFunctionalAPI(TestCase):
             parameters['tied_buffer'] = torch.tensor([5.0])
             functional_call(module, parameters, x, tie_weights=True)
 
-
     def test_tied_weights_no_error_without_flag(self):
         module = MockTiedModule()
         weight = torch.tensor([[1.0]],)
@@ -317,6 +430,131 @@ class TestStatelessFunctionalAPI(TestCase):
         del parameters['tied_bias']
         parameters['tied_buffer'] = torch.tensor([5.0])
         self.assertNotWarn(lambda: stateless._functional_call(module, parameters, x, tie_weights=False))
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparamertize_tie_weights_strict(self, functional_call):
+        module = MockTiedModule()
+        weight = torch.tensor([[2.0]],)
+        bias = torch.tensor([5.0])
+        buffer = torch.tensor([3.0])
+        extra = torch.tensor([1.0])
+        orig_tensors = tuple(module.parameters()) + tuple(module.buffers())
+        orig_tensors_values = tuple(t.clone() for t in orig_tensors)
+
+        # Tie weights no error
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        out = functional_call(module, parameters, x, tie_weights=True, strict=True)
+        self.assertEqual(out, x * weight + bias + bias + buffer + buffer)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a successful call',
+        )
+
+        # Tie weights without flag
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Missing key(s): 'tied_bias', 'tied_buffer'."),
+        ):
+            out = functional_call(module, parameters, x, tie_weights=False, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Tie some weights
+        parameters = {'l1.weight': weight,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Missing key(s): 'l1.bias', 'tied_bias'."),
+        ):
+            out = stateless.functional_call(module, parameters, x, tie_weights=True, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Tie weights with extra keys
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'."),
+        ):
+            out = stateless.functional_call(module, parameters, x, tie_weights=True, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Tie weights with extra keys and without flag
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'.") + r'\s+' + re.escape("Missing key(s): 'tied_bias', 'tied_buffer'."),
+        ):
+            out = stateless.functional_call(module, parameters, x, tie_weights=False, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
+
+        # Tie some weights with extra keys
+        parameters = {'l1.weight': weight,
+                      'buffer': buffer,
+                      'extra': extra}
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'.") + r'\s+' + re.escape("Missing key(s): 'l1.bias', 'tied_bias'."),
+        ):
+            out = stateless.functional_call(module, parameters, x, tie_weights=True, strict=True)
+        self.assertTrue(
+            all(t1 is t2 and torch.allclose(t1, t3)
+                for t1, t2, t3
+                in zip(orig_tensors,
+                       tuple(module.parameters()) + tuple(module.buffers()),
+                       orig_tensors_values)),
+            'the module should not have been modified by a failed call',
+        )
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -342,6 +580,50 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
+    def test_setattr_strict(self, functional_call):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                assert not hasattr(self, 'extra')
+
+            def forward(self, x):
+                return x + self.extra
+
+        a = {'extra': torch.zeros(())}
+        mod = Bar()
+        self.assertTrue(not hasattr(mod, 'extra'))
+        out = functional_call(mod, a, torch.ones(()))
+        self.assertEqual(out, torch.ones(()))
+        self.assertTrue(not hasattr(mod, 'extra'))
+
+        a = {'extra': torch.zeros(())}
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'."),
+        ):
+            out = functional_call(mod, a, torch.ones(()), strict=True)
+        self.assertTrue(not hasattr(mod, 'extra'))
+
+        a = {}
+        with self.assertRaisesRegex(
+            AttributeError,
+            re.escape("'Bar' object has no attribute 'extra'"),
+        ):
+            out = functional_call(mod, a, torch.ones(()))
+        self.assertTrue(not hasattr(mod, 'extra'))
+
+        a = {}
+        with self.assertRaisesRegex(
+            AttributeError,
+            re.escape("'Bar' object has no attribute 'extra'"),
+        ):
+            out = functional_call(mod, a, torch.ones(()), strict=True)
+        self.assertTrue(not hasattr(mod, 'extra'))
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
     def test_functional_call_with_kwargs(self, functional_call):
         class Foo(torch.nn.Module):
             def __init__(self, x):
@@ -361,7 +643,6 @@ class TestStatelessFunctionalAPI(TestCase):
         res_1 = functional_call(mod, a, (), {'inp': inp, 'other_inp': other_inp})
         self.assertEqual(res, res_1)
 
-
     def test_functional_call_tuple_dicts(self):
         mod = MockModule()
         x = torch.rand((1, 1))
@@ -380,7 +661,6 @@ class TestStatelessFunctionalAPI(TestCase):
         a = ({'l1.weight': torch.ones(1, 1)}, {'l1.bias': torch.ones(1)}, {'buffer': torch.zeros(1)})
         res = torch.func.functional_call(mod, a, x)
         self.assertEqual(res, x + 1)
-
 
     def test_functional_call_multiple_dicts_error(self):
         mod = MockModule()
