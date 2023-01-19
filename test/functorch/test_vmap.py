@@ -16,6 +16,7 @@ import functools
 import itertools
 import warnings
 import unittest
+import random
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
@@ -4902,6 +4903,83 @@ class TestTransformFailure(TestCase):
         with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
             transform(input)
 
+class TestVmapDeviceType(Namespace.TestVmapBase):
+    def _vmap_test(self, *args, **kwargs):
+        return _vmap_test(self, *args, **kwargs)
+
+    def test__is_all_true(self, device):
+        def test():
+            def f(x, *, expected_result):
+                result = torch.ops.aten._is_all_true(x)
+                self.assertFalse(torch._C._functorch.is_batchedtensor(result))
+                self.assertEqual(result.shape, torch.Size([]))
+                self.assertEqual(result.item(), expected_result)
+                return result
+
+            x = torch.rand(10, device=device)
+            vmap(f)(x >= 0, expected_result=True)
+            vmap(f)(x < 0, expected_result=False)
+
+            x[random.choice(range(10))] *= -1
+            vmap(f)(x >= 0, expected_result=False)
+            vmap(f)(x < 0, expected_result=False)
+
+            x = -torch.rand(10, device=device)
+            vmap(f)(x > 0, expected_result=False)
+            vmap(f)(x <= 0, expected_result=True)
+
+        check_vmap_fallback(self, test, torch._is_all_true)
+
+    def test_check_tensor(self, device):
+        def test():
+            test_sizes = [
+                (1,),
+                (10,),
+                (1, 1),
+                (1, 10),
+                (10, 1),
+                (10, 10),
+                (1, 1, 1),
+                (10, 1, 1),
+                (1, 10, 1),
+                (10, 10, 10),
+            ]
+
+            def check_gte_0(t):
+                return torch._test_check_tensor(t >= 0)
+
+            error_message = "Test message for TORCH_CHECK_TENSOR_ALL"
+
+            for size in test_sizes:
+                t_all_gte_0 = torch.rand(size, device=device)
+                t_all_lt_0 = t_all_gte_0 - 1
+
+                vmap(check_gte_0)(t_all_gte_0)
+
+                if len(size) >= 2:
+                    vmap(vmap(check_gte_0))(t_all_gte_0)
+
+                with self.assertRaisesRegex(RuntimeError, error_message):
+                    vmap(check_gte_0)(t_all_lt_0)
+
+                if len(size) >= 2:
+                    with self.assertRaisesRegex(RuntimeError, error_message):
+                        vmap(vmap(check_gte_0))(t_all_lt_0)
+
+                if t_all_gte_0.numel() > 1:
+                    t_all_gte_0_but_one = t_all_gte_0.clone()
+                    idx = (random.choice(range(dim_size)) for dim_size in size)
+                    t_all_gte_0_but_one[(..., *idx)] = -1
+
+                    with self.assertRaisesRegex(RuntimeError, error_message):
+                        vmap(check_gte_0)(t_all_gte_0_but_one)
+
+                    if len(size) >= 2:
+                        with self.assertRaisesRegex(RuntimeError, error_message):
+                            vmap(vmap(check_gte_0))(t_all_gte_0_but_one)
+
+        check_vmap_fallback(self, test, torch._test_check_tensor)
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
@@ -4912,6 +4990,7 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
+instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
