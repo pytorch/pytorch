@@ -529,10 +529,8 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 }
 
 
-void generate_vec_hflip_reg_mask(std::vector<char> & mask, const int64_t data_stride) {
+void generate_vec_hflip_reg_mask(char mask[16], const int64_t data_stride) {
 #ifdef CPU_CAPABILITY_AVX2
-    mask.clear();
-    mask.resize(16);
     for (int k=0; k<16; k++) {
       int j = k / data_stride + 1;
       int v = (j * data_stride - 1) - (k % data_stride);
@@ -544,7 +542,7 @@ void generate_vec_hflip_reg_mask(std::vector<char> & mask, const int64_t data_st
 
 
 int64_t vectorized_cpu_hflip_channels_last_i8(
-    char * C10_RESTRICT *data, const int64_t size, const int64_t stride, const int64_t size0, const std::vector<char> & mdata) {
+    char * C10_RESTRICT *data, const int64_t size, const int64_t stride, const int64_t size0, const char mdata[16]) {
 
   int64_t i = 0;
 #ifdef CPU_CAPABILITY_AVX2
@@ -637,7 +635,7 @@ void cpu_hflip_channels_last_i8_C(at::TensorIterator& iter) {
   const auto data_stride = input_strides[1];
 
   // Generate avx mask once
-  std::vector<char> mdata;
+  char mdata[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   generate_vec_hflip_reg_mask(mdata, data_stride);
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
