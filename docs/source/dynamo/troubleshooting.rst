@@ -146,14 +146,14 @@ which will generate an error.
    import torch._dynamo as dynamo
 
 
-   @dynamo.optimize("eager")
    def test_assertion_error():
        y = torch.ones(200, 200)
        z = {y: 5}
        return z
 
+   compiled_test_assertion_error = torch.compile(test_assertion_error, backend="eager")
 
-   test_assertion_error()
+   compiled_test_assertion_error()
 
 Which will generate the following error:
 
@@ -236,7 +236,7 @@ Here is an example:
    import torch._dynamo as dynamo
 
    model = torch.nn.Sequential(*[torch.nn.Linear(200, 200) for _ in range(5)])
-   @dynamo.optimize("inductor")
+
    def test_backend_error():
 
        y = torch.ones(200, 200)
@@ -246,7 +246,8 @@ Here is an example:
        return model(a)
 
 
-   test_backend_error()
+   compiled_test_backend_error = torch.compile(test_backend_error, backend="inductor")
+   compiled_test_backend_error()
 
 Running this should give you this error with a longer stack trace below
 it:
@@ -266,8 +267,8 @@ it:
 `error with full stack
 trace <https://gist.github.com/mlazos/d6947854aa56d686800259a164c62100>`__
 
-If you then change ``@dynamo.optimize("inductor")`` to
-``@dynamo.optimize("aot_eager")``, it will run without error, because
+If you then change ``torch.compile(backend="inductor")`` to
+``torch.compile(backend="aot_eager")``, it will run without error, because
 `the
 issue <https://github.com/pytorch/torchdynamo/blob/d09e50fbee388d466b5252a63045643166006f77/torchinductor/lowering.py#:~:text=%23%20This%20shouldn%27t%20be,assert%20False>`__
 is in the TorchInductor lowering process, not in AOTAutograd.
@@ -367,7 +368,6 @@ through an example.
        return gm
 
 
-   @dynamo.optimize(toy_compiler)
    def test_backend_error():
        y = torch.ones(200, 200)
        x = torch.ones(200, 200)
@@ -376,7 +376,8 @@ through an example.
        return model(a)
 
 
-   test_backend_error()
+   compiled_test_backend_error = torch.compile(test_backend_error, backend=toy_compiler)
+   compiled_test_backend_error()
 
 In order to run the code after TorchDynamo has traced the forward graph,
 you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
@@ -412,7 +413,7 @@ the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
 
 
    mod = Repro().cuda()
-   opt_mod = dynamo.optimize("None")(mod)
+   opt_mod = torch.compile(mod, backend="None")
 
 
    args = [((200, 200), (200, 1), torch.float32, 'cpu', False)]
@@ -518,10 +519,10 @@ Given a program like this:
 
 .. code-block:: python
 
-   @dynamo.optimize(...)
    def some_fun(x):
        ...
-   some_fun(x)
+
+   compiled_fun = torch.compile(some_fun, ...)
    ...
 
 TorchDynamo will attempt to compile all of the torch/tensor operations
@@ -581,9 +582,10 @@ usage:
 
 .. code-block:: python
 
-   @dynamo.optimize(<compiler>, nopython=True)
    def toy_example(a, b):
       ...
+
+   compiled_toy = torch.compile(toy_example, fullgraph=True, backend=<compiler>)
 
 Excessive Recompilation
 -----------------------
@@ -597,7 +599,7 @@ recompile that function (or part) up to
 hitting the cache limit, you will first need to determine which guard is
 failing and what part of your program is triggering it.
 
-The `recompilation profiler <#recompilation-profiler>`__ automates the
+The `compile profiler <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/utils.py>`__ automates the
 process of setting TorchDynamo’s cache limit to 1 and running your
 program under an observation-only 'compiler' that records the causes of
 any guard failures. You should be sure to run your program for at least
@@ -621,11 +623,15 @@ acceptable number of recompilations for some dynamic models.
 
 .. code-block:: python
 
-   prof = dynamo.utils.CompilationProfiler()
-   @dynamo.optimize(prof)
+   from torch._dynamo.utils import CompileProfiler
+
+   prof = CompileProfiler()
+
    def my_model():
        ...
-   my_model()
+
+   profiler_model = torch.compile(my_model, backend=prof)
+   profiler_model()
    print(prof.report())
 
 Accuracy Debugging
