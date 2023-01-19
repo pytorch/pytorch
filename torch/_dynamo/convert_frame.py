@@ -195,7 +195,6 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     init_logging()
 
-    @dynamo_timed(phase_name="convert_frame")
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
         code = frame.f_code
