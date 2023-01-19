@@ -4,11 +4,13 @@ from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
+import math
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
+from torch._utils import is_compiling
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
@@ -21,6 +23,7 @@ class _RequiredParameter(object):
 
 required = _RequiredParameter()
 
+
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
         prev_grad = torch.is_grad_enabled()
@@ -31,6 +34,58 @@ def _use_grad_for_differentiable(func):
             torch.set_grad_enabled(prev_grad)
         return ret
     return _use_grad
+
+def _get_value(x):
+    # item is significantly faster than a cpu tensor in eager mode
+    if not torch.jit.is_scripting() and is_compiling():
+        return x
+    else:
+        return x.item()
+
+def _stack_if_compiling(x):
+    if not torch.jit.is_scripting() and is_compiling():
+        return torch.stack(x)
+    else:
+        return x
+
+def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscript type inference
+    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
+        return x.sqrt()
+    else:
+        return math.sqrt(x)
+
+
+# We try to use the foreach implementation on CUDA whenever possible since
+# it is faster than the for-loop implementation. However, the foreach
+# implementation is not differentiable, so we must check differentiable=False.
+def _default_to_foreach(tensorlists: List[List[torch.Tensor]], differentiable: bool = False) -> bool:
+    all_tensors = []
+    for tensorlist in tensorlists:
+        all_tensors.extend(tensorlist)
+    return not torch.jit.is_scripting() and not differentiable and all(
+        p.is_cuda for p in all_tensors
+    )
+
+
+# Common doc strings among optimizers
+_foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
+            is used. If unspecified by the user (so foreach is None), we will try to use
+            foreach over the for-loop implementation on CUDA, since it is usually
+            significantly more performant. (default: None)"""
+
+_capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
+            capture in a CUDA graph. Passing True can impair ungraphed performance,
+            so if you don't intend to graph capture this instance, leave it False
+            (default: False)"""
+
+_differentiable_doc = r"""differentiable (bool, optional): whether autograd should
+            occur through the optimizer step in training. Otherwise, the step()
+            function runs in a torch.no_grad() context. Setting to True can impair
+            performance, so leave it False if you don't intend to run autograd
+            through this instance (default: False)"""
+
+_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
+            objective, instead of minimizing (default: False)"""
 
 
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:

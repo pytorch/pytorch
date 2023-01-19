@@ -33,7 +33,7 @@ fi
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
-export IOS_NIGHTLY_BUILD_VERSION="1.14.0.${DATE}"
+export IOS_NIGHTLY_BUILD_VERSION="2.0.0.${DATE}"
 if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
     # libtorch_lite_ios_nightly_1.11.0.20210810.zip
     ZIPFILE="libtorch_lite_ios_nightly_${IOS_NIGHTLY_BUILD_VERSION}.zip"
@@ -47,7 +47,7 @@ echo "${IOS_NIGHTLY_BUILD_VERSION}" > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
 # Install conda then 'conda install' awscli
-curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-MacOSX-x86_64.sh
 chmod +x ~/conda.sh
 /bin/bash ~/conda.sh -b -p ~/anaconda
 export PATH="~/anaconda/bin:${PATH}"

@@ -26,7 +26,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -736,4 +736,4 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
   return std::tuple<Tensor, Tensor>(save_mean, save_var);
 }
 
-} } // namespace at::native
+} // namespace at::native
