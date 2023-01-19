@@ -20,6 +20,10 @@ from functorch.compile import (
 
 import torch
 from torch import fx as fx
+
+from torch._dynamo import config as dynamo_config
+from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.utils import get_debug_dir, init_logging
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -32,7 +36,6 @@ from .scheduler import (
     OutputNode,
     SchedulerNode,
 )
-from .utils import dynamo_config, dynamo_debug_utils, dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -188,7 +191,7 @@ def enable_aot_logging():
     import torch._functorch.aot_autograd
 
     log = logging.getLogger(torch._functorch.aot_autograd.__name__)
-    path = os.path.join(dynamo_utils.get_debug_dir(), "aot_torchinductor")
+    path = os.path.join(get_debug_dir(), "aot_torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -220,13 +223,13 @@ class DebugContext:
             with DebugContext():
                 return fn(*args, **kwargs)
 
-        return dynamo_debug_utils.wrap_compiler_debug(inner, compiler_name="inductor")
+        return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
     def create_debug_dir(folder_name):
         for n in DebugContext._counter:
             dirname = os.path.join(
-                dynamo_utils.get_debug_dir(),
+                get_debug_dir(),
                 "aot_torchinductor",
                 f"{folder_name}.{n}",
             )
@@ -274,7 +277,7 @@ class DebugContext:
     def __enter__(self):
         log = logging.getLogger(config.inductor_import)
         if not log.handlers:
-            dynamo_utils.init_logging()
+            init_logging()
 
         if config.debug:
 
@@ -356,7 +359,7 @@ class DebugFormatter:
 
     def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
         with self.fopen("fx_graph_runnable.py") as fd:
-            dynamo_debug_utils.save_graph_repro(fd, gm, inputs, "inductor")
+            save_graph_repro(fd, gm, inputs, "inductor")
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
