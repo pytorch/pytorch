@@ -8,11 +8,11 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.distributed.distributed_c10d import _get_default_group, register_process_group
 from torch._C._distributed_c10d import ReduceOp
 
-def matmul_cat_col(a, b, c, d, e, f, *, all_reduce):
+def matmul_cat_col(a, b, c, d, e, f, *, pg_id):
     x = torch.matmul(a, b)
     y = torch.matmul(c, d)
     z = torch.cat((x, y))
-    all_reduce(z, reduce_op="sum")
+    torch.ops.aten.all_reduce(z, group_id=pg_id, reduce_op="sum")
     g = torch.matmul(e, f)
     out = torch.add(z, g.repeat(2, 1))
     return (out, )
@@ -20,13 +20,6 @@ def matmul_cat_col(a, b, c, d, e, f, *, all_reduce):
 def compile(func, example_inputs):
     graph = make_fx(func)(*example_inputs)
     return inductor_compile_fx(graph, example_inputs)
-
-def eager_all_reduce(x, group_id, reduce_op):
-    op = {
-        "sum": ReduceOp.SUM
-    }
-    assert reduce_op in op, f"add support for {reduce_op}"
-    return dist.all_reduce(x, async_op=False, group=group_id, op=op[reduce_op])
 
 if __name__ == '__main__':
     os.environ["RANK"] = os.getenv("RANK", "0")
@@ -43,14 +36,12 @@ if __name__ == '__main__':
     # to collective APIs and pg object is recovered in execution layer
     pg = _get_default_group()
     pg_id = register_process_group(pg)
+    matmul_cat_col = partial(matmul_cat_col, pg_id=pg_id)
 
     inputs = (torch.ones(4, 4, device="cuda") + rank,) * 6
-    correct_out = matmul_cat_col(*inputs, all_reduce=partial(eager_all_reduce, group_id=pg_id))
+    correct_out = matmul_cat_col(*inputs)
 
-    compiled_matmul_cat_col = compile(
-        partial(matmul_cat_col, all_reduce=partial(torch.ops.aten.all_reduce, group_id=pg_id)),
-        inputs
-    )
+    compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
     inductor_out = compiled_matmul_cat_col(*inputs)
     print(f"rank {rank}: {correct_out}, {inductor_out}")
     assert same(correct_out, inductor_out)
