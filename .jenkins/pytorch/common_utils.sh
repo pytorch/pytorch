@@ -145,7 +145,7 @@ function install_triton() {
 }
 
 function setup_torchdeploy_deps(){
-  conda install -y -n py_${ANACONDA_PYTHON_VERSION} libpython-static=${ANACONDA_PYTHON_VERSION}
+  conda install -y -n "py_${ANACONDA_PYTHON_VERSION}" "libpython-static=${ANACONDA_PYTHON_VERSION}"
   local CC
   local CXX
   CC="$(which gcc)"
