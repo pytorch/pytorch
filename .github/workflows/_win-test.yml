@@ -58,11 +58,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
-      - name: Enable git symlinks on Windows
-        shell: bash
-        run: |
-          git config --global core.symlinks true
-
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:

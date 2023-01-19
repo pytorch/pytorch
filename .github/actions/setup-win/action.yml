@@ -80,3 +80,8 @@ runs:
             echo "Found no Python using ${CONDA_RUN}"
           fi
         fi
+
+    - name: Enable git symlinks on Windows
+      shell: bash
+      run: |
+        git config --global core.symlinks true
