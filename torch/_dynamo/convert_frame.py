@@ -35,13 +35,13 @@ from .utils import (
     format_bytecode,
     gen_record_file_name,
     guard_failures,
+    increment_frame,
     init_logging,
     is_namedtuple,
     istype,
     orig_code_map,
     troubleshooting_url,
     write_record_to_file,
-    increment_frame,
 )
 
 log = logging.getLogger(__name__)

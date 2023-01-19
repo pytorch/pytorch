@@ -64,6 +64,7 @@ def tabulate(rows, headers):
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
 
+
 def dynamo_profiled(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
@@ -93,11 +94,14 @@ curr_frame = 0
 def increment_frame():
     global curr_frame
     curr_frame = curr_frame + 1
-    
+
+
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count():
     global curr_frame
+    frame_phase_timing.clear()
     curr_frame = 0
+
 
 # Print a report of time spent so far
 # Ex:
@@ -109,12 +113,12 @@ def print_time_report():
     total_by_key = {}
     print("TIMING:")
     for frame, timings in frame_phase_timing.items():
-        for key, time in timings.items():
-            total += time
+        for key, timing in timings.items():
+            total += timing
             if key not in total_by_key:
-                total_by_key[key] = time
+                total_by_key[key] = timing
             else:
-                total_by_key[key] += time
+                total_by_key[key] += timing
     for key, value in total_by_key.items():
         print(f"{key}:{round(value, 5)}")
 
@@ -123,7 +127,7 @@ def print_time_report():
 # By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
 # where the key is the functions name.
 # For example:
-#  
+#
 #  @dynamo_timed
 #  def _foo(...):
 #
@@ -151,10 +155,14 @@ def dynamo_timed(original_function=None, phase_name=None):
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
                     frame_phase_timing[frame_key] = {}
-                assert phase_name not in frame_phase_timing[frame_key], f"Duplicate phase name {phase_name} for frame {frame_key}"
+                assert (
+                    phase_name not in frame_phase_timing[frame_key]
+                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
                 frame_phase_timing[frame_key][phase_name] = round(time_spent, 5)
             return r
+
         return time_wrapper
+
     if original_function:
         return dynamo_timed_inner(original_function)
     return dynamo_timed_inner
