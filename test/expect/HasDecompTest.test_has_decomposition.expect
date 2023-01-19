@@ -714,9 +714,6 @@ aten::empty_quantized.out
 aten::equal
 aten::expand_copy
 aten::expand_copy.out
-aten::exponential
-aten::exponential.out
-aten::exponential_
 aten::fake_quantize_per_channel_affine_cachemask
 aten::fake_quantize_per_channel_affine_cachemask.out
 aten::fake_quantize_per_tensor_affine_cachemask
@@ -928,6 +925,10 @@ aten::mkldnn_reorder_conv2d_weight
 aten::mkldnn_reorder_conv2d_weight.out
 aten::mkldnn_reorder_conv3d_weight
 aten::mkldnn_reorder_conv3d_weight.out
+aten::mkldnn_rnn_layer
+aten::mkldnn_rnn_layer.out
+aten::mkldnn_rnn_layer_backward
+aten::mkldnn_rnn_layer_backward.out
 aten::mm
 aten::mm.out
 aten::mode

@@ -666,6 +666,10 @@ class DecompAmpTests(TestCase):
 instantiate_device_type_tests(DecompAmpTests, globals())
 
 class HasDecompTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.maxDiff = None
+
     def test_has_decomposition(self):
 
         def can_appear_in_trace(op) -> bool:

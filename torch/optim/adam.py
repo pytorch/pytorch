@@ -2,7 +2,8 @@ from typing import cast, List, Optional, Dict
 
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling, _dispatch_sqrt
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
+                        _dispatch_sqrt, _capturable_doc, _differentiable_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
@@ -47,81 +48,6 @@ def _get_fp16AMP_params(
     return _MultiDeviceReplicator(found_inf_combined)
 
 class Adam(Optimizer):
-    r"""Implements Adam algorithm.
-
-    .. math::
-       \begin{aligned}
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \gamma \text{ (lr)}, \beta_1, \beta_2
-                \text{ (betas)},\theta_0 \text{ (params)},f(\theta) \text{ (objective)}          \\
-            &\hspace{13mm}      \lambda \text{ (weight decay)},  \: \textit{amsgrad},
-                \:\textit{maximize}                                                              \\
-            &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
-                v_0\leftarrow 0 \text{ (second moment)},\: \widehat{v_0}^{max}\leftarrow 0\\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-
-            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
-            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
-            &\hspace{5mm}\textbf{if} \: \lambda \neq 0                                           \\
-            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
-            &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
-            &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
-            &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
-            &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
-            &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
-            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
-                \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-       \end{aligned}
-
-    For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        amsgrad (bool, optional): whether to use the AMSGrad variant of this
-            algorithm from the paper `On the Convergence of Adam and Beyond`_
-            (default: False)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
-            Passing True can impair ungraphed performance, so if you don't intend to
-            graph capture this instance, leave it False (default: False)
-        differentiable (bool, optional): whether autograd should occur through the optimizer step
-            in training otherwise, the step() function runs in a torch.no_grad() context.
-            Setting to True can impair performance, so leave it False if you don't intend to run
-            autograd through this instance (default: False)
-        fused (bool, optional): whether the fused implementation (CUDA only) is used.
-            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported. Since the fused implementation is usually significantly faster than
-            the for-loop implementation, we try to use it whenever possible (all parameters
-            are on CUDA and are of a supported type). Else, we continue with the for-loop
-            implementation. (default: None)
-
-    .. _Adam\: A Method for Stochastic Optimization:
-        https://arxiv.org/abs/1412.6980
-    .. _On the Convergence of Adam and Beyond:
-        https://openreview.net/forum?id=ryQu7f-RZ
-    """
-
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
                  maximize: bool = False, capturable: bool = False,
@@ -283,6 +209,77 @@ class Adam(Optimizer):
                  found_inf=found_inf)
 
         return loss
+
+
+Adam.__doc__ = r"""Implements Adam algorithm.
+
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \gamma \text{ (lr)}, \beta_1, \beta_2
+                \text{ (betas)},\theta_0 \text{ (params)},f(\theta) \text{ (objective)}          \\
+            &\hspace{13mm}      \lambda \text{ (weight decay)},  \: \textit{amsgrad},
+                \:\textit{maximize}                                                              \\
+            &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
+                v_0\leftarrow 0 \text{ (second moment)},\: \widehat{v_0}^{max}\leftarrow 0\\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
+            &\hspace{5mm}\textbf{if} \: \lambda \neq 0                                           \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
+            &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
+            &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
+            &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
+            &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
+            &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
+            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
+                \widehat{v_t})                                                                   \\
+            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+                \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+                \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
+    """ + r"""
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-3)
+        betas (Tuple[float, float], optional): coefficients used for computing
+            running averages of gradient and its square (default: (0.9, 0.999))
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        amsgrad (bool, optional): whether to use the AMSGrad variant of this
+            algorithm from the paper `On the Convergence of Adam and Beyond`_
+            (default: False)
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: None)
+        {maximize}
+        {capturable}
+        {differentiable}
+        fused (bool, optional): whether the fused implementation (CUDA only) is used.
+            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
+            are supported. Since the fused implementation is usually significantly faster than
+            the for-loop implementation, we try to use it whenever possible (all parameters
+            are on CUDA and are of a supported type). Else, we continue with the for-loop
+            implementation. (default: None)
+
+    .. _Adam\: A Method for Stochastic Optimization:
+        https://arxiv.org/abs/1412.6980
+    .. _On the Convergence of Adam and Beyond:
+        https://openreview.net/forum?id=ryQu7f-RZ
+
+    """.format(maximize=_maximize_doc, capturable=_capturable_doc, differentiable=_differentiable_doc)
 
 
 def adam(params: List[Tensor],
