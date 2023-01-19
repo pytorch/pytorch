@@ -1753,7 +1753,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.rsub',
-        # duplicated due to efficiency concerns of the ref vs the decomp
+        # duplicated as refs do not have decent support for advanced indexing
+        '_refs.index_copy',
+        '_refs.index_copy_',
+        '_refs.index_add',
         '_refs.index_add_',
         # these are not aten ops?
         '_refs._conversions.bfloat16',
@@ -1828,10 +1831,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full_like',  # missing "layout"
-        '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
-        '_refs.zeros_like',  # missing "layout"
         # other
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
