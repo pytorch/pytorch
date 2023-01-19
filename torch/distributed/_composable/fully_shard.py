@@ -1,4 +1,5 @@
-from typing import Callable, Iterable, Optional, Union
+import contextlib
+from typing import Callable, Generator, Iterable, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -95,3 +96,49 @@ def fully_shard(
         ):
             _insert_module_state(submodule, state)
     return module
+
+
+@contextlib.contextmanager
+def unshard_params(
+    module: nn.Module,
+    recurse: bool = True,
+    writeback: bool = True,
+    rank0_only: bool = False,
+    offload_to_cpu: bool = False,
+    with_grads: bool = False,
+) -> Generator:
+    """
+    This context manager unshards FSDP-managed parameters.
+
+    Args:
+        module (nn.Module): Root module whose module tree to which this
+            parameter unsharding logic applies.
+        writeback (bool): Whether writes to the parameters persist after
+            exiting the context.
+        rank0_only (bool): Whether to unshard parameters on rank 0 only or on
+            all ranks.
+        offload_to_cpu (bool): Whether to offload the unsharded parameters to
+            CPU while inside the context.
+        with_grads (bool): Whether to additionally unshard gradients along with
+            the parameters.
+    """
+    # TODO (awgu): IMHO, `recurse=False` does not present meaningful semantics.
+    # In what case would the user want to only unshard the parameters of the
+    # root FSDP modules (where there may be multiple)? To me, the non-recursive
+    # case should directly target a module annotated with `fully_shard` or be a
+    # no-op otherwise.
+    # TODO (awgu): I plan to unify documentation with `summon_full_params()` in
+    # a follow-up.
+    # TODO (awgu): The current implementation relies on traversal utils that
+    # do not traverse through incompatible composable APIs. This may not be the
+    # desired behavior for some functions (like this one), in which case we
+    # need an option to continue traversing.
+    with torch.distributed.fsdp._unshard_param_utils._unshard_params(
+        module=module,
+        recurse=recurse,
+        writeback=writeback,
+        rank0_only=rank0_only,
+        offload_to_cpu=offload_to_cpu,
+        with_grads=with_grads,
+    ):
+        yield
