@@ -285,12 +285,18 @@ class TestStatelessFunctionalAPI(TestCase):
         del parameters['tied_bias']
         del parameters['tied_buffer']
 
-        with self.assertRaisesRegex(ValueError, "functional_call got values for both (l1.bias|tied_bias)"):
+        with self.assertRaisesRegex(
+            ValueError,
+            re.escape("functional_call got multiple values for keys ['l1.bias', 'tied_bias']"),
+        ):
             parameters['tied_bias'] = torch.tensor([5.0])
             functional_call(module, parameters, x, tie_weights=True)
         del parameters['tied_bias']
 
-        with self.assertRaisesRegex(ValueError, "functional_call got values for both (buffer|tied_buffer)"):
+        with self.assertRaisesRegex(
+            ValueError,
+            re.escape("functional_call got multiple values for keys ['buffer', 'tied_buffer']"),
+        ):
             parameters['tied_buffer'] = torch.tensor([5.0])
             functional_call(module, parameters, x, tie_weights=True)
 
