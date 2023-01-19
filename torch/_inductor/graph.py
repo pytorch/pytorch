@@ -67,9 +67,9 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
+        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
+            i.node.expr if isinstance(i, torch.SymInt) else i for i in stride
         ]
         return size, stride
 
