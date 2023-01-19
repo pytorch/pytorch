@@ -1,0 +1,112 @@
+# Copyright 2018 The Bazel Authors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This becomes the BUILD file for @local_config_cc// under FreeBSD.
+
+package(default_visibility = ["//visibility:public"])
+
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_toolchain", "cc_toolchain_suite")
+load(":cc_toolchain_config.bzl", "cc_toolchain_config")
+
+cc_library(
+    name = "malloc",
+)
+
+filegroup(
+    name = "empty",
+    srcs = [],
+)
+
+# Hardcoded toolchain, legacy behaviour.
+cc_toolchain_suite(
+    name = "toolchain",
+    toolchains = {
+        "armeabi-v7a": ":cc-compiler-armeabi-v7a",
+        "armeabi-v7a|compiler": ":cc-compiler-armeabi-v7a",
+        "freebsd": ":cc-compiler-freebsd",
+        "freebsd|compiler": ":cc-compiler-freebsd",
+    },
+)
+
+cc_toolchain(
+    name = "cc-compiler-freebsd",
+    all_files = ":empty",
+    ar_files = ":empty",
+    as_files = ":empty",
+    compiler_files = ":empty",
+    dwp_files = ":empty",
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    strip_files = ":empty",
+    supports_param_files = 0,
+    toolchain_config = ":local_freebsd",
+    toolchain_identifier = "local_freebsd",
+)
+
+cc_toolchain_config(
+    name = "local_freebsd",
+    cpu = "freebsd",
+)
+
+toolchain(
+    name = "cc-toolchain-freebsd",
+    exec_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:freebsd",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:freebsd",
+    ],
+    toolchain = ":cc-compiler-freebsd",
+    toolchain_type = "@rules_cc//cc:toolchain_type",
+)
+
+cc_toolchain(
+    name = "cc-compiler-armeabi-v7a",
+    all_files = ":empty",
+    ar_files = ":empty",
+    as_files = ":empty",
+    compiler_files = ":empty",
+    dwp_files = ":empty",
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    strip_files = ":empty",
+    supports_param_files = 0,
+    toolchain_config = ":stub_armeabi-v7a",
+    toolchain_identifier = "stub_armeabi-v7a",
+)
+
+cc_toolchain_config(
+    name = "stub_armeabi-v7a",
+    cpu = "armeabi-v7a",
+)
+
+toolchain(
+    name = "cc-toolchain-armeabi-v7a",
+    exec_compatible_with = [
+        "@platforms//cpu:arm",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:arm",
+        "@platforms//os:android",
+    ],
+    toolchain = ":cc-compiler-armeabi-v7a",
+    toolchain_type = "@rules_cc//cc:toolchain_type",
+)
+
+filegroup(
+    name = "link_dynamic_library",
+    srcs = ["link_dynamic_library.sh"],
+)

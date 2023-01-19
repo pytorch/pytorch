@@ -4,6 +4,11 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
 local_repository(
+    name = "rules_cc",
+    path = "tools/rules_cc",
+)
+
+local_repository(
     name = "rules_cuda",
     path = "tools/rules_cuda",
 )

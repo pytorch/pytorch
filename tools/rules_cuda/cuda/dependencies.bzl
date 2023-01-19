@@ -30,18 +30,23 @@ _local_cuda = repository_rule(
 )
 
 def _rules_cc():
-    if native.existing_rule("rules_cc"):
-        fail("@rules_cc repository already exists. Unable to patch feature 'cuda'.")
-    http_archive(
-        name = "rules_cc",
-        sha256 = "cb8ce8a25464b2a8536450971ad1b45ee309491c1f5e052a611b9e249cfdd35d",
-        strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
-        patches = [Label("//private:rules_cc.patch")],
-        urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
-            "https://github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
-        ],
-    )
+    pass
+    # if native.existing_rule("rules_cc"):
+    #     fail("@rules_cc repository already exists. Unable to patch feature 'cuda'.")
+    # http_archive(
+    #     name = "rules_cc",
+    #     sha256 = "cb8ce8a25464b2a8536450971ad1b45ee309491c1f5e052a611b9e249cfdd35d",
+    #     strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
+    #     patches = [Label("//private:rules_cc.patch")],
+    #     urls = [
+    #         "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
+    #         "https://github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
+    #     ],
+    # )
+    # local_repository(
+    #     name = "rules_cc",
+    #     path = "tools/rules_cc",
+    # )
 
 def rules_cuda_dependencies(with_rules_cc = True):
     """Loads rules_cuda dependencies. To be called from WORKSPACE file.
