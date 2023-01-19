@@ -1,10 +1,10 @@
-#include <torch/csrc/PyInterpreter.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/python_dispatch.h>
 
 #include <string>
 
@@ -37,7 +37,8 @@ struct ConcretePyInterpreterVTable final
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
-  c10::intrusive_ptr<c10::TensorImpl> detach(const c10::TensorImpl* self) const override;
+  c10::intrusive_ptr<c10::TensorImpl> detach(
+      const c10::TensorImpl* self) const override;
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
@@ -54,8 +55,10 @@ struct ConcretePyInterpreterVTable final
         op, key, stack);
   }
 
-  bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat) const override;
-  bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat) const override;
+  bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
+      const override;
+  bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat)
+      const override;
   bool is_non_overlapping_and_dense(const c10::TensorImpl* self) const override;
   c10::Device device(const c10::TensorImpl* self) const override;
   int64_t dim(const c10::TensorImpl* self) const override;
@@ -158,12 +161,12 @@ py::object torchDispatchFromTensorImpl(
   auto args =
       py::reinterpret_steal<py::object>(PyTuple_New(1 + extra_args.size()));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
-  int64_t i = 1; 
+  int64_t i = 1;
   for (auto& a : extra_args) {
     if (a.ptr() == nullptr)
       throw python_error();
     PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
-    i++; 
+    i++;
   }
 
   py::dict kwargs;
@@ -195,14 +198,14 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
   if (!Py_IsInitialized())
     return;
 
-  pybind11::gil_scoped_acquire gil; 
+  pybind11::gil_scoped_acquire gil;
   // Two possibilities:
   // 1. We are decref-ing a tensor. Then we must be careful about
   // PyObject resurrection (this only applies to Tensors, see
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (is_tensor && Py_REFCNT(pyobj) > 1) { 
+  if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
     // too late to rescue the object, so just stub out the PyObject
@@ -768,7 +771,6 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
 }
 
 PyInterpreterHolder self_interpreter;
-
 
 } // anonymous namespace
 
