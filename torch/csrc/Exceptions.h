@@ -167,11 +167,11 @@ struct python_error : public std::exception {
     Py_XINCREF(traceback);
   }
 
-  python_error(python_error&& other) {
-    type = other.type;
-    value = other.value;
-    traceback = other.traceback;
-    message = std::move(other.message);
+  python_error(python_error&& other) noexcept
+      : type(other.type),
+        value(other.value),
+        traceback(other.traceback),
+        message(std::move(other.message)) {
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;
@@ -271,8 +271,8 @@ TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  PyTorchError(const std::string& msg_ = std::string()) : msg(msg_) {}
+  PyTorchError() = default;
+  PyTorchError(std::string msg_) : msg(std::move(msg_)) {}
   virtual PyObject* python_type() = 0;
   const char* what() const noexcept override {
     return msg.c_str();
