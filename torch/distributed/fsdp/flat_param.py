@@ -795,7 +795,7 @@ class FlatParamHandle:
             p_assert(
                 flat_param.device == cpu_device,
                 f"Expects the `FlatParameter` to be on CPU when parameter CPU "
-                f"offloading is enabled, not {flat_param.device}"
+                f"offloading is enabled, not {flat_param.device}",
             )
         else:
             self._check_on_compute_device(self.flat_param)
