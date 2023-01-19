@@ -100,7 +100,8 @@ try:
     os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
         '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
 
-    subprocess.run('conda env list', shell=True)
+    result = subprocess.run('conda env list', shell=True)
+    result.check_returncode()
 
 except Exception as e:
     None

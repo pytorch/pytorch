@@ -29,13 +29,18 @@ with pushd('build'):
 
     # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
     try:
-        subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
+        result = subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
             '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True)
+        result.check_returncode()
 
-        subprocess.run('echo Executing Ninja for custom_backend test...', shell=True)
-        subprocess.run('ninja -v', shell=True)
+        result = subprocess.run('echo Executing Ninja for custom_backend test...', shell=True)
+        result.check_returncode()
 
-        subprocess.run('echo Ninja succeeded for custom_backend test.', shell=True)
+        result = subprocess.run('ninja -v', shell=True)
+        result.check_returncode()
+
+        result = subprocess.run('echo Ninja succeeded for custom_backend test.', shell=True)
+        result.check_returncode()
 
     except Exception as e:
 
@@ -47,15 +52,19 @@ with pushd('build'):
 try:
 
     # Run tests Python-side and export a script module.
-    subprocess.run('conda install -n test_env python test_custom_backend.py -v', shell=True)
-    subprocess.run('conda install -n test_env python backend.py --export-module-to="build/model.pt"', shell=True)
+    result = subprocess.run('conda install -n test_env python test_custom_backend.py -v', shell=True)
+    result.check_returncode()
+
+    result = subprocess.run('conda install -n test_env python backend.py --export-module-to="build/model.pt"', shell=True)
+    result.check_returncode()
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
     os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
         + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
-    subprocess.run('test_custom_backend.exe model.pt', shell=True)
+    result = subprocess.run('test_custom_backend.exe model.pt', shell=True)
+    result.check_returncode()
 
 except Exception as e:
 

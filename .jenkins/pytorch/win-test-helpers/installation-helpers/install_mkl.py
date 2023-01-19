@@ -11,15 +11,18 @@ if 'REBUILD' not in os.environ:
 
         if 'BUILD_ENVIRONMENT' not in os.environ:
 
-            subprocess.run('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z ' +
+            result = subprocess.run('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z ' +
                     '--output ' + tmp_win_dir + '\\mkl.7z', shell=True)
+            result.check_returncode()
 
         else:
 
-            subprocess.run('aws s3 cp s3://ossci-windows/mkl_2020.2.254.7z ' +
+            result = subprocess.run('aws s3 cp s3://ossci-windows/mkl_2020.2.254.7z ' +
                 tmp_win_dir + '\\mkl.7z --quiet', shell=True)
+            result.check_returncode()
 
-        subprocess.run('7z x -aoa ' + tmp_win_dir + '\\mkl.7z -o' + tmp_win_dir + '\\mkl', shell=True)
+        result = subprocess.run('7z x -aoa ' + tmp_win_dir + '\\mkl.7z -o' + tmp_win_dir + '\\mkl', shell=True)
+        result.check_returncode()
 
     except Exception as e:
 
