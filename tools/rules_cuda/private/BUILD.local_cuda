@@ -9,7 +9,7 @@ filegroup(
     "cuda/bin/**",
     "cuda/lib64/**",
     "cuda/nvvm/**",
-  ]),
+  ]) + ["@opt_cache_lib//:nvcc"],
 )
 
 # TODO: Remove, see third_party/cuda:BUILD
