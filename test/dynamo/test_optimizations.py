@@ -9,7 +9,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.optimizations import backends
-from torch._dynamo.optimizations.analysis import has_mutation
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.optimizations.normalize import Inplacifier, normalize
 from torch._dynamo.testing import same
@@ -73,33 +72,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         code = gm.code.replace(" ", "")
         self.assertIn("inplace=True", code)
         self.assertIn("out=linear_1", code)
-
-    def test_has_mutation(self):
-        gm = torch.fx.symbolic_trace(Seq())
-        self.assertFalse(has_mutation(gm, torch.rand([10, 10])))
-
-        class Mutating(torch.nn.Module):
-            def __init__(self):
-                super(Mutating, self).__init__()
-
-            def forward(self, arg):
-                return arg.add_(1)
-
-        gm = torch.fx.symbolic_trace(Mutating())
-        self.assertTrue(has_mutation(gm, torch.rand([10, 1, 1, 1])))
-
-    def test_has_mutation_factory(self):
-        def fn():
-            x = torch.empty(2)
-            x.fill_(2)
-            return x
-
-        def compiler_fn(graph, example_inputs):
-            self.assertTrue(has_mutation(graph, example_inputs))
-            return graph
-
-        opt_fn = torch._dynamo.optimize(compiler_fn)(fn)
-        opt_fn()
 
     def test_example_inputs(self):
         def fn(a, bc, d):

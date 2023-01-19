@@ -453,7 +453,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     stats = memory_stats(device=device)
 
     def _format_size(sz, pref_sz):
-        prefixes = ["B ", "KB", "MB", "GB", "TB", "PB"]
+        prefixes = ["B  ", "KiB", "MiB", "GiB", "TiB", "PiB"]
         prefix = prefixes[0]
         for new_prefix in prefixes[1:]:
             if pref_sz < 768 * 1024:
@@ -461,7 +461,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
             prefix = new_prefix
             sz //= 1024
             pref_sz /= 1024
-        return "{:7d} {}".format(sz, prefix)
+        return "{:6d} {}".format(sz, prefix)
 
     def _format_count(cnt, pref_cnt):
         prefixes = [" ", "K", "M"]

@@ -103,7 +103,9 @@ at::TensorOptions options_from_string(const std::string& str) {
   }
 
   auto it = map->find(str);
-  TORCH_CHECK_VALUE(it != map->end(), "invalid type: '", str, "'");
+  if (it == map->end()) {
+    throw ValueError("invalid type: '%s'", str.c_str());
+  }
   return it->second->options();
 }
 

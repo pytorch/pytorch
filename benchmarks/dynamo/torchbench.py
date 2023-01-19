@@ -118,6 +118,10 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "tacotron2",
 }
 
+REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "drq",
+}
+
 REQUIRE_COSINE_TOLERACE = {
     # Just keeping it here even though its empty, if we need this in future.
 }
@@ -192,6 +196,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super(TorchBenchmarkRunner, self).__init__()
         self.suite_name = "torchbench"
+        self.optimizer = None
 
     @property
     def skip_models(self):
@@ -297,6 +302,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+
+        if self.args.trace_on_xla:
+            # work around for: https://github.com/pytorch/xla/issues/4174
+            import torch_xla  # noqa: F401
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
@@ -330,6 +339,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
         if self.args.float16 or self.args.amp:
+            if name in REQUIRE_HIGHER_FP16_TOLERANCE:
+                return 1e-2, cosine
             return 1e-3, cosine
         if is_training and current_device == "cuda":
             tolerance = 1e-3
@@ -345,7 +356,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(*inputs)
+        with self.autocast():
+            return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)

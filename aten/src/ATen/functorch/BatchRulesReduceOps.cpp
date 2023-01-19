@@ -55,6 +55,14 @@ Tensor median_decomp(
   return std::get<0>(at::median(self.flatten(), 0, false));
 }
 
+Tensor all_decomp(const Tensor& self) {
+  return at::all(self.flatten(), 0, false);
+}
+
+Tensor any_decomp(const Tensor& self) {
+  return at::any(self.flatten(), 0, false);
+}
+
 enum ReductionCase { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
@@ -446,6 +454,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);
   REDUCTION_WITH_KEEPDIM_ARG(amax);
   REDUCTION_WITH_KEEPDIM_ARG(amin);
+  m.impl("all", all_decomp);
+  REDUCTION_WITH_KEEPDIM_ARG(all.dim);
+  m.impl("any", any_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);

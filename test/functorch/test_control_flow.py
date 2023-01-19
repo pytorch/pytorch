@@ -636,5 +636,19 @@ class TestControlFlowTraced(TestCase):
         res = gm(p, pred, xs, y)
         self.assertEqual(res, main(p, pred, xs, y))
 
+    def test_cond_with_sym_pred(self):
+        def true_fn(x):
+            return x + x
+
+        def false_fn(x):
+            return x * x
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
+        x = torch.ones(4, 3, 2)
+        self.assertEqual(foo(x), gm(x))
+
 if __name__ == '__main__':
     run_tests()

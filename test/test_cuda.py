@@ -600,6 +600,36 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async")
+    def test_cublas_workspace_explicit_allocation(self):
+        a = torch.randn(7, 7, device='cuda', requires_grad=False)
+        default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
+        # different size (32 MiB) expected on Hopper GPU
+        if torch.cuda.get_device_capability() == (9, 0):
+            default_workspace_size = 4096 * 8 * 1024
+
+        def check_workspace_size(inp):
+            torch._C._cuda_clearCublasWorkspaces()
+            start = torch.torch.cuda.memory_stats()['active_bytes.all.allocated']
+            with torch.no_grad():
+                torch.matmul(inp, inp)
+            finish = torch.torch.cuda.memory_stats()['active_bytes.all.allocated']
+            return finish - start
+
+        # check default
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ''
+        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+
+        # check default with bad user config
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = '-1'
+        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+
+        # check valid config
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':128:8:64:16:32:32'
+        self.assertTrue(abs(check_workspace_size(a) - (3072 * 1024)) < 524288)
+
+        torch._C._cuda_clearCublasWorkspaces()
+
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
             int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
@@ -614,20 +644,24 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
-        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
             int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        # this is really just checking that the environment variable is respected during testing
+        # and not overwritten by another function that doesn't revert it to the intitial value
         if not skip_tf32_cublas:
             self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+            self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        else:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
         for p in ('medium', 'high'):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
-            if not skip_tf32_cublas:
-                self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
         torch.set_float32_matmul_precision('highest')
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
-        if not skip_tf32_cublas:
-            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        torch.set_float32_matmul_precision(orig)
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
