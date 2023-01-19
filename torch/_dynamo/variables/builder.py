@@ -751,7 +751,6 @@ def wrap_fx_proxy_cls(
             # Flipping it to an assert fails dozens of tests.
             # TODO(ezyang): should attempt this burndown again
             if not isinstance(example_value, torch._subclasses.FakeTensor):
-<<<<<<< HEAD
                 # We shouldn't be doing this at all, see
                 # https://github.com/pytorch/torchdynamo/issues/1950
                 # But assuming we're doing it, the legacy behavior for
