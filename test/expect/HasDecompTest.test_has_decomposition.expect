@@ -978,8 +978,6 @@ aten::normal_functional
 aten::ones.names
 aten::ones.names_out
 aten::ones.out
-aten::ones_like
-aten::ones_like.out
 aten::ormqr
 aten::ormqr.out
 aten::permute_copy
