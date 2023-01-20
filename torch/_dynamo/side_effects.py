@@ -246,9 +246,11 @@ class SideEffects:
         self.keepalive.append(item)
         return variable
 
-    def prune_dead_object_new(self, tx, live_new_objects=None):
-        if live_new_objects is None:
+    def prune_dead_object_new(self, tx, do_not_prune_new_objects=None):
+        if do_not_prune_new_objects is None:
             live_new_objects = set()
+        else:
+            live_new_objects = set(do_not_prune_new_objects)
         skip_obj = None
 
         def visit(var: VariableTracker):

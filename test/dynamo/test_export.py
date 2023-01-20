@@ -7,7 +7,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from functorch.experimental.control_flow import cond
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
