@@ -571,10 +571,10 @@ def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     return a
 
 
-def zero_(a: TensorLikeType) -> TensorLikeType:
-    r = prims.fill(a, 0)
-    prims.copy_to(a, r)
-    return a
+@register_decomposition(aten.zero)
+@out_wrapper()
+def zero(input: TensorLikeType) -> TensorLikeType:
+    return torch.zeros_like(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -1124,10 +1124,8 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
-    if isinstance(a, TensorLike) and a.dtype != dtype:
-        a = prims.to_dtype(a, dtype)
-    if isinstance(b, TensorLike) and b.dtype != dtype:
-        b = prims.to_dtype(b, dtype)
+    a = _maybe_convert_to_dtype(a, dtype)
+    b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
     return pow(a, b)
@@ -4129,7 +4127,7 @@ def new_zeros(
 
     return torch.full(
         size,
-        False if dtype == torch.bool else 0,
+        False if (dtype or a.dtype) == torch.bool else 0,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4181,7 +4179,7 @@ def new_ones(
 
     return torch.full(
         size,
-        True if dtype == torch.bool else 1,
+        True if (dtype or a.dtype) == torch.bool else 1,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4428,7 +4426,7 @@ def logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return prims.to_dtype(torch.pow(base, ret), dtype)
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
 
 
 @overload
@@ -4693,10 +4691,50 @@ def full_like(
     return fill(e, fill_value)
 
 
-zeros_like = partial(full_like, fill_value=False)
+@register_decomposition(aten.zeros_like)
+def zeros_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        False if (dtype or a.dtype) == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
-ones_like = partial(full_like, fill_value=True)
+@register_decomposition(aten.ones_like)
+def ones_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        True if (dtype or a.dtype) == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
 @register_decomposition(aten.randn.default)
@@ -5004,8 +5042,8 @@ def tril_indices(
     b = m_first_row - 0.5
     row_inds1 = torch.floor(-b + torch.sqrt(b * b + 2 * xs1))
     col_inds1 = torch.floor(xs1 - (2 * m_first_row - 1 + row_inds1) * row_inds1 * 0.5)
-    row_inds1 = prims.to_dtype(row_inds1 + row_offset, dtype)
-    col_inds1 = prims.to_dtype(col_inds1, dtype)
+    row_inds1 = _maybe_convert_to_dtype(row_inds1 + row_offset, dtype)
+    col_inds1 = _maybe_convert_to_dtype(col_inds1, dtype)
 
     # then bottom rectangle
     xs2 = arange_kw(0, rectangle_size, dtype=dtype)
@@ -5068,8 +5106,8 @@ def triu_indices(
     b = -0.5 - m_first_row
     row_inds1 = torch.floor(-b - torch.sqrt(b * b - 2 * xs1))
     col_inds1 = torch.floor(xs1 - ((2 * m_first_row - 1 - row_inds1) * row_inds1) * 0.5)
-    row_inds1 = prims.to_dtype(row_inds1, dtype)
-    col_inds1 = prims.to_dtype(col_inds1, dtype)
+    row_inds1 = _maybe_convert_to_dtype(row_inds1, dtype)
+    col_inds1 = _maybe_convert_to_dtype(col_inds1, dtype)
 
     if col:
         row_inds1 = row_inds1 + (rectangle_size // col)
@@ -5239,6 +5277,7 @@ true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
 exponential_ = _make_inplace(exponential)
+zero_ = _make_inplace(zero)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
