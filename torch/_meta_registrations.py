@@ -2377,10 +2377,35 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 
+def get_num_ranks(arg):
+    # hack, assume we're using arg (pg_name) as number of ranks for now.
+    return int(arg)
+
 @register_meta(c10d.traceable_allreduce)
 def allreduce__meta(x):
     return torch.empty_like(x)
 
+@register_meta(c10d.traceable_reduce_scatter_tensor)
+def reduce_scatter_tensor__meta(x, arg):
+    return torch.tensor_split(x, get_num_ranks(arg))[0]
+
+@register_meta(c10d.traceable_reduce_scatter)
+def reduce_scatter__meta(x, arg):
+    return torch.empty_like(x[0])
+
+@register_meta(c10d.traceable_all_gather)
+def all_gather__meta(x, arg):
+    return [torch.empty_like(x) for _ in range(get_num_ranks(arg))]
+
+@register_meta(c10d.traceable_all_gather_base)
+def all_gather_base__meta(x, arg):
+    return x.repeat([get_num_ranks(arg)] + [1] * (x.ndim - 1))
+
+@register_meta(c10d.traceable_alltoall)
+def alltoall__meta(x, arg):
+    # we expect all shapes to be statically the same
+    # FIXME: this variant tdoens't make sense because we need the shapes as well
+    return [torch.empty_like(a) for a in x]
 
 legacy_contiguous_memory_format = torch.contiguous_format
 

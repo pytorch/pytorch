@@ -8,12 +8,49 @@
 namespace c10d {
 namespace {
 
+
+// hack, assume we're using arg (pg_name) as number of ranks for now.
+int get_num_ranks(const std::string& arg) {
+  return std::atoi(arg.c_str());
+}
+
 // for now this op is useless in eager. we just assume we're tracing it and
 // replacing it in part, this is due to it being difficult to construct
 // ProcessGroup or ReduceOp in python in an acceptable way to pass them to the
 // dispatcher.  (Pybind classes, which are available, do not work)
 at::Tensor traceable_allreduce(at::Tensor x) {
   return x;
+}
+
+at::Tensor traceable_reduce_scatter_tensor(at::Tensor in, const std::string& arg) {
+  auto num_ranks = get_num_ranks(arg);
+  return at::tensor_split(in, num_ranks)[0];
+}
+
+at::Tensor traceable_reduce_scatter(const at::TensorList in, const std::string& arg) {
+  return in[0];
+}
+
+std::vector<at::Tensor> traceable_all_gather(at::Tensor in, const std::string& arg) {
+  std::vector<at::Tensor> out;
+  auto num_ranks = get_num_ranks(arg);
+  for (int i = 0; i < num_ranks; ++i) {
+    out.push_back(in);
+  }
+  return out;
+}
+
+at::Tensor traceable_all_gather_base(at::Tensor in, const std::string& arg) {
+  // FIXME shape is wrong
+  std::vector<long int> repeats(in.ndimension(), 1);
+  if (repeats.size() > 0) {
+    repeats[0] = get_num_ranks(arg);
+  }
+  return at::native::repeat(in, repeats);
+}
+
+std::vector<at::Tensor> traceable_alltoall(at::TensorList in, const std::string& arg) {
+  return in.vec();
 }
 
 TORCH_LIBRARY(c10d, m) {
@@ -37,6 +74,26 @@ TORCH_LIBRARY(c10d, m) {
       "traceable_allreduce",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, traceable_allreduce));
+  m.def(
+      "traceable_reduce_scatter_tensor(Tensor tensor, str arg) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, traceable_reduce_scatter_tensor));
+  m.def(
+      "traceable_reduce_scatter(Tensor[] inputs, str arg) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, traceable_reduce_scatter));
+m.def(
+      "traceable_all_gather(Tensor input, str arg) -> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, traceable_all_gather));
+m.def(
+      "traceable_all_gather_base(Tensor input, str arg) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, traceable_all_gather_base));
+m.def(
+      "traceable_alltoall(Tensor[] inputs, str arg) -> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, traceable_alltoall));
   m.def(
       "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(

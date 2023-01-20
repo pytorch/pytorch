@@ -3731,6 +3731,39 @@ def allreduce(inputs):
     )
 
 
+@register_lowering(c10d.traceable_reduce_scatter_tensor)
+def reduce_scatter_tensor(inputs, arg):
+    return TensorBox.create(
+        ir.ReduceScatterTensor.create(
+            inputs, arg,
+        )
+    )
+
+@register_lowering(c10d.traceable_reduce_scatter)
+def reduce_scatter(inputs, arg):
+    return TensorBox.create(
+        ir.ReduceScatter.create(
+            inputs, arg,
+        )
+    )
+
+@register_lowering(c10d.traceable_all_gather)
+def all_gather(inputs, arg):
+    return TensorBox.create(
+        ir.AllGather.create(
+            inputs, arg,
+        )
+    )
+
+@register_lowering(c10d.traceable_all_gather_base)
+def all_gather_base(inputs, arg):
+    return TensorBox.create(
+        ir.AllGatherBase.create(
+            inputs, arg,
+        )
+    )
+
+
 def _import_kernels():
     """
     Need to make sure all these get registered in the lowers dict

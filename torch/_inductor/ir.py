@@ -3318,6 +3318,193 @@ class Convolution(ExternKernelAlloc):
             sympy.Integer(1),
         )
 
+def get_num_ranks(arg):
+    # hack, assume we're using arg (pg_name) as number of ranks for now.
+    return int(arg)
+
+
+
+# HACK
+# Takes 1 tensor in input, produces 1 tensor in output
+class ReduceScatterTensor(ExternKernelOut):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        arg: str,
+    ):
+        size = x.get_size()
+        x = cls.realize_input(cls.require_contiguous(x))
+        num_ranks = get_num_ranks(arg)
+        out_layout = FixedLayout(
+            x.get_device(),
+            x.get_dtype(),
+            [size[0] // num_ranks] + size[1:],
+            x.get_stride(),
+        )
+        return ReduceScatterTensor(
+            layout=out_layout,
+            inputs=[x],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.header.writeline(
+            f"import torch.distributed as dist"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work = dist.reduce_scatter_tensor({self.get_name()}, {self.codegen_args()[0]}, async_op=True)"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work.wait()"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.codegen_args()[0]}"
+        )
+
+
+# HACK
+# Takes 1 tensor in input, produces world_size tensors in output
+class AllGather(ExternKernelOut):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        arg: str,
+    ):
+        x = cls.realize_input(cls.require_contiguous(x))
+        out_layout = FixedLayout(
+            x.get_device(),
+            x.get_dtype(),
+            x.size(),
+            x.stride(),
+        )
+        return AllGather(
+            layout=MultiOutputLayout(x.get_device()),
+            inputs=[x],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.header.writeline(
+            f"import torch.distributed as dist"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work = dist.reduce_scatter({self.get_name()}, {self.codegen_args()[0]}, async_op=True)"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work.wait()"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.codegen_args()[0]}"
+        )
+
+
+# HACK
+# Takes 1 tensor in input, produces 1 tensor in output
+class AllGatherBase(ExternKernelOut):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        arg: str,
+    ):
+        x = cls.realize_input(cls.require_contiguous(x))
+        world_size = get_num_ranks(arg)
+        size = x.get_size()
+        out_layout = FixedLayout(
+            x.get_device(),
+            x.get_dtype(),
+            [size[0] * world_size] + size[1:],
+            x.get_stride(),
+        )
+        return AllGatherBase(
+            layout=out_layout,
+            inputs=[x],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.header.writeline(
+            f"import torch.distributed as dist"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work = dist._all_gather_base({self.get_name()}, {self.codegen_args()[0]}, async_op=True)"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work.wait()"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.codegen_args()[0]}"
+        )
+
+
+# HACK
+# Takes world_size tensor in input, produces 1 tensor in output
+class ReduceScatter(ExternKernelOut):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+
+    @classmethod
+    def create(
+        cls,
+        xs: List["TensorBox"],
+        arg: str,
+    ):
+        out_layout = FixedLayout(
+            xs[0].get_device(),
+            xs[0].get_dtype(),
+            xs[0].get_size(),
+            xs[0].get_stride(),
+        )
+        xs = [cls.realize_input(cls.require_contiguous(x)) for x in xs]
+        return ReduceScatter(
+            layout=out_layout,
+            inputs=xs,
+        )
+
+    def codegen(self, wrapper):
+        wrapper.header.writeline(
+            f"import torch.distributed as dist"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work = dist.reduce_scatter({self.get_name()}, [{', '.join(self.codegen_args())}], async_op=True)"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work.wait()"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.codegen_args()[0]}"
+        )
+
+
+
 
 class AllReduce(ExternKernelAlloc):
     # allreduce_ can't be called from python, without fixing bindings
