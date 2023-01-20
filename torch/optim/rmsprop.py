@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc
+from .optimizer import (Optimizer, _default_to_foreach, _use_grad_for_differentiable,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -188,12 +189,11 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {maximize}
         {differentiable}
 
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def rmsprop(
@@ -204,7 +204,7 @@ def rmsprop(
     momentum_buffer_list: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
     *,
@@ -220,8 +220,8 @@ def rmsprop(
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        foreach = _default_to_foreach([params, grads, square_avgs, grad_avgs, momentum_buffer_list],
+                                      differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
