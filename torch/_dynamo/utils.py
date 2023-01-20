@@ -119,7 +119,7 @@ def print_time_report():
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
-    
+
     out = ""
     for key, value in total_by_key.items():
         out = f"{out} {key}:{round(value, 5)}"
