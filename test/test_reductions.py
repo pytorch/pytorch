@@ -504,6 +504,116 @@ class TestReductions(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
+    @skipIfNoSciPy
+    @dtypes(torch.complex64, torch.complex128)
+    def test_logcumsumexp_complex(self, device, dtype):
+        # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
+        # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
+        # the for-loop above should produce similar precision as logcumsumexp (it's just slower),
+        # so it can be used as the expected values to check our computation
+
+        # using logsumexp from scipy because by the time of writing this test code,
+        # torch.logsumexp has not been implemented for complex numbers
+        from scipy.special import logsumexp
+
+        def zero_out_neg_inf(t):
+            t = t.clone()
+            idx = torch.logical_and(~(torch.isfinite(t)), torch.real(t) < 0)
+            t[idx] = torch.real(t[idx]).to(t.dtype)
+            return t
+
+        def standardize_phase(t):
+            t = torch.real(t) + 1j * (torch.imag(t) % (2 * np.pi))
+            return t
+
+        def logcumsumexp_slow(a, dim):
+            res_lst = []
+            for i in range(a.size(dim)):
+                index = [slice(None, None, None) for _ in range(a.ndim)]
+                index[dim] = slice(None, i + 1, None)
+                a_inp = a[tuple(index)]
+                res_lst.append(logsumexp(a_inp.cpu().numpy(), axis=dim, keepdims=True))
+            res = np.concatenate(res_lst, axis=dim)
+            return torch.as_tensor(res)
+
+        def compare_logcumsumexp(a, expected=None):
+            for i in range(a.ndim):
+                actual = torch.logcumsumexp(a, dim=i)
+                # if the expected is not given, then revert to scipy's logsumexp
+                if expected is None:
+                    expected2 = logcumsumexp_slow(a, dim=i)
+                else:
+                    expected2 = expected
+
+                # move the imaginary values to (0, 2 * pi)
+                actual = standardize_phase(actual)
+                expected2 = standardize_phase(expected2)
+
+                # zeroing the imaginary part of the element if the real part is -inf
+                # as the imaginary part cannot be determined exactly and it does not
+                # really matter if we take the exp of the output
+                actual = zero_out_neg_inf(actual)
+                expected2 = zero_out_neg_inf(expected2)
+                self.assertEqual(expected2.shape, actual.shape)
+                self.assertEqual(expected2, actual)
+
+        # randomly specified values
+        # in this case, scipy.logsumexp should be enough
+        a1 = torch.randn((5, 10), dtype=dtype, device=device)
+        compare_logcumsumexp(a1)
+
+        # test with some non-normal values
+        a2 = torch.tensor([1e3 + 0j, 1e-18 + 1e4j, 1e2 + 1e-8j], dtype=dtype, device=device)
+        compare_logcumsumexp(a2)
+
+        # handle special case involving infinites and nans
+        # here we don't use scipy.logsumexp as it gives confusing answer on
+        # some inf cases
+        # see here:
+        inf = float('inf')
+        nan = float('nan')
+        a3_input = torch.tensor([
+            -inf + 4j,
+            -inf + 1j,
+            1.2 + 2.1j,
+            1e10 + 1e20j,
+            inf + 0j,
+            inf + 1j,
+            inf + 3j,
+            nan + 2j,
+        ])
+        a3_expected = torch.tensor([
+            -inf + 0j,
+            -inf + 0j,
+            1.2 + 2.1j,
+            1e10 + 1e20j,
+            inf + 0j,  # scipy's logsumexp gives (inf + 0.7853982j) here, unclear why
+            inf + (np.pi / 4) * 1j,  # the imaginary part thanks to some weird behaviour of log(inf + infj)
+            complex(inf, nan),
+            complex(nan, nan),
+        ])
+        # windows give strange results on the second-to-last results where it gives inf + pi/4 j
+        # instead of inf + nan j
+        if not IS_WINDOWS:
+            compare_logcumsumexp(a3_input, a3_expected)
+
+        a4_input = torch.tensor([
+            complex(-inf, inf),
+            complex(-inf, inf),
+            -inf + 1j,
+            1.2 + 2.1j,
+            complex(2.4, inf),
+        ])
+        a4_expected = torch.tensor([
+            -inf + 0j,
+            -inf + 0j,
+            -inf + 0j,
+            1.2 + 2.1j,
+            complex(nan, nan),
+        ])
+        if not IS_WINDOWS:
+            compare_logcumsumexp(a4_input, a4_expected)
+
     @onlyCPU
     def test_sum_parallel(self, device):
         # To use parallel branches we'll need to compare on tensors
