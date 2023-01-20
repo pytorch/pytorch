@@ -358,7 +358,7 @@ void insertDynamicShapesGuard(
       continue;
     }
     inputs_to_check.push_back(node_input);
-    guard_types.push_back(
+    guard_types.emplace_back(
         subgraph->inputs().at(i)->type()->expect<TensorType>()->withStrides(
             c10::VaryingShape<c10::Stride>()));
   }
@@ -568,7 +568,7 @@ RegisterOperators reg_guard({
             }
           }
 
-          for (auto type : types) {
+          for (const auto& type : types) {
             auto tt = type->expect<TensorType>();
             auto ss = tt->symbolic_sizes();
             TORCH_INTERNAL_ASSERT(ss.rank());
@@ -720,7 +720,7 @@ void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
 }
 
 Operation createTensorExprDynamicGroup(const Node* node) {
-  auto graph = node->g(attr::Subgraph);
+  const auto& graph = node->g(attr::Subgraph);
   Code code(graph, "");
   // This implementation creates a Code object and InterpreterState on every
   // call to TensorExprDynamicGroup, which affects performance. Ideally, we

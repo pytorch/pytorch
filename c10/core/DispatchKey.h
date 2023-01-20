@@ -39,6 +39,7 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(Meta, extra)                                \
+  _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)
@@ -444,6 +445,15 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+
+  // Note: The alias keyset for FuncTorchBatchedDecomposition is disjoint from
+  // all
+  // other alias keysets
+  // and so precedence order doesn't matter
+  FuncTorchBatchedDecomposition, // registered at
+  // build/aten/src/ATen/RegisterFuncTorchBatchedDecomposition.cpp
+  // Note: The alias keyset for CompositeImplicitAutogradNestedTensor is
+  // disjoint from all other alias keysets
   CompositeImplicitAutogradNestedTensor, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at

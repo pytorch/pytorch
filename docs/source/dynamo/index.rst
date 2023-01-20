@@ -1,5 +1,5 @@
-TorchDynamo Documentation
-=========================
+TorchDynamo Overview
+====================
 
 **TorchDynamo** is a Python-level JIT compiler designed to make unmodified
 PyTorch programs faster. TorchDynamo hooks into the frame evaluation API
@@ -10,7 +10,7 @@ operations into an `FX Graph <https://pytorch.org/docs/stable/fx.html>`__
 which is then just-in-time compiled with a customizable backend.
 It creates this FX Graph through bytecode analysis and is designed to
 mix Python execution with compiled backends to get the best of both
-worlds: usability and performance.
+worlds — usability and performance.
 
 TorchDynamo makes it easy to experiment with different compiler
 backends to make PyTorch code faster with a single line decorator
@@ -18,7 +18,7 @@ backends to make PyTorch code faster with a single line decorator
 
 .. image:: ../_static/img/dynamo/TorchDynamo.png
 
-For more information about `TorchInductor`, one of the backends
+`TorchInductor` is one of the backends
 supported by `TorchDynamo Graph <https://pytorch.org/docs/stable/fx.html>`__
 into `Triton <https://github.com/openai/triton>`__ for GPUs or
 `C++/OpenMP <https://www.openmp.org/>`__ for CPUs. We have a
@@ -33,6 +33,7 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
    * `dev-discuss topics <https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest>`__
 
 .. toctree::
+   :maxdepth: 1
    :hidden:
 
    installation

@@ -10,7 +10,7 @@
 #include <unordered_map>
 
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 
@@ -83,7 +83,7 @@ enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
 //   work->wait()
 //
 //   // Now continue on other work in the current stream.
-class TORCH_API ProcessGroupNCCL : public ProcessGroup {
+class TORCH_API ProcessGroupNCCL : public Backend {
  public:
   class WorkNCCL : public Work,
     public std::enable_shared_from_this<WorkNCCL> {
@@ -244,7 +244,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options : ProcessGroup::Options {
+  struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(
@@ -685,7 +685,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
-  c10::intrusive_ptr<ProcessGroup> uccPG_;
+  c10::intrusive_ptr<Backend> uccPG_;
 #endif
 };
 

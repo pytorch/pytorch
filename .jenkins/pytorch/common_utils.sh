@@ -145,8 +145,7 @@ function install_triton() {
 }
 
 function setup_torchdeploy_deps(){
-  conda install -y cmake
-  conda install -y -c conda-forge libpython-static=3.10
+  conda install -y -n "py_${ANACONDA_PYTHON_VERSION}" "libpython-static=${ANACONDA_PYTHON_VERSION}"
   local CC
   local CXX
   CC="$(which gcc)"
@@ -158,10 +157,12 @@ function setup_torchdeploy_deps(){
 
 function checkout_install_torchdeploy() {
   local commit
+  commit=$(get_pinned_commit multipy)
   setup_torchdeploy_deps
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
   pushd multipy
+  git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
   pip install -e . --install-option="--cudatests"
   popd
@@ -197,7 +198,9 @@ function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
   git checkout no_torchaudio
-  python install.py
+  # Occasionally the installation may fail on one model but it is ok to continue
+  # to install and test other models
+  python install.py --continue_on_fail
   popd
 }
 

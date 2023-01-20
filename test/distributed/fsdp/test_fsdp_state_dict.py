@@ -33,6 +33,7 @@ from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
+    _broadcast_state_dict,
     _get_state_dict,
     _zero_model,
     CUDAInitMode,
@@ -112,21 +113,8 @@ class TestFSDPStateDict(FSDPTest):
         return 2
 
     def _broadcast_state_dict(self, model, state_dict):
-        if not isinstance(model, FSDP):
-            # For non-FSDP root, some parts of the model state on rank 0 may
-            # not be on CPU, so we move everything to CPU to avoid issues like:
-            # https://github.com/pytorch/pytorch/issues/77113.
-            for param_name, param in state_dict.items():
-                if param.device != torch.device("cpu"):
-                    state_dict[param_name] = param.cpu()
-
-        olist = [state_dict if self.rank == 0 else None]
-        dist.broadcast_object_list(olist)
-        state_dict = olist[0]
-        # Ensure that the state is on CUDA
-        for param_name in state_dict.keys():
-            state_dict[param_name] = state_dict[param_name].cuda()
-        return state_dict
+        # TODO (rohan-varma): remove model
+        return _broadcast_state_dict(self.rank, state_dict)
 
     def _compare_models(self, model, model_new, assert_fn, check_fp16=False):
         assert assert_fn in (self.assertEqual, self.assertNotEqual)
@@ -230,7 +218,11 @@ class TestFSDPStateDict(FSDPTest):
                 # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
                 # so bypass the check for now.
                 if isinstance(model, FSDP):
-                    self.assertEqual(fsdp_state_dict, {})
+                    self.assertEqual(
+                        fsdp_state_dict,
+                        {},
+                        f"Expected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}",
+                    )
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
@@ -396,9 +388,7 @@ class TestFSDPStateDict(FSDPTest):
             ):
                 if torch.count_nonzero(tensor) == 0:
                     with torch.no_grad():
-                        tensor.add_(
-                            torch.tensor(1, dtype=tensor.dtype, device=tensor.device)
-                        )
+                        tensor.add_(torch.ones_like(tensor))
         with self._get_state_dict_mgr(fsdp_model, "state_dict", True):
             state_dict = deepcopy(_get_state_dict(fsdp_model))
         # Initialize a non-wrapped model on all ranks
@@ -611,8 +601,8 @@ class TestFSDPStateDict(FSDPTest):
     def _state_dict(model: Module, state_dict_type: str):
         try:
             enum_val = STATE_DICT_MAPPING[state_dict_type]
-        except KeyError:
-            raise ValueError(f"No state_dict type for {state_dict_type}")
+        except KeyError as e:
+            raise ValueError(f"No state_dict type for {state_dict_type}") from e
 
         with FSDP.state_dict_type(model, enum_val):
             return model.state_dict()
@@ -623,8 +613,8 @@ class TestFSDPStateDict(FSDPTest):
     ):
         try:
             enum_val = STATE_DICT_MAPPING[state_dict_type]
-        except KeyError:
-            raise ValueError(f"No state_dict for {state_dict_type}")
+        except KeyError as e:
+            raise ValueError(f"No state_dict for {state_dict_type}") from e
 
         with FSDP.state_dict_type(model, enum_val):
             return model.load_state_dict(state_dict, strict=True)

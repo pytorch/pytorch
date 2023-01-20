@@ -12,6 +12,7 @@ from .eval_frame import (
     run,
     skip,
 )
+from .external_utils import is_compiling
 from .utils import compilation_metrics, guard_failures, orig_code_map
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "list_backends",
     "skip",
     "OptimizedModule",
+    "is_compiling",
 ]
 
 
@@ -58,7 +60,7 @@ def list_backends():
     """
     from .optimizations import BACKENDS
 
-    return [*sorted([*BACKENDS.keys(), "inductor"])]
+    return sorted(BACKENDS.keys())
 
 
 def allow_in_graph(fn):

@@ -4,10 +4,13 @@ Custom Backends
 Debugging Backend
 -----------------
 
-Suppose you wanted to better understand what is going on during a
-compilation you can create a custom compiler which we’ll refer to as a
-backend that will print pretty print the fx ``GraphModule`` extracted
-from dynamo’s bytecode analysis and return a ``forward()`` callable.
+If you want to better understand what is going on during a
+compilation, you can create a custom compiler, which is referred to as
+backend in this section, that will print pretty print the fx
+``GraphModule`` extracted from Dynamo’s bytecode analysis
+and return a ``forward()`` callable.
+
+For example:
 
 .. code-block:: python
 
@@ -39,7 +42,7 @@ Running the above example produces the following output:
    call_function  add     <built-in function add>                                 (cos, sin)  {}
    output         output  output                                                  ((add,),)   {}
 
-This works for ``torch.nn.Module`` as well as shown below
+This works for ``torch.nn.Module`` as well as shown below:
 
 .. code-block:: python
 
@@ -55,7 +58,7 @@ This works for ``torch.nn.Module`` as well as shown below
    optimized_mod = dynamo.optimize(my_compiler)(mod)
    optimized_mod(torch.randn(10))
 
-Let’s take a look at one more example with control flow.
+Let’s take a look at one more example with control flow:
 
 .. code-block:: python
 
@@ -118,13 +121,13 @@ Integrating a custom backend that offers superior performance is also
 easy and we’ll integrate a real one
 with `optimize_for_inference <https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html>`__:
 
-.. code-block :: python
+.. code-block:: python
 
    def optimize_for_inference_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
        scripted = torch.jit.trace(gm, example_inputs)
        return torch.jit.optimize_for_inference(scripted)
 
-And then you should be able to optimize any existing code with
+And then you should be able to optimize any existing code with:
 
 .. code-block:: python
 

@@ -401,7 +401,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(cudnn_grid_sampler_backward, CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
 
   VMAP_SUPPORT(cudnn_grid_sampler, GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
-  VMAP_SUPPORT(cross, cross_batch_rule);
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);

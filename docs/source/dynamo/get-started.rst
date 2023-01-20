@@ -1,9 +1,8 @@
 Getting Started
 ===============
 
-Let’s start with a simple example and make things more complicated step
-by step. Please note that you’re likely to see more significant speedups
-the newer your GPU is.
+Let’s start with a simple example. Note that you are likely to see more
+significant speedups the newer your GPU is.
 
 .. code:: python
 
@@ -15,32 +14,32 @@ the newer your GPU is.
        return a + b
    new_fn = optimize("inductor")(fn)
    input_tensor = torch.randn(10000).to(device="cuda:0")
-   a = new_fn()
+   a = new_fn(input_tensor, input_tensor)
 
 This example will not actually run faster. Its purpose is to demonstrate
 the ``torch.cos()`` and ``torch.sin()`` features which are
 examples of pointwise ops as in they operate element by element on a
-vector. A more famous pointwise op you might actually want to use would
+vector. A more famous pointwise op you might want to use would
 be something like ``torch.relu()``. Pointwise ops in eager mode are
-suboptimal because each one would need to need to read a tensor from
-memory, make some changes and then write back those changes. The single
+suboptimal because each one would need to read a tensor from
+memory, make some changes, and then write back those changes. The single
 most important optimization that inductor does is fusion. So back to our
 example we can turn 2 reads and 2 writes into 1 read and 1 write which
 is crucial especially for newer GPUs where the bottleneck is memory
-bandwidth (how quickly you can send data to a GPU) instead of compute
-(how quickly your GPU can crunch floating point operations)
+bandwidth (how quickly you can send data to a GPU) rather than compute
+(how quickly your GPU can crunch floating point operations).
 
 Another major optimization that inductor makes available is automatic
 support for CUDA graphs.
 CUDA graphs help eliminate the overhead from launching individual
-kernels from a python program which is especially relevant for newer GPUs.
+kernels from a Python program which is especially relevant for newer GPUs.
 
-dynamo supports many different backends but inductor specifically works
+TorchDynamo supports many different backends but inductor specifically works
 by generating `Triton <https://github.com/openai/triton>`__ kernels and
-we can inspect them by running ``TORCHINDUCTOR_TRACE=1 python trig.py``
+we can inspect them by running ``TORCH_COMPILE_DEBUG=1 python trig.py``
 with the actual generated kernel being
 
-.. code:: python
+.. code-block:: python
 
    @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
    @triton.jit
@@ -60,14 +59,14 @@ because the two ``sin`` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
 You can read up a lot more on Triton’s performance
-`here <https://openai.com/blog/triton/>`__ but the key is it’s in python
-so you can easily understand it even if you haven’t written all that
+`here <https://openai.com/blog/triton/>`__ but the key is it’s in Python
+so you can easily understand it even if you have not written all that
 many CUDA kernels.
 
-As a next step let’s try a real model like resnet50 from the PyTorch
+Next, let’s try a real model like resnet50 from the PyTorch
 hub.
 
-.. code:: python
+.. code-block:: python
 
    import torch
    import torch._dynamo as dynamo
@@ -75,21 +74,21 @@ hub.
    opt_model = dynamo.optimize("inductor")(model)
    model(torch.randn(1,3,64,64))
 
-And that’s not the only available backend, you can run in a REPL
-``dynamo.list_backends()`` to see all the available ones. Try out the
+And that is not the only available backend, you can run in a REPL
+``dynamo.list_backends()`` to see all the available backends. Try out the
 ``aot_cudagraphs`` or ``nvfuser`` next as inspiration.
 
 Let’s do something a bit more interesting now, our community frequently
 uses pretrained models from
 `transformers <https://github.com/huggingface/transformers>`__ or
 `TIMM <https://github.com/rwightman/pytorch-image-models>`__ and one of
-our design goals is for dynamo and inductor to work out of the box with
+our design goals is for Dynamo and inductor to work out of the box with
 any model that people would like to author.
 
-So we’re going to directly download a pretrained model from the
+So we will directly download a pretrained model from the
 HuggingFace hub and optimize it:
 
-.. code:: python
+.. code-block:: python
 
    import torch
    from transformers import BertTokenizer, BertModel
@@ -103,7 +102,7 @@ HuggingFace hub and optimize it:
    output = model(**encoded_input)
 
 If you remove the ``to(device="cuda:0")`` from the model and
-encoded_input then triton will generate C++ kernels that will be
+``encoded_input``, then Triton will generate C++ kernels that will be
 optimized for running on your CPU. You can inspect both Triton or C++
 kernels for BERT, they’re obviously more complex than the trigonometry
 example we had above but you can similarly skim it and understand if you
@@ -111,7 +110,7 @@ understand PyTorch.
 
 Similarly let’s try out a TIMM example
 
-.. code:: python
+.. code-block:: python
 
    import timm
    import torch._dynamo as dynamo
@@ -120,7 +119,8 @@ Similarly let’s try out a TIMM example
    opt_model = dynamo.optimize("inductor")(model)
    opt_model(torch.randn(64,3,7,7))
 
-Our goal with dynamo and inductor was to build the highest coverage ML compiler which should work with any model you throw at it.
+Our goal with Dynamo and inductor is to build the highest coverage ML compiler
+which should work with any model you throw at it.
 
 Existing Backends
 ~~~~~~~~~~~~~~~~~
@@ -129,42 +129,41 @@ TorchDynamo has a growing list of backends, which can be found in
 `backends.py <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/backends.py>`__
 or ``torchdynamo.list_backends()`` each of which with its optional dependencies.
 
-Some of the most commonly used backend include:
+Some of the most commonly used backends include:
 
-* **Debugging backends**: \* ``dynamo.optimize("eager")`` - Uses PyTorch
+* **Debugging backends**:
+  * ``dynamo.optimize("eager")`` - Uses PyTorch
   to run the extracted GraphModule. This is quite useful in debugging
-  TorchDynamo issues. \* ``dynamo.optimize("aot_eager")`` - Uses
-  AotAutograd with no compiler, i.e, just using PyTorch eager for the
+  TorchDynamo issues.
+  * ``dynamo.optimize("aot_eager")`` - Uses
+  AotAutograd with no compiler, for example, just using PyTorch eager for the
   AotAutograd’s extracted forward and backward graphs. This is useful for
   debugging, and unlikely to give speedups.
 
-* **Training & inference backends**: \* ``dynamo.optimize("inductor")`` -
-  Uses TorchInductor backend with AotAutograd and cudagraphs by leveraging
+* **Training & inference backends**:
+  * ``dynamo.optimize("inductor")`` - Uses ``TorchInductor`` backend
+  with AotAutograd and cudagraphs by leveraging
   codegened Triton kernels `Read
   more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
-
   * ``dynamo.optimize("nvfuser")`` - nvFuser with TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-
   * ``dynamo.optimize("aot_nvfuser")`` - nvFuser with AotAutograd. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-
   * ``dynamo.optimize("aot_cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
 
-* **Inference-only backend**\ s: \* ``dynamo.optimize("ofi")`` - Uses
-  Torchscript optimize_for_inference. `Read
+* **Inference-only backends**:
+  * ``dynamo.optimize("ofi")`` - Uses
+  Torchscript ``optimize_for_inference``. `Read
   more <https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html>`__
-
-  * ``dynamo.optimize("fx2trt")`` - Uses Nvidia TensorRT for inferenc optimizations. `Read more <https://github.com/pytorch/TensorRT/blob/master/docsrc/tutorials/getting_started_with_fx_path.rst>`__
-
+  * ``dynamo.optimize("fx2trt")`` - Uses Nvidia TensorRT for inference optimizations. `Read more <https://github.com/pytorch/TensorRT/blob/master/docsrc/tutorials/getting_started_with_fx_path.rst>`__
   * ``dynamo.optimize("onnxrt")`` - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__ \* ``dynamo.optimize("ipex")`` - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
 
 Why do you need another way of optimizing PyTorch code?
 -------------------------------------------------------
 
 While a number of other code optimization tools exist in the PyTorch
-ecosystem, each of them has its own flow. Here is a few examples of
-existing methods and their limitations:
+ecosystem, each of them has its own flow.
+Here is a few examples of existing methods and their limitations:
 
--  ``torch.jit.trace()`` is silently wrong if it cannot trace e.g:
+-  ``torch.jit.trace()`` is silently wrong if it cannot trace, for example:
    during control flow
 -  ``torch.jit.script()`` requires modifications to user or library code
    by adding type annotations and removing non PyTorch code
@@ -177,5 +176,3 @@ existing methods and their limitations:
    situations <./documentation/FAQ.md#do-i-still-need-to-export-whole-graphs>`__
    but allows a smoother transition where partial graphs can be
    optimized without code modification
-
-.. |image0| image:: ../_static/img/dynamo/TorchDynamo.png

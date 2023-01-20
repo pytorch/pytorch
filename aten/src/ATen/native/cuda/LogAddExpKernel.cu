@@ -9,11 +9,11 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
       iter.dtype(), "logaddexp_cuda",
       [&]() {
         using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
@@ -23,7 +23,7 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
           }
           else {
             scalar_t m = ::max(a, b);
-            return m + ::log((scalar_t)(1.0) + ::exp(-::abs(a - b)));
+            return m + ::log1p(::exp(-::abs(a - b)));
           }
         });
       });
@@ -50,4 +50,4 @@ void logaddexp2_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

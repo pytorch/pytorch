@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
 #include <ATen/core/functional.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
@@ -23,7 +24,9 @@
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <onnx/shape_inference/implementation.h>
+C10_DIAGNOSTIC_POP()
 
 #include <fstream>
 #include <memory>
@@ -32,8 +35,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void writeArchiveAndTensors(
     const std::string& archive_name,
@@ -1391,5 +1393,4 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

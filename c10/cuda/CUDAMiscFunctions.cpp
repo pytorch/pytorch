@@ -12,7 +12,7 @@ const char* get_cuda_check_suffix() noexcept {
     return "";
   } else {
     return "\nCUDA kernel errors might be asynchronously reported at some"
-           " other API call,so the stacktrace below might be incorrect."
+           " other API call, so the stacktrace below might be incorrect."
            "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1.";
   }
 }

@@ -283,10 +283,10 @@ public:
 
 private:
   // (see m_high_watermark_ratio for description)
-  constexpr static double default_high_watermark_ratio = 0.0;
+  constexpr static double default_high_watermark_ratio = 1.7;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
-  constexpr static double default_low_watermark_ratio_unified  = 1.5;
+  constexpr static double default_low_watermark_ratio_unified  = 1.4;
   constexpr static double default_low_watermark_ratio_discrete = 1.0;
 
   const id<MTLDevice> m_device;

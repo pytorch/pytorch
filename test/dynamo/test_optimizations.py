@@ -9,7 +9,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.optimizations import backends
-from torch._dynamo.optimizations.analysis import has_mutation
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.optimizations.normalize import Inplacifier, normalize
 from torch._dynamo.testing import same
@@ -74,33 +73,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertIn("inplace=True", code)
         self.assertIn("out=linear_1", code)
 
-    def test_has_mutation(self):
-        gm = torch.fx.symbolic_trace(Seq())
-        self.assertFalse(has_mutation(gm, torch.rand([10, 10])))
-
-        class Mutating(torch.nn.Module):
-            def __init__(self):
-                super(Mutating, self).__init__()
-
-            def forward(self, arg):
-                return arg.add_(1)
-
-        gm = torch.fx.symbolic_trace(Mutating())
-        self.assertTrue(has_mutation(gm, torch.rand([10, 1, 1, 1])))
-
-    def test_has_mutation_factory(self):
-        def fn():
-            x = torch.empty(2)
-            x.fill_(2)
-            return x
-
-        def compiler_fn(graph, example_inputs):
-            self.assertTrue(has_mutation(graph, example_inputs))
-            return graph
-
-        opt_fn = torch._dynamo.optimize(compiler_fn)(fn)
-        opt_fn()
-
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
@@ -110,6 +82,38 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             nonlocal r1
             r1 = graph(*example_inputs)[0]
             return graph.forward
+
+        a = torch.empty(2).fill_(1)
+        b = torch.empty(2).fill_(2)
+        c = torch.empty(2).fill_(3)
+        d = 4
+        r1 = None
+        r2 = fn(a, (b, c), d)
+        opt_fn = torch._dynamo.optimize_assert(compiler_fn)(fn)
+        r3 = opt_fn(a, (b, c), d)
+
+        self.assertIsNotNone(r1)
+        self.assertEqual(r1.size(), r2.size())
+        self.assertEqual(r1.stride(), r2.stride())
+        self.assertEqual(r1.dtype, r2.dtype)
+
+        self.assertEqual(r1.size(), r3.size())
+        self.assertEqual(r1.stride(), r3.stride())
+        self.assertEqual(r1.dtype, r3.dtype)
+
+    def test_example_inputs_runtime_use(self):
+        def fn(a, bc, d):
+            b, c = bc
+            return a / d - b / c
+
+        def compiler_fn(graph, example_inputs):
+            def fwd(*args):
+                nonlocal r1
+                r = graph.forward(*args)
+                r1 = r[0]
+                return r
+
+            return fwd
 
         a = torch.empty(2).fill_(1)
         b = torch.empty(2).fill_(2)
