@@ -376,7 +376,6 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/*.svg',
     '**/*Makefile',
-    '**/*Makefile_dashboard',
     '**/contrib/**',
     'third_party/**',
     '**/.gitattributes',
