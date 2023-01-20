@@ -396,7 +396,9 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def expm1(x):
-        return f"{x}.expm1()"
+        # decompose for a better performance
+        vec_one = f"decltype({x})(1)"
+        return f"{x}.exp() - {vec_one}"
 
     @staticmethod
     def log1p(x):
@@ -534,6 +536,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if dtype in (torch.float16, torch.bfloat16):
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
+
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):

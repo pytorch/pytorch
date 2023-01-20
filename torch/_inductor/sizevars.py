@@ -350,8 +350,7 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            self.guard_equals(numerator % denominator, 0)
             return True
         return False
 
