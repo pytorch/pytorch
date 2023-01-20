@@ -383,7 +383,6 @@ def min_cut_rematerialization_partition(
         default_recomputable_ops += [aten.index]
     default_recomputable_ops += view_ops
 
-    # add more generally ?
     default_recomputable_ops += pointwise_ops()
 
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)

@@ -35,7 +35,7 @@ static_weight_shapes = True
 cse = True
 
 # Restricts the amount of computation AOTAutograd can do.
-max_dist_from_bw = 5
+max_dist_from_bw = 3
 
 log_level = (
     logging.DEBUG if debug_partitioner or debug_graphs or debug_joint else logging.INFO
