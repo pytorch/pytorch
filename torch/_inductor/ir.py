@@ -2938,8 +2938,7 @@ class FallbackKernel(ExternKernelAlloc):
             )
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
-        if self.kernel not in ("aten.convolution_backward",):
-            log.warning(f"Using FallbackKernel: {self.kernel}")
+        V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -3850,7 +3849,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.garbage_collect_values = False
         self.env = {}
         self.fetch_attr = submodules.__getitem__
-        self.name = V.get_ops_handler().name
+        self.name = "InterpreterShim"
 
 
 class LoopBody:

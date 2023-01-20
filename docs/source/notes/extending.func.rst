@@ -25,7 +25,7 @@ This guide assumes you are familiar with :ref:`extending-autograd`,
 which explains how to use :class:`torch.autograd.Function`.
 
 :class:`torch.autograd.Function` can either have a :meth:`~Function.forward` that accepts a ctx object,
-or it can have separate :meth:`~Function.forward` (that does not accept ``ctx``) and a ``setup_context``
+or it can have separate :meth:`~Function.forward` (that does not accept ``ctx``) and a :meth:`~Function.setup_context`
 staticmethod that modifies the ``ctx`` object.
 
 Only the latter is supported with function transforms:
@@ -52,7 +52,7 @@ Depending on the transform,
 
 In order for the :class:`torch.autograd.Function` to be arbitrarily composable with function
 transforms, we recommend that all other staticmethods other than :meth:`~Function.forward` and
-``setup_context`` must be transformable: that is, they must consist of only PyTorch
+:meth:`~Function.setup_context` must be transformable: that is, they must consist of only PyTorch
 operators or call other :class:`torch.autograd.Function` (that may call into C++/CUDA/etc).
 
 Let's go over some examples of common use cases.
