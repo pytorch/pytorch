@@ -483,7 +483,7 @@ expected_failure_sym_magic_methods = {
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
-        seed_node = (create_symint(shape_env, 1) / 1.).get_pyobj()
+        seed_node = (create_symint(shape_env, 1) / 1.).node
 
         def get_sym_inp(inp):
             if isinstance(inp, int):
