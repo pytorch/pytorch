@@ -4831,7 +4831,6 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
-
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention, r"""
 Computes scaled dot product attention on query, key and value tensors, using
@@ -4859,6 +4858,19 @@ Shape legend:
 
 """)
 
+
+def _scaled_dot_product_attention(
+        query: Tensor,
+        key: Tensor,
+        value,
+        attn_mask: Optional[Tensor] = None,
+        dropout_p: float = 0.0,
+        need_attn_weights: bool = False,
+        is_causal: bool = False):
+    r""" TODO This function is for merge purposes only and needs to be removed
+    """
+    attn = scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, is_causal)
+    return attn, None
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
