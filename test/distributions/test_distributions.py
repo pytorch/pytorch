@@ -45,7 +45,7 @@ torch.set_default_dtype(torch.double)
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
-     gradcheck)
+     gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 import torch.autograd.forward_ad as fwAD
@@ -914,6 +914,7 @@ class TestDistributions(DistributionsTestCase):
                                  msg='{} example {}/{}, .sample() is not detached'.format(
                                      Dist.__name__, i + 1, len(params)))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_rsample_requires_grad(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
