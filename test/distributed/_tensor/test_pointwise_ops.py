@@ -17,14 +17,15 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed.distributed_c10d import ReduceOp
+from torch.testing._internal.common_distributed import (
+    DEFAULT_WORLD_SIZE,
+    MultiThreadedTestCase,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
-from torch.testing._internal.common_distributed import (
-    MultiThreadedTestCase,
-    DEFAULT_WORLD_SIZE,
-)
+
 
 def no_op():
     return None
@@ -263,23 +264,32 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
                 op=torch.nn.functional.dropout,
             )
 
-    def test_mul_out(self):
+    def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
-        torch.manual_seed(self.rank)
         shard_spec = [Shard(0)]
         input_size = (8, 4)
         input_tensor = torch.randn(*input_size, device=self.device_type)
         dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
+        local_tensor_clone = torch.clone(input_tensor)
+        torch.manual_seed(123)
+        dtensor = init_op(dtensor, *args, **kwargs)
+        torch.manual_seed(123)
+        local_tensor_clone = init_op(local_tensor_clone, *args, **kwargs)
+        dtensor_clone = DTensor.from_local(local_tensor_clone, device_mesh, shard_spec)
+        self.assertTrue(isinstance(dtensor_clone, DTensor))
+        self.assertTrue(isinstance(dtensor, DTensor))
+        self.assertEqualOnRank(dtensor_clone, dtensor)
 
-        other_tensor = torch.randn(*input_size, device=self.device_type)
-        other_dtensor = DTensor.from_local(other_tensor, device_mesh, shard_spec)
-
-        output_tensor = torch.randn(*input_size, device=self.device_type)
-        output_dtensor = DTensor.from_local(output_tensor, device_mesh, shard_spec)
-        dt = torch.mul(dtensor, other_dtensor, out=output_dtensor)
-        expected = torch.mul(input_tensor, other_tensor, out=output_tensor)
-        self.assertEqual(input_tensor, dtensor.to_local())
-        self.assertEqual(expected, dt.to_local())
+    def test_init_ops(self):
+        self._run_init_op(
+            torch.nn.init.kaiming_uniform_,
+            a=0,
+            mode="fan_in",
+            nonlinearity="leaky_relu",
+        )
+        self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
+        self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
+        self._run_init_op(torch.nn.init.constant_, 2.4)
 
 
 if __name__ == "__main__":
