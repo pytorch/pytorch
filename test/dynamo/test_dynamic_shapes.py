@@ -27,11 +27,7 @@ import unittest
 
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
-        cls=cls,
-        make_new_cls=True,
-        new_fn_suffix="_dynamic_shapes",
-        new_cls_prefix="DynamicShapes",
-        patches=((config, "dynamic_shapes", True),),
+        cls, "DynamicShapes", "_dynamic_shapes", (config, "dynamic_shapes", True)
     )
 
 

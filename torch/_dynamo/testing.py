@@ -5,7 +5,6 @@ import logging
 import os.path
 import types
 import unittest
-from typing import Any, Callable, Optional, Tuple
 from unittest.mock import patch
 
 import torch
@@ -256,10 +255,7 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
     return torch.as_strided(buffer, size, stride)
 
 
-def _make_fn_with_patches(
-    fn: Any,  # fn object
-    patches: Tuple[Tuple[Any, str, Any]],  # module, attr, val
-):
+def _make_fn_with_patches(fn, *patches):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         with contextlib.ExitStack() as stack:
@@ -271,34 +267,20 @@ def _make_fn_with_patches(
     return _fn
 
 
-def make_test_cls_with_patches(
-    cls: Any,  # class object
-    make_new_cls: bool,  # or add to existing class
-    new_fn_suffix: str,
-    new_cls_prefix: Optional[str] = None,  # if make_new_cls
-    name_pred: Callable[[str], bool] = lambda name: name.startswith("test_"),
-    patches=Tuple[Tuple[Any, str, Any]],  # module, attr, val
-):
-    if make_new_cls:
+def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
+    class DummyTestClass(cls):
+        pass
 
-        class DummyTestClass(cls):
-            pass
-
-        DummyTestClass.__name__ = f"{new_cls_prefix}{cls.__name__}"
+    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
 
     for name in dir(cls):
-        if name_pred(name):
+        if name.startswith("test_"):
             fn = getattr(cls, name)
             if not callable(fn):
                 continue
-            new_name = f"{name}{new_fn_suffix}"
-            fn = _make_fn_with_patches(fn, patches)
+            new_name = f"{name}{fn_suffix}"
+            fn = _make_fn_with_patches(fn, *patches)
             fn.__name__ = new_name
-            if make_new_cls:
-                setattr(DummyTestClass, name, None)
-                setattr(DummyTestClass, new_name, fn)
-            else:
-                setattr(cls, new_name, fn)
+            setattr(DummyTestClass, new_name, fn)
 
-    if make_new_cls:
-        return DummyTestClass
+    return DummyTestClass

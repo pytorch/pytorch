@@ -21,11 +21,12 @@ import torch
 
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, same
+from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -186,6 +187,14 @@ class TestCase(TorchTestCase):
     def tearDownClass(cls):
         cls._stack.close()
         super().tearDownClass()
+
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.reset()
 
 
 class ToTuple(torch.nn.Module):
@@ -665,12 +674,6 @@ class TestIndexingSimplification(TorchTestCase):
 
 
 class CommonTemplate:
-    @classmethod
-    def install(my_cls, other_cls, suffix):  # noqa: B902
-        for name, value in my_cls.__dict__.items():
-            if name.startswith("test_"):
-                setattr(other_cls, f"{name}_{suffix}", value)
-
     def test_bool(self):
         def fn(a, b):
             return (
@@ -695,7 +698,7 @@ class CommonTemplate:
 
     def test_add_const_int(self):
         def fn(a):
-            return (a + 1,)
+            return (a + 1, torch.add(a, 1, alpha=2))
 
         self.common(fn, (torch.randn(32),))
 
@@ -1538,9 +1541,11 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
-    # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
+        # For gpu path, there is an accuracy issue
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv bn test")
+
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         bn_modules = {
@@ -1594,9 +1599,11 @@ class CommonTemplate:
                         (v,),
                     )
 
-    # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_functional_bn_fuse(self):
+        # For gpu path, there is an accuracy issue
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv bn test")
+
         # Define a BatchNorm using functional BN.
         class BatchNorm(torch.nn.BatchNorm2d):
             def __init__(
@@ -1676,8 +1683,10 @@ class CommonTemplate:
                 (v,),
             )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_packed(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d packed test")
+
         x_shape = (1, 3, 56, 56)
         mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
         v = torch.randn(x_shape, dtype=torch.float32)
@@ -1687,10 +1696,12 @@ class CommonTemplate:
                 (v,),
             )
 
-    # For gpu path, there has a accurcy issue,
-    # see https://github.com/pytorch/pytorch/issues/87745.
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_unary(self):
+        # For gpu path, there is an accuracy issue
+        # see https://github.com/pytorch/pytorch/issues/87745
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d unary test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1758,10 +1769,12 @@ class CommonTemplate:
                     (v,),
                 )
 
-    # For gpu path, there has a accurcy issue,
-    # see https://github.com/pytorch/pytorch/issues/87745.
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d binary test")
     def test_conv2d_binary(self):
+        # For gpu path, there is an accuracy issue
+        # see https://github.com/pytorch/pytorch/issues/87745
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d binary test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -2105,6 +2118,36 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
+    @requires_multigpu()
+    def test_recompile_on_index(self):
+        torch.set_float32_matmul_precision("high")
+
+        def gemm(x, y):
+            return x @ y
+
+        failed_guard = None
+
+        def fail(guard):
+            nonlocal failed_guard
+            failed_guard = guard
+
+        gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
+
+        x0 = torch.randn(1024, 1024, device="cpu:0")
+        y0 = torch.randn(1024, 1024, device="cpu:0")
+
+        gemm_opt(x0, y0)
+
+        x1 = torch.randn(1024, 1024, device="cpu:1")
+        y1 = torch.randn(1024, 1024, device="cpu:1")
+
+        gemm_opt(x1, y1)
+        self.assertTrue(failed_guard is not None)
+        self.assertTrue(
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
+            in failed_guard.reason
+        )
+
     def test_unbind(self):
         def fn(a):
             return torch.unbind(a), torch.unbind(a, -1)
@@ -2146,8 +2189,10 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d channels_last")
+
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
             ToTuple(),
@@ -2199,8 +2244,10 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv3d_channels_last(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv3d channels_last")
+
         m = torch.nn.Sequential(
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
@@ -3111,6 +3158,13 @@ class CommonTemplate:
             return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
+
+    def test_full_truncation(self):
+        def fn(a):
+            return a + torch.full_like(a, 7.777)
+
+        for dtype in all_types():
+            self.common(fn, (make_tensor(8, dtype=dtype, device="cpu"),))
 
     def test_index1(self):
         def fn(a, b, c):
@@ -4988,8 +5042,10 @@ class CommonTemplate:
         res = torch._dynamo.optimize("inductor")(fn)(x)
         self.assertEqual(res, res_ref)
 
-    @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
     def test_kwargs(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("histogramdd only supports cpu")
+
         def fn(x, y):
             return torch.histogramdd(
                 x,
@@ -5019,8 +5075,10 @@ class CommonTemplate:
         )
 
     @patch.object(config, "cpp_wrapper", True)
-    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
     def test_cpp_wrapper(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("cpp_wrapper only supports cpu")
+
         device = "cpu"
         for name in [
             "test_as_strided",  # buffer reuse
@@ -5058,6 +5116,148 @@ class CommonTemplate:
         )
 
 
+test_xfails = {
+    'test_alexnet_prefix_dynamic_shapes': ('cpu', 'cuda'),
+    'test_baddbmm_dynamic_shapes': ('cpu', 'cuda'),
+    'test_conv2d_binary_dynamic_shapes': ('cpu',),
+    'test_conv2d_packed_dynamic_shapes': ('cpu',),
+    'test_conv2d_unary_dynamic_shapes': ('cpu',),
+    'test_conv_functional_bn_fuse_dynamic_shapes': ('cpu',),
+    'test_cpp_wrapper_dynamic_shapes': ('cpu',),
+    'test_grid_sampler_2d_dynamic_shapes': ('cpu', 'cuda'),
+    'test_indirect_load_broadcast_dynamic_shapes': ('cpu', 'cuda'),
+    'test_invalid_operand_issue1_dynamic_shapes': ('cpu', 'cuda'),
+    'test_kwargs_dynamic_shapes': ('cpu',),
+    'test_linear_packed_dynamic_shapes': ('cpu',),
+    'test_list_clearing_dynamic_shapes': ('cpu', 'cuda'),
+    'test_lowmem_dropout2_dynamic_shapes': ('cpu', 'cuda'),
+    'test_move_arange_dynamic_shapes': ('cpu', 'cuda'),
+    'test_nll_loss_forward_dynamic_shapes': ('cpu', 'cuda'),
+    'test_permute2_dynamic_shapes': ('cpu', 'cuda'),
+    'test_sizehint_issue1_dynamic_shapes': ('cpu', 'cuda'),
+    'test_tmp_not_defined_issue2_dynamic_shapes': ('cpu', 'cuda'),
+    'test_unroll_small_reduction_dynamic_shapes': ('cpu', 'cuda'),
+    'test_unspec_inputs_dynamic_shapes': ('cpu', 'cuda'),
+    'test_upsample_bilinear2d_a_dynamic_shapes': ('cpu', 'cuda'),
+    'test_upsample_bilinear2d_b_dynamic_shapes': ('cpu', 'cuda'),
+    'test_upsample_nearest1d_dynamic_shapes': ('cpu', 'cuda'),
+    'test_upsample_nearest2d_backward_dynamic_shapes': ('cpu', 'cuda'),
+    'test_upsample_nearest2d_dynamic_shapes': ('cpu', 'cuda'),
+    'test_upsample_nearest3d_dynamic_shapes': ('cpu', 'cuda'),
+    'test_views3_dynamic_shapes': ('cpu',),
+    'test_zero_dim_reductions_dynamic_shapes': ('cpu',),
+    'test_add_inplace_permuted_dynamic_shapes': ('cuda',),
+    'test_any_dynamic_shapes': ('cuda',),
+    'test_argmax_argmin2_dynamic_shapes': ('cuda',),
+    'test_as_strided_scatter_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d1_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d2_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d3_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d4_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d5_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d6_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d_backward2_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d_backward3_dynamic_shapes': ('cuda',),
+    'test_avg_pool2d_backward_dynamic_shapes': ('cuda',),
+    'test_batch_norm_2d_dynamic_shapes': ('cuda',),
+    'test_cat_dynamic_shapes': ('cuda',),
+    'test_cat_extern_kernel_dynamic_shapes': ('cuda',),
+    'test_cat_of_loops_and_extern_kernel_dynamic_shapes': ('cuda',),
+    'test_cat_upcasting_dynamic_shapes': ('cuda',),
+    'test_cauchy_dynamic_shapes': ('cuda',),
+    'test_cudnn_rnn_dynamic_shapes': ('cuda',),
+    'test_expand_as_dynamic_shapes': ('cuda',),
+    'test_expanded_reduction_dynamic_shapes': ('cuda',),
+    'test_flip_dynamic_shapes': ('cuda',),
+    'test_fuse_tiled_dynamic_shapes': ('cuda',),
+    'test_gather_scatter_dynamic_shapes': ('cuda',),
+    'test_horizonal_fusion1_dynamic_shapes': ('cuda',),
+    'test_index1_dynamic_shapes': ('cuda',),
+    'test_index2_dynamic_shapes': ('cuda',),
+    'test_index_put1_dynamic_shapes': ('cuda',),
+    'test_index_put2_dynamic_shapes': ('cuda',),
+    'test_index_put3_dynamic_shapes': ('cuda',),
+    'test_index_select_dynamic_shapes': ('cuda',),
+    'test_l1_loss_dynamic_shapes': ('cuda',),
+    'test_log_softmax_dynamic_shapes': ('cuda',),
+    'test_logsumexp_dynamic_shapes': ('cuda',),
+    'test_masked_fill_dynamic_shapes': ('cuda',),
+    'test_masked_fill_promotion_dynamic_shapes': ('cuda',),
+    'test_max_pool2d1_dynamic_shapes': ('cuda',),
+    'test_max_pool2d2_dynamic_shapes': ('cuda',),
+    'test_max_pool2d3_dynamic_shapes': ('cuda',),
+    'test_max_pool2d4_dynamic_shapes': ('cuda',),
+    'test_max_pool2d5_dynamic_shapes': ('cuda',),
+    'test_max_pool2d_with_indices_backward2_dynamic_shapes': ('cuda',),
+    'test_max_pool2d_with_indices_backward3_dynamic_shapes': ('cuda',),
+    'test_max_pool2d_with_indices_backward4_dynamic_shapes': ('cuda',),
+    'test_max_pool2d_with_indices_backward_dynamic_shapes': ('cuda',),
+    'test_mean_dynamic_shapes': ('cuda',),
+    'test_narrow_dynamic_shapes': ('cuda',),
+    'test_repeat_dynamic_shapes': ('cuda',),
+    'test_roll_dynamic_shapes': ('cuda',),
+    'test_scatter4_dynamic_shapes': ('cuda',),
+    'test_scatter_add2_dynamic_shapes': ('cuda',),
+    'test_scatter_reduce2_dynamic_shapes': ('cuda',),
+    'test_scheduler_vertical_fusion1_dynamic_shapes': ('cuda',),
+    'test_select_scatter_dynamic_shapes': ('cuda',),
+    'test_simplify_loops_dynamic_shapes': ('cuda',),
+    'test_slice1_dynamic_shapes': ('cuda',),
+    'test_slice2_dynamic_shapes': ('cuda',),
+    'test_slice_scatter_dynamic_shapes': ('cuda',),
+    'test_softmax_dynamic_shapes': ('cuda',),
+    'test_softmax_one_kernel_dynamic_shapes': ('cuda',),
+    'test_std_dynamic_shapes': ('cuda',),
+    'test_strided_inputs_dynamic_shapes': ('cuda',),
+    'test_sum1_dynamic_shapes': ('cuda',),
+    'test_sum2_dynamic_shapes': ('cuda',),
+    'test_sum3_dynamic_shapes': ('cuda',),
+    'test_sum4_dynamic_shapes': ('cuda',),
+    'test_sum5_dynamic_shapes': ('cuda',),
+    'test_sum_dtype_dynamic_shapes': ('cuda',),
+    'test_sum_keepdims_dynamic_shapes': ('cuda',),
+    'test_tmp_not_defined_issue1_dynamic_shapes': ('cuda',),
+    'test_to_memory_format_dynamic_shapes': ('cuda',),
+    'test_transpose_add_dynamic_shapes': ('cuda',),
+    'test_transpose_dynamic_shapes': ('cuda',),
+    'test_transposed_propagates_dynamic_shapes': ('cuda',),
+    'test_triu_dynamic_shapes': ('cuda',),
+    'test_var_mean_dynamic_shapes': ('cuda',),
+    'test_vertical_fusion1_dynamic_shapes': ('cuda',),
+    'test_views1_dynamic_shapes': ('cuda',),
+}
+
+
+def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
+    for name, value in my_cls.__dict__.items():
+        if name.startswith("test_"):
+            # You cannot copy functions in Python, so we use lambdas here to
+            # create objects with different ids. Otherwise, expectedFailure
+            # would modify all methods sharing the same object id. Also, by
+            # using a default argument in a lambda, we create a copy instead of
+            # a reference. Otherwise, we would lose access to the value.
+            xfails = test_xfails.get(name)
+            if xfails and suffix in xfails:
+                setattr(other_cls, f"{name}_{suffix}",
+                        unittest.expectedFailure(lambda self, value=value: value(self)))
+            else:
+                setattr(other_cls, f"{name}_{suffix}", lambda self, value=value: value(self))
+
+
+def make_dynamic_cls(cls):
+    return make_test_cls_with_patches(
+        cls,
+        "DynamicShapes",
+        "_dynamic_shapes",
+        (config, "dynamic_shapes", True),
+        (torch._dynamo.config, "dynamic_shapes", True),
+        (functorch_config, "use_dynamic_shapes", True),
+    )
+
+
+DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
+
+
 if HAS_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
@@ -5069,7 +5269,8 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    CommonTemplate.install(CpuTests, "cpu")
+    copy_tests(CommonTemplate, CpuTests, "cpu")
+    copy_tests(DynamicShapesCommonTemplate, CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
         def test_conv_stride_constraints(self):
@@ -5801,7 +6002,8 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
-    CommonTemplate.install(CudaTests, "cuda")
+    copy_tests(CommonTemplate, CudaTests, "cuda")
+    copy_tests(DynamicShapesCommonTemplate, CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
         common = check_model_cuda
