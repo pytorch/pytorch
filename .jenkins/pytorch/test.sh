@@ -332,7 +332,7 @@ test_inductor_benchmark_perf() {
 }
 
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface
+  test_inductor_benchmark huggingface 0
 }
 
 test_inductor_huggingface_perf() {
@@ -356,7 +356,7 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench 0
 }
 
 test_inductor_torchbench_perf() {
