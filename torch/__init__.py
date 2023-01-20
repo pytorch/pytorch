@@ -542,6 +542,13 @@ def set_default_device(device):
     will be allocated on whatever the current device for the device type,
     even after :func:`torch.cuda.set_device` is called.
 
+    .. warning::
+
+        This function imposes a slight performance cost on every Python
+        call to the torch API (not just factory functions).  If this
+        is causing problems for you, please comment on
+        https://github.com/pytorch/pytorch/issues/92701
+
     Args:
         device (device or string): the device to set as default
 
