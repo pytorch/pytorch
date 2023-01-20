@@ -617,6 +617,15 @@
 - func: affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor
   variants: function
 
+- func: _is_all_true(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _is_all_true
+
+# Note: this function is only for testing.
+- func: _test_check_tensor(Tensor self) -> Tensor
+  variants: function
+
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: all.out
