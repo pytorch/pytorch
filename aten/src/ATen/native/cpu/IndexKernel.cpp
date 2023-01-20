@@ -587,11 +587,33 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       auto iter_dtype = iter.dtype();
       // Ignoring half and bfloat16 as cpu_hflip_vec is slower than cpu_kernel_vec
       if (isIntegralType(iter_dtype, true) || iter_dtype == kDouble || iter_dtype == kFloat) {
-        AT_DISPATCH_ALL_TYPES_AND(kBool,
-            iter_dtype, "hflip_cpu", [&iter] {
-              cpu_hflip_vec<scalar_t>(iter);
-        });
-        return;
+        // Replace AT_DISPATCH_ALL_TYPES_AND by manual if/else due to internal test failures:
+        // - "dtype 'Float' not selected for kernel tag hflip_cpu"
+        // - "dtype 'Long' not selected for kernel tag hflip_cpu"
+        //
+        // AT_DISPATCH_ALL_TYPES_AND(kBool,
+        //     iter_dtype, "hflip_cpu", [&iter] {
+        //       cpu_hflip_vec<scalar_t>(iter);
+        // });
+
+        if (iter_dtype == kByte) {
+          return cpu_hflip_vec<uint8_t>(iter);
+        } else if (iter_dtype == kChar) {
+          return cpu_hflip_vec<int8_t>(iter);
+        } else if (iter_dtype == kInt) {
+          return cpu_hflip_vec<int32_t>(iter);
+        } else if (iter_dtype == kLong) {
+          return cpu_hflip_vec<int64_t>(iter);
+        } else if (iter_dtype == kShort) {
+          return cpu_hflip_vec<int16_t>(iter);
+        } else if (iter_dtype == kBool) {
+          return cpu_hflip_vec<bool>(iter);
+        } else if (iter_dtype == kFloat) {
+          return cpu_hflip_vec<float>(iter);
+        } else if (iter_dtype == kDouble) {
+          return cpu_hflip_vec<double>(iter);
+        }
+
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
     } else if (iter.has_contiguous_first_dim()) {
