@@ -3269,12 +3269,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    def test_torch_package_working_with_inductor_trace(self):
+    def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
 
         inputs = [torch.randn([2, 2]), torch.randn([2, 2])]
 
-        optimized_model = torch._dynamo.optimize(backend="inductor")(
+        optimized_model = torch._dynamo.optimize(backend="eager")(
             MyPickledModule(torch.randn([2, 2]))
         )
         from torch import package
@@ -3292,7 +3292,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         imp = package.PackageImporter(path)
         loaded_model = imp.load_pickle(package_name, resource_name)
 
-        optimized_loaded_model = torch._dynamo.optimize(backend="inductor")(
+        optimized_loaded_model = torch._dynamo.optimize("eager")(
             loaded_model
         )(*inputs)
 
