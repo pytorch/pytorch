@@ -41,8 +41,12 @@ if install_fresh_conda == '1':
                 '--output ' + tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe', shell=True)
         result.check_returncode()
 
-        subprocess.run('ls tmp_dir_win', shell=True)
+        subprocess.run('ls ' + tmp_dir_win, shell=True)
         subprocess.run('ls C:\\Jenkins\\Miniconda3', shell=True)
+        subprocess.run('echo ' + str(os.environ['TMP_DIR_WIN']), shell=True)
+        subprocess.run('echo ' + tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe', shell=True)
+        subprocess.run('echo ' + str(result.stderr), shell=True)
+        subprocess.run('echo ' + str(result.stdout), shell=True)
 
         '''
         subprocess.Popen('Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe ' +
@@ -64,6 +68,9 @@ if install_fresh_conda == '1':
             '\\Miniconda3;' + conda_parent_dir + '\\Miniconda3\\Scripts;' + os.environ['PATH']
 
     except Exception as e:
+
+        subprocess.run('ls ' + tmp_dir_win, shell=True)
+        subprocess.run('ls C:\\Jenkins\\Miniconda3', shell=True)
 
         subprocess.run('echo activate conda failed', shell=True)
         subprocess.run('echo ' + str(e), shell=True)
