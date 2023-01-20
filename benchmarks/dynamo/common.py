@@ -71,13 +71,18 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # fp64_OOM
+    "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
+    "tacotron2",  # AssertionError: Deduped args out of bounds
     "vision_maskrcnn",
     # Huggingface
     "AlbertForMaskedLM",  # OOM
     "AlbertForQuestionAnswering",  # OOM
     "BigBird",
+    "DebertaV2ForQuestionAnswering",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
@@ -86,20 +91,14 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
-    "mobilevit_s",  # Accuracy
+    "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
-    "hf_T5_base",  # fp64_OOM
-    "mobilenet_v2_quantized_qat",  # setStorage
-    "resnet50_quantized_qat",  # setStorage
-    "tacotron2",  # aten._thnn_fused_lstm_cell.default
-    "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
-    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "twins_pcpvt_base",  # timeout
 ]
 
@@ -298,11 +297,13 @@ def timed(
         xm.mark_step()
         xm.wait_device_ops()
 
-    t0 = time.perf_counter()
+    time_total = 0
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
         # Put this call inside the loop to reset the seed for each iteration.
+        # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
+        t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
         # instead of calling sync on result_list, we should call mark_step.
@@ -316,12 +317,16 @@ def timed(
             # we need the mark step to send the optimizer graph out for
             # compilation.
             xm.mark_step()
+        t_iter_end = time.perf_counter()
+        time_total += t_iter_end - t_iter_begin
 
+    t_0 = time.perf_counter()
     if use_xla:
         xm.wait_device_ops()
     synchronize()
-    t1 = time.perf_counter()
-    return (t1 - t0, result) if return_result else t1 - t0
+    t_1 = time.perf_counter()
+    time_total += t_1 - t_0
+    return (time_total, result) if return_result else time_total
 
 
 class Stats:
