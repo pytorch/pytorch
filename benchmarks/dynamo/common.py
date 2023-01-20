@@ -1427,6 +1427,7 @@ class BenchmarkRunner:
             print(status)
         if self.args.timing:
             from torch._dynamo.utils import print_time_report
+
             print_time_report()
 
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
@@ -1687,9 +1688,7 @@ def parse_args(args=None):
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
     )
-    parser.add_argument(
-        "--timing", action="store_true", help="Emits phase timing"
-    )
+    parser.add_argument("--timing", action="store_true", help="Emits phase timing")
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
