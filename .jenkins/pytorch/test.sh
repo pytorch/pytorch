@@ -294,9 +294,6 @@ test_single_dynamo_benchmark() {
 test_inductor_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
-  local name="$1"
-  shift
-
   # Check inference with --float32
   test_single_dynamo_benchmark "inductor_inference" "$@" --inductor
 
