@@ -477,9 +477,9 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule("aten.cat.default")
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
     dim = 0  # default dim = 0
-    tensor_list_specs: List[DTensorSpec] = op_schema.args_schema[0]
+    tensor_list_specs = cast(List[DTensorSpec], op_schema.args_schema[0])
     if (len(op_schema.args_schema) > 1):
-        dim = op_schema.args_schema[1]
+        dim = cast(int, op_schema.args_schema[1])
     # normalize arguments
     if dim < 0:
         dim += tensor_list_specs[0].ndim
@@ -489,7 +489,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
     for spec in tensor_list_specs:
         if dim < len(spec.placements) and spec.placements[dim].is_shard():
             needs_reshard_on_cat_dim = True
-            spec.placements[dim] = Replicate()
+            spec.placements = unshard_tensor_dim(spec.placements, dim=dim)
     if needs_reshard_on_cat_dim:
         args_schema = (tensor_list_specs,) + op_schema.args_schema[1:]
         suggested_schema = OpSchema(
@@ -531,6 +531,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
     new_size = 0
     for spec in tensor_list_specs:
         new_size += spec.shape[dim]
+    assert isinstance(output_sharding.output_spec, DTensorSpec)
     output_sharding.output_spec.shape = torch.Size(
         tuple(output_sharding.output_spec.shape[:dim])
         + (new_size,)
@@ -550,7 +551,7 @@ def _update_schema_suggestion_for_cat(
     # check concat dim
     for spec in suggestion_specs:
         if dim < len(spec.placements) and spec.placements[dim].is_shard():
-            spec.placements[dim] = Replicate()
+            spec.placements = unshard_tensor_dim(spec.placements, dim=dim)
     args_schema = (suggestion_specs,) + op_schema.args_schema[1:]
 
     output_sharding.schema_suggestions = [

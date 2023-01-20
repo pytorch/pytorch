@@ -150,7 +150,6 @@ dtensor_fails = {
     xfail("diff"),
     xfail("dist"),
     xfail("dot"),
-    xfail("dstack"),
     xfail("einsum"),
     xfail("empty"),
     xfail("empty_like"),
