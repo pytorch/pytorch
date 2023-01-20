@@ -5669,7 +5669,7 @@ if HAS_CPU:
                         opt_fn = torch._dynamo.optimize("inductor")(m)
                         same(m(x), opt_fn(x))
                         if simdlen != 1:
-                            assert metrics.generated_cpp_vec_kernel_count == 7
+                            assert metrics.generated_cpp_vec_kernel_count == 6
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
