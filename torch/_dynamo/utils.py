@@ -111,7 +111,6 @@ def reset_frame_count():
 def print_time_report():
     total = 0
     total_by_key = {}
-    print("TIMING:")
     for frame, timings in frame_phase_timing.items():
         for key, timing in timings.items():
             total += timing
@@ -120,7 +119,7 @@ def print_time_report():
             else:
                 total_by_key[key] += timing
 
-    out = ""
+    out = "TIMING:"
     for key, value in total_by_key.items():
         out = f"{out} {key}:{round(value, 5)}"
 
