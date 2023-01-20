@@ -387,6 +387,22 @@ class OpOverload(PyOperatorABC):
                 self._dispatch_cache[key] = handler
                 return handler
 
+        if key == torch._C.DispatchKey.AutogradCPU:
+            import torch.fx.experimental.proxy_tensor as proxy_tensor
+
+            if proxy_tensor.PROXY_MODE:
+                def handler(*args, **kwargs):
+                    if proxy_tensor.PROXY_MODE is None:
+                        return self._op_dk(final_key, *args, **kwargs)
+                    mode = proxy_tensor.PROXY_MODE
+                    try:
+                        proxy_tensor.PROXY_MODE = None
+                        return mode.__torch_dispatch__(self, (), args, kwargs)
+                    finally:
+                        proxy_tensor.PROXY_MODE = mode
+                self._dispatch_cache[key] = handler
+                return handler
+
         # print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         self._dispatch_cache[key] = r
