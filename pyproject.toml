@@ -11,6 +11,7 @@ requires = [
     "typing_extensions",
     "six",
     "requests",
+    "optree>=0.5.1",
 ]
 # Use legacy backend to import local packages in setup.py
 build-backend = "setuptools.build_meta:__legacy__"
