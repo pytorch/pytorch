@@ -947,4 +947,3 @@ else
   test_benchmarks
   test_executorch
 fi
-
