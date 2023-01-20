@@ -3254,6 +3254,7 @@ class TestDistributions(DistributionsTestCase):
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
 # the reparameterization trick and do not need to be tested for accuracy.
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestRsample(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
