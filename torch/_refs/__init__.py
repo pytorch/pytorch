@@ -5142,6 +5142,16 @@ def bucketize(
 )
 def exponential(self, rate=1, generator=None):
     assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"exponential not implemented for {self.dtype}",
+    )
+    utils.check(
+        rate >= 0.0,
+        lambda: f"exponential_ expects lambda >= 0.0, but found lambda={rate}",
+    )
     return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
