@@ -11,5 +11,5 @@ a delayed function execution.
 
 .. automodule:: torch._awaits
 
-.. autoclass:: Await
+.. autoclass:: _Await
     :inherited-members:
