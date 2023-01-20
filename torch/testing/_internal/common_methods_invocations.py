@@ -794,6 +794,28 @@ def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input=shape, kwargs=dict(dtype=dtype, device=device, requires_grad=requires_grad))
 
 
+def sample_inputs_log_normal(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), 0, 0.25),
+        ((S, S), 0.5, 1),
+        ((S, S, S), 0, 0.5),
+    )
+    for shape, mean, std in samples:
+        yield SampleInput(make_arg(shape), args=(mean, std))
+
+
+def error_inputs_log_normal(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    invalid_std = 0
+    yield ErrorInput(
+        SampleInput(t, args=(0, invalid_std)),
+        error_type=RuntimeError,
+        error_regex=r"log_normal_ expects std > 0.0, but found std={}".format(invalid_std),
+    )
+
+
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -8404,6 +8426,19 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('log_normal',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.log_normal_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.log_normal_,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_log_normal,
+           error_inputs_func=error_inputs_log_normal,
+           skips=(
+              # Tests that assume input tensor has a meaningful effect on output tensor
+              DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+              DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
@@ -17150,6 +17185,29 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         ),
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.log_normal",
+        torch_opinfo_name="log_normal",
+        supports_out=True,
+        decorators=(
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
     ),
     PythonRefInfo(
         "_refs.arange",
