@@ -5,8 +5,13 @@ import subprocess
 import sys
 import re
 from typing import Any
-from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-from trymerge import gh_post_pr_comment as gh_post_comment, GitHubPR
+from gitutils import (
+    get_git_remote_name,
+    get_git_repo_dir,
+    GitRepo,
+    GitHubPR,
+    gh_post_pr_comment as gh_post_comment,
+)
 
 SAME_SHA_ERROR = (
     "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n" +

@@ -6,13 +6,13 @@ from gitutils import (
     get_git_repo_dir,
     GitRepo,
 )
-from trymerge import (
+from label_utils import (
     LABEL_ERR_MSG,
     has_required_labels,
     add_label_err_comment,
     delete_all_label_err_comments,
-    GitHubPR,
 )
+from gitutils import GitHubPR
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
