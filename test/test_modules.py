@@ -2,11 +2,13 @@
 
 from itertools import product
 from inspect import signature, isgenerator
+from collections import OrderedDict
 from copy import deepcopy
 import tempfile
 from operator import methodcaller
 
 import torch
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
@@ -488,6 +490,7 @@ class TestModule(TestCase):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
     @onlyCUDA
+    @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
@@ -714,6 +717,34 @@ class TestModule(TestCase):
                                     "for this ModuleInfo entry.")
                 else:
                     raise e
+
+    def test_setattr_respects_property_setters(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, bar=None):
+                super().__init__()
+                self._bar = bar
+
+            @property
+            def bar(self):
+                return self._bar
+
+            @bar.setter
+            def bar(self, bar):
+                self._bar = bar
+
+        foo = Foo()
+        # Assigning a module with a property setter.
+        module_value = torch.nn.Module()
+        foo.bar = module_value
+        self.assertIs(foo.bar, module_value)
+        self.assertEqual(foo._modules, OrderedDict([("_bar", module_value)]))
+        # Assigning a parameter.
+        param_value = torch.nn.Parameter(torch.ones(2))
+        foo.bar = param_value
+        self.assertIs(foo.bar, param_value)
+        self.assertEqual(foo._parameters, OrderedDict([("_bar", param_value)]))
+        self.assertEqual(foo._modules, OrderedDict())
+
 
 instantiate_device_type_tests(TestModule, globals())
 

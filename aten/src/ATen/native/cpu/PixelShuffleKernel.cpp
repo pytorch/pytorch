@@ -8,7 +8,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -250,4 +250,4 @@ void pixel_unshuffle_kernel_impl(
 REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl);
 REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl);
 
-}} // at::native
+} // at::native

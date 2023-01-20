@@ -39,15 +39,6 @@ def my_custom_function(x):
     return x + 1
 
 
-class MyPickledModule(torch.nn.Module):
-    def __init__(self, z):
-        super().__init__()
-        self.z = z
-
-    def forward(self, x, y):
-        return x * x * x + y + self.z
-
-
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -2385,6 +2376,29 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         a = opt_fn(torch.tensor(False), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([1.25, 1.25]), a))
 
+    def test_map_side_effects(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.tensor(1)
+
+            def forward(self, xs):
+                def body(x):
+                    self.w += 1
+                    return x
+
+                return map(body, xs)
+
+        mod = Module()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Graph state change detected",
+        ):
+            opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
+            opt_fn(torch.randn(3, 2))
+
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
 
@@ -3268,31 +3282,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
-
-    def test_torch_package_working_with_inductor_trace(self):
-        inputs = [torch.randn([2, 2]), torch.randn([2, 2])]
-
-        optimized_model = torch._dynamo.optimize(backend="inductor")(
-            MyPickledModule(torch.randn([2, 2]))
-        )
-        from torch import package
-
-        path = "/tmp/MyPickledModule.pt"
-        package_name = "MyPickledModule"
-        resource_name = "MyPickledModule.pkl"
-
-        model = MyPickledModule(torch.randn([2, 2]))
-
-        with package.PackageExporter(path) as exp:
-            exp.extern("**")
-            exp.save_pickle(package_name, resource_name, model)
-
-        imp = package.PackageImporter(path)
-        loaded_model = imp.load_pickle(package_name, resource_name)
-
-        optimized_loaded_model = torch._dynamo.optimize(backend="inductor")(
-            loaded_model
-        )
 
 
 class CustomFunc1(torch.autograd.Function):
