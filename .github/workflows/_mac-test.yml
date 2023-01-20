@@ -106,6 +106,7 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
+        continue-on-error: true
         run: |
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"

@@ -92,6 +92,7 @@ jobs:
       - name: Start monitoring script
         id: monitor-script
         shell: bash
+        continue-on-error: true
         run: |
           # Windows conda doesn't have python3 binary, only python, but it's python3
           ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
