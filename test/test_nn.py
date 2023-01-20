@@ -8309,24 +8309,25 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_memory_format(self, device):
-        import copy
         # Tests for regression reported in https://github.com/pytorch/pytorch/issues/92166
-        def helper(input_format, grad_format, B=2, C=4, W=4, H=4):
-            net_orig=torch.nn.GroupNorm(B, C).to(device=device)
-            net = copy.deepcopy(net_orig)
-            x_orig=torch.rand(B,C,W,H, device=device, requires_grad=True)
-            grad_orig=torch.rand(B,C,W,H,device=device)
-            x=x_orig.clone().detach().to(memory_format=input_format).requires_grad_(True)
-            grad=grad_orig.detach().to(memory_format=grad_format)
 
-            y=net(x)
+        def helper(input_format, grad_format, B=2, C=4, W=4, H=4):
+            import copy
+            net_orig = torch.nn.GroupNorm(B, C).to(device=device)
+            net = copy.deepcopy(net_orig)
+            x_orig = torch.rand(B, C, W, H, device=device, requires_grad=True)
+            grad_orig = torch.rand(B, C, W, H, device=device)
+            x = x_orig.clone().detach().to(memory_format=input_format).requires_grad_(True)
+            grad = grad_orig.detach().to(memory_format=grad_format)
+
+            y = net(x)
             y.backward(grad)
 
             y_orig = net_orig(x_orig)
             y_orig.backward(grad_orig)
 
             self.assertEqual(y, y_orig)
-            #TODO: Fix me, CPU should produce valid results here, but it is not
+            # TODO: Fix me, CPU should produce valid results here, but it is not
             if device != "cpu":
                 self.assertEqual(x.grad, x_orig.grad)
 
