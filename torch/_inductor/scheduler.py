@@ -421,12 +421,17 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> Optional["SchedulerNode"]:
         """Returns a new node which represents the same loop iterated in a new order
 
-        new_order represents the permutation to apply to the index variables,
-        i.e. [1, 0] will swap the order of a 2d loop. Note this only applies to
-        the pointwise index variables.
+        reorder is a function that takes indices in the new order and
+        translates them into the indices expected by the underlying loop. e.g.
+
+            reorder = lambda index: index[1], index[0]
+
+        will swap the order of a 2d loop. Note this only applies to the
+        pointwise index variables.
 
         Also note some class members are shallow copied to the new node, so do
         not modify the returned node.
+
         """
 
         if len(self.get_ranges()[0]) != ndim:
@@ -887,10 +892,11 @@ class Scheduler:
 
         # recent_fusions tracks names of nodes fused during this function call.
         #
-        # This is required because get_possible_fusions() may return a new node
-        # not in name_to_fused_node, so we can't trust
-        # node = self.name_to_fused_node[node.get_first_name()]
-        # to map an unfused nodes back to itself
+        # This is required because config.fusion_reorder_loops, when enabled,
+        # causes get_possible_fusions() to return new nodes not in
+        # name_to_fused_node, so we can't assume
+        #   node = self.name_to_fused_node[node.get_first_name()]
+        # will map an unfused nodes back to itself
         recent_fusions: Set[str] = set()
 
         for node1, node2 in self.get_possible_fusions():
@@ -972,14 +978,8 @@ class Scheduler:
         sizevars = V.graph.sizevars
 
         # Step 1: Can we reorder to match their shapes?
-
-        def expr_key(expr):
-            # Include str(exp) to differentiate dimensions with the same value
-            # but derived from different expressions
-            return (sizevars.size_hint(expr), str(expr))
-
         def sort_exprs(exprs):
-            return sorted(exprs, key=expr_key)
+            return sorted(exprs, key=lambda e: e.sort_key())
 
         if sort_exprs(dep1.size) != sort_exprs(dep2.size):
             return None
@@ -1022,16 +1022,31 @@ class Scheduler:
         buffer_names_grouping: Dict[str, List[BaseSchedulerNode]],
         ignore: Set[Tuple[BaseSchedulerNode, BaseSchedulerNode]],
     ) -> Set[Tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+        """Returns possible fusions that require iterating an ir.Loop in a different
+        order. To do this, we create new nodes that represent the reordered
+        Loop. Any pair of nodes in the ignore set will not be checked, on the
+        assumption these are better to fuse without reordering.
+        """
         possible_fusions = set()
 
         # Step 1: Find pairs of nodes that could possibly be fused after reordering
+        #
+        # The strategy is to compare nodes pairs that access a common buffer
+        # and compare their `read_writes`. If the MemoryDep objects for the
+        # common buffer aren't equal then the two nodes must iterate the buffer
+        # in different orders. So, we inspect the MemoryDep's indexing
+        # expressions to find a reordering that makes them equal.
+        #
+        # Note that since nodes can have multiple buffers in common, this may
+        # produce duplicate reorderings so we build the full set of reorderings
+        # first to eliminate duplicates.
         reorder_opportunities: Dict[
             Tuple[BaseSchedulerNode, BaseSchedulerNode], Set[Tuple[int, ...]]
         ] = collections.defaultdict(set)
 
         for buf_name, node_grouping in buffer_names_grouping.items():
             for node1, node2 in itertools.combinations(node_grouping, 2):
-                if (node1, node2) in possible_fusions:
+                if (node1, node2) in ignore:
                     continue
 
                 if node1.is_reduction() and node2.is_reduction():
@@ -1076,7 +1091,7 @@ class Scheduler:
                         reorder_opportunities[(node1, node2)].add(tuple(reorder))
 
         # Step 2: Construct new nodes with the reordering and comprehesively
-        # test if they can be fused
+        # test if they can be fused with self.can_fuse
         for (node1, node2), orders in reorder_opportunities.items():
             for order in orders:
                 # Prefer to reorder pointwise ops, or node2 if both match
