@@ -429,10 +429,11 @@ class Tracer(TracerBase):
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
         """
+        return forward(*args, **kwargs)
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        #if not self.is_leaf_module(m, module_qualified_name):
+        #    return forward(*args, **kwargs)
+        #return self.create_proxy("call_module", module_qualified_name, args, kwargs)
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
@@ -1066,7 +1067,7 @@ def symbolic_trace(
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
     """
-    _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full"]
+    _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full", "empty"]
 
     def gen_constructor_wrapper(target):
         @functools.wraps(target)

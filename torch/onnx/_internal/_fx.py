@@ -46,6 +46,7 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
             table[op_overload] = op_overload_packet._qualified_op_name
 
     table[torch.ops.prims.convert_element_type.default] = "prim::convert_element_type"
+    table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
     return table
 
 
@@ -120,11 +121,16 @@ def _retrieve_or_wrap_scalar_as_constant(
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.int64))
     elif isinstance(ts_value, list) and all(isinstance(val, float) for val in ts_value):
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
+    elif isinstance(ts_value, list) and all(isinstance(val, torch.fx.Node) for val in ts_value):
+        # A list of torch.fx.Node's (aka ts_value) is mapped to a list of TorchScript values.
+        ts_list = [fx_name_to_ts_value[val.name] for val in ts_value]
+        ts_value = g.op("prim::ListConstruct", *ts_list)
     elif isinstance(ts_value, torch.dtype):
         from torch.onnx import _type_utils
 
         ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
     else:
+        import pdb; pdb.set_trace()
         raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
     return ts_value
 
@@ -195,7 +201,6 @@ def _export_fx_to_ts(fx_module_with_metadata):
             else:
                 # Input of graph.
                 v = g.addInput(node.name)
-                print(node.name, v, node.meta)
                 v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
                 assert (
                     v is not None
@@ -445,30 +450,19 @@ def _export(
         # Use default decomposition table.
         decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
     # Apply decomposition table to the input graph.
-    import pdb; pdb.set_trace()
-    print("Before decomposition:")
-    module.print_readable()
     decomposed_module = proxy_tensor.make_fx(module, decomposition_table=decomposition_table, tracing_mode="fake")(*args)
-    print("After decomposition:")
-    decomposed_module.print_readable()
-    #decomposed_module = module
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
     from torch.utils._mode_utils import no_dispatch, all_same_mode
     with no_dispatch():
-        import pdb; pdb.set_trace()
         ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module)
-        print(ts_graph)
     # Export TorchScript graph to ONNX ModelProto.
     with no_dispatch():
-        #onnx_model = _ts_graph_to_onnx_model_in_protobuf(ts_graph, ts_initializers)
-        new_ts_initializers = {}
-        for k, v in ts_initializers.items():
-            new_ts_initializers[k] = torch.zeros(v.shape, dtype=v.dtype)
-        onnx_model = _ts_graph_to_onnx_model_in_protobuf(ts_graph, new_ts_initializers)
+        onnx_model = _ts_graph_to_onnx_model_in_protobuf(ts_graph, ts_initializers)
     if use_binary_format:
         # Return ModelProto in binary format.
+        model_proto = onnx.ModelProto.FromString(onnx_model)
         return onnx_model
     # Return ModelProto in readable format (printable).
     model_proto = onnx.ModelProto.FromString(onnx_model)

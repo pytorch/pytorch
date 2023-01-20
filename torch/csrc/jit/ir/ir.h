@@ -175,8 +175,8 @@ struct Wrap {
   T* elem;
   void (*clear_cb)(void*);
 };
-
 struct Value {
+
   AT_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
 

@@ -415,9 +415,6 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    from torch.utils._python_dispatch import _get_current_dispatch_mode
-    print(f"Current Dispatch Mode: {_get_current_dispatch_mode()}, {id(_get_current_dispatch_mode())}")
-
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
@@ -578,9 +575,6 @@ class FakeTensor(torch.Tensor):
         device: Union[torch.device, str],
         constant: Optional[torch.Tensor] = None,
     ):
-        if elem.device.type != "meta":
-            import pdb; pdb.set_trace()
-            print(elem)
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
@@ -760,7 +754,6 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        print(f"FakeTensorMode({id(self)}): {func}")
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -1048,7 +1041,6 @@ class FakeTensorMode(TorchDispatchMode):
     def invalidate_written_to_constants(
         self, func, flat_arg_fake_tensors, args, kwargs
     ):
-        print(f"invalidate_written_to_constants: {func}")
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         if any_constant and get_schema_info(func).is_mutable():
             schema_info = get_schema_info(func)

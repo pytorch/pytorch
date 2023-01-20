@@ -226,25 +226,20 @@ def fetch_tensor_proxy(tracer):
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, args, kwargs):
-    print(f"proxy_call: {func}")
     def can_handle_tensor(x):
         return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
-    print(f"handle tensor")
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
-        print(f"NotImplemented {func} {args} {kwargs}")
         return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:
             r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
-            print(f"CURRENT_DECOMPOSITION_TABLE")
             if r is not NotImplemented:
                 return r
 
-    print(f"func.decompose")
     with proxy_mode:
         r = func.decompose(*args, **kwargs)
         if r is not NotImplemented:
@@ -320,7 +315,6 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    print(f"proxy_call create_proxy: {func}")
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -476,7 +470,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        print(f"ProxyTorchDispatchMode ({id(self)}): {func}")
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
@@ -539,7 +532,6 @@ class ProxySymDispatchMode(SymDispatchMode):
         return p_out
 
     def __sym_dispatch__(self, func, types, args, kwargs):
-        print(f"ProxySymDispatchMode: {func}")
         if not self.enable_tracing:
             return func(*args, **kwargs)
 

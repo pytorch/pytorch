@@ -2083,6 +2083,12 @@ def bitwise_not(g: jit_utils.GraphContext, input):
     return g.op("Not", input)
 
 
+@_onnx_symbolic("aten::bitwise_or")
+@_beartype.beartype
+def bitwise_or(g, self, other):
+    return g.op("org.pytorch.aten::ATen", self, other, operator_s="bitwise_or", overload_name_s="Tensor")
+
+
 @_beartype.beartype
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
@@ -5472,6 +5478,12 @@ def masked_fill(g: jit_utils.GraphContext, self, mask, value):
     mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
+
+
+@_onnx_symbolic("aten::masked_fill_")
+@_beartype.beartype
+def masked_fill_(g: jit_utils.GraphContext, self, mask, value):
+    return masked_fill(g, self, mask, value)
 
 
 @_onnx_symbolic("aten::index")
