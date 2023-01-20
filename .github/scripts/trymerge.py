@@ -26,6 +26,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from warnings import warn
 from pathlib import Path
+import rockset  # type: ignore[import]
 
 from gitutils import (
     GitRepo,
@@ -44,6 +45,13 @@ class JobCheckState(NamedTuple):
     url: str
     status: Optional[str]
 
+class JobCheckState:
+    def __init__(self, name: str, url: str, status: Optional[str], classification: Optional[str] = None):
+        self.name: str = name
+        self.url: str = url
+        self.status: Optional[str] = status
+        self.classification: Optional[str] = classification
+
 JobNameToStateDict = Dict[str, JobCheckState]
 
 class WorkflowCheckState:
@@ -53,6 +61,18 @@ class WorkflowCheckState:
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
 
+class FlakyRule:
+    def __init__(self, name: str, captures: List[str]):
+        self.name: str = name
+        self.captures = captures
+
+    def matches(self, job: Optional[Dict[str, Any]]) -> bool:
+        return (
+            job is not None
+            and self.name in job.get('name', '')
+            and job.get('failure_captures', None) is not None
+            and all([capture in job.get("failure_captures", []) for capture in self.captures])
+        )
 
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
@@ -208,6 +228,23 @@ query ($owner: String!, $name: String!, $number: Int!) {
         edges {
           node {
             name
+          }
+        }
+      }
+      headRef {
+        compare(headRef: "master") {
+          commits(first: 1) {
+            edges {
+              node {
+                parents(first: 1) {
+                  edges {
+                    node {
+                      oid
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -710,6 +747,9 @@ class GitHubPR:
 
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
+
+    def get_merge_base(self) -> str:
+        return cast(str, self.info["headRef"]["compare"]["commits"]["edges"][0]["node"]["parents"]["edges"][0]["node"]["oid"])
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -1265,6 +1305,90 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
 
+def get_flaky_rules() -> List[FlakyRule]:
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
+    flaky_rules_json: List[FlakyRule] = []
+    for _ in range(3):
+        try:
+            raw_json = fetch_json(url)
+            for rule in raw_json:
+                flaky_rules_json.append(FlakyRule(**rule))
+            break
+        except Exception as e:
+            print(f"Could not download {url} because: {e}.")
+    return flaky_rules_json
+
+def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
+    query = f"""
+SELECT
+    w.name as workflow_name,
+    j.id,
+    j.name,
+    j.conclusion,
+    j.completed_at,
+    j.html_url,
+    j.head_sha,
+    j.torchci_classification.captures as failure_captures,
+    LENGTH(j.steps) as steps,
+FROM
+    commons.workflow_job j join commons.workflow_run w on w.id = j.run_id
+where
+    j.head_sha in ('{head_sha}','{merge_base}')
+"""
+    res: List[Dict[str, Any]] = rockset.Client(
+        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    ).sql(rockset.Q(query))
+    return res
+
+def get_classifications(
+    head_sha: str,
+    merge_base: str,
+    checks: Dict[str, JobCheckState]
+) -> Dict[str, JobCheckState]:
+    flaky_rules_json = get_flaky_rules()
+
+    rockset_results = get_rockset_results(head_sha, merge_base)
+    head_sha_jobs: Dict[str, Dict[str, Any]] = {}
+    merge_base_jobs: Dict[str, Dict[str, Any]] = {}
+
+    def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
+        if key not in d:
+            d[key] = val
+            return
+        if d[key]["conclusion"] == "success":
+            return
+        if d[key]["id"] < val["id"]:
+            d[key] = val
+
+    for rockset_result in rockset_results:
+        name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
+        if rockset_result["head_sha"] == head_sha:
+            insert(head_sha_jobs, name, rockset_result)
+        else:
+            insert(merge_base_jobs, name, rockset_result)
+
+    res: Dict[str, JobCheckState] = {}
+    for name, check in checks.items():
+        res[name] = check
+        if check.status == "SUCCESS":
+            continue
+        head_sha_job = head_sha_jobs.get(name)
+        merge_base_job = merge_base_jobs.get(name)
+        if (
+            head_sha_job is not None
+            and merge_base_job is not None
+            and head_sha_job["conclusion"] == merge_base_job["conclusion"]
+            and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
+        ):
+            res[name].classification = "BROKEN_TRUNK"
+        elif head_sha_job is not None and head_sha_job["steps"] <= 1:
+            res[name].classification = "FLAKY"
+        elif any([rule.matches(head_sha_job) for rule in flaky_rules_json]):
+            res[name].classification = "FLAKY"
+    assert(len(res) == len(checks))
+    return res
+
+
 def get_combined_checks_from_pr_and_land_validation(
     pr: GitHubPR,
     land_check_commit: Optional[str],
@@ -1290,7 +1414,8 @@ def get_combined_checks_from_pr_and_land_validation(
 
     # Merge the two checks together. Land validation check results (if any) overwrite pr check results
     merged_checks = {**pr_checks, **land_validation_checks}  # explanation: https://stackoverflow.com/a/26853961/21539
-    return merged_checks
+    res = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), merged_checks)
+    return res
 
 def filter_checks_with_lambda(
     checks: JobNameToStateDict,
@@ -1400,9 +1525,11 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
+    ok_failed_checks_threshold: int = 3
 ) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
     failed_checks: List[Tuple[str, Optional[str]]] = []
+    ok_failed_checks: List[Tuple[str, Optional[str]]] = []
 
     relevant_checknames = [name for name in check_runs.keys() if any([x in name for x in required_checks])]
 
@@ -1413,7 +1540,13 @@ def categorize_checks(
         if check_runs[checkname].status is None:
             pending_checks.append((checkname, check_runs[checkname].url))
         elif not is_passing_status(check_runs[checkname].status):
-            failed_checks.append((checkname, check_runs[checkname].url))
+            if check_runs[checkname].classification in ('BROKEN_TRUNK', 'FLAKY'):
+                ok_failed_checks.append((checkname, check_runs[checkname].url))
+            else:
+                failed_checks.append((checkname, check_runs[checkname].url))
+    if len(ok_failed_checks) > ok_failed_checks_threshold:
+        failed_checks = failed_checks + ok_failed_checks
+
     return (pending_checks, failed_checks)
 
 def merge(pr_num: int, repo: GitRepo,

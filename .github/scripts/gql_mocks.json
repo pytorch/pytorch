@@ -37185,5 +37185,747 @@
         }
       }
     }
+  },
+  "query_sha=fa3b2971800534b98820337848107cc1b9096b7e0ca3711ec21c47ba1182099d name=pytorch number=91340 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "tugsbayasgalan"
+          },
+          "title": "Symintify pytorch slicing logic",
+          "body": "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):\n* __->__ #91340\n\nDifferential Revision: [D42398023](https://our.internmc.facebook.com/intern/diff/D42398023)",
+          "headRefName": "gh/tugsbayasgalan/86/head",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "gh/tugsbayasgalan/86/base",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "ae8889feecb96f0ba0a7ad9888dae340f21487de"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "88ac30a6fbfc65012deeeb3662d8a9272e191cca"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "99540ebd8bb3f5bff0d90325c35f49290c35cd2d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "85043a88f6847463a275633be1ccb07eacca93be"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "00ed45052b95d64051d0cca228cecad40f2e45ae"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "aeba29c8272975c0c25c40d395f5c8e9952f42a0"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "0691dc8b2a96860dadc6d5fd47487933ed69d13d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "7052a80984320c7f74a26ab0cbeb683d71835f05"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "8555d264c5aa18a0e3f609bdb21889f3600de85d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "4bd8ffe4d985250e0fb3f71dc7046859620386ca"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "a6d53387bb92ce42f002a270bac73468e7ad2b0d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "842377100ffcb2ba4d69775f9d91812d6d4fce9f"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "5db8aa548077f0a3e32150951aac8b7b2d910102"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "acdb2d71b7bcbc31f7192fb7025799009e406d1e"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "92e13828c1a6095a0e117f0a048201b84ccdb0dd"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "3d9bb36d7871dc528b4dd1d8526720768287327b"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "1cdcd7ea89a58bfee14d32e78ca2104e14124fb5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "tugsbayasgalan"
+                    },
+                    "email": "tmanlaibaatar@fb.com",
+                    "name": "Tugsbayasgalan Manlaibaatar"
+                  },
+                  "oid": "18a466ebc23ed04879972cfd0a2fb3d85c3895f7"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MTg",
+              "hasNextPage": false
+            },
+            "totalCount": 18
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Facebook GitHub Tools",
+                            "databaseId": 12274
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Meta Internal-Only Changes Check",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://opensource.facebook.com/"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAnIk8lw=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6VI="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Netlify",
+                            "databaseId": 13473
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6Vg="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Azure Pipelines",
+                            "databaseId": 9426
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6Vw="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Dependabot",
+                            "databaseId": 29110
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6WM="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Codecov",
+                            "databaseId": 254
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6Wo="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "PyTorch Bot",
+                            "databaseId": 40112
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6XM="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "CircleCI Checks",
+                            "databaseId": 18001
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6Xc="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Labeler"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/3864512812"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "triage",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512812/jobs/6587338912"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAnIUHWY=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6no="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "TorchBench CI (pytorch-linux-py3.8-cu116)"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/3864512853"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "run-torchbench",
+                                "conclusion": "NEUTRAL",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512853/jobs/6587339023"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAnIUHf4=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SKIPPED"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6uw="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Lint"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/3864512861"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "workflow-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587338996"
+                              },
+                              {
+                                "name": "toc",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339034"
+                              },
+                              {
+                                "name": "Test tools",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339070"
+                              },
+                              {
+                                "name": "lintrunner",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339110"
+                              },
+                              {
+                                "name": "quick-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339139"
+                              },
+                              {
+                                "name": "Test collect_env (with_torch)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339176"
+                              },
+                              {
+                                "name": "Test collect_env (without_torch)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339209"
+                              },
+                              {
+                                "name": "Test collect_env (older_python_version)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339236"
+                              },
+                              {
+                                "name": "pr-sanity-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3864512861/jobs/6587339268"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAnIUH1c=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmJq6u4="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  },
+                  "status": {
+                    "contexts": [
+                      {
+                        "context": "EasyCLA",
+                        "state": "SUCCESS",
+                        "targetUrl": "https://easycla.lfx.linuxfoundation.org/#/?version=2"
+                      }
+                    ]
+                  },
+                  "pushedDate": "2023-01-08T00:07:00Z",
+                  "oid": "18a466ebc23ed04879972cfd0a2fb3d85c3895f7"
+                }
+              }
+            ]
+          },
+          "changedFiles": 4,
+          "files": {
+            "nodes": [
+              {
+                "path": "aten/src/ATen/TensorIndexing.h"
+              },
+              {
+                "path": "c10/core/SymInt.h"
+              },
+              {
+                "path": "torch/csrc/autograd/python_variable_indexing.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/python_variable_indexing.h"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NA",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "Skylion007"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "albanD"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Skylion007"
+                },
+                "state": "CHANGES_REQUESTED"
+              },
+              {
+                "author": {
+                  "login": "tugsbayasgalan"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "tugsbayasgalan"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "tugsbayasgalan"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "albanD"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "albanD"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "albanD"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "Skylion007"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "albanD"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Skylion007"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0xMi0yM1QxMjoxOToxNy0wODowMLkyMDIyLTEyLTIzVDEyOjE5OjE2LTA4OjAwzklG9o4=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "@tugsbayasgalan your PR has been successfully reverted.",
+                "createdAt": "2023-01-05T17:14:54Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1372498362
+              },
+              {
+                "bodyText": "@tugsbayasgalan has imported this pull request.  If you are a Meta employee, you can view this diff on Phabricator.",
+                "createdAt": "2023-01-07T01:57:54Z",
+                "author": {
+                  "login": "tugsbayasgalan"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1374346186
+              },
+              {
+                "bodyText": "Rebased gh/tugsbayasgalan/87/orig onto refs/remotes/origin/viable/strict because #91341 was rebased, please pull locally before adding more changes (for example, via ghstack checkout https://github.com/pytorch/pytorch/pull/91340)",
+                "createdAt": "2023-01-07T10:17:26Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1374432230
+              },
+              {
+                "bodyText": "@pytorchbot merge -f \"Landed internally\"",
+                "createdAt": "2023-01-08T22:50:06Z",
+                "author": {
+                  "login": "tugsbayasgalan"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1374948938
+              },
+              {
+                "bodyText": "Merge started\nYour change will be merged immediately since you used the force (-f) flag, bypassing any CI checks (ETA: 1-5 minutes).\nLearn more about merging in the wiki.\nQuestions? Feedback? Please reach out to the PyTorch DevX TeamAdvanced Debugging\nCheck the merge workflow status\nhere",
+                "createdAt": "2023-01-08T22:51:38Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1374949218
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOUc6pug==",
+              "hasPreviousPage": true
+            }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Merged"
+                }
+              },
+              {
+                "node": {
+                  "name": "Reverted"
+                }
+              },
+              {
+                "node": {
+                  "name": "ciflow/trunk"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: not user facing"
+                }
+              }
+            ]
+          },
+          "headRef": {
+            "compare": {
+              "commits": {
+                "edges": [
+                  {
+                    "node": {
+                      "parents": {
+                        "edges": [
+                          {
+                            "node": {
+                              "oid": "faed4db4971af151e3dba7233ae49f9c0149dc18"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
