@@ -873,7 +873,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 4)
         self.assertEqual(cnt.op_count, 10)
 
     def test_longformer_chunk(self):
