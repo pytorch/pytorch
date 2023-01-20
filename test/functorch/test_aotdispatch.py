@@ -23,7 +23,6 @@ import unittest
 import warnings
 import itertools
 from functools import partial
-from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
@@ -2221,7 +2220,6 @@ aot_autograd_failures = {
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('segment_reduce', 'lengths'),
-    xfail('nn.functional.embedding_bag'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
@@ -2329,7 +2327,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -2538,7 +2535,7 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
                     cur_flat_args[idx] = next(args)
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             params_and_buffers = {**named_params, **named_buffers}
-            return stateless.functional_call(m, params_and_buffers, c_args, c_kwargs)
+            return torch.func.functional_call(m, params_and_buffers, c_args, c_kwargs)
 
         named_params = dict(_named_parameters(m, remove_duplicate=False))
         named_buffers = dict(_named_buffers(m, remove_duplicate=False))
