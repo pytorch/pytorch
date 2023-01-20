@@ -548,6 +548,16 @@ class BlackHoleVariable(VariableTracker):
         )
 
 
+class AutogradFunctionContextVariable(VariableTracker):
+    """
+    A autograd.function context used after graph break in forward.
+    Any call method on this context object will be graph break.
+    The is different from BlackHoleVariable which is only used in inference mode.
+    """
+
+    pass
+
+
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
         super(LambdaVariable, self).__init__(**kwargs)
