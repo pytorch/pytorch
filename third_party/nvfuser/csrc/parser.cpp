@@ -3243,7 +3243,8 @@ class IrParser {
               if (tensor_type == nullptr) {
                 return false;
               }
-              if (!tensor_type->sizes().concrete_sizes().has_value()) {
+              auto sizes = tensor_type->sizes().concrete_sizes();
+              if (!sizes.has_value() || sizes->empty()) {
                 // Shape information for input tensor is required.
                 return false;
               }
