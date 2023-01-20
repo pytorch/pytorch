@@ -434,21 +434,40 @@ class CSE:
         )
 
     def generate(
-        self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True
+        self,
+        buffer: IndentedBuffer,
+        expr: typing.Union[str, CSEVariable],
+        write=True,
+        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
-        if expr not in self.cache:
+        cache_key = expr
+        if append_broadcast:
+            assert isinstance(append_broadcast, str)
+            cache_key = expr + append_broadcast
+        if cache_key not in self.cache:
             var = self.newvar()
-            self.cache[expr] = var
+            self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
-        return self.cache[expr]
+                if append_broadcast:
+                    var_suffix = "_load"
+                else:
+                    var_suffix = ""
+                buffer.writeline(
+                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
+                )
+                if append_broadcast:
+                    buffer.writeline(
+                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
+                    )
+
+        return self.cache[cache_key]
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
