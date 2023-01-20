@@ -5143,7 +5143,9 @@ def bucketize(
 def cauchy(self, median=0, gamma=1, generator=None):
     assert generator is None
     utils.check(
-        not utils.is_complex_dtype(self.dtype) and not utils.is_integer_dtype(self.dtype) and not utils.is_boolean_dtype(self.dtype),
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
         lambda: f"cauchy not implemented for {self.dtype}",
     )
     return median + gamma * torch.tan(math.pi * (torch.rand_like(self) - 0.5))
