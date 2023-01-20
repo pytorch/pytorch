@@ -148,19 +148,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
 ]
 
 
-CI_SKIP_OPTIMIZER = {
-    # TIMM
-    "convmixer_768_32",  # accuracy
-    "sebotnet33ts_256",  # accuracy
-    "hrnet_w18",  # Stack issue in fx
-    # TorchBench
-    "dlrm",  # symbolic shapes error
-    # HF
-    "pnasnet5large",  # Stack issue in fx
-    "MobileBertForMaskedLM",  # Stack issue in fx
-    "MobileBertForQuestionAnswering",  # Stack issue in fx
-    "PegasusForConditionalGeneration",  # OOM
-}
+CI_SKIP_OPTIMIZER = {}
 
 
 def model_specified_by_path(path_and_class_str):
