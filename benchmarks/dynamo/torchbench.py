@@ -6,7 +6,7 @@ import os
 import re
 import sys
 import warnings
-from os.path import abspath, exists
+from os.path import abspath, dirname, exists
 
 import torch
 
@@ -373,8 +373,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 
 if __name__ == "__main__":
-
+    default_batchsize_fn = abspath(
+        os.path.join(dirname(sys.argv[0]), "/torchbench_models_list.txt")
+    )
     original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TorchBenchmarkRunner(), original_dir)
+    main(TorchBenchmarkRunner(), original_dir, default_batchsize_fn)

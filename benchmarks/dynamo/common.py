@@ -1459,7 +1459,7 @@ def help(fn):
     return fn.__doc__
 
 
-def parse_args(args=None):
+def parse_args(args=None, default_batchsize_fn=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--filter", "-k", action="append", help="filter benchmarks with regexp"
@@ -1536,7 +1536,10 @@ def parse_args(args=None):
     )
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
     parser.add_argument(
-        "--batch-size-file", type=str, help="String to load batch size from"
+        "--batch-size-file",
+        type=str,
+        help="String to load batch size from",
+        default=default_batchsize_fn,
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
@@ -1812,10 +1815,10 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
-def main(runner, original_dir=None):
+def main(runner, original_dir=None, default_batchsize_fn=None):
     if original_dir:
         os.chdir(original_dir)
-    args = parse_args()
+    args = parse_args(default_batchsize_fn=default_batchsize_fn)
 
     if args.diff_branch:
         import git
