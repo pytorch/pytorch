@@ -41,7 +41,7 @@ from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .output_graph import CompilerFn
 from .types import DynamoCallback
-from .utils import compile_times
+from .utils import compile_times, dynamo_timed
 
 log = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ def enable_dynamic(enable: bool = True):
         return
     with patch("torch._dynamo.config.dynamic_shapes", True), patch(
         "torch._functorch.config.use_dynamic_shapes", True
-    ):
+    ), patch("torch._dynamo.config.specialize_int_float", False):
         yield
 
 
