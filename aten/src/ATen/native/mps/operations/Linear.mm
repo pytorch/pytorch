@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace mps;
 
@@ -349,5 +348,4 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
