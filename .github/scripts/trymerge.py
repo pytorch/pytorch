@@ -34,8 +34,8 @@ from gitutils import (
     get_git_remote_name,
     get_git_repo_dir,
     patterns_to_regex,
+    get_pytorch_labels,
 )
-from export_pytorch_labels import get_pytorch_labels
 from trymerge_explainer import (
     TryMergeExplainer,
     get_revert_message,
