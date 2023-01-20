@@ -457,17 +457,13 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"std::log1p({x})"
-
-    @staticmethod
-    def expm1(x):
-        return f"std::expm1({x})"
-
+    
+    
     @staticmethod
     def tan(x):
         return f"std::tan({x})"
 
     @staticmethod
-
     def tanh(x):
         return f"std::tanh({x})"
 
