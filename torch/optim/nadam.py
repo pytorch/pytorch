@@ -1,8 +1,9 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _differentiable_doc)
+                        _differentiable_doc, _foreach_doc, _default_to_foreach)
 from typing import List, Optional
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['NAdam', 'nadam']
 
@@ -147,14 +148,13 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {differentiable}
 
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
 
-    """.format(differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, differentiable=_differentiable_doc)
 
 
 def nadam(params: List[Tensor],
@@ -165,7 +165,7 @@ def nadam(params: List[Tensor],
           state_steps: List[Tensor],
           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-          foreach: bool = None,
+          foreach: Optional[bool] = None,
           differentiable: bool = False,
           *,
           beta1: float,
@@ -187,8 +187,8 @@ def nadam(params: List[Tensor],
         raise RuntimeError("API has changed, `mu_products` argument must contain a list of singleton tensors")
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        foreach = _default_to_foreach([params, grads, exp_avgs, exp_avg_sqs,
+                                       mu_products, state_steps], differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
@@ -292,36 +292,41 @@ def _multi_tensor_nadam(params: List[Tensor],
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    # update steps
-    torch._foreach_add_(state_steps, 1)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs,
+                                                          mu_products, state_steps])
+    for (grouped_params, grouped_grads, grouped_exp_avgs,
+         grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps) in grouped_tensors.values():
 
-    bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
-    mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in state_steps]
-    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
-                for step in state_steps]
+        # update steps
+        torch._foreach_add_(grouped_state_steps, 1)
 
-    # update mu_products
-    torch._foreach_mul_(mu_products, mus)
+        bias_correction2 = [1 - beta2 ** _get_value(step) for step in grouped_state_steps]
+        mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in grouped_state_steps]
+        mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
+                    for step in grouped_state_steps]
 
-    if weight_decay != 0:
-        grads = torch._foreach_add(grads, params, alpha=weight_decay)
+        # update mu_products
+        torch._foreach_mul_(grouped_mu_products, mus)
 
-    # Decay the first and second moment running average coefficient
-    torch._foreach_mul_(exp_avgs, beta1)
-    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+        if weight_decay != 0:
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-    torch._foreach_mul_(exp_avg_sqs, beta2)
-    torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
+        # Decay the first and second moment running average coefficient
+        torch._foreach_mul_(grouped_exp_avgs, beta1)
+        torch._foreach_add_(grouped_exp_avgs, grouped_grads, alpha=1 - beta1)
 
-    exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-    bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
-    torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
-    denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+        torch._foreach_mul_(grouped_exp_avg_sqs, beta2)
+        torch._foreach_addcmul_(grouped_exp_avg_sqs, grouped_grads, grouped_grads, 1 - beta2)
 
-    step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
-                                           for mu_product, mu in zip(mu_products, mus)])
-    step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
-                                            for mu_product, mu_next in zip(mu_products, mu_nexts)])
+        exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
+        bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+        torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
+        denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
-    torch._foreach_addcdiv_(params, exp_avgs, denom, step_size_expavg)
+        step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
+                                               for mu_product, mu in zip(grouped_mu_products, mus)])
+        step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
+                                                for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
+
+        torch._foreach_addcdiv_(grouped_params, grouped_grads, denom, step_size_grads)
+        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom, step_size_expavg)
