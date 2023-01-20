@@ -604,8 +604,8 @@ def _fused_adam(
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
         if grad_scale is not None and found_inf is not None:
-            device_grad_scale = grad_scale.get(device)
-            device_found_inf = found_inf.get(device)
+            device_grad_scale = grad_scale.get(str(device))
+            device_found_inf = found_inf.get(str(device))
         else:
             device_grad_scale = None
             device_found_inf = None
