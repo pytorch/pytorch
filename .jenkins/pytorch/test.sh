@@ -645,15 +645,6 @@ test_xla() {
 # the torch built on its base commit.
 test_forward_backward_compatibility() {
   set -x
-  REPO_DIR=$(pwd)
-  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
-    echo "On trunk, we should compare schemas with torch built from the parent commit"
-    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
-  else
-    echo "On pull, we should compare schemas with torch built from the merge base"
-    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
-  fi
-  export SHA_TO_COMPARE
 
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
@@ -663,8 +654,7 @@ test_forward_backward_compatibility() {
 
   # build torch at the base commit to generate a base function schema for comparison
   git reset --hard "${SHA_TO_COMPARE}"
-  echo "::group::Installing Torch From Base Commit"
-  pip install -r requirements.txt
+  echo "::group::Installing Torch from ${SHA_TO_COMPARE}"
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
   python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
@@ -672,28 +662,88 @@ test_forward_backward_compatibility() {
   echo "::endgroup::"
 
   pushd test/forward_backward_compatibility
+
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
 
   git reset --hard "${SHA1}"
   # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
-      echo "FC check failed: new model cannot be load in old code"
-      return 1
+    echo "FC check failed: new model cannot be load in old code"
+    return 1
   fi
+
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
+
+  # Clean up the build artifacts and the test virtual env
   rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
+
   pip show torch
-  python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  if ! python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt; then
+    # The test already echos its failure message, so there is no need to double
+    # print here
+    return 1
+  fi
+
   # BC: verify old model can be load with new code
   if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
-      echo "BC check failed: old model cannot be load in new code"
-      return 1
+    echo "BC check failed: old model cannot be load in new code"
+    return 1
   fi
+
   popd
+
   set +x
   assert_git_not_dirty
+}
+
+test_forward_backward_compatibility_with_revert_support() {
+  set -x
+
+  REPO_DIR=$(pwd)
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
+    IS_ON_TRUNK=1
+
+    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+    echo "On trunk, we should first compare schemas with torch built from the parent commit ${SHA_TO_COMPARE}"
+  else
+    IS_ON_TRUNK=0
+
+    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+    echo "On pull, we should compare schemas with torch built from the merge base ${SHA_TO_COMPARE}"
+  fi
+
+  export SHA_TO_COMPARE
+  if ! test_forward_backward_compatibility; then
+    if [[ "${IS_ON_TRUNK}" == "1" ]]; then
+      # This test can fail on trunk if the commit is a revert of a schema change. This
+      # is a false alarm because the revert actually puts the schema back to where it
+      # was before the change. So we need to perform another forward backward compatibility
+      # check here with the parent of the reverted commit, not the current parent
+      SHA_REGEX="This reverts commit ([a-zA-Z0-9]+)\."
+      REVERTED_SHA=$(echo "${PR_BODY}" | grep -E "${SHA_REGEX}" | awk '{print $NF}' | sed 's/.$//')
+
+      if [[ -n "${REVERTED_SHA}" ]]; then
+        SHA_TO_COMPARE=$(git rev-parse "${REVERTED_SHA}"^)
+        echo "On trunk, we also want to compare schemas with torch built from the parent of the reverted commit ${SHA_TO_COMPARE}"
+
+        export SHA_TO_COMPARE
+        if ! test_forward_backward_compatibility; then
+          exit 1
+        fi
+      else
+        # Test fails on trunk, but this is not a reverted commit
+        exit 1
+      fi
+    else
+      # Test fails on PR
+      exit 1
+    fi
+  fi
+
+  # All compatibility checks pass
+  set +x
 }
 
 test_bazel() {
@@ -771,7 +821,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *backward* ]]; then
-  test_forward_backward_compatibility
+  test_forward_backward_compatibility_with_revert_support
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
@@ -897,3 +947,4 @@ else
   test_benchmarks
   test_executorch
 fi
+
