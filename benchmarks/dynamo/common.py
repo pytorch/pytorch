@@ -67,15 +67,15 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # all dynamic shapes errors for detectron variants
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
-    "detectron2_fasterrcnn_r_101_fpng",
-    "detectron2_fasterrcnn_r_50_c4g",
-    "detectron2_fasterrcnn_r_50_dc5g",
-    "detectron2_fasterrcnn_r_50_fpng",
-    "detectron2_fcos_r_50_fpng",
-    "detectron2_maskrcnn_r_101_c4g",
-    "detectron2_maskrcnn_r_101_fpng",
-    "detectron2_maskrcnn_r_50_c4g",
-    "detectron2_maskrcnn_r_50_fpng",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
     "hf_BigBird",  # OOM
     # Huggingface
     "BartForConditionalGeneration",  # OOM
