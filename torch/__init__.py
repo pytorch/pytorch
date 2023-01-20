@@ -50,6 +50,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
+    'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
 ]
 
@@ -314,6 +315,66 @@ class SymFloat:
 
     def __repr__(self):
         return self.node.str()
+
+class SymBool:
+    """
+    Like an bool (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+
+    Unlike regular bools, regular boolean operators will force extra guards instead
+    of symbolically evaluate.  Use the bitwise operators instead to handle this.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    def __and__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __or__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    # We very carefully define __sym_not__, and not a number of other
+    # plausible alternatives:
+    #
+    #   - We do not override __not__ because this is not a real magic
+    #     method; you cannot override the meaning of the not builtin in
+    #     Python.  We use the name 'sym_not' to clarify that in user code you
+    #     cannot use the builtin not or operator.not_ or operator.__not__ and
+    #     hit this magic method; you must use our custom sym_not operator.
+    #
+    #   - We do not override the __invert__ method because SymBool is
+    #     meant to be usable in situations where bool is expected.  However,
+    #     bitwise negation ~a does the wrong thing with booleans (because
+    #     bool is a subclass of int, so ~1 = -2 which is not falseish.)
+    #     This would be a giant footgun, so we get around it by defining
+    #     our own operator.  Note that bitwise and/or do the right thing,
+    #     so we reuse the conventional operators there for readability.
+    #
+    def __sym_not__(self) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __repr__(self):
+        return self.node.str()
+
+def sym_not(a):
+    r""" SymInt-aware utility for logical negation.
+
+    Args:
+        a (SymBool or bool): Object to negate
+    """
+    if hasattr(a, '__sym_not__'):
+        return a.__sym_not__()
+    return not a
 
 def sym_float(a):
     r""" SymInt-aware utility for float casting.
