@@ -304,7 +304,7 @@ def _multi_tensor_nadam(params: List[Tensor],
     torch._foreach_mul_(mu_products, mus)
 
     if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # Decay the first and second moment running average coefficient
     torch._foreach_mul_(exp_avgs, beta1)
