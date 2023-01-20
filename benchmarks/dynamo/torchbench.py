@@ -374,7 +374,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 if __name__ == "__main__":
     default_batchsize_fn = abspath(
-        os.path.join(dirname(sys.argv[0]), "/torchbench_models_list.txt")
+        os.path.join(dirname(sys.argv[0]), "torchbench_models_list.txt")
     )
     original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
