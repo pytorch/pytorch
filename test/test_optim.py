@@ -765,7 +765,7 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
             for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
+                self.assertEqual(st_p, mt_p)
 
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
@@ -781,7 +781,7 @@ class TestOptim(TestCase):
                         and actual.ndim == 1
                     ):
                         actual = actual[0]
-                    self.assertEqual(st_p_state[k], actual, atol=5e-5, rtol=0)
+                    self.assertEqual(st_p_state[k], actual)
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
@@ -836,7 +836,10 @@ class TestOptim(TestCase):
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False)),
-            # TODO: add NAdam, which currently is not accurate enough for the standard atols.
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
