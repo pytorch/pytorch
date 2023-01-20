@@ -795,6 +795,17 @@ def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input=shape, kwargs=dict(dtype=dtype, device=device, requires_grad=requires_grad))
 
 
+def sample_inputs_cauchy(op, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), 0, 0.5),
+        ((S, S), 0, 1),
+        ((S, S, S), -2, 1),
+    )
+    for shape, median, gamma in samples:
+        yield SampleInput(make_arg(shape), args=(median, gamma))
+        
+        
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -8787,6 +8798,19 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('cauchy',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.cauchy_,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_cauchy,
+           #TODO: error_inputs_func -- see why torch.Tensor.cauchy_ does not check gamma > 0 while torch.distributions.cauchy.Cauchy does
+           skips=(
+              # Tests that assume input tensor has a meaningful effect on output tensor
+              DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+              DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
@@ -17546,6 +17570,27 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         ),
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.cauchy",
+        torch_opinfo_name="cauchy",
+        decorators=(
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
     ),
     PythonRefInfo(
         "_refs.arange",
