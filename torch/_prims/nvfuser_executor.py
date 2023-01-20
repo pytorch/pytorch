@@ -19,12 +19,7 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from nvfuser._C import (  # type: ignore[import]
-        DataType,
-        Fusion,
-        FusionDefinition,
-        Tensor,
-    )
+    from nvfuser import DataType, FusionDefinition, Tensor  # type: ignore[import]
 else:
     DataType = None
 
@@ -74,7 +69,7 @@ def compute_contiguity(shape, strides):
     Contiguous dimensions are represented by True, strided dimensions
     are represented by False.
     """
-    from nvfuser._C import compute_contiguity
+    from nvfuser import compute_contiguity
 
     return compute_contiguity(shape, strides)
 
@@ -148,8 +143,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
     orig_flat_out, _ = tree_flatten(output_node.args[0])
 
-    fusion = Fusion()
-    with FusionDefinition(fusion) as fd:
+    with FusionDefinition() as fd:
 
         def _to_nvfuser_constant(arg):
             if isinstance(arg, Number):
@@ -222,7 +216,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         out = FusionInterpreter(gm).run(*nv_args)
         flat_out, unflatten_spec = tree_flatten(out)
 
-    return fusion, unflatten_spec
+    return fd, unflatten_spec
 
 
 def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):

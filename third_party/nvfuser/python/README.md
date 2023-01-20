@@ -8,10 +8,9 @@ This frontend allows for a user to describe the set of operations for nvFuser to
 
 ```python
 import torch
-from nvfuser._C import Fusion, FusionDefinition, DataType
+from nvfuser import FusionDefinition, DataType
 
-fs = Fusion()
-with FusionDefinition(fs) as fd :
+with FusionDefinition() as fd :
     t0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1],
                           contiguous=[True, True, True],
                           dtype=DataType.Float)
@@ -27,31 +26,28 @@ with FusionDefinition(fs) as fd :
 input1 = torch.ones(2, 1, 8, device='cuda')
 input2 = torch.ones(2, 4, 8, device='cuda')
 
-nvf_out = fs.execute([input1, input2])[0]
+nvf_out = fd.execute([input1, input2])[0]
 ```
 
-## Example 2 - Lookup and Execute a `Fusion` Based on Id
+## Example 2 - Lookup and Execute a `FusionDefinition` Based on Id
 
 ```python
 fid = 0
-fs = Fusion(fid)
+fd = FusionDefinition(fid)
 
 input1 = torch.ones(2, 1, 8, device='cuda')
 input2 = torch.ones(2, 4, 8, device='cuda')
 
-nvf_out = fs.execute([input1, input2])[0]
+nvf_out = fd.execute([input1, input2])[0]
 ```
 
 ## Components
 
-### `Fusion` - Represents a Fusion
-#### `Fusion` Methods
-* `defined()`: Allows you to query if the `Fusion` is already defined and can be executed.
-* `execute([inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs and returns a list of tensors.
-* `id()`: Returns the fusion id for a given `Fusion`.
-* `print()`: Prints the low level IR for the currently defined fusion.
-
 ### `FusionDefinition` Context Manager - Interface for Defining Fusions
+* `execute([inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs and returns a list of tensors.
+* `id()`: Returns the fusion id for a given definition.
+* `print()`: Prints the `FusionDefinition` as a python function.
+* `print_ir()`: Prints the low level IR for the currently defined fusion.
 
 #### Defining Input Tensors
 _All intermediate tensors are created by operations.  Constant tensors do not exist._
@@ -104,7 +100,7 @@ output = fd.ops.foo(arg1, ... )
 ```
 You can see a supported list of operations with the following query:
 ```python
-python -c "from nvfuser._C import FusionDefinition; help(FusionDefinition.Operators)"
+python -c "from nvfuser import FusionDefinition; help(FusionDefinition.Operators)"
 ```
 #### Notating Outputs
 
@@ -119,7 +115,7 @@ add_output(output: Scalar)
 # Debug Information
 **Query a list of supported operations:**
 ```python
-python -c "from nvfuser._C import FusionDefinition; help(FusionDefinition.Operators)"
+python -c "from nvfuser import FusionDefinition; help(FusionDefinition.Operators)"
 ```
 **View the fusion definitions that are executed by setting an environment variable:**
 ```python

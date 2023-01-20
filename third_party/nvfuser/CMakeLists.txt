@@ -103,7 +103,6 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/predicate_compute.cpp
     ${NVFUSER_SRCS_DIR}/python_frontend/fusion_cache.cpp
     ${NVFUSER_SRCS_DIR}/python_frontend/fusion_definition.cpp
-    ${NVFUSER_SRCS_DIR}/python_frontend/fusion_interface.cpp
     ${NVFUSER_SRCS_DIR}/register_interface.cpp
     ${NVFUSER_SRCS_DIR}/root_domain_map.cpp
     ${NVFUSER_SRCS_DIR}/scheduler/pointwise.cpp
@@ -230,6 +229,11 @@ if(BUILD_PYTHON)
     set_target_properties(${NVFUSER} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
   install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${TORCH_ROOT}/nvfuser/)
+
+  # install nvfuser python files
+  install(DIRECTORY "${NVFUSER_ROOT}/python/"
+          DESTINATION "${TORCH_ROOT}/nvfuser"
+          FILES_MATCHING PATTERN "*.py" )
 endif()
 
 # --- generate runtime files

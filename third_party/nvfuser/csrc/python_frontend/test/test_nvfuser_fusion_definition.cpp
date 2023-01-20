@@ -4,7 +4,6 @@
 #include <torch/torch.h>
 
 #include <python_frontend/fusion_definition.h>
-#include <python_frontend/fusion_interface.h>
 #include <python_frontend/fusion_record.h>
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
@@ -20,7 +19,7 @@ using namespace torch::jit::fuser::cuda;
 TEST_F(NVFuserTest, FusionDefinition_CUDA) {
   // Test that the FusionDefinition asserts on max_length == 0
   {
-    FusionDefinition fd(nullptr, 0);
+    FusionDefinition fd(c10::nullopt, 0);
 
     try {
       fd.enter();
@@ -30,23 +29,9 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     }
   }
 
-  // Test that the FusionDefinition asserts on a null FusionManager ptr
-  {
-    FusionDefinition fd(nullptr, 5);
-
-    try {
-      fd.enter();
-      FAIL() << "You should trigger an assert with a null FusionInterface!";
-    } catch (...) {
-      SUCCEED();
-    }
-  }
-
   // Create a new FusionDefinition that is not found in the cache
   {
-    std::unique_ptr<FusionInterface> fusion =
-        std::make_unique<FusionInterface>();
-    FusionDefinition fd(fusion.get(), 4);
+    FusionDefinition fd(c10::nullopt, 4);
 
     try {
       fd.enter();
@@ -112,15 +97,13 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     }
   }
 
-  // Look up a FusionDefinition with a defined Fusion
+  // Look up a FusionDefinition with a defined Fusion #id 1
   {
-    std::unique_ptr<FusionInterface> fusion =
-        std::make_unique<FusionInterface>(0);
-    FusionDefinition fd(fusion.get(), 1);
+    FusionDefinition fd(1);
 
     try {
       fd.enter();
-      FAIL() << "You should trigger an assert with a defined FusionInterface!";
+      FAIL() << "You should trigger an assert with a defined fusion!";
     } catch (const std::exception& e) {
       SUCCEED();
     }
@@ -128,9 +111,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
   // Look up a FusionDefinition completely in the cache
   {
-    std::unique_ptr<FusionInterface> fusion =
-        std::make_unique<FusionInterface>();
-    FusionDefinition fd(fusion.get(), 4);
+    FusionDefinition fd(c10::nullopt, 4);
 
     try {
       fd.enter();

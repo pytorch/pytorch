@@ -1,7 +1,6 @@
 #include <instrumentation.h>
 #include <python_frontend/fusion_cache.h>
 #include <python_frontend/fusion_definition.h>
-#include <python_frontend/fusion_interface.h>
 #include <utils.h>
 
 // Require namespace for perf scope instrumentation
@@ -61,19 +60,20 @@ std::ostream& operator<<(std::ostream& os, const State& state) {
   return os;
 }
 
-FusionDefinition::FusionDefinition(FusionInterface* fusion, size_t max_length)
+FusionDefinition::FusionDefinition(c10::optional<size_t> id, size_t max_length)
     : max_length_(max_length),
-      fusion_(fusion),
+      fusion_id_(id),
       fusion_cache_(FusionCache::get()),
       end_record_(new EndRecord()),
       recording_(),
       recording_state_(),
       fusion_state_(),
-      ops(this) {}
+      ops(this),
+      sched(this) {}
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  auto fusion_guard = fusionInterfacePtr()->guard();
+  auto fusion_guard = Nvf::FusionGuard(preschedFusion());
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
@@ -81,36 +81,29 @@ void FusionDefinition::buildFusionIr() {
   }
 }
 
-FusionCache* FusionDefinition::fusionCachePtr() const {
+FusionCache* FusionDefinition::fusionCache() const {
   TORCH_INTERNAL_ASSERT(
       fusion_cache_ != nullptr, "FusionCache pointer is null!");
   return fusion_cache_;
 }
 
-FusionInterface* FusionDefinition::fusionInterfacePtr() const {
-  TORCH_INTERNAL_ASSERT(fusion_ != nullptr, "FusionInterface pointer is null!");
-  return fusion_;
-}
-
 FusionDefinition* FusionDefinition::enter() {
   TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
-  TORCH_CHECK(
-      !fusionInterfacePtr()->defined(), "Fusion Interface is already defined!");
-  fusionCachePtr()->resetTriePtr();
+  TORCH_CHECK(!fusion_id_.has_value(), "Fusion Schedule is already found!");
+  fusionCache()->resetTriePtr();
   return this;
 }
 
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
-  auto cache_entry = fusionCachePtr()->queryChildren(end_record_.get());
+  auto cache_entry = fusionCache()->queryChildren(end_record_.get());
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
-    auto fusion_id = fusionCachePtr()->createChild(end_record_.get());
-    TORCH_CHECK(fusion_id.has_value(), "Invalid fusion id!");
-    fusionInterfacePtr()->define(fusion_id.value());
-    fusionCachePtr()->traverseTrie(end_record_.get());
+    fusion_id_ = fusionCache()->createChild(end_record_.get());
+    TORCH_CHECK(fusion_id_.has_value(), "Invalid fusion id!");
+    fusionCache()->traverseTrie(end_record_.get());
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
@@ -119,19 +112,23 @@ void FusionDefinition::exit() {
     buildFusionIr();
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::FusionIrPresched)) {
-      fusionInterfacePtr()->print();
+      printIr();
     }
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
-    fusionInterfacePtr()->define(cache_entry.value()->fusion_id);
-    fusionCachePtr()->traverseTrie(end_record_.get());
+    fusion_id_ = c10::optional<size_t>(cache_entry.value()->fusion_id);
+    fusionCache()->traverseTrie(end_record_.get());
   }
 }
 
 void FusionDefinition::print(std::ostream& os) const {
-  os << "\ndef nvfuser_fusion_id" << fusion_->id();
+  if (fusion_id_.has_value()) {
+    os << "\ndef nvfuser_fusion_id" << fusion_id_.value();
+  } else {
+    os << "\ndef nvfuser_incomplete_fusion";
+  }
   os << "(fd : FusionDefinition) -> None :\n";
   os << std::dec;
   for (auto& rec : recording_) {
@@ -140,6 +137,23 @@ void FusionDefinition::print(std::ostream& os) const {
     os << "\n";
   }
   os << std::endl;
+}
+
+void FusionDefinition::printIr() {
+  preschedFusion()->printMath();
+}
+
+std::vector<at::Tensor> FusionDefinition::execute(
+    const at::ArrayRef<c10::IValue>& inputs) const {
+  TORCH_CHECK(
+      fusion_id_.has_value(), "Valid fusion schedule is not available!");
+  return fusionCache()
+      ->querySchedule(fusion_id_.value())
+      .auto_gen_schedules->runFusionWithInputs(inputs);
+}
+
+c10::optional<size_t> FusionDefinition::id() const {
+  return fusion_id_;
 }
 
 Scalar FusionDefinition::defineScalar() {
@@ -165,7 +179,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       "operations.  The max_length for FusionDefintion's might need to be ",
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
-  auto cache_entry = fusionCachePtr()->queryChildren(recording_.back().get());
+  auto cache_entry = fusionCache()->queryChildren(recording_.back().get());
   // If the Record is found in the cache, the FusionDefinition and the Cache
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.
@@ -180,19 +194,24 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") missed in Fusion Cache.\n";
     }
-    fusionCachePtr()->createChild(recording_.back().get());
+    fusionCache()->createChild(recording_.back().get());
   }
-  fusionCachePtr()->traverseTrie(recording_.back().get());
+  fusionCache()->traverseTrie(recording_.back().get());
+}
+
+Nvf::Fusion* FusionDefinition::preschedFusion() {
+  TORCH_CHECK(fusion_id_.has_value(), "Invalid fusion id!");
+  return fusionCache()->querySchedule(fusion_id_.value()).preschedFusion();
 }
 
 void FusionDefinition::addInput(Nvf::Val* input) {
-  fusionInterfacePtr()->addInput(input);
+  preschedFusion()->addInput(input);
 }
 void FusionDefinition::addOutput(Nvf::Val* output) {
-  fusionInterfacePtr()->addOutput(output);
+  preschedFusion()->addOutput(output);
 }
 void FusionDefinition::aliasOutputToInput(Nvf::Val* output, Nvf::Val* input) {
-  fusionInterfacePtr()->aliasOutputToInput(output, input);
+  preschedFusion()->aliasOutputToInput(output, input);
 }
 
 Nvf::Val* FusionDefinition::getFusionState(size_t index) const {

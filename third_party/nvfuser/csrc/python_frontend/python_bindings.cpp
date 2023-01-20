@@ -10,7 +10,6 @@
 #include <ops/composite.h>
 #include <python_frontend/fusion_cache.h>
 #include <python_frontend/fusion_definition.h>
-#include <python_frontend/fusion_interface.h>
 #include <python_frontend/fusion_record.h>
 #include <python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -70,24 +69,6 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.print(std::cout);
       });
 
-  py::class_<nvfuser::FusionInterface> fusion(nvfuser, "Fusion");
-  fusion.def(py::init<>())
-      .def(py::init<size_t>(), py::arg("fusion_id"))
-      .def("define", &nvfuser::FusionInterface::define)
-      .def("defined", &nvfuser::FusionInterface::defined)
-      .def(
-          "execute",
-          [](nvfuser::FusionInterface& self, const py::iterable& iter) {
-            std::vector<IValue> inputs;
-            for (py::handle obj : iter) {
-              inputs.push_back(toIValue(obj, c10::AnyType::get()));
-            }
-            return self.execute(inputs);
-          },
-          py::return_value_policy::reference)
-      .def("id", &nvfuser::FusionInterface::id)
-      .def("print", &nvfuser::FusionInterface::print);
-
   //! These are the FusionDefinition supported object types that are either
   //! defined as inputs or the output of an operation.
   py::class_<nvfuser::Tensor> tensor_class(nvfuser, "Tensor");
@@ -109,8 +90,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
   fusion_def
       .def(
-          py::init<nvfuser::FusionInterface*, int>(),
-          py::arg("fusion"),
+          py::init<c10::optional<size_t>, size_t>(),
+          py::arg("id") = py::none(),
           py::arg("max_length") = int(1024))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
@@ -137,6 +118,25 @@ void initNvFuserPythonBindings(PyObject* module) {
             std::stringstream ss;
             self.print(ss);
             return ss.str();
+          })
+      .def(
+          "print",
+          [](nvfuser::FusionDefinition& self) { self.print(std::cout); })
+      .def("print_ir", [](nvfuser::FusionDefinition& self) { self.printIr(); })
+      .def(
+          "execute",
+          [](nvfuser::FusionDefinition& self, const py::iterable& iter) {
+            std::vector<IValue> inputs;
+            for (py::handle obj : iter) {
+              inputs.push_back(toIValue(obj, c10::AnyType::get()));
+            }
+            return self.execute(inputs);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "id",
+          [](nvfuser::FusionDefinition& self) -> c10::optional<size_t> {
+            return self.id();
           })
       .def(
           "add_output",

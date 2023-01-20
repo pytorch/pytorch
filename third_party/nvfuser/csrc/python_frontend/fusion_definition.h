@@ -89,7 +89,7 @@ struct TORCH_CUDA_CU_API Scalar {
 //!   help(FusionDefinition.Operators)
 class TORCH_CUDA_CU_API FusionDefinition {
  public:
-  FusionDefinition(FusionInterface* fusion, size_t max_length = 256);
+  FusionDefinition(c10::optional<size_t> id, size_t max_length = 256);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -106,6 +106,13 @@ class TORCH_CUDA_CU_API FusionDefinition {
   void exit();
   //! Prints a python function representing the definition
   void print(std::ostream& os) const;
+  //! Prints the Fusion IR representation of an unscheduled fusion
+  void printIr();
+  //! Executes a fusion if a valid definition or cache lookup occurred prior
+  std::vector<at::Tensor> execute(
+      const at::ArrayRef<c10::IValue>& inputs) const;
+  //! Return fusion id of defined FusionDefinition
+  c10::optional<size_t> id() const;
 
   //! These methods are used to record the FusionDefinition for cache lookup
 
@@ -134,18 +141,15 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! when a cache lookup fails.
   void buildFusionIr();
   //! Returns the FusionCache Ptr that holds the cache of Fusions
-  FusionCache* fusionCachePtr() const;
-  //! Returns the FusionInterface Ptr that represents the corresponding
-  //! Fusion IR object.
-  FusionInterface* fusionInterfacePtr() const;
+  FusionCache* fusionCache() const;
+  Nvf::Fusion* preschedFusion();
 
   //! Holds the defined maximum length of a FusionDefinition in order to
   //! prevent a run away error. The user should feel free to increase this
   //! number as appropriate.
   size_t max_length_;
-
-  //! A pointer to an interface for an nvFusion Fusion IR object.
-  FusionInterface* fusion_;
+  //! Fusion Cache Id for Scheduled Fusion.
+  c10::optional<size_t> fusion_id_;
   //! A pointer to the FusionCache.
   FusionCache* fusion_cache_;
 
@@ -165,13 +169,26 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! The Operators are not directly defined in this header.  They are defined
   //! in the python bindings through lambda functions so the user only needs to
   //! define new operators in one place.
+  //! Operators define what operations are fused.
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}
 
     FusionDefinition* fusion_definition;
   };
 
+  //! The SchedOperators are not directly defined in this header.  They are
+  //! defined in the python bindings through lambda functions so the user only
+  //! needs to define new operators in one place.
+  //! SchedOperators allow the user to define how a fusion should be blocked
+  //! for execution.
+  struct SchedOperators {
+    SchedOperators(FusionDefinition* fd) : fusion_definition(fd) {}
+
+    FusionDefinition* fusion_definition;
+  };
+
   Operators ops;
+  SchedOperators sched;
 };
 
 } // namespace nvfuser

@@ -14,7 +14,7 @@ import torch._prims as prims
 
 # Will only create the nvfuser module if CUDA is available
 try:
-    from nvfuser._C import Fusion, FusionCache, FusionDefinition, DataType
+    from nvfuser import FusionCache, FusionDefinition, DataType
 except ImportError:
     pass
 
@@ -39,27 +39,24 @@ class TestNvFuserFrontend(TestCase):
         before_fusions = fc.num_fusions()
 
         # Execute a fusion function and capture the string python definition
-        fs = Fusion()
-        fd = FusionDefinition(fs)
-        with fd:
+        with FusionDefinition() as fd:
             fusion_func(fd)
         fd_str = fd.__repr__()
-        out = fs.execute(inputs)
+        out = fd.execute(inputs)
 
         # Execute the python definition that was captured
         func_name = re.findall('(nvfuser_fusion_id\\d+)', fd_str.split('\n')[1])[0]
         exec(fd_str)
-        fs_cap = Fusion()
-        with FusionDefinition(fs_cap) as fd_cap:
+        with FusionDefinition() as fd_cap:
             eval(func_name)(fd_cap)
-        out_cap = fs_cap.execute(inputs_cap)
+        out_cap = fd_cap.execute(inputs_cap)
 
         # Make sure the original and captured definitions match
         for idx in range(len(out)) :
             self.assertEqual(out[idx], out_cap[idx])
 
         self.assertEqual(fc.num_fusions() - before_fusions, int(new_fusion_expected))
-        return out, fs
+        return out, fd
 
     def test_basic(self) :
         inputs = [
@@ -82,11 +79,11 @@ class TestNvFuserFrontend(TestCase):
         nvf_out1, _ = self.exec_nvfuser(fusion_func, inputs)
 
         # Create a new fusion with the same definition, it should hit the cache!
-        nvf_out2, fs2 = self.exec_nvfuser(fusion_func, inputs, new_fusion_expected=False)
+        nvf_out2, fd2 = self.exec_nvfuser(fusion_func, inputs, new_fusion_expected=False)
 
         # Create a fusion from a fusion id and make sure it executes!
-        fs3 = Fusion(fs2.id())
-        nvf_out3 = fs3.execute(inputs)
+        fd3 = FusionDefinition(fd2.id())
+        nvf_out3 = fd3.execute(inputs)
 
         eager_out = torch.sum((inputs[0] + inputs[1]) * 3.0, dim=-1)
         self.assertEqual(eager_out, nvf_out1[0])

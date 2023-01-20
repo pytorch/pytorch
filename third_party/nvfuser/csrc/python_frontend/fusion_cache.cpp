@@ -6,6 +6,18 @@ namespace nvfuser {
 static std::mutex fusion_cache_lock;
 FusionCache* FusionCache::singleton_ = nullptr;
 
+FusionSchedules::FusionSchedules()
+    : auto_gen_schedules(nullptr), user_defined_schedules() {
+  auto_gen_schedules = std::make_unique<Nvf::FusionExecutorCache>(
+      std::make_unique<Nvf::Fusion>());
+}
+
+Nvf::Fusion* FusionSchedules::preschedFusion() {
+  auto fusion = auto_gen_schedules->fusion();
+  TORCH_CHECK(fusion != nullptr, "Prescheduled Fusion is unexpectedly null!");
+  return fusion;
+}
+
 TrieNode::TrieNode(RecordFunctor* rec, size_t _fusion_id)
     : record(rec), children(), fusion_id(_fusion_id), visits(0) {}
 
@@ -64,7 +76,8 @@ FusionCache::FusionCache(size_t max_fusions)
     : max_fusions_(max_fusions),
       root_(nullptr),
       trie_ptr_(nullptr),
-      fusions_() {
+      fusions_(),
+      user_defined_input_encodings_() {
   RecordFunctor* start = new StartRecord();
   root_ = std::make_unique<TrieNode>(start);
   trie_ptr_ = root_.get();
@@ -82,6 +95,13 @@ c10::optional<TrieNode*> FusionCache::queryChildren(RecordFunctor* rec) const {
     return c10::optional<TrieNode*>(trie_node->second.get());
   }
 }
+FusionSchedules& FusionCache::querySchedule(size_t fusion_id) {
+  TORCH_CHECK(
+      fusion_id < fusions_.size(),
+      "Invalid scheduler query for id:",
+      fusion_id);
+  return fusions_.at(fusion_id);
+}
 
 c10::optional<size_t> FusionCache::createChild(RecordFunctor* rec) {
   c10::optional<size_t> result = c10::nullopt;
@@ -98,8 +118,7 @@ c10::optional<size_t> FusionCache::createChild(RecordFunctor* rec) {
         max_fusions_,
         "fusions.  The max_fusions for the FusionCache might need to be ",
         "increased if the max number is not being exceeded due to an error.");
-    fusions_.push_back(std::make_unique<Nvf::FusionExecutorCache>(
-        std::make_unique<Nvf::Fusion>()));
+    fusions_.emplace_back(FusionSchedules());
     fusion_id = fusions_.size() - 1;
     result = c10::optional<size_t>(fusion_id);
   }
