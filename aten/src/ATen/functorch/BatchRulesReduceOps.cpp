@@ -20,6 +20,11 @@ Tensor sum_decomp(
   return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
+std::tuple<Tensor, optional<int64_t>> _is_all_true_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim) {
+  return std::make_tuple(at::_is_all_true(self), nullopt);
+}
+
 Tensor mean_decomp(
     const Tensor& self, optional<ScalarType> dtype) {
   return at::mean(self, range(0, self.dim()), false, dtype);
@@ -53,6 +58,14 @@ Tensor nanmedian_decomp(
 Tensor median_decomp(
     const Tensor& self) {
   return std::get<0>(at::median(self.flatten(), 0, false));
+}
+
+Tensor all_decomp(const Tensor& self) {
+  return at::all(self.flatten(), 0, false);
+}
+
+Tensor any_decomp(const Tensor& self) {
+  return at::any(self.flatten(), 0, false);
 }
 
 enum ReductionCase { DimArray, Dim };
@@ -446,6 +459,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);
   REDUCTION_WITH_KEEPDIM_ARG(amax);
   REDUCTION_WITH_KEEPDIM_ARG(amin);
+  m.impl("all", all_decomp);
+  REDUCTION_WITH_KEEPDIM_ARG(all.dim);
+  m.impl("any", any_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
@@ -491,5 +507,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(aminmax, aminmax_batching_rule);
   VMAP_SUPPORT(_log_softmax_backward_data, _log_softmax_backward_batch_rule);
   VMAP_SUPPORT(_softmax_backward_data, _softmax_backward_batch_rule);
+  VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);
 }
 }}

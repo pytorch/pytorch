@@ -79,11 +79,10 @@ from ._optim_utils import (
     _flatten_optim_state_dict,
     _get_param_id_to_param_from_optim_input,
     _get_param_key_to_param,
-    _get_param_to_param_id,
     _get_param_to_param_id_from_optim_input,
+    _get_param_to_param_key,
     _optim_state_dict,
     _process_pos_dim_tensor_state,
-    _rekey_named_optim_state_dict,
     _rekey_sharded_optim_state_dict,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
@@ -313,6 +312,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prevent too many in-flight all-gathers. This ``bool`` only affects
             the sharded strategies that schedule all-gathers. Enabling this can
             help lower the number of CUDA malloc retries.
+        ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
+            parameters will not be managed by this FSDP instance,
+            that means these parameters will not be flattened and sharded by FSDP,
+            their gradients will not be synchronized as well. With this newly added
+            argument, ``ignored_modules`` could be deprecated soon. For backward compatibility,
+            both ``ignored_parameters`` and ``ignored_modules`` are kept for now,
+            but FSDP only allows one of them to be specified as not ``None``.
     """
 
     def __init__(
@@ -331,10 +337,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
+        ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        _init_ignored_module_states(self, module, ignored_modules)
+        _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
 
         # Add module annotations for Dynamo support (see function for details)
         _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
@@ -404,9 +411,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if not use_orig_params:
             _check_orig_params_flattened(self, self._ignored_params)
             _register_flat_param(self, self)
-
-        # Delete to avoid keeping references after the constructor
-        delattr(self, "_ignored_params")
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
@@ -1156,7 +1160,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model, False, False
             )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1204,7 +1210,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1216,16 +1224,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             True,
             use_orig_params,
         )
-        if is_named_optimizer:
-            return _rekey_named_optim_state_dict(sharded_osd)
-        else:
-            return _rekey_sharded_optim_state_dict(
-                sharded_osd,
-                model,
-                optim,
-                optim_input,
-                using_optim_input,
-            )
+        return _rekey_sharded_optim_state_dict(
+            sharded_osd,
+            model,
+            optim,
+            optim_input,
+            using_optim_input,
+            is_named_optimizer,
+        )
 
     @staticmethod
     def full_optim_state_dict(
@@ -1662,7 +1668,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             param_to_param_id = (
                 _get_param_to_param_id_from_optim_input(model, optim_input)
                 if using_optim_input
-                else _get_param_to_param_id(optim)
+                else _get_param_to_param_key(optim)
             )
             # Because not all model parameters may be passed as the optimizer
             # input, we may need to drop some parameters from this mapping

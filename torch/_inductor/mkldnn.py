@@ -1,20 +1,22 @@
 import copy
 import itertools
 import operator
+from functools import reduce
 from typing import Optional
-
-import numpy
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.nn import functional as F
 from torch.nn.modules.utils import _pair
+
+from .fx_utils import matches_module_function_pattern
 
 
 class UnaryAttr(object):
@@ -348,7 +350,7 @@ class PackedLinear(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = int(numpy.prod(input_size) / input_size[-1])
+        self.batch_size = int(reduce(lambda x, y: x * y, input_size) / input_size[-1])
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
@@ -510,21 +512,49 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     return gm
 
 
+def create_unary_module(node: torch.fx.node):
+    assert node.op == "call_function", "The current node should be a function node"
+    unary_map = {
+        F.relu: nn.ReLU,
+        F.sigmoid: nn.Sigmoid,
+        F.tanh: nn.Tanh,
+        F.hardswish: nn.Hardswish,
+        F.leaky_relu: nn.LeakyReLU,
+        F.hardtanh: nn.Hardtanh,
+        F.gelu: nn.GELU,
+        F.relu6: nn.ReLU6,
+        F.silu: nn.SiLU,
+    }
+    return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
+
+
 def fuse_unary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
 
-    for (unary_module, _), (computation_module, fuse_func,) in itertools.product(
-        unary_modules_map.items(), computation_op_unary_op_fusion_map.items()
-    ):
-        pattern = (computation_module, unary_module)
+    for unary_op, (
+        computation_module,
+        fuse_func,
+    ) in itertools.product(unary_ops, computation_op_unary_op_fusion_map.items()):
+        pattern = (computation_module, unary_op)
         for node in gm.graph.nodes:
-            if matches_module_pattern(pattern, node, modules):
+            if matches_module_pattern(
+                pattern, node, modules
+            ) or matches_module_function_pattern(pattern, node, modules):
                 if (
                     len(node.args[0].users) > 1
                 ):  # Output of computation_node is used by other nodes
                     continue
                 computation_node = modules[node.args[0].target]
-                unary_node = modules[node.target]
+                if node.op == "call_function":
+                    # make sure unary function's inputs only one fx.node(others should be constant value).
+                    if any(isinstance(v, torch.fx.Node) for v in node.args[1:]) or any(
+                        isinstance(v, torch.fx.Node) for _, v in node.kwargs.items()
+                    ):
+                        continue
+                    unary_node = create_unary_module(node)
+                    unary_node.eval()
+                else:
+                    unary_node = modules[node.target]
                 eval_mode = all(not n.training for n in [computation_node, unary_node])
                 if not eval_mode:
                     continue
@@ -554,7 +584,7 @@ def fuse_unary(gm: torch.fx.GraphModule):
 
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -630,9 +660,8 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         # Make sure the fused node is post node of node's inputs nodes.
                         node.append(node.args[index_node])
                         gm.graph.erase_node(node)
-                        gm.graph.lint()
                         break
-
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -675,9 +704,8 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     # Make sure the fused node is post node of node's inputs nodes.
                     node.append(node.args[1])
                     gm.graph.erase_node(node)
-                    gm.graph.lint()
                     break
-
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -704,7 +732,7 @@ def pack_module(gm: torch.fx.GraphModule):
                 )
                 assert isinstance(new_module, nn.Module)
                 replace_node_module(node, modules, new_module)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -728,6 +756,29 @@ unary_modules_map = {
     nn.ReLU6: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.SiLU: UnaryAttr("swish"),
 }
+
+unary_ops = [
+    # modules
+    nn.ReLU,
+    nn.Sigmoid,
+    nn.Tanh,
+    nn.Hardswish,
+    nn.LeakyReLU,
+    nn.Hardtanh,
+    nn.GELU,
+    nn.ReLU6,
+    nn.SiLU,
+    # functional
+    F.relu,
+    F.sigmoid,
+    F.tanh,
+    F.hardswish,
+    F.leaky_relu,
+    F.hardtanh,
+    F.gelu,
+    F.relu6,
+    F.silu,
+]
 
 
 binary_attr = {
