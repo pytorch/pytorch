@@ -1100,7 +1100,9 @@ def pow(
     elif isinstance(a, Number):
         if a == 1.0:
             return torch.fill(b, True)
-        if a == 2.0 and (utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)):
+        if a == 2.0 and (
+            utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
+        ):
             return torch.exp2(b)
 
     return prims.pow(a, b)
