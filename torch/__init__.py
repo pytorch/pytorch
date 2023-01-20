@@ -1372,4 +1372,5 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
 
 # dynamic registration of sparse triton kernels
 from torch.sparse import _register_impls
-_register_impls(torch.library.Library("aten", "IMPL"))
+lib = torch.library.Library("aten", "IMPL")
+_register_impls(lib)
