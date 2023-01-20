@@ -13,6 +13,7 @@ from torch.distributed.fsdp import (
     BackwardPrefetch,
     CPUOffload,
     FullyShardedDataParallel as FSDP,
+    MixedPrecision,
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
@@ -1055,7 +1056,7 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_no_sync(self):
+    def test_no_sync_correctness(self):
         """
         Tests a basic ``no_sync()`` setup by comparing ``use_orig_params=True``
         against ``use_orig_params=False``.
@@ -1068,10 +1069,10 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
                     ShardingStrategy.NO_SHARD,
                 ],
             },
-            self._test_no_sync,
+            self._test_no_sync_correctness,
         )
 
-    def _test_no_sync(self, sharding_strategy: ShardingStrategy):
+    def _test_no_sync_correctness(self, sharding_strategy: ShardingStrategy):
         model = nn.Linear(3, 3, bias=False, device="cuda")
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
@@ -1164,6 +1165,54 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
             torch.testing.assert_close(grad, 2 * ref_grad)
         for grad, ref_grad in zip(grads_use_orig_params, ref_grads_use_orig_params):
             torch.testing.assert_close(grad, 2 * ref_grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_no_sync_mixed_precision(self):
+        """
+        Tests that dtypes are as expected when using ``no_sync()`` with
+        ``use_orig_params=True`` and parameter mixed precision.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ]
+            },
+            self._test_no_sync_mixed_precision,
+        )
+
+    def _test_no_sync_mixed_precision(self, sharding_strategy: ShardingStrategy):
+        model = nn.Linear(3, 3, bias=False, device="cuda")
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float32,
+        )
+        fsdp_kwargs = {
+            "sharding_strategy": sharding_strategy,
+            "mixed_precision": mixed_precision,
+            "use_orig_params": True,
+        }
+        fsdp_model = FSDP(model, **fsdp_kwargs)
+        inp = torch.randn((2, 3), device="cuda")
+        with fsdp_model.no_sync():
+            # For each of these `no_sync()` backward passes, check that the
+            # gradients are in the low precision parameter dtype (FP16)
+            fsdp_model(inp).sum().backward()
+            for param in fsdp_model.parameters():
+                if param.grad is not None:
+                    self.assertEqual(param.grad.dtype, torch.float16)
+            fsdp_model(inp).sum().backward()
+            for param in fsdp_model.parameters():
+                if param.grad is not None:
+                    self.assertEqual(param.grad.dtype, torch.float16)
+        # For the backward pass outside `no_sync()`, check that the gradients
+        # are cast to the full precision in preparation for the optimizer step
+        fsdp_model(inp).sum().backward()
+        for param in fsdp_model.parameters():
+            if param.grad is not None:
+                self.assertEqual(param.grad.dtype, torch.float32)
 
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)

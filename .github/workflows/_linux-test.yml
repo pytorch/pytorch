@@ -189,6 +189,7 @@ jobs:
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
@@ -205,6 +206,12 @@ jobs:
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+
+      - name: Print remaining test logs
+        shell: bash
+        if: always()
+        run: |
+          cat test/**/*.log || true
 
       - name: Get workflow job id
         id: get-job-id
@@ -224,7 +231,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
           use-gha: ${{ inputs.use-gha }}

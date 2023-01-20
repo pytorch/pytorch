@@ -150,6 +150,12 @@ jobs:
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
 
+      - name: Print remaining test logs
+        shell: bash
+        if: always()
+        run: |
+          cat test/**/*.log || true
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
@@ -167,7 +173,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}

@@ -1456,7 +1456,9 @@ class CudaNonDefaultStream():
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
             self.beforeStreams[-1].synchronize()
-            torch._C._cuda_setStream(deviceStream._cdata)
+            torch._C._cuda_setStream(stream_id=deviceStream.stream_id,
+                                     device_index=deviceStream.device_index,
+                                     device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
     def __exit__(self, exec_type, exec_value, traceback):
@@ -1464,7 +1466,9 @@ class CudaNonDefaultStream():
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
         for d in range(torch.cuda.device_count()):
-            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+            torch._C._cuda_setStream(stream_id=self.beforeStreams[d].stream_id,
+                                     device_index=self.beforeStreams[d].device_index,
+                                     device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
@@ -1857,32 +1861,6 @@ class TensorOrArrayPair(TensorLikePair):
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
 
-        # This is a slow and ugly hack to allow the comparison of hybrid sparse CSR tensors with strided ones. If
-        # `check_layout=False` (default), the tensors will be converted to strided by calling `.to_dense()` on them.
-        # However, this is not yet supported for hybrid sparse CSR and thus we need to do it manually for now.
-        # FIXME: Remove this as soon as `.to_dense` is supported for hybrid sparse CSR tensors
-        if not self.check_layout:
-            self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
-
-    def _handle_hybrid_sparse_csr(self, actual, expected):
-        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-        if not ((actual.layout in compressed_sparse_layouts) or (expected.layout in compressed_sparse_layouts)):
-            return actual, expected
-
-        def to_dense(tensor):
-            if tensor.layout not in compressed_sparse_layouts:
-                return tensor
-
-            def partial_to_dense(tensor):
-                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
-                    return tensor.to_dense()
-                lst = [partial_to_dense(torch.select_copy(tensor, 0, i)) for i in range(len(tensor))]
-                return torch.stack(lst) if lst else tensor.to_dense()
-
-            return partial_to_dense(tensor)
-
-        return [to_dense(input) for input in [actual, expected]]
-
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
@@ -2241,6 +2219,29 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         check_if_enable(self)
         set_rng_seed(SEED)
+
+        # Save global check sparse tensor invariants state that can be
+        # restored from tearDown:
+        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @torch.sparse.check_sparse_tensor_invariants(False)
+        # decorator to disable the invariant checks.
+        torch.sparse.check_sparse_tensor_invariants.enable()
+
+    def tearDown(self):
+        # There exists test cases that override TestCase.setUp
+        # definition, so we cannot assume that _check_invariants
+        # attribute is defined in general.
+        if hasattr(self, '_check_invariants'):
+            # Restore the global check sparse tensor invariants state
+            if self._check_invariants:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+            else:
+                torch.sparse.check_sparse_tensor_invariants.disable()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -4123,9 +4124,10 @@ def outs_and_grads(fn, graph_inps, inps):
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
     for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
     return outs, grads
 
 def compare_equal_outs_and_grads(test, m1, m2, inps):

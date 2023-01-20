@@ -22,10 +22,16 @@ import types
 import typing
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Any, Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch import fx
@@ -60,6 +66,7 @@ def tabulate(rows, headers):
 
 
 def dynamo_profiled(func):
+    @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         datafn = (
@@ -80,6 +87,7 @@ def dynamo_profiled(func):
 
 
 def dynamo_timed(func):
+    @wraps(func)
     def time_wrapper(*args, **kwargs):
         key = func.__qualname__
         if key not in compilation_metrics:
@@ -175,22 +183,6 @@ def init_logging():
     graph_break_dup_warning_checker.reset()
 
 
-# filter out all frames after entering dynamo
-def filter_stack(stack):
-    user_stack = []
-    for frame in stack:
-        if "convert_frame" in frame.filename:
-            break
-        if (
-            "eval_frame" in frame.filename
-            or f"{config.dynamo_import}.optimize(" in frame.line
-        ):
-            continue
-        user_stack.append(frame)
-
-    return user_stack
-
-
 def format_graph_tabular(graph):
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
@@ -284,30 +276,43 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    return istype(
-        value,
-        (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        )
+    else:
+        return False
 
 
 def is_numpy_float_type(value):
-    return istype(
-        value,
-        (
-            np.float16,
-            np.float32,
-            np.float64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.float16,
+                np.float32,
+                np.float64,
+            ),
+        )
+    else:
+        return False
+
+
+def is_numpy_ndarray(value):
+    if HAS_NUMPY:
+        return istype(value, np.ndarray)
+    else:
+        return False
 
 
 def istensor(obj):
@@ -728,6 +733,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    relax_numpy_equality=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -735,7 +741,16 @@ def same(
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         return len(ref) == len(res) and all(
-            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            same(
+                ai,
+                bi,
+                fp64_refi,
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+                relax_numpy_equality,
+            )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif isinstance(ref, dict):
@@ -753,6 +768,7 @@ def same(
                     tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
+                    relax_numpy_equality=relax_numpy_equality,
                 )
             ):
                 log.error(f"Accuracy failed for key name {k}")
@@ -773,13 +789,16 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
-                return torch.allclose(
+                r = torch.allclose(
                     ref.to(dtype=torch.uint8),
                     res.to(dtype=torch.uint8),
                     atol=tol,
                     rtol=tol,
                     equal_nan=equal_nan,
                 )
+                if not r:
+                    log.error("Accuracy failed: uint8 tensor did not match")
+                return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -824,13 +843,27 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
+            log.error(f"Accuracy failed: allclose not within tol={tol}")
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
-        return ref == res
+        r = ref == res
+        if not r:
+            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+        return r
     elif isinstance(ref, float):
-        return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        if not r:
+            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+        return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        return (type(ref) is type(res)) and (ref == res)
+        if relax_numpy_equality:
+            ref = ref.item()
+        r = (type(ref) is type(res)) and (ref == res)
+        if not r:
+            log.error("Accuracy failed (numpy): {ref} != {res}")
+        return r
+    elif is_numpy_ndarray(ref):
+        return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -854,6 +887,7 @@ def same(
                 tol=tol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                relax_numpy_equality=relax_numpy_equality,
             )
             for key in ref.__dict__.keys()
         )

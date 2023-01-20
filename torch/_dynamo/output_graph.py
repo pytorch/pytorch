@@ -57,7 +57,6 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
     TensorVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 
@@ -241,9 +240,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.should_exit = False
         self.random_values_var = None
         self.initial_random_state = ()
-        self.unspec_variable_map: Dict[
-            str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
-        ] = {}
+        self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -518,10 +515,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(
-                    v, (UnspecializedNumpyVariable, UnspecializedPythonVariable)
-                )
-                for v in stack_values
+                not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
@@ -762,6 +756,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
+        self.side_effects.keepalive = []
 
     def create_proxy(
         self,
@@ -783,6 +778,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

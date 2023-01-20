@@ -63,29 +63,6 @@ jobs:
         run: |
           git config --global core.symlinks true
 
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          no-sudo: true
-
-      - name: Setup Windows
-        uses: ./.github/actions/setup-win
-        with:
-          cuda-version: ${{ inputs.cuda-version }}
-
-      - name: Setup conda
-        shell: bash
-        run: |
-          # Windows conda is baked into the AMI at this location
-          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
-
-          {
-            echo "CONDA_RUN=${CONDA} run --no-capture-output";
-            echo "CONDA_BUILD=${CONDA} run conda-build";
-            echo "CONDA_INSTALL=${CONDA} install";
-          } >> "${GITHUB_ENV}"
-
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
@@ -100,6 +77,17 @@ jobs:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
               call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
               set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          no-sudo: true
+
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
+        with:
+          cuda-version: ${{ inputs.cuda-version }}
 
       - name: Start monitoring script
         id: monitor-script
@@ -164,6 +152,12 @@ jobs:
 
           .jenkins/pytorch/win-test.sh
 
+      - name: Print remaining test logs
+        shell: bash
+        if: always()
+        run: |
+          cat test/**/*.log || true
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
@@ -182,7 +176,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
