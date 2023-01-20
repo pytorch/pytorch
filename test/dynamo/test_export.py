@@ -878,7 +878,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
-                return torch.cos(x)
+                return torch.cos(x).relu() + 1
 
         class MyModule(torch.nn.Module):
             def __init__(self):

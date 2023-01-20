@@ -779,9 +779,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        source_fn = tx.source_fn
-        if source_fn:
-            rv.node.meta["source_fn"] = source_fn
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

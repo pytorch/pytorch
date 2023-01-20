@@ -1572,12 +1572,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
-        # Stack of module being parsed, current nn.module is at the end of ordered dict,
-        # This info is eventally stored in node.meta["nn_module_stack"]
+        # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
-        # Name of the source function being parsed. This field is eventally stored in node.meta["source_fn"]
-        self.source_fn: Optional[str] = None
-
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
