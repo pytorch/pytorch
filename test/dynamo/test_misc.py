@@ -2744,6 +2744,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 torch.allclose(opt_model(torch.ones(2, 3)), torch.tensor([2.0]))
             )
 
+    def test_autograd_function_has_graph_break(self):
+        x = torch.randn(10)
+        for model in [Module5(), Module6()]:
+            torch._dynamo.reset()
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_model = torch._dynamo.optimize(cnts)(model)
+            for _ in range(3):
+                ref = model(x)
+                res = opt_model(x)
+                self.assertTrue(torch.allclose(ref, res))
+            self.assertEqual(cnts.frame_count, 2)
+
     def test_object_classmethod(self):
         class C:
             @classmethod
@@ -3341,6 +3353,22 @@ class CustomFunc2(torch.autograd.Function):
         return grad_output
 
 
+class CustomFunc3(torch.autograd.Function):
+    # Test there is graph break in forward function
+    @staticmethod
+    def forward(ctx, foo):
+        result = foo + foo
+        torch._dynamo.graph_break()
+        result = result + foo
+        ctx.save_for_backward(result)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (result,) = ctx.saved_tensors
+        return grad_output * math.sqrt(result.numel())
+
+
 class Module1(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -3370,6 +3398,23 @@ class Module4(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.fn = CustomFunc2.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
+
+
+class Module5(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc3().apply(foo)
+
+
+class Module6(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc3.apply
 
     def forward(self, foo):
         return self.fn(foo)
