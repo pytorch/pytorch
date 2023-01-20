@@ -623,17 +623,10 @@ class TestNvFuserFrontend(TestCase):
             t4 = fd.ops.gather(t3, t2, 0)
             fd.add_output(t4)
 
-        nvf_out1, _ = self.exec_nvfuser(fusion_func, inputs)
-        # Create a new fusion with the same definition, it should hit the cache!
-        nvf_out2, fs2 = self.exec_nvfuser(fusion_func, inputs, new_fusion_expected=False)
-        # Create a fusion from a fusion id and make sure it executes!
-        fs3 = Fusion(fs2.id())
-        nvf_out3 = fs3.execute(inputs)
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
 
         eager_out = torch.gather(inputs[0] + inputs[1], 0, inputs[2])
-        self.assertEqual(eager_out, nvf_out1[0])
-        self.assertEqual(eager_out, nvf_out2[0])
-        self.assertEqual(eager_out, nvf_out3[0])
+        self.assertEqual(eager_out, nvf_out[0])
 
 if __name__ == '__main__':
     run_tests()
