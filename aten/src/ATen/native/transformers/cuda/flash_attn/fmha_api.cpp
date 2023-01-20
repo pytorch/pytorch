@@ -129,8 +129,8 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const bool zero_tensors,
         const bool is_causal,
         c10::optional<at::Generator> gen_) {
-    // return_softmax is an a parameter for flash attention
-    // for api though we are removing this parameter.
+    // return_softmax is a parameter for flash attention
+    // but for the in core api though we are removing this parameter.
     constexpr bool return_softmax = false;
 
     auto dprops = at::cuda::getCurrentDeviceProperties();

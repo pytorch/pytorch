@@ -1814,7 +1814,7 @@ class TestNestedTensorDeviceType(TestCase):
             key = torch.nested.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
             value = torch.nested.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
         elif input_dim == 4:
-            # In the 4D case the L or S is ragged
+            # In the 4D case the L and S is ragged
             # Shape: (N, N', L, E); ragged N' and L
             query = torch.nested.nested_tensor([rand_tensor(2, 2, E), rand_tensor(3, 3, E), rand_tensor(4, 4, E)])
             # Shape: (N, N', S, E); ragged N' and S
@@ -1832,9 +1832,8 @@ class TestNestedTensorDeviceType(TestCase):
         dropout_p = 0.0  # no dropout for reproducibility
 
         # Success case: no attn_mask set and is_causal=False.
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=dropout_p)
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            query, key, value, attn_mask=None, is_causal=False, dropout_p=dropout_p)
 
         expected_outputs = []
         for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):

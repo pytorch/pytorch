@@ -697,11 +697,6 @@ Tensor scaled_dot_product_attention(
     const c10::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal) {
-  // TODO: The second return is the attention weights if the math kernel is
-  // used. The fused kernels do not return this Tensor so for the fused kernels
-  // The second return SHOULD always be an empty Tensor, unless need_attn_weights
-  // is true (in which case the fused kernels would not be called). This blows up
-  // op_info tests.
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
