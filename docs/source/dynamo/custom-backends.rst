@@ -1,8 +1,50 @@
 Custom Backends
 ===============
 
+Overview
+--------
+
+``torch.compile`` provides a straightforward method to enable users
+to define custom backends.
+
+A backend function has the contract
+``(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable``.
+
+Backend functions can be called by TorchDynamo, the graph tracing component of ``torch.compile``,
+after tracing an FX graph and are
+expected to return a compiled function that is equivalent to the traced FX graph.
+The returned callable should have the same contract as the ``forward`` function of an ``nn.Module``:
+``(*args: Any) -> Any``.
+
+In order for TorchDynamo to call your backend, pass your backend function as the ``backend`` kwarg in
+``torch.compile``, for example, ``torch.compile(model, backend=my_custom_backend)``. See below for examples.
+
+Registering Custom Backends
+---------------------------
+
+You can register your backend using the ``register_backend`` decorator, for example,
+
+.. code-block:: python
+    from torch._dynamo.optimizations import register_backend
+
+    @register_backend
+    def my_compiler(gm, example_inputs):
+        ...
+
+Registration serves two purposes:
+* You can pass a string containing your backend function's name to ``torch.compile`` instead of the function itself,
+  for example, ``torch.compile(model, backend="my_compiler")``.
+* It is required for use with the `minifier <https://pytorch.org/docs/master/dynamo/troubleshooting.html>`__. Any generated
+  code from the minifier must call your code that registers your backend function, typically through an ``import`` statement.
+
+Custom Backends after AOTAutograd
+---------------------------------
+
+Examples
+--------
+
 Debugging Backend
------------------
+^^^^^^^^^^^^^^^^^
 
 If you want to better understand what is going on during a
 compilation, you can create a custom compiler, which is referred to as
@@ -115,7 +157,7 @@ The order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 
 Speedy Backend
---------------
+^^^^^^^^^^^^^^
 
 Integrating a custom backend that offers superior performance is also
 easy and we’ll integrate a real one
@@ -136,7 +178,7 @@ And then you should be able to optimize any existing code with:
        ...
 
 Composable Backends
--------------------
+^^^^^^^^^^^^^^^^^^^
 
 TorchDynamo includes many backends, which can be found in
 `backends.py <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/backends.py>`__
