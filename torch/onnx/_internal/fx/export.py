@@ -5,6 +5,7 @@ import operator
 from typing import Callable, Dict, Optional, Tuple, Union
 
 import onnx
+import onnxscript
 from onnxscript import evaluator
 from onnxscript.function_libs.torch_aten import graph_building, ops
 
@@ -207,8 +208,8 @@ def _retrieve_or_adapt_input(fx_node_arg, fx_name_to_onnxscipt_tensor, example_o
         onnx_tensor = fx_name_to_onnxscipt_tensor[onnx_tensor.name]
     elif isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = _type_utils.JitScalarType.from_dtype(onnx_tensor)
-    else:
-        raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
+    # else:
+    #     raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
     return onnx_tensor
 
 
@@ -282,6 +283,9 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
             assert (
                 output is not None
             ), f"Node creates None with target={node.target} and name={node.name}"
+            assert isinstance(output, graph_building.TorchScriptTensor)
+            assert isinstance(output, onnxscript.tensor.Tensor)
+
             fx_name_to_onnxscipt_tensor[node.name] = output
         elif node.op == "call_function":
             # aten ops and other statless functions.
@@ -312,6 +316,8 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 # _fill_tensor_types(v, node.meta["val"])
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScriptTensors.
+                assert isinstance(output, graph_building.TorchScriptTensor)
+                assert isinstance(output, onnxscript.tensor.Tensor)
                 fx_name_to_onnxscipt_tensor[node.name] = output
             elif node.target == operator.getitem and isinstance(node.args, tuple):
                 onnx_tensor_tuple = fx_name_to_onnxscipt_tensor[node.args[0].name]
@@ -320,6 +326,8 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     assert (
                         output is not None
                     ), f"Node creates None with target={node.target} and name={node.name}"
+                    assert isinstance(output, graph_building.TorchScriptTensor)
+                    assert isinstance(output, onnxscript.tensor.Tensor)
                     fx_name_to_onnxscipt_tensor[node.name] = output
                 else:
                     # TODO(justinchuby): Implement this function
@@ -334,6 +342,8 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     assert (
                         output is not None
                     ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}"
+                    assert isinstance(output, graph_building.TorchScriptTensor)
+                    assert isinstance(output, onnxscript.tensor.Tensor)
                     # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                     # that case, v is a tuple of TorchScript values.
                     fx_name_to_onnxscipt_tensor[node.name] = output
@@ -384,6 +394,8 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
             assert (
                 output is not None
             ), f"Node creates None with target={node.target} and name={node.name}"
+            assert isinstance(output, graph_building.TorchScriptTensor)
+            assert isinstance(output, onnxscript.tensor.Tensor)
             fx_name_to_onnxscipt_tensor[node.name] = output
             ts_name_to_real_tensor[output.symbolic_value().debugName()] = current_attr
         else:
