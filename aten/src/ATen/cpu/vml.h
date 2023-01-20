@@ -97,17 +97,6 @@ IMPLEMENT_VML(lgamma)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
-class MklThreadGuard {
-  int old_threads_;
-public:
-  MklThreadGuard(int num_threads):
-    old_threads_(mkl_set_num_threads_local(num_threads)) {
-  }
-  ~MklThreadGuard(){
-    mkl_set_num_threads_local(old_threads_);
-  }
-};
-
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
 // we need to expect MKL_INT to be of type int, which implies int32_t in most
 // cases.
@@ -117,7 +106,6 @@ static_assert(
 #define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
   inline void v##op(type * out, const type * in, int64_t size) {        \
-    MklThreadGuard guard(1);                                            \
     int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
