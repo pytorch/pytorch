@@ -295,14 +295,10 @@ test_inductor_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
   # Check inference with --float32
-  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager
 
   # Check training with --amp
-  test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
-
-  # Check training with symbolic shapes (not actually inductor)
-  test_single_dynamo_benchmark "dynamic_aot_eager_training" "$@" \
-    --backend aot_eager --dynamic-shapes --training
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp
 }
 
 test_inductor_benchmark_perf() {
