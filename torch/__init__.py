@@ -1368,9 +1368,3 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
                   'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
-
-
-# dynamic registration of sparse triton kernels
-from torch.sparse import _register_impls
-lib = torch.library.Library("aten", "IMPL")
-_register_impls(lib)
