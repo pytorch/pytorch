@@ -838,6 +838,7 @@ class TritonKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
+        original_index = index
         index, mask_vars, mask = self.indexing(index)
 
         if "rmask" in mask:
@@ -856,10 +857,16 @@ class TritonKernel(Kernel):
         else:
             other = ""
 
+        append_broadcast = None
         if V.graph.is_unspec_arg(name):
             line = var
         else:
-            line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+            if isinstance(original_index, sympy.Integer):
+                dense_size = self.dense_size_str()
+                line = f"tl.load({var} + ({original_index}))"
+                append_broadcast = dense_size
+            else:
+                line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
 
@@ -871,9 +878,13 @@ class TritonKernel(Kernel):
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            result_var = self.cse.generate(self.body, line)
+            result_var = self.cse.generate(
+                self.body, line, append_broadcast=append_broadcast
+            )
         else:
-            result_var = self.cse.generate(self.loads, line)
+            result_var = self.cse.generate(
+                self.loads, line, append_broadcast=append_broadcast
+            )
 
         result_var.mask_vars = mask_vars
 
