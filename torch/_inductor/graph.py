@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
@@ -31,7 +32,7 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
+from .utils import gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -121,6 +122,12 @@ class GraphLowering(torch.fx.Interpreter):
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.warning(f"Using FallbackKernel: {name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -166,7 +173,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -246,8 +253,17 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if config.static_weight_shapes and (
-            len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
+        # todo(chilli): We can remove the last check once we turn buffers into
+        # static shape tensors. That's a hack to workaround Inductor believing
+        # the buffer should be static but us passing in a fake tensor with
+        # symbolic shapes.
+        if (
+            config.static_weight_shapes
+            and (
+                len(self.graph_inputs) < self.num_static_inputs
+                or not config.dynamic_shapes
+            )
+            and not example._has_symbolic_sizes_strides
         ):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
@@ -516,7 +532,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 

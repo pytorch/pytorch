@@ -873,7 +873,7 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
             return a0;
           } else {
             float m0 = std::max(a0, b0);
-            return m0 + std::log(static_cast<float>(1.0) + std::exp(-std::abs(a0 - b0)));
+            return m0 + std::log1p(std::exp(-std::abs(a0 - b0)));
           }
         },
         [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
@@ -881,15 +881,14 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
           std::tie(a0, a1) = convert_bfloat16_float(a);
           std::tie(b0, b1) = convert_bfloat16_float(b);
           Vectorized<float> inf(std::numeric_limits<float>::infinity());
-          Vectorized<float> one(1.0);
           Vectorized<float> m0 = maximum(a0, b0);
           Vectorized<float> m1 = maximum(a1, b1);
           a0 = Vectorized<float>::blendv(
-              m0 + (one + (a0 - b0).abs().neg().exp()).log(),
+              m0 + (a0 - b0).abs().neg().exp().log1p(),
               a0,
               (a0 == b0) & (a0.abs() == inf));
           a1 = Vectorized<float>::blendv(
-              m1 + (one + (a1 - b1).abs().neg().exp()).log(),
+              m1 + (a1 - b1).abs().neg().exp().log1p(),
               a1,
               (a1 == b1) & (a1.abs() == inf));
           return convert_float_bfloat16(a0, a1);
@@ -903,15 +902,14 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
               return a;
             } else {
               scalar_t m = std::max(a, b);
-              return m + std::log(static_cast<scalar_t>(1.0) + std::exp(-std::abs(a - b)));
+              return m + std::log1p(std::exp(-std::abs(a - b)));
             }
           },
           [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             Vectorized<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
-            Vectorized<scalar_t> one(1.0);
             Vectorized<scalar_t> m = maximum(a, b);
             return Vectorized<scalar_t>::blendv(
-                m + (one + (a - b).abs().neg().exp()).log(),
+                m + (a - b).abs().neg().exp().log1p(),
                 a,
                 (a == b) & (a.abs() == inf));
           });

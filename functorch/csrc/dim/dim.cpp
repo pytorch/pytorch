@@ -1085,8 +1085,8 @@ inline int64_t _Tensor_ndim(py::handle h) {
 inline py::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
     c10::optional<PyObject*> mb_obj =
-        t->unsafeGetTensorImpl()->check_pyobj(getPyInterpreter());
-    if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->owns_pyobj()) {
+        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+    if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
     }
     return A.autorelease(py::object::checked_steal(THPVariable_Wrap(*t)));

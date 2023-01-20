@@ -1174,8 +1174,8 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(lt)
       SYMNODE_BINARY(le)
       SYMNODE_BINARY(ge)
-      SYMNODE_BINARY(min)
-      SYMNODE_BINARY(max)
+      SYMNODE_BINARY(sym_min)
+      SYMNODE_BINARY(sym_max)
       SYMNODE_UNARY(ceil)
       SYMNODE_UNARY(floor)
       SYMNODE_UNARY(neg)
@@ -1315,7 +1315,7 @@ void initJITBindings(PyObject* module) {
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
 
-  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+  py::enum_<MobileOptimizerType>(m, "_MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
       .value(
           "INSERT_FOLD_PREPACK_OPS",
@@ -1327,8 +1327,7 @@ void initJITBindings(PyObject* module) {
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
       .value(
           "VULKAN_AUTOMATIC_GPU_TRANSFER",
-          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)
-      .export_values();
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER);
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
