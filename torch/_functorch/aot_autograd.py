@@ -1869,12 +1869,28 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 def forward(ctx, *all_args):
                     all_args_list = list(all_args)
                     if CompiledFunction.compiled_bw is None:
-                        # TODO - pass in fake tensors ?
                         context = disable_autocast_manager if disable_amp else nullcontext
-                        with context(), track_graph_compiling(aot_config, "backward"):
-                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                bw_module, all_args_list
-                            )
+                        if config.use_dynamic_shapes:
+                            with context():
+                                # Retrace backwards with a new shape environment
+                                local_bw_module = make_fx(bw_module, tracing_mode="symbolic")(*all_args)
+                                with track_graph_compiling(aot_config, "backward"):
+                                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                        # NB: The None case is for when we
+                                        # have SymInt tangents, which are
+                                        # always passed with None
+                                        local_bw_module,
+                                        [
+                                            n.meta['val'] if 'val' in n.meta else None
+                                            for n in local_bw_module.graph.nodes
+                                            if n.op == "placeholder"
+                                        ]
+                                    )
+                        else:
+                            with context(), track_graph_compiling(aot_config, "backward"):
+                                CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                    bw_module, all_args_list
+                                )
 
                     ctx.maybe_clear_saved_tensors()
                     out = call_func_with_args(
