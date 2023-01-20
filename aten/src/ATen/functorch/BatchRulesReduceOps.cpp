@@ -20,6 +20,11 @@ Tensor sum_decomp(
   return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
+std::tuple<Tensor, optional<int64_t>> _is_all_true_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim) {
+  return std::make_tuple(at::_is_all_true(self), nullopt);
+}
+
 Tensor mean_decomp(
     const Tensor& self, optional<ScalarType> dtype) {
   return at::mean(self, range(0, self.dim()), false, dtype);
@@ -502,5 +507,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(aminmax, aminmax_batching_rule);
   VMAP_SUPPORT(_log_softmax_backward_data, _log_softmax_backward_batch_rule);
   VMAP_SUPPORT(_softmax_backward_data, _softmax_backward_batch_rule);
+  VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);
 }
 }}
