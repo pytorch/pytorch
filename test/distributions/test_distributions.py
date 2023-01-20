@@ -3925,6 +3925,7 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
 
     def setUp(self):
