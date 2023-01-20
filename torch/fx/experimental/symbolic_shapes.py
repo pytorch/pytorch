@@ -12,6 +12,7 @@ import traceback
 import collections
 import textwrap
 import logging
+import z3
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymInt, SymFloat, sym_float, sym_int, sym_max, sym_min  # noqa: F401
@@ -759,7 +760,98 @@ class ShapeEnv(object):
             assert sources
             # We must assert that each symbol is not zero or one, as we make
             # negative inferences on shape variables
-            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+            exprs.append(f"{source_ref(sources[0])} != 0")
+            exprs.append(f"{source_ref(sources[0])} != 1")
+
+        class myz3Ref(z3.ArithRef):
+            def __init__(self, expr):
+                super().__init__(expr.ast, expr.ctx)
+
+            def __add__(self, other):
+                return myz3Ref(super().__add__(other))
+
+            def __radd__(self, other):
+                return myz3Ref(super().__radd__(other))
+
+            def __sub__(self, other):
+                return myz3Ref(super().__sub__(other))
+
+            def __rsub__(self, other):
+                return myz3Ref(super().__rsub__(other))
+
+            def __mul__(self, other):
+                return myz3Ref(super().__mul__(other))
+
+            def __rmul__(self, other):
+                return myz3Ref(super().__rmul__(other))
+
+            def __floordiv__(self, other):
+                div = self / other
+                return myz3Ref(div if div.is_int() else z3.ToInt(div))
+
+            def __rfloordiv__(self, other):
+                div = other / self
+                return myz3Ref(div if div.is_int() else z3.ToInt(div))
+
+            def __pow__(self, other):
+                if isinstance(other, int):
+                    return myz3Ref(functools.reduce(operator.mul, [self] * other))
+                return myz3Ref(super().__pow__(other))
+
+        def myz3Int(name):
+            return myz3Ref(z3.Int(name))
+
+        class Z3SymbolicTensor:
+            def __init__(self, name, max_idx):
+                self._size   = [myz3Int(f"{name}.size()[{i}]") for i in range(max_idx+1)]
+                self._stride = [myz3Int(f"{name}.stride()[{i}]") for i in range(max_idx+1)]
+                self._storage_offset = myz3Int(f"{name}.storage_offset()")
+
+            def size(self):
+                return self._size
+
+            def stride(self):
+                return self._stride
+
+            def storage_offset(self):
+                return self._storage_offset
+
+
+        vars = {}
+        for vs in symbol_to_source.values():
+            for v in vs:
+                name = v.base.name()
+                vars[name] = max(vars.get(name, 0), v.idx or 0)
+
+        for source, expr in input_guards:
+            name = source.base.name()
+            vars[name] = max(vars.get(name, 0), source.idx or 0)
+
+        for name, idx in vars.items():
+            locals()[name] = Z3SymbolicTensor(name, idx)
+
+        def Ne(a, b):
+            return a != b
+
+        def Eq(a, b):
+            return a == b
+
+        def Mod(a, b):
+            return a % b
+
+        z3fml = []
+        for e in exprs:
+            z3fml.append(eval(e))
+        
+        tactic = z3.Then(z3.Tactic('simplify'),
+                         z3.Tactic('solve-eqs'),
+                         z3.Tactic('propagate-values'),
+                         z3.Tactic('factor'),
+                         z3.Tactic('simplify'),
+                         z3.Tactic('propagate-ineqs'),
+                         z3.Tactic('ctx-solver-simplify'),
+                        )
+        print(tactic(z3.And(z3fml)))
 
         if exprs:
             return " and ".join(exprs)
