@@ -1119,7 +1119,7 @@ class BenchmarkRunner:
 
     def optimizer_step(self):
         if self.optimizer is not None:
-            self.optimizer.step()
+            torch._dynamo.disable(self.optimizer.step)()
 
     def get_benchmark_indices(self, length):
         start = self._args.partition_id * (length // self._args.total_partitions)
