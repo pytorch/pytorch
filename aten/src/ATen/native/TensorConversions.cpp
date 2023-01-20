@@ -941,7 +941,7 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
     if (layout_from != kStrided) {
       AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " with dense_dim argument given is not supported");
     }
-  } else {
+
     auto dense_dim = *dense_dim_opt;
     if (layout_to == kSparse) {
       if (dense_dim < 0 || dense_dim > self.dim()) {
