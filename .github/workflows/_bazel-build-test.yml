@@ -31,14 +31,14 @@ jobs:
       id-token: write
       contents: read
     steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
       - name: Setup SSH outside of Meta (Click me for login details)
         uses: huydhn/actions-ssh@sshd
         with:
           sshUser: huydhn
-
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
