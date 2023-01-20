@@ -13,10 +13,7 @@ import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.optimizations.normalize import normalize_ir
-from torch._dynamo.optimizations.training import (
-    aot_autograd,
-    is_aot_autograd_safe_to_run,
-)
+from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
@@ -30,6 +27,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
+
 
 @dataclasses.dataclass
 class BoxedBool:
