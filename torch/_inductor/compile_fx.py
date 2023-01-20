@@ -3,34 +3,33 @@ import functools
 import itertools
 import logging
 import sys
+import warnings
 from typing import List
 
 import functorch
-from functorch._src.aot_autograd import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
+
+from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
+from torch._dynamo.optimizations.normalize import normalize_ir
+from torch._dynamo.optimizations.training import (
+    aot_autograd,
+    is_aot_autograd_safe_to_run,
+)
+from torch._dynamo.utils import fake_mode_from_tensors
+from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
 
 from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import (
-    dynamo_logging,
-    dynamo_optimizations,
-    dynamo_utils,
-    has_incompatible_cudagraph_ops,
-)
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
-
-aot_autograd = dynamo_optimizations.training.aot_autograd
-normalize_ir = dynamo_optimizations.normalize.normalize_ir
-is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
-count_calls = dynamo_utils.count_calls
 
 
 @dataclasses.dataclass
@@ -83,12 +82,22 @@ def _step_logger():
     return dynamo_logging.get_step_logger(log)
 
 
+@functools.lru_cache(None)
+def _warn_tf32_disabled():
+    if (
+        torch.cuda.is_available()
+        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ):
+        warnings.warn(
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
+            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+        )
+
+
 @DebugContext.wrap
 def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
-    shape_env = None
-    for inp in example_inputs:
-        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
-            shape_env = inp.fake_mode.shape_env
+    shape_env = _shape_env_from_inputs(example_inputs)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
@@ -109,6 +118,8 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
+    _warn_tf32_disabled()
+
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
 
@@ -127,12 +138,16 @@ def compile_fx_inner(
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
-    shape_env = None
-    for inp in example_inputs:
-        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
-            shape_env = inp.fake_mode.shape_env
 
-    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
+    shape_env = _shape_env_from_inputs(example_inputs)
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    graph = GraphLowering(
+        gm,
+        shape_env=shape_env,
+        num_static_inputs=num_fixed,
+        graph_id=graph_id,
+        fake_mode=fake_mode,
+    )
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()
@@ -184,10 +199,16 @@ def clone_preserve_strides(x):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
+    def is_aligned(storage_offset, dtype):
+        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
+
     check_inputs = [
         i
         for i in range(len(inputs))
-        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        if (
+            i not in static_input_idxs
+            or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
+        )
         and inputs[i].device.type == "cuda"
     ]
 
@@ -391,7 +412,7 @@ def compile_fx(
     with overrides.patch_functions():
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
             fw_compiler=fw_compiler,
@@ -400,11 +421,20 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-            # A "tiny" graph can actually decompose into multiple
-            # operators (if it's a decomposition) and inductor can
-            # do a better job on it in this case
-            #
-            # Also, for some reason, test_comprehensive___rmatmul___cpu
-            # fails without forcing a compile lol.
-            force_compile_tiny_graphs=True,
         )(model_, example_inputs_)
+
+
+def _shape_env_from_inputs(inputs):
+    shape_env = None
+    fake_mode = fake_mode_from_tensors(inputs)
+
+    # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
+    # pass in real inputs for now.
+    # if len(inputs) > 0:
+    # assert fake_mode is not None, breakpoint()
+
+    if fake_mode is not None:
+        return fake_mode.shape_env
+
+    # TODO(voz): Should we always have one anyway?
+    return None

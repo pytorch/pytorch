@@ -1,11 +1,13 @@
 # Owner(s): ["module: dynamo"]
+import operator
+from typing import Dict, List
 from unittest.mock import patch
 
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch.utils._pytree as pytree
+from functorch.experimental.control_flow import cond
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
@@ -88,12 +90,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.ones(6, 4))
 
+        from torch._guards import GuardSource
+
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
         hit = False
         for guard in out_guards:
-            if guard.name == "symbolic_shape_expression":
+            if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
 
         self.assertTrue(hit)
 
@@ -116,9 +120,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -141,9 +144,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -184,9 +186,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -211,9 +212,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -231,9 +231,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -251,9 +250,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -273,9 +271,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -296,9 +293,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -319,9 +315,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -343,9 +338,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -367,9 +361,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -392,9 +385,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -417,9 +409,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -442,9 +433,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -471,9 +461,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -496,9 +485,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -581,9 +569,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -606,9 +593,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -651,9 +637,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -678,9 +663,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -698,9 +682,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -718,9 +701,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inp)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -740,9 +722,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -763,9 +744,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -786,9 +766,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -810,9 +789,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -834,9 +812,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -863,9 +840,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -888,37 +864,46 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        flat_input, _ = pytree.tree_flatten(inps_rand)
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
     def test_export_with_stack_trace(self):
         inp = torch.tensor([0.1, 0.1])
-        linear = torch.nn.Linear(2, 2)
 
-        def func(x):
-            x = x + 1
-            y = x.t()
-            y = y.relu()
-            y = linear(y)
-            return y
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-        exported = torch._dynamo.export(func, inp, aten_graph=False)
+            def forward(self, x):
+                return torch.cos(x).relu()
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                out = self.block(x)
+                return out
+
+        exported = torch._dynamo.export(MyModule(), inp, aten_graph=False)
         out_graph = exported[0]
 
         for node in out_graph.graph.nodes:
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
 
         torch._dynamo.reset()
 
-        exported = torch._dynamo.export(func, inp, aten_graph=True)
+        exported = torch._dynamo.export(MyModule(), inp, aten_graph=True)
         out_graph = exported[0]
         for node in out_graph.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
@@ -938,23 +923,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         def compiler(gm, sample_inputs):
-            aten_gm = make_fx(gm)(*sample_inputs)
+            def fw(*args):
+                aten_gm = make_fx(gm)(*args)
+                return aten_gm(*args)
 
-            self.assertEqual(len(aten_gm.graph.nodes), len(out_graph.graph.nodes))
-            for node1, node2 in zip(aten_gm.graph.nodes, out_graph.graph.nodes):
-                self.assertEqual(node1.op, node2.op)
-                if node1.op == "call_function":
-                    self.assertEqual(node1.target, node2.target)
-                    self.assertEqual(len(node1.args), len(node2.args))
-                    for arg1, arg2 in zip(node1.args, node2.args):
-                        self.assertEqual(type(arg1), type(arg2))
-
-            return aten_gm.forward
+            return fw
 
         opt_func = torch._dynamo.optimize(compiler, nopython=True)(func)
-        make_fx_result = opt_func(inp)
+        make_fx_result_through_backend = opt_func(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(make_fx_result, export_result))
+        fx_g = make_fx(func)(inp)
+        make_fx_result_through_direct = fx_g(inp)
+
+        self.assertTrue(
+            torch._dynamo.utils.same(make_fx_result_through_backend, export_result)
+        )
+        self.assertTrue(
+            torch._dynamo.utils.same(make_fx_result_through_direct, export_result)
+        )
 
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
@@ -1434,13 +1420,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_with_module_layer(self):
-        from functorch.experimental.cond import cond
-
-        def true_fn(layer, val):
-            return layer(val) * torch.tensor(2)
-
-        def false_fn(layer, val):
-            return layer(val) * torch.tensor(-1)
+        from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
             def __init__(self):
@@ -1448,7 +1428,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.linear = torch.nn.Linear(3, 3)
 
             def forward(self, pred, x):
-                return cond(pred, true_fn, false_fn, [self.linear, x])
+                def true_fn(val):
+                    return self.linear(val) * torch.tensor(2)
+
+                def false_fn(val):
+                    return self.linear(val) * torch.tensor(-1)
+
+                return cond(pred, true_fn, false_fn, [x])
 
         mod = Module()
         x = torch.randn([3, 3])
@@ -1470,6 +1456,62 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_export_with_map_cond(self):
+        from functorch.experimental.control_flow import cond, map
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def inner(self, x, pred):
+                def true_fn(x):
+                    return x + x
+
+                def false_fn(x):
+                    return x * x
+
+                return cond(pred, true_fn, false_fn, [x])
+
+            def forward(self, pred, xs):
+                def body(x, pred):
+                    return self.inner(x, pred)
+
+                return map(body, xs, pred)
+
+        mod = Module()
+        x = torch.randn(3, 2, 1)
+        pred_x = torch.tensor(True)
+
+        y = torch.randn(4, 3, 2)
+        pred_y = torch.tensor(False)
+        real_result = mod(pred_y, y)
+
+        out_graph, _ = torch._dynamo.export(mod, pred_x, x)
+        self.assertEqual(real_result, out_graph(pred_y, y))
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_export_with_map_zero_sized_tensor(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return map(body, xs)
+
+        mod = Module()
+        xs = torch.randn(0, 2)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "zero-sized tensor",
+        ):
+            out_graph, _ = torch._dynamo.export(mod, xs)
+
     def test_export_meta_val(self):
         def f(x, y, z):
             return x * y + z
@@ -1485,6 +1527,125 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for node in gm.graph.nodes:
             if node.op == "placeholder":
                 self.assertIn("val", node.meta)
+
+    def test_input_container_type(self):
+        def f(x: torch.Tensor, y: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+            return {"a": x.sum() + sum(y).sum()}
+
+        inp = (torch.randn(6, 5), [torch.randn(6, 5), torch.randn(6, 5)])
+
+        gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        self.assertEqual(gm(*inp), f(*inp))
+
+    def test_export_symbolic_shape(self):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty(x.shape[0] * 2)
+
+        inp = (torch.randn(6, 5),)
+        gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        has_sym_size = False
+        for node in gm.graph.nodes:
+            if node.target is torch.ops.aten.sym_size:
+                has_sym_size = True
+
+        self.assertTrue(has_sym_size)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing(self):
+        def f(x):
+            return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
+
+        gm_aten_mode, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm_aten_mode(inp).shape, f(inp).shape)
+
+        count = 0
+        # aten graph should flatten getitem calls to actual
+        # slice kernel call.
+        for node in gm_aten_mode.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.slice.Tensor
+            ):
+                count += 1
+
+        self.assertEqual(count, 2)
+
+        gm_torch_mode, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=False)
+
+        # In torch mode, the graph should contain 3 getitem methods
+        # one for x.shape[0]-2 and one for x.shape[1]-1 and one for slice
+        # this is because Tensor class has its' own getitem method
+        # which gets translated to aten.Slice later.
+        count = 0
+        for node in gm_torch_mode.graph.nodes:
+            if node.op == "call_function" and node.target == operator.getitem:
+                count += 1
+
+        self.assertEqual(count, 3)
+        self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_invalid(self):
+        def g(x, y):
+            return x[y : x.shape[0]]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamic slicing on data-dependent value is not supported",
+        ):
+            torch._dynamo.export(
+                g,
+                torch.randn(4, 5),
+                torch.tensor(2),
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_simple(self):
+        def f(x):
+            return x[slice(None, None, None)]
+
+        gm, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm(inp), f(inp))
+
+    def test_export_cond_in_aten_symbolic(self):
+        class ConditionOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def true_fn(self, x, y):
+                return x * y
+
+            def false_fn(self, x, y):
+                return x + y
+
+            def forward(self, pred, x, y):
+                return cond(pred, self.true_fn, self.false_fn, [x, y])
+
+        model = ConditionOp()
+        inp = (
+            torch.tensor(False),
+            torch.randn(4, 4),
+            torch.randn(4, 4),
+        )
+        gm, _ = torch._dynamo.export(
+            model, *inp, aten_graph=True, tracing_mode="symbolic"
+        )
+
+        gm.print_readable()
+
+        self.assertEqual(gm(*inp), model(*inp))
 
 
 if __name__ == "__main__":

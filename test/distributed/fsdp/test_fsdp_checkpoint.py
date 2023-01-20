@@ -12,11 +12,11 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     offload_wrapper,
 )
+from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
-from torch.distributed.fsdp import ShardingStrategy
 
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest
@@ -345,19 +345,22 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
         }
 
         # Wrap no checkpointing model submodules with FSDP
-        model.m1 = FSDP(module=model.checkpoint1, **fsdp_kwargs)
-        model.m2 = FSDP(module=model.checkpoint2, **fsdp_kwargs)
+        model.checkpoint1 = FSDP(module=model.checkpoint1, **fsdp_kwargs)
+        model.checkpoint2 = FSDP(module=model.checkpoint2, **fsdp_kwargs)
 
         # Wrap checkpointing model submodules with FSDP
-        model_ac.m1 = FSDP(module=model_ac.checkpoint1, **fsdp_kwargs)
-        model_ac.m2 = FSDP(module=model_ac.checkpoint2, **fsdp_kwargs)
+        model_ac.checkpoint1 = FSDP(module=model_ac.checkpoint1, **fsdp_kwargs)
+        model_ac.checkpoint2 = FSDP(module=model_ac.checkpoint2, **fsdp_kwargs)
 
         x = torch.randn(2, 100, device="cuda")
 
         model(x).sum().backward()
         model_ac(x).sum().backward()
 
-        for p1, p2 in zip(model.parameters(), model_ac.parameters()):
+        for (n1, p1), (n2, p2) in zip(
+            model.named_parameters(), model_ac.named_parameters()
+        ):
+            self.assertEqual(n1, n2)
             self.assertTrue(p1.grad.allclose(p2.grad))
 
 

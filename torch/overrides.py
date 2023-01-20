@@ -75,6 +75,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_tensor,
         torch.is_storage,
         torch.set_default_tensor_type,
+        torch.set_default_device,
         torch.set_rng_state,
         torch.get_rng_state,
         torch.manual_seed,
@@ -133,6 +134,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.blackman_window,
         torch.broadcast_shapes,
         torch.can_cast,
+        torch.compile,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,
         torch.cudnn_convolution,
@@ -160,6 +162,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
         torch.mkldnn_linear_backward_weights,
+        torch.mkldnn_rnn_layer,
         torch.normal,
         torch.ones,
         torch.promote_types,
@@ -176,6 +179,10 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sparse_csc_tensor,
         torch.sparse_bsr_tensor,
         torch.sparse_bsc_tensor,
+        torch.sym_float,
+        torch.sym_int,
+        torch.sym_max,
+        torch.sym_min,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -237,6 +244,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.vitals_enabled,
         torch.set_vital,
         torch.read_vitals,
+        torch.vmap,
         torch.frombuffer,
         torch.asarray,
         Tensor.__delitem__,
@@ -284,6 +292,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj_physical,
         Tensor._neg_view,
         Tensor._is_zerotensor,
+        Tensor._is_all_true,
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
     }
@@ -826,7 +835,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v,
             add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None,
             need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None,
-            v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None: -1),
+            v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None, is_causal=False: -1),
         torch.nn.functional.multi_margin_loss: (lambda input, target, p=1, margin=1.0, weight=None, size_average=None,
                                                 reduce=None, reduction='mean': -1),
         torch.nn.functional.multilabel_margin_loss: (lambda input, target, size_average=None, reduce=None,
@@ -1313,7 +1322,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
         Tensor.storage: lambda self: -1,
-        Tensor._storage: lambda self: -1,
+        Tensor.untyped_storage: lambda self: -1,
         Tensor.storage_offset: lambda self: -1,
         Tensor.storage_type: lambda self: -1,
         Tensor.sum_to_size: lambda self, size: -1,
@@ -1688,7 +1697,7 @@ def resolve_name(f):
 
     Arguments
     ---------
-    callable : Callable
+    f : Callable
         Function to resolve the name of.
 
     Returns

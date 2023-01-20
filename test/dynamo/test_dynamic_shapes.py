@@ -39,18 +39,6 @@ DynamicShapesExportTests = make_dynamic_cls(test_export.ExportTests)
 DynamicShapesSubGraphTests = make_dynamic_cls(test_subgraphs.SubGraphTests)
 
 
-# DynamicShapesFunctionTests
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_len_tensor_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_tensor_len_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-
 unittest.expectedFailure(
     DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes
     # aten.min.dim - couldn't find symbolic meta function/decomposition
@@ -85,7 +73,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )
-unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
 
 # DynamicShapesUnspecTests
 # Missing decomp
@@ -100,11 +87,6 @@ unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_s
 # FakeTensor(FakeTensor(..., device='meta', size=()), cpu)), **{}):
 # aten._local_scalar_dense.default
 unittest.expectedFailure(test_unspec.UnspecReproTests.test_batch_norm_act_unspec)
-
-# SymIntArrayRef expected to contain only concrete integers
-unittest.expectedFailure(
-    DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
-)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

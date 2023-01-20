@@ -8,6 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/OpMathType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
@@ -23,7 +24,7 @@
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t>
@@ -32,7 +33,7 @@ inline void _vec_log_softmax_lastdim(
     scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  using Vec = vec::Vectorized<at::opmath_type<scalar_t>>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   if (grain_size < CHUNK_SIZE)
@@ -204,7 +205,7 @@ inline void _vec_host_softmax_backward_lastdim(
     scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  using Vec = vec::Vectorized<at::opmath_type<scalar_t>>;
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
@@ -1288,4 +1289,4 @@ REGISTER_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
 REGISTER_DISPATCH(
     log_softmax_backward_kernel,
     &log_softmax_backward_kernel_impl);
-}} // namespace at::native
+} // namespace at::native

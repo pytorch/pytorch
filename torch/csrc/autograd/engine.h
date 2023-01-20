@@ -64,12 +64,11 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
-      : base_(base),
+      : base_(std::move(base)),
         fn_(std::move(fn)),
         inputs_(std::move(inputs)),
         isShutdownTask_(isShutdownTask) {}

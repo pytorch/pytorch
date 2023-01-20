@@ -91,7 +91,7 @@ constexpr std::size_t kSoftLimitCallbacks = 4;
 // An abstract base class for various observer contexts that can be attached to
 // the RecordFunction.
 struct ObserverContext {
-  virtual ~ObserverContext() {}
+  virtual ~ObserverContext() = default;
 
  protected:
   ObserverContext() {}
@@ -709,7 +709,7 @@ class TORCH_API RecordFunctionGuard {
 class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
  public:
   DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
-  virtual ~DisableRecordFunctionGuard() {}
+  virtual ~DisableRecordFunctionGuard() = default;
 };
 
 struct TORCH_API RecordFunctionTLS {

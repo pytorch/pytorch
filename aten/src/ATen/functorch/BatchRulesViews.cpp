@@ -172,7 +172,7 @@ const Tensor& resize__plumbing(
       optional_memory_format == c10::MemoryFormat::Contiguous,
       "resize_: batching rule only supports None or Contiguous MemoryFormat");
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "resize__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
@@ -239,34 +239,41 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   return std::make_tuple(result, c10::optional<int64_t>(new_batch_idx));
 }
 
-std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim) {
+std::tuple<Tensor, optional<int64_t>> squeeze_dims_batch_rule(
+    const Tensor& self, optional<int64_t> bdim, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
   // Special case for scalar arrays to replicate PyTorch behavior.
-  if (self.dim() == 1) {
-    TORCH_CHECK(dim == 0, "Dimension is out of range (expected to be in range of [-1, 0], but got ", dim);
+  auto ndim = self.dim();
+  if (ndim == 1) {
+    TORCH_CHECK(
+        dims.size() == 0 || (dims.size() == 1 && dims[0] == 0),
+        "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
     return std::make_tuple(self.alias(), bdim);
   }
 
-  // Calculate the proper offset if dim is negative.
-  auto actual_dim = dim;
-  if (dim < 0) {
-    actual_dim = self.dim() + dim - 1;
-  }
-  if (actual_dim < bdim) {
-    // Since dimension to be squeezed is before the batch dimension pass as-is.
-    auto original_size = self.dim();
-    auto result = self.squeeze(actual_dim);
-    auto updated_batch_idx = *bdim;
-    if (result.dim() != original_size) {
-      // A column before batch dimension has been dropped so adjust accordingly.
-      --updated_batch_idx;
+  // Adjust any dimensions higher than the batch dimension
+  DimVector adjusted_dims(dims.begin(), dims.end());
+  int64_t updated_batch_idx = *bdim;
+  for (auto &d : adjusted_dims) {
+    auto actual_dim = c10::maybe_wrap_dim(d, ndim - 1);
+    if (actual_dim < *bdim) {
+      d = actual_dim;
+      if (self.sym_size(actual_dim) == 1) {
+        // A column before batch dimension will be dropped so adjust accordingly.
+        --updated_batch_idx;
+      }
+    } else {
+      // Since dimension to be squeezed is after the batch dimension adjust by one to account
+      // for the original batch dimension. In this case batch dimension won't move.
+      d = actual_dim + 1;
     }
-    return std::make_tuple(result, optional<int64_t>(updated_batch_idx));
-  } else {
-    // Since dimension to be squeezed is after the batch dimension adjust by one to account
-    // for the original batch dimension. In this case batch dimension won't move.
-    return std::make_tuple(self.squeeze(actual_dim + 1), bdim);
   }
+  return std::make_tuple(self.squeeze(adjusted_dims), optional<int64_t>(updated_batch_idx));
+}
+
+std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(
+    const Tensor& self, optional<int64_t> bdim, int64_t dim) {
+  return squeeze_dims_batch_rule(self, bdim, {dim});
 }
 
 std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t chunks, int64_t dim) {
@@ -515,6 +522,19 @@ std::tuple<Tensor, optional<int64_t>> narrow_copy_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+std::tuple<std::vector<Tensor>, optional<int64_t>> unsafe_split_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    c10::SymInt split_size,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  dim = maybe_wrap_dim(dim, logical_rank) + 1;
+  auto result = self_.unsafe_split_symint(split_size, dim);
+  return std::make_tuple(result, 0);
+}
+
 std::tuple<Tensor, optional<int64_t>> movedim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef source, IntArrayRef destination) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto source_ = getPhysicalDims(self_, self_bdim.has_value(), source);
@@ -531,12 +551,11 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
 }
 
 Tensor trace_decomp(const Tensor& tensor) {
+  TORCH_CHECK(tensor.dim() == 2, "trace: expected a matrix, but got tensor with dim ", tensor.dim());
   return tensor.diagonal().sum();
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  VMAP_SUPPORT(diag, diag_batch_rule);
-  VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
@@ -549,6 +568,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(select, int, select_batching_rule);
   VMAP_SUPPORT(squeeze, squeeze_batch_rule);
   VMAP_SUPPORT2(squeeze, dim, squeeze_dim_batch_rule);
+  VMAP_SUPPORT2(squeeze, dims, squeeze_dims_batch_rule);
   VMAP_SUPPORT(_reshape_alias, _reshape_alias_batch_rule);
   VMAP_SUPPORT(roll, roll_batch_rule);
   VMAP_SUPPORT(permute, permute_batching_rule);
@@ -566,6 +586,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
+  VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
 }
 
 }}

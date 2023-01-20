@@ -260,9 +260,7 @@ TEST(MetaprogrammingTest, FilterMap_movableOnly_byValue) {
 }
 
 // See https://github.com/pytorch/pytorch/issues/35546
-TEST(
-    MetaprogrammingTest,
-    DISABLED_ON_WINDOWS(FilterMap_onlyCopiesIfNecessary)) {
+TEST(MetaprogrammingTest, FilterMap_onlyCopiesIfNecessary) {
   struct map_copy_counting_by_copy {
     CopyCounting operator()(CopyCounting v) const {
       return v;
@@ -289,9 +287,7 @@ TEST(
   EXPECT_EQ(2, result[2].move_count);
 }
 
-TEST(
-    MetaprogrammingTest,
-    DISABLED_ON_WINDOWS(FilterMap_onlyMovesIfNecessary_1)) {
+TEST(MetaprogrammingTest, FilterMap_onlyMovesIfNecessary_1) {
   struct map_copy_counting_by_move {
     CopyCounting operator()(CopyCounting&& v) const {
       return std::move(v);

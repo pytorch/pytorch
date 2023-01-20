@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 void collectUnresolvedNames(
@@ -53,5 +52,4 @@ std::vector<std::string> getUnresolvedClassAttributes(const ClassDef& def) {
        Maybe<List<Assign>>::create(range, assigns)}));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

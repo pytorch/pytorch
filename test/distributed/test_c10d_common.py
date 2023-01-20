@@ -8,10 +8,11 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 import torch
 import torch.distributed as dist
@@ -906,6 +907,78 @@ class CommonDistributedDataParallelTest(object):
 
         self._test_not_nan(model, x)
 
+    @dataclass
+    class CustomOutput:
+        o1: Optional[torch.Tensor]
+        o2: Dict[str, torch.Tensor]
+
+    class DataclassOutputModule(nn.Module):
+        def __init__(self, skip_o1):
+            super().__init__()
+            self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.relu = nn.ReLU()
+            self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.skip_o1 = skip_o1
+
+        def forward(self, x):
+            o1 = None if self.skip_o1 else self.relu(self.seq1(x))
+            o2 = {
+                "a": self.seq2(x),
+                "b": self.relu(self.seq2(x))
+            }
+            return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
+
+    def _test_dataclass_output(self, skip_o1):
+        net_x = torch.cat(
+            [torch.ones(4, 10) * i for i in range(self.world_size)]
+        ).to(self.rank)
+        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
+
+        # use manual_seed to make sure local models start with the same values
+        torch.manual_seed(0)
+        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[self.rank],
+            find_unused_parameters=True,
+            static_graph=False,
+            process_group=self._get_process_group(),
+        )
+
+        net_out = net(net_x)
+        ddp_out = ddp(ddp_x)
+
+        net_loss = F.mse_loss(
+            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+            if not skip_o1
+            else net_out.o2["a"] + net_out.o2["b"],
+            torch.ones_like(net_out.o2["a"], device=self.rank),
+        )
+        ddp_loss = F.mse_loss(
+            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+            if not skip_o1
+            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            torch.ones_like(ddp_out.o2["a"], device=self.rank),
+        )
+
+        net_loss.backward()
+        ddp_loss.backward()
+
+        for p1, p2 in zip(net.parameters(), ddp.parameters()):
+            if torch.is_tensor(p1.grad):
+                self.assertTrue(p1.grad.allclose(p2.grad))
+            else:
+                self.assertEqual(p1.grad, p2.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output(self):
+        self._test_dataclass_output(skip_o1=False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output_unused_param(self):
+        self._test_dataclass_output(skip_o1=True)
+
+
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
         tensors = [
@@ -1522,6 +1595,20 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         for tensor in tensors:
             self.assertEqual(tensor, torch.ones(10, 10) * self.world_size)
 
+    def _test_all_to_all_single(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda" if backend == "nccl" else "cpu"
+        # test alltoall_base
+        input_tensor = torch.ones(2, 2, device=torch.device(device))
+        output_tensor = torch.zeros(2, 2, device=torch.device(device))
+        dist.all_to_all_single(output_tensor, input_tensor)
+
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
         super(CompilerTest, self).setUp()
@@ -1550,7 +1637,12 @@ class CompilerTest(MultiProcessTestCase):
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return z * 2
+            if isinstance(z, list):
+                return [zz * 2 for zz in z]
+            elif isinstance(z, torch.Tensor):
+                return z * 2
+            else:
+                raise RuntimeError("Unexpected return type")
 
         xx = x.clone()
 
@@ -1595,7 +1687,7 @@ class CompilerTest(MultiProcessTestCase):
 
         xx += 1
         yy = traced_fn(xx)
-        self.assertFalse(y.allclose(yy))
+        self.assertNotEqual(y, yy)
 
     def _test_allreduce_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
@@ -1614,11 +1706,30 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_allgather_into_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            output_tensor = torch.cat(out_tensors, dim=0)
+            work = dist.all_gather_into_tensor(output_tensor, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, output_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_reduce_scatter_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
             in_tensors = [tensor.clone() + i for i in range(group.size())]
             out_tensor = torch.zeros_like(tensor)
             work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensor = torch.zeros_like(tensor).chunk(group.size(), dim=0)[self.rank]
+            work = dist.reduce_scatter_tensor(out_tensor, tensor, group=group, async_op=True)
             return work, out_tensor
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
@@ -1636,6 +1747,15 @@ class CompilerTest(MultiProcessTestCase):
             out_tensor = torch.zeros_like(tensor)
             work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
             return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_alltoall_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            in_tensors = [tensor for i in range(group.size())]
+            work = dist.all_to_all(out_tensors, in_tensors, group=group, async_op=True)
+            return work, out_tensors
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
@@ -1695,6 +1815,28 @@ class ReduceOpTest(TestCase):
         for scale in (torch.tensor(1.0), 2.0):
             reduce_op = dist._make_nccl_premul_sum(scale)
             self.assertEqual(pickle.loads(pickle.dumps(reduce_op)), reduce_op)
+
+    # Ref: https://github.com/pytorch/pytorch/issues/90072
+    def test_reduceop_equal(self):
+        not_reduceop = "abc"
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            reduce_op_obj = c10d.ReduceOp(reduce_op)
+            # this calls `ReduceOp.__eq__(self, other)`
+            self.assertEqual(reduce_op_obj, reduce_op_obj)
+            self.assertEqual(reduce_op_obj, reduce_op)
+            self.assertNotEqual(reduce_op_obj, not_reduceop)
+            self.assertNotEqual(reduce_op, not_reduceop)
+            # TODO(crcrpar): This needs to be `assertEqual` for the associativity even though
+            # the comparison of `RedOpType` and `ReduceOp` sounds less likely to happen compared
+            # to that of `ReduceOp` and `RedOptype`.
+            # this calls `RedOpType.__eq__(self, other)`
+            self.assertNotEqual(reduce_op, reduce_op_obj)
+
+            self.assertFalse(None in (reduce_op, reduce_op_obj))
+            self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
 
 if __name__ == "__main__":

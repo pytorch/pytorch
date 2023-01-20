@@ -3,7 +3,6 @@ import logging
 import math
 from typing import Dict
 
-import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -241,6 +240,7 @@ class PowerSGDState(object):
         # Different random seeds across iterations indicate different 'projections' of the gradients at different SGD steps.
         # If the same random projection is used,
         # there will be differences between the gradients that are never synchronized.
+        import numpy as np
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.

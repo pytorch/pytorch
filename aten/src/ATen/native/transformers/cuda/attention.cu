@@ -3,8 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
+#include <c10/util/Logging.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -685,6 +687,8 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     double dropout_p,
     bool return_softmax,
     bool is_causal) {
+  // Used for tracking usage statistics
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
@@ -752,6 +756,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& value,
     bool compute_log_sumexp,
     bool is_causal) {
+  // Used for tracking usage statistics
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
   // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
@@ -785,6 +791,23 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
   }
   return static_cast<int64_t>(backend);
 }
+bool _chunk_grad_outputs_efficient_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool is_causal) {
+
+  int64_t M = query.size(2);
+  int64_t N = key.size(2);
+
+  bool grad_kv_needs_init = is_causal && N > M;
+  bool is_aliased = query.storage().is_alias_of(key.storage()) && query.storage().is_alias_of(value.storage());
+  bool equal_seq_len = query.size(2) == key.size(2);
+  bool q_v_same_head_dim = query.size(3) == value.size(3);
+  bool chunk_grad_outputs = (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
+  return chunk_grad_outputs;
+}
+
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
     const Tensor& query,
@@ -985,5 +1008,8 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
   TORCH_CHECK(false, "This operator should be overridden in python before use");
   return at::Tensor();
 }
+
+REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
+
 } // namespace native
 } // namespace at

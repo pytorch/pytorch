@@ -3,15 +3,18 @@
 
 import torch
 import torch.nn as nn
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
 from torch.distributed._tensor import (
-    distribute_tensor,
-    distribute_module,
     DeviceMesh,
+    distribute_module,
+    distribute_tensor,
     DTensor,
-    Shard,
     Replicate,
+    Shard,
+)
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
 )
 
 
@@ -19,10 +22,7 @@ class MyModel(nn.Module):
     def __init__(self, n_features, n_layers, device):
         super().__init__()
         self.seq = nn.Sequential(
-            *[
-                nn.Linear(n_features, n_features, device=device)
-                for _ in range(n_layers)
-            ]
+            *[nn.Linear(n_features, n_features, device=device) for _ in range(n_layers)]
         )
 
     def forward(self, x):
@@ -50,12 +50,8 @@ class DTensorAPITest(DTensorTestBase):
             tensor_to_shard = torch.randn(
                 3 * self.world_size, 3, requires_grad=requires_grad
             )
-            dist_tensor = distribute_tensor(
-                tensor_to_shard, device_mesh, shard_spec
-            )
-            self.assertEqual(
-                dist_tensor.size(), torch.Size([3 * self.world_size, 3])
-            )
+            dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+            self.assertEqual(dist_tensor.size(), torch.Size([3 * self.world_size, 3]))
             local_tensor = dist_tensor.to_local()
             self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
             if requires_grad:
@@ -78,9 +74,7 @@ class DTensorAPITest(DTensorTestBase):
         dtensor = distribute_tensor(tensor_to_distribute, device_mesh, spec)
 
         with self.assertRaisesRegex(ValueError, "to a different device mesh"):
-            new_mesh = DeviceMesh(
-                self.device_type, torch.arange(self.world_size)
-            )
+            new_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
             distribute_tensor(dtensor, new_mesh, [Shard(0)])
 
         with self.assertRaisesRegex(ValueError, "to a different placements"):
@@ -104,9 +98,7 @@ class DTensorAPITest(DTensorTestBase):
             splitted_tensor_list = tensor_to_shard.tensor_split(
                 self.world_size, dim=shard_dim
             )
-            dist_tensor = distribute_tensor(
-                tensor_to_shard, device_mesh, shard_spec
-            )
+            dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
             self.assertEqual(dist_tensor.size(), torch.Size(input_size))
             local_tensor = dist_tensor.to_local()
             self.assertEqual(local_tensor, splitted_tensor_list[self.rank])
@@ -115,9 +107,7 @@ class DTensorAPITest(DTensorTestBase):
     def test_distribute_module(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         # fully shard all linear modules on dim 0
-        module_to_shard = MyModel(
-            5 * self.world_size, 20, device=self.device_type
-        )
+        module_to_shard = MyModel(5 * self.world_size, 20, device=self.device_type)
         shard_spec = [Shard(0)]
 
         def shard_fn(name, module, device_mesh):
@@ -128,9 +118,7 @@ class DTensorAPITest(DTensorTestBase):
                     )
                     module.register_parameter(name, dist_param)
 
-        sharded_module = distribute_module(
-            module_to_shard, device_mesh, shard_fn
-        )
+        sharded_module = distribute_module(module_to_shard, device_mesh, shard_fn)
         for param in sharded_module.parameters():
             self.assertIsInstance(param, DTensor)
             self.assertEqual(param.placements, shard_spec)
@@ -162,21 +150,15 @@ class DTensorAPITest(DTensorTestBase):
 
         # only shard part of module, and rest of module should be replicate
         def shard_fn(name, module, device_mesh):
-            if isinstance(module, nn.Linear) and (
-                name == "seq.0" or name == "seq.8"
-            ):
+            if isinstance(module, nn.Linear) and (name == "seq.0" or name == "seq.8"):
                 for name, param in module.named_parameters():
                     dist_param = torch.nn.Parameter(
                         distribute_tensor(param, device_mesh, shard_spec)
                     )
                     module.register_parameter(name, dist_param)
 
-        module_to_distribute = MyModel(
-            5 * self.world_size, 20, device=self.device_type
-        )
-        dist_module = distribute_module(
-            module_to_distribute, device_mesh, shard_fn
-        )
+        module_to_distribute = MyModel(5 * self.world_size, 20, device=self.device_type)
+        dist_module = distribute_module(module_to_distribute, device_mesh, shard_fn)
         for name, param in dist_module.named_parameters():
             self.assertIsInstance(param, DTensor)
             if name.startswith("seq.0") or name.startswith("seq.8"):

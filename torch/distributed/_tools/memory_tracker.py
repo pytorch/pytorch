@@ -1,5 +1,7 @@
 from collections import defaultdict
 
+import pickle
+
 from typing import (
     Any,
     Callable,
@@ -52,6 +54,7 @@ class MemoryTracker:
 
     Example usage:
 
+        >>> # xdoctest: +SKIP(failing)
         >>> net.cuda()
         >>> input = input.cuda()
 
@@ -74,15 +77,9 @@ class MemoryTracker:
         torch._C._log_api_usage_once("torch.distributed.memory_tracker")
         self._hooks: List[RemovableHandle] = []
         self._operator_names: Dict[str, int] = defaultdict(int)
-        self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
-        self.memories_active: Dict[int, Dict[str, float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
-        self.memories_reserved: Dict[int, Dict[str, float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
+        self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict()
+        self.memories_active: Dict[int, Dict[str, float]] = defaultdict()
+        self.memories_reserved: Dict[int, Dict[str, float]] = defaultdict()
         self._markers: Dict[str, int] = defaultdict(int)
         self._cur_module_name: str = ""
         self._op_index: int = 0
@@ -105,8 +102,10 @@ class MemoryTracker:
             # the memory stats tracked here may not completely accurate.
             h1 = m.register_forward_pre_hook(self._create_pre_forward_hook(name))
             h2 = m.register_forward_hook(self._create_post_forward_hook(name))
-            h3 = m.register_backward_hook(self._create_backward_hook(name))
-            self._hooks.extend([h1, h2, h3])
+            # it does not work well with jagged tensor somehow, the root cause is not
+            # clear and remove it for now as it does not really capture important info.
+            # h3 = m.register_backward_hook(self._create_backward_hook(name))
+            self._hooks.extend([h1, h2])
         torch.cuda.empty_cache()
         assert getattr(self, "profile_mode", None) is None
         self.profile_mode = MemoryProfileDispatchMode(self)
@@ -147,36 +146,83 @@ class MemoryTracker:
         print("------------------------------------------------")
 
     @no_type_check
-    def show_traces(self) -> None:
-        """
-        Show the traces of ``memory_allocated``, ``memory_active`` and ``memory_reserved`` at
-        operator level and the marker 'fw_bw_boundary' at the boundary of forward pass
-        and backward pass.
-        """
+    def show_traces(self, path: str = "") -> None:
+        from itertools import chain
+
         import matplotlib.pyplot as plt
 
-        y_1 = [mb for (name, mb) in self.memories_allocated.values()]
-        y_2 = [mb for (name, mb) in self.memories_active.values()]
-        y_3 = [mb for (name, mb) in self.memories_reserved.values()]
-        min_val = min(y_1 + y_2 + y_3)
-        max_val = max(y_1 + y_2 + y_3)
-        x = list(i for i in range(len(y_1)))
-        fig = plt.figure(figsize=(16, 8))
-        plt.plot(x, list(y_1), label="memory_allocated")
-        plt.plot(x, list(y_2), label="memory_active")
-        plt.plot(x, list(y_3), label="memory_reserved")
-        plt.xlabel("# Operator Calls")
-        plt.ylabel("Memory (MB)")
-        for marker_name, marker in self._markers.items():
-            if marker_name == "fw_bw_boundary":
-                plt.plot(
-                    [marker, marker], [min_val, max_val], "r", lw=2, label=marker_name
-                )
-            else:
-                plt.plot(
-                    [marker, marker], [min_val, max_val], "k-", lw=2, label=marker_name
-                )
-        plt.legend()
+        def _plot_figure(x, y_values, labels):
+            min_val = min(list(chain(*y_values))) * 0.999
+            max_val = max(list(chain(*y_values))) * 1.001
+            plt.figure()
+            for y, label in zip(y_values, labels):
+                plt.plot(x, y, label=label)
+            plt.xlabel("# Operator Calls")
+            plt.ylabel("Memory (MB)")
+            plt.legend()
+            for marker_name, marker in self._markers.items():
+                if marker_name == "fw_bw_boundary":
+                    plt.plot(
+                        [marker, marker],
+                        [min_val, max_val],
+                        "r",
+                        lw=2,
+                        label=marker_name,
+                    )
+                else:
+                    plt.plot(
+                        [marker, marker],
+                        [min_val, max_val],
+                        "k-",
+                        lw=2,
+                        label=marker_name,
+                    )
+
+        if path != "":
+            self.load(path)
+
+        y_1 = [gb for (name, gb) in self.memories_allocated.values()]
+        y_2 = [gb for (name, gb) in self.memories_active.values()]
+        y_3 = [gb for (name, gb) in self.memories_reserved.values()]
+        x = list(range(len(y_1)))
+        # Split figures when there is big difference between
+        # "reserved_memory" and "allocated_memory" or "active_memory".
+        _plot_figure(
+            x,
+            [list(y_1), list(y_2), list(y_3)],
+            ["allocated_memory", "active_memory", "reserved_memory"],
+        )
+        _plot_figure(x, [list(y_1)], ["allocated_memory"])
+        _plot_figure(x, [list(y_2)], ["active_memory"])
+        _plot_figure(x, [list(y_3)], ["reserved_memory"])
+
+    def save_stats(self, path: str) -> None:
+        """
+        Save the stats using pickle during runtime if users want to plot the traces
+        in other places like notebook.
+        """
+        stats = {
+            "memories_allocated": self.memories_allocated,
+            "memories_active": self.memories_active,
+            "memories_reserved": self.memories_reserved,
+            "markers": self._markers,
+        }
+
+        with open(path, "wb") as f:
+            pickle.dump(stats, f, pickle.HIGHEST_PROTOCOL)
+
+    def load(self, path: str) -> None:
+        """
+        Load the pickled memory stats to plot the traces or print the summary.
+        """
+
+        with open(path, "rb") as f:
+            stats = pickle.load(f)
+
+        self.memories_allocated = stats["memories_allocated"]
+        self.memories_active = stats["memories_active"]
+        self.memories_reserved = stats["memories_reserved"]
+        self._markers = stats["markers"]
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """
