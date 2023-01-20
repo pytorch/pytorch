@@ -153,6 +153,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
+    'optree==0.7.0',
 ]
 
 [[linter]]
@@ -190,7 +191,8 @@ include_patterns = [
     'benchmarks/instruction_counts/**/*.py',
     'tools/**/*.py',
     'torchgen/**/*.py',
-    'torch/utils/_pytree.py',
+    'torch/fx/pytree.py',
+    'torch/utils/pytree.py',
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
@@ -845,6 +847,8 @@ include_patterns = [
     'torch/_functorch/functional_call.py',
     'torch/nn/utils/_named_member_accessor.py',
     'torch/nn/utils/stateless.py',
+    'torch/fx/pytree.py',
+    'torch/utils/pytree.py',
     'torch/testing/*.py',
     'torch/distributed/fsdp/**/*.py',
     'test/distributed/fsdp/**/*.py',
