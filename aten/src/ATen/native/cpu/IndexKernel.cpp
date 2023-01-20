@@ -708,47 +708,6 @@ void cpu_hflip_channels_last_vec(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
-void cpu_vflip_memcpy(at::TensorIterator& iter) {
-  // This is a vertical flip specialization using memcpy to speed-up the runtime
-
-  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
-
-    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
-    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
-    // output and input.
-    static constexpr int ntensors = 2;
-    const int64_t *outer_strides = &strides[3];
-
-    std::array<char*, ntensors> data_arr;
-    std::copy_n(base, ntensors, data_arr.data());
-
-    TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
-    const int64_t stride = strides[0];
-
-    for (const auto j C10_UNUSED : c10::irange(size1)) {
-
-      char** C10_RESTRICT data_ = data_arr.data();
-      int64_t n = size0;
-
-      char* C10_RESTRICT data[ntensors];
-      for (const auto arg : c10::irange(ntensors)) {
-        data[arg] = data_[arg];
-      }
-
-      memcpy(data[0], data[1], n * stride);
-
-      // advance:
-      for (const auto arg : c10::irange(data_arr.size())) {
-        data_arr[arg] += outer_strides[arg];
-      }
-    }
-  };
-
-  int64_t grain_size = at::internal::GRAIN_SIZE;
-  iter.for_each(loop2d, grain_size);
-  iter.cast_outputs();
-}
-
 void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cpu",
