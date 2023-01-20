@@ -968,7 +968,9 @@ void Engine::evaluate_function(
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
         captured_grad = new_inputs[capture.input_idx_];
-        for (auto& hook : capture.hooks_) {
+        // NOTE [Deprecated capture hooks]
+        for (const auto& hook :
+             capture.DO_NOT_USE_DEPRECATED_get_capture_hooks()) {
           captured_grad = (*hook)(captured_grad);
         }
         if (opt_parent_stream) {
