@@ -379,14 +379,12 @@ for op in pointwise_ops:
 
 def _register_non_deterministic_op(op):
     @register_prop_rule(op)
-    def dropout_rule(op_schema: OpSchema) -> OutputSharding:
+    def non_deterministic_rule(op_schema: OpSchema) -> OutputSharding:
         self_spec = cast(DTensorSpec, op_schema.args_schema[0])
 
-        # TODO: We are specializing dropout_rule now because it's
-        # a non-deterministic algorithm, and replication does not
-        # not support non-deterministic op yet. We should remove
-        # this rule and make dropout to use pointwise rule instead
-        # once we support non-deterministic op.
+        # TODO: We are specializing non_deterministic_rule now because
+        # replicate does not support this op yet. We should remove
+        # this rule once we support non-deterministic op for replicate.
         replicate_or_partial = False
         for placement in self_spec.placements:
             if isinstance(placement, (Replicate, _Partial)):

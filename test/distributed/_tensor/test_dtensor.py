@@ -42,16 +42,19 @@ class DTensorTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_metadtensor(self):
+    def test_meta_dtensor(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        dist_specs = [[Shard(0)], [Replicate()]]
         meta_tensor = torch.randn(1024, 2048, device="meta")
-        shard_spec = [Shard(0)]
-        # Test distribute_tensor on meta tensor
-        meta_dtensor = distribute_tensor(meta_tensor, device_mesh, shard_spec)
-        torch.nn.init.uniform_(meta_dtensor)
-        # Test from_local on meta tensor
-        meta_dtensor = DTensor.from_local(meta_tensor, device_mesh, shard_spec)
-        torch.nn.init.uniform_(meta_dtensor)
+        for dist_spec in dist_specs:
+            # Test distribute_tensor on meta tensor
+            meta_dtensor = distribute_tensor(meta_tensor, device_mesh, dist_spec)
+            torch.nn.init.constant_(meta_dtensor, 1.2)
+            self.assertEqual(meta_dtensor.device.type, self.device_type)
+            # Test from_local on meta tensor
+            meta_dtensor = DTensor.from_local(meta_tensor, device_mesh, dist_spec)
+            torch.nn.init.constant_(meta_dtensor, 1.5)
+            self.assertEqual(meta_dtensor.device.type, self.device_type)
 
     @with_comms
     def test_dtensor_stride(self):
