@@ -2086,7 +2086,13 @@ def bitwise_not(g: jit_utils.GraphContext, input):
 @_onnx_symbolic("aten::bitwise_or")
 @_beartype.beartype
 def bitwise_or(g, self, other):
-    return g.op("org.pytorch.aten::ATen", self, other, operator_s="bitwise_or", overload_name_s="Tensor")
+    if not symbolic_helper._is_bool(self) or not symbolic_helper._is_bool(other):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values",
+            input,
+        )
+    return g.op("Or", self, other)
 
 
 @_beartype.beartype
