@@ -891,7 +891,7 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
     AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " is not supported");
   }
 
-  if (layout_from == kSparse and layout_to != kSparse) {
+  if (layout_from == kSparse && layout_to != kSparse) {
     if (self.sparse_dim() != 2) {
       AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " for input tensors with sparse_dim()!=2 is not supported");
     }
