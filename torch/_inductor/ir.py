@@ -4063,30 +4063,6 @@ class Wait(ExternKernelAlloc):
         return (self.layout.target.get_name(),)
 
 
-"""
-what do i want to do?
-learn more about stream handling in inductor
-prototype a simpler allreduce impl that directly calls nccl
-solve the connection of primitive rank/group native API to kernel call
-    (prior prototype calls default processgroup allreduce with no way to specify pg from user code)
-
-
-what would the inductor code look like?
-
-buf1 = some_kernel()
-all_reduce_(buf1, stream=comm_stream)
-all_reduce_1 = event(comm_stream)
-
-buf2 = some_other_kernel()
-all_reduce_1.sync(compute_stream)
-
-buf3 = some_final_kernel(buf1)
-
-what's the first blocker?
-- how to call nccl APIs from inductor py!
-"""
-
-
 class AllReduce(ExternKernelAlloc):
     def __init__(
         self,
