@@ -6445,21 +6445,23 @@ class ExprPrinterTests(TestCase):
             self.assertEqual(cexpr(expr), result)
             self.assertEqual(texpr(expr), result)
 
+
 class RNNTest(TestCase):
     class Model(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.gru = torch.nn.GRU(16, 16, batch_first=True)
-        
+
         def forward(self, x):
             return self.gru(x)
 
     def test_rnn_compile_safe(self):
-        device = torch.device('cuda')
+        device = torch.device("cuda")
         model = RNNTest.Model().to(device)
         model = torch._dynamo.optimize("inductor")(model)
         x = torch.rand(1024, 20, 16).to(device)
         model(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
