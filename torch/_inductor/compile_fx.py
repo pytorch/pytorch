@@ -25,7 +25,7 @@ from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -199,10 +199,16 @@ def clone_preserve_strides(x):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
+    def is_aligned(storage_offset, dtype):
+        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
+
     check_inputs = [
         i
         for i in range(len(inputs))
-        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        if (
+            i not in static_input_idxs
+            or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
+        )
         and inputs[i].device.type == "cuda"
     ]
 
