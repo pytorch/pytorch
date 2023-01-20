@@ -185,7 +185,7 @@ void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
@@ -244,7 +244,7 @@ void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cpu", [&] {
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
@@ -528,6 +528,46 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
+void cpu_vflip_memcpy(at::TensorIterator& iter) {
+  // This is a vertical flip specialization using memcpy to speed-up the runtime
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
+    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
+    // output and input.
+    static constexpr int ntensors = 2;
+    const int64_t *outer_strides = &strides[3];
+
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+
+    TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
+    const int64_t stride = strides[0];
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      memcpy(data[0], data[1], n * stride);
+
+      // advance:
+      for (const auto arg : c10::irange(data_arr.size())) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
 
 std::array<char, 32> generate_vec_hflip_reg_mask(int64_t data_stride) {
     std::array<char, 32> mask;
@@ -540,7 +580,6 @@ std::array<char, 32> generate_vec_hflip_reg_mask(int64_t data_stride) {
     }
     return mask;
 }
-
 
 int64_t vectorized_cpu_hflip_channels_last(
     char * C10_RESTRICT *data, const int64_t data_size, const int64_t data_stride, const std::array<char, 32> & mdata) {
@@ -620,7 +659,7 @@ int64_t vectorized_cpu_hflip_channels_last(
   return i;
 }
 
-void cpu_hflip_channels_last(at::TensorIterator& iter) {
+void cpu_hflip_channels_last_vec(at::TensorIterator& iter) {
 
   auto input_strides = iter.strides(1);
   const auto data_stride = input_strides[1];
@@ -668,7 +707,6 @@ void cpu_hflip_channels_last(at::TensorIterator& iter) {
   iter.for_each(loop2d, grain_size);
   iter.cast_outputs();
 }
-
 
 void cpu_vflip_memcpy(at::TensorIterator& iter) {
   // This is a vertical flip specialization using memcpy to speed-up the runtime
@@ -729,11 +767,32 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       auto iter_dtype = iter.dtype();
       // Ignoring half and bfloat16 as cpu_hflip_vec is slower than cpu_kernel_vec
       if (isIntegralType(iter_dtype, true) || iter_dtype == kDouble || iter_dtype == kFloat) {
-        AT_DISPATCH_ALL_TYPES_AND(kBool,
-            iter_dtype, "hflip_cpu", [&iter] {
-              cpu_hflip_vec<scalar_t>(iter);
-        });
-        return;
+        // Replace AT_DISPATCH_ALL_TYPES_AND by manual if/else due to internal test failures:
+        // - "dtype 'Float' not selected for kernel tag hflip_cpu"
+        // - "dtype 'Long' not selected for kernel tag hflip_cpu"
+        //
+        // AT_DISPATCH_ALL_TYPES_AND(kBool,
+        //     iter_dtype, "hflip_cpu", [&iter] {
+        //       cpu_hflip_vec<scalar_t>(iter);
+        // });
+
+        if (iter_dtype == kByte) {
+          return cpu_hflip_vec<uint8_t>(iter);
+        } else if (iter_dtype == kChar) {
+          return cpu_hflip_vec<int8_t>(iter);
+        } else if (iter_dtype == kInt) {
+          return cpu_hflip_vec<int32_t>(iter);
+        } else if (iter_dtype == kLong) {
+          return cpu_hflip_vec<int64_t>(iter);
+        } else if (iter_dtype == kShort) {
+          return cpu_hflip_vec<int16_t>(iter);
+        } else if (iter_dtype == kBool) {
+          return cpu_hflip_vec<bool>(iter);
+        } else if (iter_dtype == kFloat) {
+          return cpu_hflip_vec<float>(iter);
+        } else if (iter_dtype == kDouble) {
+          return cpu_hflip_vec<double>(iter);
+        }
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
     } else if (iter.has_contiguous_first_dim()) {
@@ -747,7 +806,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
           c == input_strides[1] &&
           c == iter.element_size(0) * iter.shape()[0]  // checks if dim=1 is contiguous as well
       ) {
-        return cpu_hflip_channels_last(iter);
+        return cpu_hflip_channels_last_vec(iter);
       }
       // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
       return cpu_vflip_memcpy(iter);
