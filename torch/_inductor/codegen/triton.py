@@ -162,6 +162,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.exp({x})"
 
     @staticmethod
+    def exp2(x):
+        return f"tl.libdevice.exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"tl.libdevice.expm1({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"tl.sqrt({x})"
 
@@ -242,10 +250,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"tl.libdevice.log1p({x})"
-
-    @staticmethod
-    def expm1(x):
-        return f"tl.libdevice.expm1({x})"
 
     @staticmethod
     def tanh(x):

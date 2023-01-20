@@ -16,6 +16,7 @@ from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
+    is_float_dtype,
     is_integer_dtype,
     Number,
 )
@@ -3370,8 +3371,14 @@ def pow(a, b):
             inner_fn=fn,
             ranges=a.get_size(),
         )
-    else:
-        return pow_native(a, b)
+
+    if isinstance(a, Number):
+        if a == 1:
+            return full_like(b, 1)
+        if a == 2 and is_float_dtype(b.get_dtype()):
+            return exp2(b)
+
+    return pow_native(a, b)
 
 
 def mutate_to(changed, val):
@@ -3533,6 +3540,14 @@ exp = register_pointwise(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
 )
+exp2 = register_pointwise(
+    aten.exp2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+expm1 = register_pointwise(
+    aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
     aten.sigmoid,
@@ -3574,11 +3589,6 @@ register_lowering(
 
 register_pointwise(
     aten.log1p,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-register_pointwise(
-    aten.expm1,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
