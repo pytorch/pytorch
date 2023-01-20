@@ -6,9 +6,11 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+from torch._dynamo.utils import dynamo_timed
+
 from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
-from ..utils import cache_on_self, dynamo_utils, has_triton, sympy_dot, sympy_product
+from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
@@ -97,12 +99,13 @@ class EnterCudaDeviceContextManagerLine:
     device_idx: int
 
     def codegen(self, code: IndentedBuffer):
-        code.writeline(f"with torch.cuda.device({self.device_idx}):")
+        # Note _DeviceGuard has less overhead than device, but only accepts
+        # integers
+        code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
 
 
 class ExitCudaDeviceContextManagerLine:
-    def codegen(self, code: IndentedBuffer):
-        pass
+    pass
 
 
 class MemoryPlanningLine:
@@ -272,6 +275,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
+                from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
@@ -299,19 +303,6 @@ class WrapperCodeGen(CodeGen):
                     """
                 )
 
-            if config.triton.mm != "aten":
-                self.header.splice(
-                    f"""
-                    from {config.inductor_import}.triton_ops.autotune import mm_heuristics
-                    from {config.inductor_import}.triton_ops.autotune import mm_autotune
-                    """
-                )
-
-            if config.triton.use_bmm:
-                self.header.writeline(
-                    f"from {config.inductor_import}.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
-                )
-
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -324,6 +315,21 @@ class WrapperCodeGen(CodeGen):
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
+
+        @functools.lru_cache(None)
+        def add_import_once(line):
+            self.header.writeline(line)
+
+        self.add_import_once = add_import_once
+        self._metas = {}
+
+    def add_meta_once(self, meta):
+        meta = repr(meta)
+        if meta not in self._metas:
+            var = f"meta{len(self._metas)}"
+            self._metas[meta] = var
+            self.header.writeline(f"{var} = {meta}")
+        return self._metas[meta]
 
     @cache_on_self
     def get_output_refs(self):
@@ -465,7 +471,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
@@ -503,6 +509,9 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(line, EnterCudaDeviceContextManagerLine):
                     line.codegen(self.wrapper_call)
                     device_cm_stack.enter_context(self.wrapper_call.indent())
+                    self.wrapper_call.writeline(
+                        f"torch.cuda.set_device({line.device_idx}) # no-op to ensure context"
+                    )
                 elif isinstance(line, ExitCudaDeviceContextManagerLine):
                     device_cm_stack.close()
                 else:
@@ -540,9 +549,9 @@ class WrapperCodeGen(CodeGen):
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
-                f"""
-                from {config.dynamo_import}.testing import rand_strided
-                from {config.inductor_import}.utils import print_performance
+                """
+                from torch._dynamo.testing import rand_strided
+                from torch._inductor.utils import print_performance
                 """,
                 strip=True,
             )

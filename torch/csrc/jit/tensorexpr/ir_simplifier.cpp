@@ -5,9 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // Creates a new Expr of the given type with the provided lhs and rhs.
 inline ExprPtr newBinaryOpOfType(
@@ -3122,6 +3120,4 @@ StmtPtr IRSimplifier::simplify(StmtPtr s) {
   return s;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

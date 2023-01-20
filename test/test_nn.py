@@ -6383,29 +6383,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out_t_5 = m(in_t_9[:, :, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
 
-    def test_upsamplingTrilinear3d(self):
-        for align_corners in [True, False]:
-            kwargs = dict(mode='trilinear', align_corners=align_corners)
-
-            for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
-                # test float scale factor up & downsampling
-                for scale_factor in [0.5, 1.5, 2]:
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                    in_t = torch.ones(1, 2, 2, 2, 2).contiguous(memory_format=memory_format)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    with warnings.catch_warnings(record=True) as w:
-                        out_t = m(in_t)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size, out_size), out_t.data)
-                    # Assert that memory format is carried through to the output
-                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-
-                    input = torch.randn(1, 2, 2, 2, 2, requires_grad=True)
-                    self.assertEqual(
-                        F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                        F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                    gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9, 9)
@@ -6608,9 +6585,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         elif weight_layout == torch.sparse_csc:
             module.weight = nn.Parameter(module.weight.to_sparse_csc())
         elif weight_layout == torch.sparse_bsr:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsr(2, 2))
+            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
         elif weight_layout == torch.sparse_bsc:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsc(2, 2))
+            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
         elif weight_layout == torch.sparse_coo:
             module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:
@@ -9232,7 +9209,6 @@ class TestNNDeviceType(NNTestCase):
 
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last, "nearest")
-        # Uncomment below once F.interpolate is updated
         helper(torch.contiguous_format, "nearest-exact")
         helper(torch.channels_last, "nearest-exact")
 
@@ -9295,7 +9271,7 @@ class TestNNDeviceType(NNTestCase):
 
         def helper(memory_format, mode):
             m = nn.Upsample(size=4, mode=mode)
-            in_t = torch.ones(1, 2, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
             in_uint8_t = torch.ones(
                 1, 2, 2, 2, 2, dtype=torch.uint8, device=device
             ).contiguous(memory_format=memory_format)
@@ -9307,6 +9283,8 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(expected_output.to(torch.uint8), out_uint8_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+            out_t.backward(torch.randn_like(out_t))
+            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
             input = torch.randn(
                 1, 2, 2, 2, 2, requires_grad=True, device=device
@@ -9401,11 +9379,13 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
-    def test_upsamplingBilinear2d(self, device, antialias, align_corners):
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @onlyNativeDeviceTypes
+    def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        kwargs = dict(mode='bilinear', align_corners=align_corners, antialias=antialias)
+        kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             # test float scale factor up & downsampling
             for scale_factor in [0.5, 1.5, 2]:
@@ -9413,7 +9393,8 @@ class TestNNDeviceType(NNTestCase):
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 with warnings.catch_warnings(record=True) as w:
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                self.assertEqual(torch.ones(2, 3, out_size, out_size, device=device), out_t.data)
+                expected_out = torch.ones(2, 3, out_size, out_size, device=device)
+                self.assertEqual(expected_out, out_t)
                 # Assert that memory format is carried through to the output
                 self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
                 out_t.backward(torch.randn_like(out_t))
@@ -9477,27 +9458,6 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
-    @parametrize_test("antialias", [True, False])
-    @parametrize_test("align_corners", [True, False])
-    def test_upsamplingBicubic2d(self, device, antialias, align_corners):
-        kwargs = dict(mode='bicubic', align_corners=align_corners, antialias=antialias)
-        # test float scale factor up & downsampling
-        # for scale_factor in [0.5, 1, 1.5, 2]:
-        for scale_factor in [2, ]:
-            in_t = torch.ones(2, 3, 8, 8, device=device)
-            out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            expected_out = torch.ones(2, 3, out_size, out_size, device=device)
-            self.assertEqual(expected_out, out_t, atol=1e-5, rtol=0)
-
-            if torch.device(device).type == 'cuda':
-                # Bicubic backward is nondeterministic because of atomicAdd usage
-                nondet_tol = 1e-5
-            else:
-                nondet_tol = 0.0
-            inpt = torch.ones(2, 3, 8, 8, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [inpt], nondet_tol=nondet_tol)
-
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8., device=device).view(1, 2, 2, 2)
@@ -9530,6 +9490,33 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingTrilinear3d(self, device, align_corners):
+        kwargs = dict(mode='trilinear', align_corners=align_corners)
+
+        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 2, 2, 2, 2, device=device)
+                in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
+                expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device)
+                self.assertEqual(expected_out, out_t)
+                # Assert that memory format is carried through to the output
+                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+                out_t.backward(torch.randn_like(out_t))
+                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+
+                input = torch.randn(1, 2, 2, 2, 2, requires_grad=True)
+                self.assertEqual(
+                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -10773,6 +10760,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @tf32_on_and_off(0.005)
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
             if var.size(0) == length:

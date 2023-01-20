@@ -1,13 +1,13 @@
 import collections
 import contextlib
 import functools
+import logging
 import math
 import operator
 import os
 import tempfile
 import textwrap
 import time
-from importlib import import_module
 from io import StringIO
 from typing import Any, Dict, List, Optional
 from unittest import mock
@@ -17,18 +17,20 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config
+from . import config, config as inductor_config
 from .cuda_properties import get_device_capability
+
+log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-# We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
-dynamo_config = import_module(f"{config.dynamo_import}.config")
-dynamo_debug_utils = import_module(f"{config.dynamo_import}.debug_utils")
-dynamo_logging = import_module(f"{config.dynamo_import}.logging")
-dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
-dynamo_testing = import_module(f"{config.dynamo_import}.testing")
-dynamo_utils = import_module(f"{config.dynamo_import}.utils")
+
+try:
+    from triton.testing import do_bench
+except ImportError:
+
+    def do_bench(*args, **kwargs):
+        raise NotImplementedError("requires Triton")
 
 
 @functools.lru_cache(None)
@@ -234,6 +236,9 @@ def sympy_str(expr: sympy.Expr):
 
 
 def sympy_symbol(name):
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
@@ -432,3 +437,21 @@ class DeferredLineBase:
 
     def __len__(self):
         return len(self.line)
+
+
+@functools.lru_cache(None)
+def is_big_gpu(index):
+    cores = torch.cuda.get_device_properties(index).multi_processor_count
+    if cores < 80:  # V100
+        log.warning("not enough cuda cores to use max_autotune mode")
+        return False
+    return True
+
+
+def use_triton_template(layout):
+    return (
+        inductor_config.max_autotune
+        and layout.device.type == "cuda"
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and is_big_gpu(layout.device.index or 0)
+    )

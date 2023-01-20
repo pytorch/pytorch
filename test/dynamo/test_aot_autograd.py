@@ -311,6 +311,55 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
+    def test_double_backward_errors(self):
+        # Remove this test after we get double backward to actually work
+        for grad_output in (torch.tensor(1.0, requires_grad=True), None):
+            # See @once_differentiable docs for why there are two different errors
+            x = torch.tensor(1.0, requires_grad=True)
+            err = "torch.compile with aot_autograd does not currently support double backward"
+
+            # The following cases should be equivalent:
+
+            # (1) double backward entirely inside compiled function
+            def f1(x):
+                y = x.sin().exp()
+                (gx,) = torch.autograd.grad(
+                    y, x, create_graph=True, grad_outputs=grad_output
+                )
+                gx.backward()
+                return gx
+
+            compiled_f1 = torch.compile(backend="aot_eager")(f1)
+            f1(x)
+            with self.assertRaisesRegex(RuntimeError, err):
+                compiled_f1(x)
+
+            # (2) the second half of double backward outside compiled function
+            def f2(x):
+                y = x.sin().exp()
+                (gx,) = torch.autograd.grad(
+                    y, x, create_graph=True, grad_outputs=grad_output
+                )
+                return gx
+
+            compiled_f2 = torch.compile(backend="aot_eager")(f2)
+            gx = compiled_f2(x)
+            with self.assertRaisesRegex(RuntimeError, err):
+                gx.backward()
+
+            # (3) double backward entirely outside compiled function
+            def f3(x):
+                y = x.sin().exp()
+                return y
+
+            compiled_f3 = torch.compile(backend="aot_eager")(f3)
+            y = compiled_f3(x)
+            (gx,) = torch.autograd.grad(
+                y, x, create_graph=True, grad_outputs=grad_output
+            )
+            with self.assertRaisesRegex(RuntimeError, err):
+                gx.backward()
+
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles(self):
         class F(torch.nn.Module):
@@ -319,8 +368,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 y = y.t_()
                 return (x + y,)
 
-        x = torch.randn(3, 3, requires_grad=True).clone()
-        y = torch.randn(3, 3, requires_grad=True).clone()
+        x = torch.randn(3, 3, requires_grad=True)
+        x1, x2, x3, x4 = x.clone(), x.clone(), x.clone(), x.clone()
+        y = torch.randn(3, 3, requires_grad=True)
+        y1, y2, y4 = y.clone(), y.clone(), y.clone()
 
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -331,8 +382,11 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             failure_reason = failure[0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        fxy(x, y)
-        fxy(x, y)
+        # Note: to prevent a recompilation between the two calls,
+        # we need to clone x and y on each use.
+        # fxy mutates the input's metadata, so otherwise dynamo will end up recompiling.
+        fxy(x1, y1)
+        fxy(x2, y2)
 
         self.assertTrue(failure_reason is None)
 
@@ -345,23 +399,19 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        fxx(x, x)
-        fxx(x, y)
+        fxx(x3, x3)
+        fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
         self.assertEqual(failure_reason, "x is y")
 
     @patch("torch._functorch.config.debug_assert", True)
-    def test_arg_dupe_via_dynamo_recompiles_many_args(self):
+    def test_arg_metadata_mutation_on_input_causes_recompile(self):
         class F(torch.nn.Module):
-            def forward(self, a, b, c, d):
+            def forward(self, a):
                 a.t_()
-                b.t_()
-                c.t_()
-                d.t_()
-                return (a + b + c + d,)
+                return (a * 2,)
 
         a = torch.randn(3, 3, requires_grad=True).clone()
-        b = torch.randn(3, 3, requires_grad=True).clone()
 
         failure_reason = None
 
@@ -374,8 +424,44 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(a, a, a, a)
-        f(a, b, b, b)
+        f(a)
+        f(a)
+        self.assertEqual(cc.frame_count, 2)
+        self.assertEqual(
+            failure_reason,
+            "tensor 'a' strides mismatch at index 0. expected 3, actual 1",
+        )
+
+        torch._dynamo.reset()
+
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_arg_dupe_via_dynamo_recompiles_many_args(self):
+        class F(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                a.t_()
+                b.t_()
+                c.t_()
+                d.t_()
+                return (a + b + c + d,)
+
+        a = torch.randn(3, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+        a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
+        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        self.assertTrue(failure_reason is None)
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        f(a1, a1, a1, a1)
+        f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertEqual(failure_reason, "a is b")
 
@@ -383,12 +469,14 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        c = torch.randn(3, 3, requires_grad=True).clone()
-        d = torch.randn(3, 3, requires_grad=True).clone()
+        c = torch.randn(3, 3, requires_grad=True)
+        d = torch.randn(3, 3, requires_grad=True)
+        c3, c4 = c.clone(), c.clone()
+        d3, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(a, b, c, c)
-        f(a, b, c, d)
+        f(a3, b3, c3, c3)
+        f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
         self.assertEqual(failure_reason, "c is d")
 

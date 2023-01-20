@@ -9,37 +9,58 @@ from typing import Dict, List
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..source import AttrSource, ConstantSource, GetItemSource
-from ..utils import make_cell
+from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..utils import istensor, make_cell
 from .base import typestr, VariableTracker
 
 
-def wrap_bound_arg(val, options):
+def wrap_bound_arg(tx, val, options, source=None):
+    # Source propagation is best effort since not every object we encounter has a source to begin with.
+    assert (
+        "source" not in options
+    ), "Source needs to be separate from options due to recursive calls for lists/dicts"
+
     if isinstance(val, dict):
         return variables.ConstDictVariable(
-            {k: wrap_bound_arg(v, options) for k, v in val.items()}, dict, **options
+            {
+                k: wrap_bound_arg(tx, v, options, source=getattr(v, "source", None))
+                for k, v in val.items()
+            },
+            dict,
+            **options,
         )
     elif isinstance(val, (tuple, list)):
         cls = variables.BaseListVariable.cls_for(type(val))
-        return cls([wrap_bound_arg(x, options) for x in val], **options)
-    elif variables.ConstantVariable.is_literal(val):
+        return cls(
+            [
+                wrap_bound_arg(tx, x, options, source=getattr(x, "source", None))
+                for x in val
+            ],
+            **options,
+        )
+
+    if variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
-        return variables.UserFunctionVariable(val, **options)
+        return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
-        return variables.EnumVariable(val, **options)
+        return variables.EnumVariable(val, source=source, **options)
     elif isinstance(val, (type, abc.ABCMeta)):
-        return variables.UserDefinedClassVariable(val, **options)
+        return variables.UserDefinedClassVariable(val, source=source, **options)
+    elif istensor(val):
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        return VariableBuilder(tx, source=source, **options)(val)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
 
 
-def wrap_args_kwargs(result, options):
+def wrap_args_kwargs(tx, result, options):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
-            result[k] = wrap_bound_arg(v, options)
+            result[k] = wrap_bound_arg(tx, v, options)
 
 
 def init_cellvars(parent, result, code):
@@ -117,28 +138,44 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def bind_args(self, parent, args, kwargs):
         assert not self.is_constant
         options = VariableTracker.propagate([self])
-        wrap = functools.partial(wrap_bound_arg, options=options)
-
         tx = parent.output.root_tx
+        wrap = functools.partial(wrap_bound_arg, tx=tx, options=options)
 
         fn: types.FunctionType = self.fn
+        defaults = fn.__defaults__ or []
+        defaults_sources = [
+            None if self.source is None else DefaultsSource(self.source, idx)
+            for idx, _ in enumerate(defaults)
+        ]
         fake_func = types.FunctionType(
             fn.__code__,
             fn.__globals__,
             fn.__name__,
-            tuple(map(wrap, fn.__defaults__ or [])),
+            tuple(
+                [
+                    wrap(val=arg, source=source)
+                    for arg, source in zip(defaults, defaults_sources)
+                ]
+            ),
             fn.__closure__,
         )
         if fn.__kwdefaults__:
+            kwdefaults_sources = {
+                k: None
+                if self.source is None
+                else DefaultsSource(self.source, k, is_kw=True)
+                for k in fn.__kwdefaults__
+            }
             fake_func.__kwdefaults__ = {
-                k: wrap(v) for k, v in fn.__kwdefaults__.items()
+                k: wrap(val=v, source=kwdefaults_sources[k])
+                for k, v in fn.__kwdefaults__.items()
             }
 
         bound = inspect.signature(fake_func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(result, options)
+        wrap_args_kwargs(tx, result, options)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -146,7 +183,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
             if name == "__class__":
-                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
+                source = AttrSource(self.source, "__class__") if self.source else None
+                result[name] = variables.UserDefinedClassVariable(
+                    cell.cell_contents,
+                    source=source,
+                )
             else:
                 var = tx.match_nested_cell(name, cell)
                 if var is not None:
@@ -382,8 +423,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
-
-        wrap_args_kwargs(result, VariableTracker.propagate(self))
+        wrap_args_kwargs(parent.output.root_tx, result, VariableTracker.propagate(self))
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):

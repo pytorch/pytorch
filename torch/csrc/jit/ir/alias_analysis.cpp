@@ -11,8 +11,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <fstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -1981,5 +1980,4 @@ void Lint(const AliasDb* db) {
   // - All container values have contained elements
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
