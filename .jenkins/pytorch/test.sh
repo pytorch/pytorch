@@ -291,6 +291,16 @@ test_single_dynamo_benchmark() {
     -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
 }
 
+test_aot_eager_benchmark() {
+  # Usage: test_dynamo_benchmark huggingface 0
+
+  # Check inference with --float32
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager
+
+  # Check training with --amp
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp
+}
+
 test_inductor_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
@@ -329,6 +339,13 @@ test_inductor_benchmark_perf() {
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   fi
+}
+
+# No sharding for the periodic job, we don't care if latency is bad
+test_aot_eager_all() {
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench 0
+  test_aot_eager_benchmark huggingface 0
+  test_aot_eager_benchmark timm_models 0
 }
 
 test_inductor_huggingface() {
@@ -828,6 +845,14 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  install_huggingface
+  install_timm
+  test_aot_eager_all
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
