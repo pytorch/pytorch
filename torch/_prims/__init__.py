@@ -1859,8 +1859,8 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
             elif length != common_length:
                 raise RuntimeError(
                     f"Sizes of tensors must match except in dimension {dim}. "
-                    "Expected {common_length} but got {length} for tensor number "
-                    "{tensor_idx} in the list"
+                    f"Expected {common_length} but got {length} for tensor number "
+                    f"{tensor_idx} in the list"
                 )
 
     new_shape = list(tensors[0].shape).copy()
