@@ -271,6 +271,9 @@ jobs:
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-bazel-test:
+    permissions:
+      id-token: write
+      contents: read
     name: linux-bionic-cuda11.6-py3.10-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
