@@ -41,7 +41,7 @@ from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .output_graph import CompilerFn
 from .types import DynamoCallback
-from .utils import compile_times
+from .utils import compile_times, dynamo_timed
 
 log = logging.getLogger(__name__)
 

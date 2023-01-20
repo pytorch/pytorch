@@ -1425,6 +1425,10 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if self.args.timing:
+            from torch._dynamo.utils import print_time_report
+            print_time_report()
+
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if explain:
@@ -1682,6 +1686,9 @@ def parse_args(args=None):
         help="""Whether to collect outputs for training. Set this to true if we
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
+    )
+    parser.add_argument(
+        "--timing", action="store_true", help="Emits phase timing"
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
