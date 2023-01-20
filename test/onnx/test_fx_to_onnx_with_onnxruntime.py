@@ -1,4 +1,6 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
+
 import io
 import unittest
 from typing import Any, Sequence, Tuple, Union
@@ -103,6 +105,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.sigmoid(x)
 
         self.run_test_with_fx_to_onnx_exporter(SigmoidAddModel(), (x,))
+
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
