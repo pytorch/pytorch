@@ -743,6 +743,27 @@ class FakeTensorOperatorInvariants(TestCase):
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
 
+    # at::_embedding_bag has no op info,
+    # and returns extra tensors that at::embedding bag throws away
+    def test_embedding_bag_private(self):
+        args = [
+            torch.ones(6, 1),
+            torch.ones(6, dtype=torch.int64),
+            torch.arange(2, dtype=torch.int64),
+            False,
+            2,  # mode = max
+        ]
+
+        ref_out = torch.ops.aten._embedding_bag(*args)
+        with FakeTensorMode() as m:
+            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+            meta_out = torch.ops.aten._embedding_bag(*meta_args)
+
+        self.assertEqual(len(ref_out), len(meta_out))
+        for ref_o, meta_o in zip(ref_out, meta_out):
+            self.assertEqual(ref_o.size(), meta_o.size())
+
+
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):
             def __init__(self):

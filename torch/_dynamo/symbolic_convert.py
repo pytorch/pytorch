@@ -50,7 +50,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
 )
-from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
+from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs, dynamo_timed
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -306,7 +306,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -662,8 +662,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
-        value = importlib.import_module(module_name)
-        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        if "torch_package" in module_name:
+            value = torch.package.package_importer._package_imported_modules[
+                module_name
+            ]
+            alias = (
+                module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            )
+        else:
+            value = importlib.import_module(module_name)
+            alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -1739,7 +1747,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         _step_logger()(

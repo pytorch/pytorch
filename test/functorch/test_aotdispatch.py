@@ -2220,7 +2220,6 @@ aot_autograd_failures = {
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('segment_reduce', 'lengths'),
-    xfail('nn.functional.embedding_bag'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc

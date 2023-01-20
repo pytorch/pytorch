@@ -21,7 +21,7 @@ pull-deps: clone-deps
 	(cd ../../../torchaudio      && git pull && git submodule update --init --recursive)
 	(cd ../../../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../../../torchbenchmark && git pull && git submodule update --init --recursive)
-	(cd ../../../triton         && git checkout master && git pull && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
+	(cd ../../../triton         && git fetch && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo
