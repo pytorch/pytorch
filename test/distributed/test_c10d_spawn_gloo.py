@@ -32,6 +32,15 @@ if sys.version_info < (3, 9):
             store = c10d.FileStore(filename, world_size)
             return c10d.ProcessGroupGloo(
                 store, rank, world_size, ProcessGroupShareTensorTest.opts())
+            # set process group backends manually
+            c10d.init_process_group(backend="gloo", store=store, rank=rank, world_size=world_size)
+            pg = c10d.distributed_c10d._get_default_group()
+            try:
+                pg._set_backend(torch.device("cpu"), c10d.Backend.GLOO, backend)
+                pg._set_backend(torch.device("cuda"), c10d.Backend.GLOO, backend)
+            except AttributeError:
+                print('Attribute _set_backend not found')
+            return pg
 
         @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         def test_shared_broadcast_gloo(self):
