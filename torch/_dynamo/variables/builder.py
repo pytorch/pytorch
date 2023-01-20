@@ -762,7 +762,13 @@ def wrap_fx_proxy(tx, proxy, example_value=None, source=None, **options):
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
 def wrap_fx_proxy_cls(
-    target_cls, tx, proxy, example_value=None, ignore_subclass=False, source=None, **options
+    target_cls,
+    tx,
+    proxy,
+    example_value=None,
+    ignore_subclass=False,
+    source=None,
+    **options,
 ):
     from ..symbolic_convert import InstructionTranslatorBase
 
