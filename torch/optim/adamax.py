@@ -320,7 +320,7 @@ def _multi_tensor_adamax(
         torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
-            torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Update biased first moment estimate.
         torch._foreach_mul_(grouped_exp_avgs, beta1)

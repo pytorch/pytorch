@@ -673,6 +673,7 @@ class TestOptim(TestCase):
             if p.requires_grad:
                 p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
 
+        kIterations = 7 if kwarg == "foreach" else 1
         for optimizer_constructor, kwargs in optimizer_with_kwargs:
             res, state = [], []
             for enabled in (False, True):
@@ -688,7 +689,8 @@ class TestOptim(TestCase):
                         params_clone.append(p_clone)
 
                 optimizer = optimizer_constructor(params_clone, **kwargs_clone)
-                optimizer.step()
+                for _ in range(kIterations):
+                    optimizer.step()
 
                 state.append(optimizer.state)
                 res.append(params_clone)
