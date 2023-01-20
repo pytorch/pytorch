@@ -308,7 +308,7 @@ test_inductor_benchmark_perf() {
       --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
     # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
     # this value needs to be actively maintained to make this check useful
-    python check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+    python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   else
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
