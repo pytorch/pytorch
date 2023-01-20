@@ -119,7 +119,7 @@ class InstructionTranslatorGraphState(NamedTuple):
 
     def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
         for k in self._fields:
-            if k == "output":
+            if k == "output" and self.output != other.output:
                 return self.output.diff(other.output, prefix=f"{k}.")
             sv = getattr(self, k)
             ov = getattr(other, k)
