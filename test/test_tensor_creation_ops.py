@@ -3946,6 +3946,7 @@ class TestAsArray(TestCase):
         tensor = torch.asarray(scalar)
         self.assertEqual(tensor.dim(), 0)
         self.assertEqual(tensor.item(), scalar.item())
+        self.assertEqual(tensor.dtype, torch.float64)
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
