@@ -328,14 +328,7 @@ Tensor _cusparselt_create_meta(const Tensor& mask) {
         bool pos1 = mask_ptr[i * length_k + j + k * 4 + 1];
         bool pos2 = mask_ptr[i * length_k + j + k * 4 + 2];
         bool pos3 = mask_ptr[i * length_k + j + k * 4 + 3];
-        // std::cout << "i: " << i << " j: " << j << " value: ";
-        // std::cout << pos0 << ", ";
-        // std::cout << pos1 << ", ";
-        // std::cout << pos2 << ", ";
-        // std::cout << pos3;
         uint16_t meta_val = _mask_to_meta(pos0, pos1, pos2, pos3);
-        // std::cout << " Want: " << (meta_val << (4 * k)) << std::endl;
-        // std::cout << std::endl;
         result_val = (result_val | (meta_val << (4 * k)));
       }
       // PyTorch doesn't have a uint16_t dtype, so we're using the signed equivalent.
