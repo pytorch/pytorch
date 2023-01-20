@@ -3,7 +3,6 @@
 
 import torch
 from torch.distributed._tensor import (
-    DeviceMesh,
     DTensor,
     Shard,
 )
@@ -15,12 +14,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DTensorInitOpsTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 4
-
     def _run_init_op(self, init_op, *args, **kwargs):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         input_size = (8, 4)
         input_tensor = torch.randn(*input_size, device=self.device_type)
@@ -30,8 +25,7 @@ class DTensorInitOpsTest(DTensorTestBase):
         local_tensor_clone = init_op(local_tensor_clone, *args, **kwargs)
         torch.manual_seed(self.rank)
         dtensor = init_op(dtensor, *args, **kwargs)
-        dtensor_clone = DTensor.from_local(local_tensor_clone, device_mesh, shard_spec)
-        self.assertEqual(dtensor_clone.to_local(), dtensor.to_local())
+        self.assertEqual(local_tensor_clone, dtensor.to_local())
 
     @with_comms
     def test_init_ops(self):
