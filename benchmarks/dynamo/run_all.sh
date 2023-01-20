@@ -26,7 +26,7 @@ if getent hosts fwdproxy; then
 fi
 
 # Feel free to edit these, but we expect most users not to need to modify this
-BASE_FLAGS=( --accuracy --explain --timing)
+BASE_FLAGS=( --accuracy --explain )
 DATE="$(date)"
 WORK="$PWD"
 
