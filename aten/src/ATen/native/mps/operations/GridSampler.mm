@@ -8,6 +8,8 @@ namespace native {
 void grid_sampler_2d_mps_impl(Tensor &output, const Tensor& input, const Tensor& grid,
                               int64_t interpolation_mode, int64_t padding_mode,
                               bool align_corners) {
+// Grid Sampler support has been added in macOS 13.1
+#if !defined(__MAC_13_1) && !defined(MAC_OS_X_VERSION_13_1)
   using namespace mps;
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
@@ -120,6 +122,7 @@ void grid_sampler_2d_mps_impl(Tensor &output, const Tensor& input, const Tensor&
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
+#endif // !defined(__MAC_13_1) && !defined(MAC_OS_X_VERSION_13_1)
 }
 
 Tensor grid_sampler_2d_mps(const Tensor& input, const Tensor& grid,
