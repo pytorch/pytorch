@@ -319,7 +319,6 @@ CI_SERIAL_LIST = [
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
-    'dynamo/test_dynamic_shapes',   # flaky on MacOS when running in parallel https://github.com/pytorch/pytorch/issues/92196
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
