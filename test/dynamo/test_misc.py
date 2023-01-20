@@ -3327,9 +3327,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         imp = package.PackageImporter(path)
         loaded_model = imp.load_pickle(package_name, resource_name)
 
-        optimized_loaded_model = torch._dynamo.optimize("eager")(
-            loaded_model
-        )(*inputs)
+        optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
 
 class CustomFunc1(torch.autograd.Function):
