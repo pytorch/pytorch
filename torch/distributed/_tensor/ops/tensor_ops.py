@@ -11,7 +11,7 @@ from torch.distributed._tensor.api import (
     Shard,
 )
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
+from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
 
 
@@ -472,3 +472,92 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
             ],
         )
         return result
+
+
+@register_prop_rule("aten.cat.default")
+def cat_rule(op_schema: OpSchema) -> OutputSharding:
+    dim = 0  # default dim = 0
+    tensor_list_specs: List[DTensorSpec] = op_schema.args_schema[0]
+    if (len(op_schema.args_schema) > 1):
+        dim = op_schema.args_schema[1]
+    # normalize arguments
+    if dim < 0:
+        dim += tensor_list_specs[0].ndim
+
+    # check concat dim
+    needs_reshard_on_cat_dim = False
+    for spec in tensor_list_specs:
+        if dim < len(spec.placements) and spec.placements[dim].is_shard():
+            needs_reshard_on_cat_dim = True
+            spec.placements[dim] = Replicate()
+    if needs_reshard_on_cat_dim:
+        args_schema = (tensor_list_specs,) + op_schema.args_schema[1:]
+        suggested_schema = OpSchema(
+            func_schema=op_schema.func_schema,
+            args_schema=args_schema,
+            kwargs_schema=op_schema.kwargs_schema,
+        )
+        return OutputSharding(
+            None,
+            schema_suggestions=[suggested_schema],
+            failed_reason="All tensors in concat must have no sharding on cat dim, need to reshard!",
+        )
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    einop_equation = ""
+    for spec in tensor_list_specs:
+        einop_equation += alphabet[:spec.ndim]
+        einop_equation += ','
+    einop_equation = einop_equation[:-1] + "->" + alphabet[:tensor_list_specs[0].ndim]
+    output_sharding = einop_rule(
+        einop_equation,
+        OpSchema(
+            func_schema=op_schema.func_schema,
+            args_schema=tuple(tensor_list_specs),
+            kwargs_schema={},
+        ),
+        linearity=False
+    )
+
+    if output_sharding.output_spec is None:
+        if output_sharding.schema_suggestions is not None:
+            return _update_schema_suggestion_for_cat(
+                output_sharding,
+                op_schema,
+                dim,
+            )
+        else:
+            return OutputSharding(None)
+    # change output shape
+    new_size = 0
+    for spec in tensor_list_specs:
+        new_size += spec.shape[dim]
+    output_sharding.output_spec.shape = torch.Size(
+        tuple(output_sharding.output_spec.shape[:dim])
+        + (new_size,)
+        + tuple(output_sharding.output_spec.shape[dim + 1 :])
+    )
+    return output_sharding
+
+
+def _update_schema_suggestion_for_cat(
+    output_sharding: OutputSharding,
+    op_schema: OpSchema,
+    dim: int,
+) -> OutputSharding:
+    assert output_sharding.schema_suggestions is not None
+    suggestion_specs = output_sharding.schema_suggestions[0].args_spec
+
+    # check concat dim
+    for spec in suggestion_specs:
+        if dim < len(spec.placements) and spec.placements[dim].is_shard():
+            spec.placements[dim] = Replicate()
+    args_schema = (suggestion_specs,) + op_schema.args_schema[1:]
+
+    output_sharding.schema_suggestions = [
+        OpSchema(
+            func_schema=op_schema.func_schema,
+            args_schema=args_schema,
+            kwargs_schema=op_schema.kwargs_schema,
+        )
+    ]
+    return output_sharding

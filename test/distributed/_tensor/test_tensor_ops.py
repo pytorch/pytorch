@@ -354,6 +354,24 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randint(5, (12, 8, 12)),
             )
 
+    @with_comms
+    def test_sharded_cat(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        torch.manual_seed(self.rank)
+        tensor_1 = torch.rand(3, 5, 6)
+        tensor_2 = torch.rand(3, 5, 6)
+        tensor_3 = torch.rand(3, 5, 6)
+        sharding = [Shard(0)]
+        dt_1 = DTensor.from_local(tensor_1, device_mesh, sharding)
+        dt_2 = DTensor.from_local(tensor_2, device_mesh, sharding)
+        dt_3 = DTensor.from_local(tensor_3, device_mesh, sharding)
+        new_dt = torch.cat([dt_1, dt_2, dt_3])
+        cat_dt = DTensor.from_local(
+            torch.cat([tensor_1, tensor_2, tensor_3]), device_mesh, sharding
+        )
+        self.assertEqual(new_dt.to_local(), cat_dt.to_local())
+        self.assertEqual(new_dt.size(), cat_dt.size())
+
 
 if __name__ == "__main__":
     run_tests()
