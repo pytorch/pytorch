@@ -108,10 +108,22 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
 }
 
 inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;
   }
-  const at::Tensor& sizes = at::native::get_nested_tensor_impl(params.query)->get_nested_size_tensor();
+  // we are only checking query but should probably check all of them
+  const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  auto num_head_dims = nt_q_tensor_impl->opt_size(1);
+  if (!num_head_dims.has_value() ) {
+    // num_head_dims is ragged
+    if (debug) {
+      TORCH_WARN("Memory efficient attention does not support ragged num_head_dims");
+    }
+    return false;
+  }
+
   auto* sizes_ptr = sizes.data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
@@ -120,7 +132,7 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN("Flash Attention does not support sequence_length <= 1");
+        TORCH_WARN("Memory efficient attention does not support sequence_length <= 1");
       }
       return false;
     }

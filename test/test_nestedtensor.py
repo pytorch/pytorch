@@ -1805,7 +1805,7 @@ class TestNestedTensorDeviceType(TestCase):
         def rand_tensor(*shape):
             return torch.randn(shape, device=device)
 
-        E = 10
+        E = 8
         if input_dim == 3:
             # Shape: (N, L, E); ragged L
             query = torch.nested.nested_tensor([rand_tensor(2, E), rand_tensor(3, E), rand_tensor(4, E)])
@@ -1838,9 +1838,8 @@ class TestNestedTensorDeviceType(TestCase):
 
         expected_outputs = []
         for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):
-            with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-                output = torch.nn.functional.scaled_dot_product_attention(
-                    q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p)
+            output = torch.nn.functional.scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p)
             expected_outputs.append(output.squeeze(0))
         expected_output_nested = torch.nested.nested_tensor(expected_outputs)
         self.assertEqual(actual, expected_output_nested)
