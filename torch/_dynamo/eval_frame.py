@@ -14,7 +14,7 @@ from typing import Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel

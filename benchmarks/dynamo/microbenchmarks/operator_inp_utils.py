@@ -9,7 +9,7 @@ from typing import Any, Dict, Generator, Iterable, Tuple
 import torch
 from torch.testing import make_tensor
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree import tree_leaves, tree_map
 
 log = logging.getLogger(__name__)
 
@@ -112,14 +112,14 @@ def serialize_torch_args(e):
 
 
 def contains_tensor(elems):
-    for elem in tree_flatten(elems)[0]:
+    for elem in tree_leaves(elems):
         if isinstance(elem, torch.Tensor):
             return True
     return False
 
 
 def skip_args(elems):
-    for i in tree_flatten(elems)[0]:
+    for i in tree_leaves(elems):
         # only shows up in constructors and ops like that
         if isinstance(i, (torch.memory_format, torch.storage.UntypedStorage)):
             return True

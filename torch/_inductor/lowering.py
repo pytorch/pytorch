@@ -10,7 +10,7 @@ import sympy
 
 import torch
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._prims_common import (
     canonicalize_dims,
     dtype_to_type,

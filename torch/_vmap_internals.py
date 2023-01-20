@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_unflatten
+from torch.utils.pytree import _broadcast_to_and_flatten, tree_flatten, tree_unflatten
 
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]

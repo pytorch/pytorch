@@ -20,7 +20,7 @@ from torch.distributed.algorithms.join import (
     JoinHook,
 )
 
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
 if dist.is_available():

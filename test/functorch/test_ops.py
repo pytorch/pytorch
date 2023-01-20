@@ -43,7 +43,7 @@ from torch.testing._internal.autograd_function_db import (
 )
 
 from torch.testing._internal.opinfo.core import SampleInput
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils.pytree import tree_flatten, tree_unflatten, tree_map, tree_leaves
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -137,7 +137,7 @@ def normalize_op_input_output2(f, args, kwargs, output_process_fn_grad=None, req
 # TODO: consolidate with normalize_op_input_output2
 def normalize_op_input_output3(f, args, kwargs, sample_args, output_process_fn_grad=None):
     flat_args, args_spec = tree_flatten(args)
-    flat_sample_args, _ = tree_flatten(sample_args)
+    flat_sample_args = tree_leaves(sample_args)
     diff_argnums = tuple(i for i, (arg, sample) in enumerate(zip(flat_args, flat_sample_args))
                          if diff_arg(sample, requires_grad=True))
     assert len(diff_argnums) > 0
@@ -268,8 +268,8 @@ def get_jvp_variant(f, sample):
         if isinstance(primals_out, torch.Tensor):
             return (primals_out, tangents_out)
         else:
-            flat_primals_out, _ = tree_flatten(primals_out)
-            flat_tangents_out, _ = tree_flatten(tangents_out)
+            flat_primals_out = tree_leaves(primals_out)
+            flat_tangents_out = tree_leaves(tangents_out)
             return tuple(flat_primals_out + flat_tangents_out)
 
     return wrapped, tangents
@@ -303,8 +303,8 @@ def _get_jvp_variant(fn, primals, tangents):
         if isinstance(primals_out, torch.Tensor):
             return (primals_out, tangents_out)
         else:
-            flat_primals_out, _ = tree_flatten(primals_out)
-            flat_tangents_out, _ = tree_flatten(tangents_out)
+            flat_primals_out = tree_leaves(primals_out)
+            flat_tangents_out = tree_leaves(tangents_out)
             return tuple(flat_primals_out + flat_tangents_out)
 
     return wrapped, primals + tangents
@@ -815,7 +815,7 @@ class TestOperators(TestCase):
             fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
-            cotangents, _ = tree_flatten(cotangents)
+            cotangents = tree_leaves(cotangents)
             num_args = len(args)
 
             args_and_cotangents = tuple(args) + tuple(cotangents)
@@ -825,8 +825,8 @@ class TestOperators(TestCase):
                 cotangents = args_and_cotangents[num_args:]
                 result, vjp_fn = vjp(fn, *args)
                 result_vjps = vjp_fn(cotangents)
-                result, _ = tree_flatten(result)
-                result_vjps, _ = tree_flatten(result_vjps)
+                result = tree_leaves(result)
+                result_vjps = tree_leaves(result_vjps)
                 return (*result, *result_vjps)
 
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
@@ -1569,8 +1569,8 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                flat_primals_out, _ = tree_flatten(primals_out)
-                flat_tangents_out, _ = tree_flatten(tangents_out)
+                flat_primals_out = tree_leaves(primals_out)
+                flat_tangents_out = tree_leaves(tangents_out)
                 return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)

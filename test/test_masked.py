@@ -5,11 +5,11 @@
 
 import itertools
 import torch
+from torch.utils.pytree import tree_map
 from typing import List, Any
 from functools import wraps
 import unittest
 from torch.testing._internal.common_utils import skipIfTorchDynamo
-
 
 from torch.testing._internal.common_utils import \
     (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests)
@@ -189,19 +189,19 @@ def _tensor_to_strided(obj):
 def to_strided(obj):
     """Convert the tensor content of object to strided tensor content.
     """
-    return torch.utils._pytree.tree_map(_tensor_to_strided, obj)
+    return tree_map(_tensor_to_strided, obj)
 
 
 def to_sparse_coo(obj):
     """Convert the tensor content of object to sparse coo tensor content.
     """
-    return torch.utils._pytree.tree_map(torch.Tensor.to_sparse, obj)
+    return tree_map(torch.Tensor.to_sparse, obj)
 
 
 def to_sparse_csr(obj):
     """Convert the tensor content of object to sparse csr tensor content.
     """
-    return torch.utils._pytree.tree_map(torch.Tensor.to_sparse_csr, obj)
+    return tree_map(torch.Tensor.to_sparse_csr, obj)
 
 
 class mask_layouts(_TestParametrizer):

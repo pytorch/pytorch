@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional, Type
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_unflatten
 
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group, ReduceOp

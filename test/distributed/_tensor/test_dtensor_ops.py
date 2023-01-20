@@ -28,7 +28,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
 )
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree import tree_leaves, tree_map
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -594,8 +594,8 @@ class TestDTensorOps(DTensorOpTestBase):
         self.check_dtensor_func(test, op)
 
     def assert_ref_dtensor_equal(self, dtensor_rs, rs):
-        flat_dtensor_rs, _ = tree_flatten(dtensor_rs)
-        flat_rs, _ = tree_flatten(rs)
+        flat_dtensor_rs = tree_leaves(dtensor_rs)
+        flat_rs = tree_leaves(rs)
         self.assertEqual(len(flat_dtensor_rs), len(flat_rs))
         for dtensor_r, r in zip(flat_dtensor_rs, flat_rs):
 
@@ -654,7 +654,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         # we need to skip tests containing tensors of zero elmeents for now.
                         # see issue: https://github.com/pytorch/tau/issues/470
                         # TODO remove this once issue above fixed.
-                        flat_args, _ = tree_flatten(dtensor_rs)
+                        flat_args = tree_leaves(dtensor_rs)
                         if any(
                             isinstance(e, torch.Tensor) and e.numel() == 0
                             for e in flat_args

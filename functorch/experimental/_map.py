@@ -1,7 +1,7 @@
 from functools import partial
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -16,7 +16,6 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch.utils._pytree import tree_flatten
 
 
 map = PyOperator("map")
@@ -67,7 +66,7 @@ def map_cpu(f, xs, *args):
 @map.py_impl(DispatchKey.AutogradCPU)
 def map_autograd(f, xs, *args):
     # TODO: support autograd
-    flat_operands, _ = tree_flatten([f, xs, args])
+    flat_operands = pytree.tree_leaves([f, xs, args])
     assert all([not f.requires_grad for f in flat_operands
                 if isinstance(f, torch.Tensor)])
 

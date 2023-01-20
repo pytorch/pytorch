@@ -2,7 +2,6 @@ import warnings
 from typing import Callable, Union
 
 import torch
-import torch.utils._pytree as pytree
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensorMode,
@@ -10,7 +9,7 @@ from torch._subclasses.fake_tensor import (
     UnsupportedFakeTensorException,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree import tree_leaves, tree_map_only
 
 
 aten = torch._ops.ops.aten
@@ -80,7 +79,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         ):
             try:
                 with FakeTensorMode() as fake_mode:
-                    fake_args, fake_kwargs = pytree.tree_map_only(
+                    fake_args, fake_kwargs = tree_map_only(
                         torch.Tensor, fake_mode.from_tensor, (args, kwargs)
                     )
                     with warnings.catch_warnings():
@@ -90,8 +89,8 @@ class CrossRefFakeMode(TorchDispatchMode):
 
         r = func(*args, **kwargs)
         if fake_r is not None:
-            r_flat, _ = tree_flatten(r)
-            f_flat, _ = tree_flatten(fake_r)
+            r_flat = tree_leaves(r)
+            f_flat = tree_leaves(fake_r)
             assert len(r_flat) == len(
                 r_flat
             ), f"Mismatch {len(r_flat)} != {len(r_flat)} on {func}"
@@ -115,7 +114,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                     r_output_alias_each_other == f_output_alias_each_other
                 ), f"Mismatch on {func}: {r_output_alias_each_other} != {f_output_alias_each_other}"
 
-            for r_out, fake_out in zip(tree_flatten(r)[0], tree_flatten(fake_r)[0]):
+            for r_out, fake_out in zip(tree_leaves(r), tree_leaves(fake_r)):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
                     fake_out, torch.Tensor

@@ -1,7 +1,7 @@
 
 import torch
 import torch.fx as fx
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree import tree_flatten, tree_leaves
 
 aten = torch.ops.aten
 
@@ -86,5 +86,5 @@ def get_placeholders(graph):
 def get_outputs(graph):
     for node in graph.nodes:
         if node.op == 'output':
-            return tree_flatten(node.args[0])[0]
+            return tree_leaves(node.args[0])
     raise AssertionError("No output node found")

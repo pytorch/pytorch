@@ -1,7 +1,7 @@
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-import torch.utils._pytree as pytree
-from . import _pytree as fx_pytree
+import torch.utils.pytree as pytree
+from . import pytree as fx_pytree
 from ._compatibility import compatibility
 
 import contextlib
@@ -63,8 +63,8 @@ _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
 _register_custom_builtin('device', 'from torch import device', torch.device)
-_register_custom_builtin('fx_pytree', 'import torch.fx._pytree as fx_pytree', fx_pytree)
-_register_custom_builtin('pytree', 'import torch.utils._pytree as pytree', pytree)
+_register_custom_builtin('fx_pytree', 'import torch.fx.pytree as fx_pytree', fx_pytree)
+_register_custom_builtin('pytree', 'import torch.utils.pytree as pytree', pytree)
 
 
 def _is_magic(x: str) -> bool:
@@ -269,8 +269,8 @@ class _PyTreeInfo(NamedTuple):
     Contains extra info stored when we're using Pytrees
     """
     orig_args: List[str]
-    in_spec: pytree.TreeSpec
-    out_spec: Optional[pytree.TreeSpec]
+    in_spec: pytree.PyTreeSpec
+    out_spec: Optional[pytree.PyTreeSpec]
 
 @compatibility(is_backward_compatible=False)
 class CodeGen(object):
@@ -610,7 +610,7 @@ class _PyTreeCodeGen(CodeGen):
         self.pytree_info: _PyTreeInfo = pytree_info
 
     def process_inputs(self, *inputs: Any) -> Any:
-        flat_args, _ = pytree.tree_flatten(inputs)
+        flat_args = pytree.tree_leaves(inputs)
         return flat_args
 
     def process_outputs(self, out: Any) -> Any:

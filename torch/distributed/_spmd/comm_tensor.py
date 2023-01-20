@@ -14,10 +14,11 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import (
+from torch.utils.pytree import (
     tree_flatten,
     tree_map,
     tree_map_only,
+    tree_map_,
 )
 
 
@@ -227,7 +228,7 @@ class CommTensor(torch.Tensor):
                 # for it later to make sure the execution during tracing is
                 # correct. Also, remember comm is already launched
                 # args[0] is always the collection of output tensors
-                tree_map(partial(set_work, out[1]), args[0])
+                tree_map_(partial(set_work, out[1]), args[0])
 
                 # HACK: update the proxy on the input argument as this is an
                 # inplace collective communication.
@@ -240,7 +241,7 @@ class CommTensor(torch.Tensor):
             else:
                 # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **unwrapped_kwargs)
-                tree_map(partial(set_work, out[1]), args[0])
+                tree_map_(partial(set_work, out[1]), args[0])
                 return out
         else:
             if work is not None:

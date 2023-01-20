@@ -20,7 +20,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch.fx.experimental.symbolic_shapes import guard_int
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree import tree_leaves, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -47,9 +47,7 @@ def type_casts(
 ):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        flat_args = [
-            x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)
-        ]
+        flat_args = [x for x in tree_leaves((args, kwargs)) if isinstance(x, Tensor)]
         computation_dtype, result_dtype = utils.elementwise_dtypes(
             *flat_args, type_promotion_kind=type_promotion
         )

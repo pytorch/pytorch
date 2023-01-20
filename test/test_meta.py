@@ -5,7 +5,7 @@ import torch
 import os
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_map, tree_flatten, tree_unflatten, tree_leaves
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
@@ -352,8 +352,8 @@ def should_check_strides(func):
     return CheckStrides.SIGNIFICANT
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
-    flat_meta_rs, _ = tree_flatten(meta_rs)
-    flat_rs, _ = tree_flatten(rs)
+    flat_meta_rs = tree_leaves(meta_rs)
+    flat_rs = tree_leaves(rs)
     test_case.assertEqual(len(flat_meta_rs), len(flat_rs))
     for i, meta_r, r in zip(range(len(flat_rs)), flat_meta_rs, flat_rs):
         def test_assert(cond, msg):
@@ -501,7 +501,7 @@ def run_meta_crossref(
         elif func is torch.Tensor.__getitem__:
             # Ensure boolean tensors use original
             assert len(args) == 2
-            flat_args, _ = tree_flatten(args[1])
+            flat_args = tree_leaves(args[1])
             flat_meta_args, spec = tree_flatten(meta_args[1])
             flat_new_args = []
             for a, ma in zip(flat_args, flat_meta_args):

@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.logging_tensor import LoggingTensor
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 
 # The current test methodology in this file is to test a variety of real use cases
 # with a set of fully-fledged tensor subclasses. In the future, this may change

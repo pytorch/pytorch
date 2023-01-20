@@ -22,7 +22,7 @@ from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 
 from torch._subclasses.fake_tensor import check_no_bool_index_tensors
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map_
 
 
 aten = torch.ops.aten
@@ -35,7 +35,7 @@ def register_meta(op):
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
-        tree_map(register, op)
+        tree_map_(register, op)
         return fn
 
     return wrapper

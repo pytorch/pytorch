@@ -22,7 +22,7 @@ from typing import (
 )
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility

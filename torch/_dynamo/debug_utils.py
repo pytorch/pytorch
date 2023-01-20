@@ -693,7 +693,7 @@ def cast_convert_element_type_to_fp64(model):
 
 
 def cast_to(dtype, model, inputs):
-    from torch.utils._pytree import tree_map
+    from torch.utils.pytree import tree_map
 
     model = model.to(dtype)
     if dtype == torch.float64:

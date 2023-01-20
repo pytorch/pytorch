@@ -1,6 +1,6 @@
 import torch
 from copy import deepcopy
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 
 # TODO: Move LoggingTensor here.
 from torch.testing._internal.logging_tensor import LoggingTensor

@@ -3,7 +3,7 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map_
 
 import operator
 
@@ -30,9 +30,9 @@ class CudaGraphsSupport(OperatorSupport):
                 found_not_cuda = True
 
         for n in node.all_input_nodes:
-            tree_map(find_not_cuda, meta_fk(n.meta))
+            tree_map_(find_not_cuda, meta_fk(n.meta))
 
-        tree_map(find_not_cuda, meta_fk(node.meta))
+        tree_map_(find_not_cuda, meta_fk(node.meta))
 
         # NB: factory function is accounted for because the result would be
         # cpu or cuda

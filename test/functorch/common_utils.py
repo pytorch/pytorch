@@ -7,7 +7,7 @@
 import itertools
 import torch
 from functorch import vmap
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db

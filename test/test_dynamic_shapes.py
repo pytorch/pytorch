@@ -15,7 +15,7 @@ import contextlib
 import math
 import atexit
 import os
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map_
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
@@ -40,7 +40,7 @@ def register_meta(op):
     def decorator(f):
         def add_func(op):
             meta_funcs[op] = f
-        tree_map(add_func, op)
+        tree_map_(add_func, op)
         return f
     return decorator
 

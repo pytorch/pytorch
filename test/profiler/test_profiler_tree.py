@@ -13,7 +13,7 @@ import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -22,7 +22,7 @@ KEEP_ELLIPSES = 2
 KEEP_NAME_AND_ELLIPSES = 3
 
 PRUNE_FUNCTIONS = {
-    "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
+    "torch/utils/pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
@@ -680,14 +680,14 @@ class TestProfilerTree(TestCase):
                 ...
               aten::add
                 test_profiler_tree.py(...): __torch_dispatch__
-                  torch/utils/_pytree.py(...): tree_map
+                  torch/utils/pytree.py(...): tree_map
                     ...
-                  torch/utils/_pytree.py(...): tree_map
+                  torch/utils/pytree.py(...): tree_map
                     ...
                   torch/_ops.py(...): __call__
                     <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
                       aten::add
-                  torch/utils/_pytree.py(...): tree_map
+                  torch/utils/pytree.py(...): tree_map
                     ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop

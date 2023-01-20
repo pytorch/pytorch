@@ -2,7 +2,8 @@ import torch
 from torch._ops import PyOperator
 from torch._C._functorch import TransformType
 from torch._functorch.utils import enable_single_level_autograd_function
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
+from torch._functorch.pytree_hacks import treespec_pprint
 from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
@@ -162,8 +163,8 @@ NO_OUT_DIMS = "not specified"
 # Mode-only functorch will greatly simplify this logic.
 def wrap_outputs_maintaining_identity(
         outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=NO_OUT_DIMS):
-    flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
-    flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
+    flat_unwrapped_inputs = pytree.tree_leaves(unwrapped_inputs)
+    flat_orig_inputs = pytree.tree_leaves(orig_inputs)
 
     unwrapped_input_to_orig_input = {
         id(unwrapped): orig
@@ -185,8 +186,8 @@ def wrap_outputs_maintaining_identity(
                 f"incompatible (output, out_dims) tuple. "
                 f"Expected out_dims={out_dims} "
                 f"to be compatible with the structure of `output`. "
-                f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
-                f"but output has structure {spec}. "
+                f"out_dims has structure {treespec_pprint(pytree.tree_structure(out_dims))} "
+                f"but output has structure {treespec_pprint(spec)}. "
                 f"For more details, please see "
                 f"https://pytorch.org/docs/master/notes/extending.func.html"
             )
@@ -450,7 +451,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 # the corresponding in_dims with None.
 def get_tangents_in_dims(input_dims, tangents):
     flat_in_dims, spec = pytree.tree_flatten(input_dims)
-    flat_tangents, _ = pytree.tree_flatten(tangents)
+    flat_tangents = pytree.tree_leaves(tangents)
     result = [None if tangent is None else in_dim
               for in_dim, tangent in zip(flat_in_dims, flat_tangents)]
     return pytree.tree_unflatten(result, spec)

@@ -41,7 +41,7 @@ import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
 
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree import tree_leaves
 
 from distutils.version import LooseVersion
 
@@ -2006,7 +2006,7 @@ def _elementwise_type_promo_np(*args, type_promotion_kind):
             return torch.from_numpy(x)
         return x
 
-    flattened = tree_flatten(args)[0]
+    flattened = tree_leaves(args)
     transformed = tuple(_maybe_torch(a) for a in flattened)
     result_dtype, _ = prims.utils.elementwise_dtypes(
         *transformed,

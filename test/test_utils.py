@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
-from torch.utils._pytree import tree_any, tree_all_only
+from torch.utils.pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch import set_default_device
 from torch.utils._device import set_device

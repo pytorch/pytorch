@@ -16,7 +16,7 @@ from torch._prims_common import (
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_leaves, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
     from nvfuser._C import (  # type: ignore[import]
@@ -146,7 +146,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
     # Checking output dtypes
     output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
-    orig_flat_out, _ = tree_flatten(output_node.args[0])
+    orig_flat_out = tree_leaves(output_node.args[0])
 
     fusion = Fusion()
     with FusionDefinition(fusion) as fd:
@@ -227,7 +227,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
 def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
     executor_parameters = executor_parameters or DEFAULT_NVFUSER_PYTHON_CONFIG
-    flat_args, _ = tree_flatten(args)
+    flat_args = tree_leaves(args)
 
     # check for cuda only fusion
     if any(isinstance(arg, torch.Tensor) and arg.is_cuda for arg in flat_args) and all(  # type: ignore[attr-defined]

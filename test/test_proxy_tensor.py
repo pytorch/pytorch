@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, xfail_inherited_tests
 import torch
+import torch.utils.pytree as pytree
 import unittest
 import warnings
 import operator
@@ -16,7 +17,6 @@ from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, bind_s
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
-from torch.utils._pytree import tree_map
 from torch import nn
 import re
 
@@ -158,8 +158,8 @@ class UnwrapTensor(torch.Tensor):
 
             return ret
 
-        args = tree_map(unwrap, args)
-        kwargs = tree_map(unwrap, kwargs)
+        args = pytree.tree_map(unwrap, args)
+        kwargs = pytree.tree_map(unwrap, kwargs)
         return func(*args, **kwargs)
 
 class TestGenericProxyTensor(TestCase):
@@ -167,7 +167,7 @@ class TestGenericProxyTensor(TestCase):
     # function
     def _test(self, f, inps):
         fx_f = make_fx(f, tracing_mode=self.tracing_mode)(*inps)
-        new_inps = tree_map(_create_new_input, inps)
+        new_inps = pytree.tree_map(_create_new_input, inps)
         r1 = fx_f(*new_inps)
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)

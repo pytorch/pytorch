@@ -16,7 +16,7 @@ from torch._C._distributed_c10d import (
     ReduceOp,
 )
 from torch.futures import Future
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree import tree_leaves
 
 """
 TODO:
@@ -30,7 +30,7 @@ We need some synchronization around cleanup to ensure that timedout ranks don't 
 
 
 def flatten_list(lst):
-    return tree_flatten(lst)[0]
+    return tree_leaves(lst)
 
 
 def ret_work(ret):

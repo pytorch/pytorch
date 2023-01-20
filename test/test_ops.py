@@ -12,7 +12,6 @@ import os
 
 from collections import defaultdict
 from importlib import import_module
-from torch.utils._pytree import tree_map
 from typing import Dict
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -73,7 +72,7 @@ from torch._prims.context import TorchRefsMode
 from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
 
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree import tree_leaves, tree_map
 from torch.utils._python_dispatch import TorchDispatchMode
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
@@ -365,7 +364,7 @@ class TestCommon(TestCase):
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
             torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
-            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
+            for a, b in zip(tree_leaves(ref_result), tree_leaves(torch_result)):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
                     if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
@@ -433,11 +432,11 @@ class TestCommon(TestCase):
                 return actual_error
 
             ref_distance = 0
-            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(precise_result)[0]):
+            for a, b in zip(tree_leaves(ref_result), tree_leaves(precise_result)):
                 ref_distance = ref_distance + _distance(a, b)
 
             torch_distance = 0
-            for a, b in zip(tree_flatten(torch_result)[0], tree_flatten(precise_result)[0]):
+            for a, b in zip(tree_leaves(torch_result), tree_leaves(precise_result)):
                 torch_distance = torch_distance + _distance(a, b)
 
             # TODO: consider adding some tolerance to this comparison
@@ -2034,7 +2033,7 @@ class TestFakeTensor(TestCase):
 
 
                 for fake_out, real_out in zip(
-                    tree_flatten(res_fake)[0], tree_flatten(res)[0]
+                    tree_leaves(res_fake), tree_leaves(res)
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
@@ -2082,13 +2081,13 @@ class TestFakeTensor(TestCase):
 
                 if torch.Tag.pointwise in func.tags:
                     shapes = []
-                    for inp in tree_flatten((args, kwargs)):
+                    for inp in tree_leaves((args, kwargs)):
                         if isinstance(inp, torch.Tensor):
                             shapes.append(inp.shape)
 
                     out_shape = torch._refs._broadcast_shapes(*shapes)
 
-                    for out_elem in tree_flatten(out):
+                    for out_elem in tree_leaves(out):
                         if isinstance(out_elem, torch.Tensor):
                             test_self.assertEqual(out_elem.shape, out_shape)
 

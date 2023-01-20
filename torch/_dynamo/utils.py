@@ -38,7 +38,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree import tree_leaves, tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -1238,7 +1238,7 @@ def fake_mode_from_tensors(inputs: List[Any]):
     if any are fake. All fake modes on all fake tensors must be identical.
     Returns None if no fake_mode is fine
     """
-    flat_inputs, _ = tree_flatten(inputs)
+    flat_inputs = tree_leaves(inputs)
     fake_mode = None
     for flat_input in flat_inputs:
         if isinstance(flat_input, torch._subclasses.FakeTensor):

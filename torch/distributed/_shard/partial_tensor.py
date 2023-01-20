@@ -10,7 +10,7 @@ from torch.distributed.nn.functional import (
 )
 from torch.distributed._shard.common_op_utils import _register_default_op
 from torch.distributed._shard.op_registry_utils import _decorator_func
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map_
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
@@ -227,8 +227,8 @@ class _PartialTensor(torch.Tensor):
             if process_group is None and isinstance(e, _PartialTensor):
                 process_group = e._process_group
 
-        tree_map(find_process_group, args)
-        tree_map(find_process_group, kwargs)
+        tree_map_(find_process_group, args)
+        tree_map_(find_process_group, kwargs)
 
         if func in _PARTIAL_TENSOR_OPS:
             return _PARTIAL_TENSOR_OPS[func](types, args, kwargs, process_group)

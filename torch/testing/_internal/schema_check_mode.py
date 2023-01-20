@@ -1,5 +1,5 @@
 import torch
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree import tree_map, tree_leaves
 from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -96,7 +96,7 @@ class SchemaCheckMode(TorchDispatchMode):
 
         c_p_args = dict(zip(pre_arguments.keys(), clone_inputs(pre_arguments.values())))
         cloned_arguments = {name : tree_map(unwrap, c_p_args.get(name)) for name in c_p_args}
-        cloned_metadata = {name : tree_map(parse_metadata, tree_flatten(pre_arguments.get(name))[0]) for name in pre_arguments}
+        cloned_metadata = {name : tree_map(parse_metadata, tree_leaves(pre_arguments.get(name))) for name in pre_arguments}
 
         out = func(*args, **kwargs)
         arguments = {name : tree_map(unwrap, pre_arguments.get(name)) for name in pre_arguments}
@@ -124,7 +124,7 @@ class SchemaCheckMode(TorchDispatchMode):
                             raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                         else:
                             self.aliasing.append(Aliasing(func._schema.name, name, f"output_{j}"))
-                if any(has_mutated(a, b, c) for a, b, c in zip(tree_flatten(before)[0], tree_flatten(after)[0], md)):
+                if any(has_mutated(a, b, c) for a, b, c in zip(tree_leaves(before), tree_leaves(after), md)):
                     if not schema_info.is_mutable(SchemaArgument(SchemaArgType.input, i)):
                         raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
                     else:

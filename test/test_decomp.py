@@ -6,7 +6,7 @@ import torch.autograd
 from torch._decomp import decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_map, tree_flatten, tree_unflatten, tree_leaves
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -377,8 +377,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_args = tree_leaves(args)
+    flat_kwargs = tree_leaves(kwargs)
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
@@ -488,9 +488,9 @@ class TestDecomp(TestCase):
                 if run_all:
                     # Execute recursively via DFS, to find the root of a possible error first
                     with self:
-                        decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                        decomp_out = tree_leaves(decomposition(*args, **kwargs))
                 else:
-                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                    decomp_out = tree_leaves(decomposition(*args, **kwargs))
 
                 # At this stage we should not be decomposing an in-place op
                 # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
@@ -500,13 +500,13 @@ class TestDecomp(TestCase):
                 # decomposition does not modify any of the inputs in-place. If it does
                 # real_out should be differen than decom_out so we should catch this
                 real_out_unflat = func(*args, **kwargs)
-                real_out, _ = tree_flatten(real_out_unflat)
+                real_out = tree_leaves(real_out_unflat)
 
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
                     upcast = partial(upcast_tensor, dtype=torch.float64)
-                    real_out_double, _ = tree_flatten(
+                    real_out_double = tree_leaves(
                         func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                     )
                     for i, (orig, decomp, ref) in enumerate(zip(real_out, decomp_out, real_out_double)):

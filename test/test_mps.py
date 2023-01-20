@@ -40,7 +40,7 @@ from torch.testing._internal.common_device_type import ops, instantiate_device_t
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
-import torch.utils._pytree as pytree
+from torch.utils.pytree import tree_leaves
 from itertools import product
 
 
@@ -8883,8 +8883,8 @@ class TestConsistency(TestCase):
 
                 diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
                 diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-                diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-                diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+                diff_cpu_arg = tuple(t for t in tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
+                diff_mps_arg = tuple(t for t in tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
                 self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
                 self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 

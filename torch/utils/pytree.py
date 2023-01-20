@@ -52,6 +52,7 @@ __all__ = [
 
 T = TypeVar("T")
 S = TypeVar("S")
+U = TypeVar("U")
 R = TypeVar("R")
 
 
@@ -146,10 +147,12 @@ def tree_map_(
 
 
 Type2 = Tuple[Type[T], Type[S]]
+Type3 = Tuple[Type[T], Type[S], Type[U]]
 TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
 
-Fn2 = Callable[[Union[T, S]], R]
 Fn = Callable[[T], R]
+Fn2 = Callable[[Union[T, S]], R]
+Fn3 = Callable[[Union[T, S, U]], R]
 FnAny = Callable[[Any], R]
 
 MapOnlyFn = Callable[[T], Callable[[Any], Any]]
@@ -157,12 +160,17 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
+def map_only(ty: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+
+@overload
 def map_only(ty: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
-def map_only(ty: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
+def map_only(ty: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
     ...
 
 
@@ -229,6 +237,18 @@ def tree_map_only(
     ...
 
 
+@overload
+def tree_map_only(
+    ty: Type3[T, S, U],
+    fn: Fn3[T, S, U, Any],
+    tree: PyTree,
+    *rests: PyTree,
+    none_is_leaf: bool = True,
+    namespace: str = "torch",
+) -> PyTree:
+    ...
+
+
 def tree_map_only(
     ty: TypeAny,
     fn: FnAny[Any],
@@ -262,6 +282,18 @@ def tree_map_only_(
 def tree_map_only_(
     ty: Type2[T, S],
     fn: Fn2[T, S, Any],
+    tree: PyTree,
+    *rests: PyTree,
+    none_is_leaf: bool = True,
+    namespace: str = "torch",
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    ty: Type3[T, S, U],
+    fn: Fn3[T, S, U, Any],
     tree: PyTree,
     *rests: PyTree,
     none_is_leaf: bool = True,
@@ -333,6 +365,18 @@ def tree_all_only(
     ...
 
 
+@overload
+def tree_all_only(
+    ty: Type3[T, S, U],
+    pred: Fn3[T, S, U, bool],
+    tree: PyTree,
+    *,
+    none_is_leaf: bool = True,
+    namespace: str = "torch",
+) -> bool:
+    ...
+
+
 def tree_all_only(
     ty: TypeAny,
     pred: FnAny[bool],
@@ -361,6 +405,18 @@ def tree_any_only(
 def tree_any_only(
     ty: Type2[T, S],
     pred: Fn2[T, S, bool],
+    tree: PyTree,
+    *,
+    none_is_leaf: bool = True,
+    namespace: str = "torch",
+) -> bool:
+    ...
+
+
+@overload
+def tree_any_only(
+    ty: Type3[T, S, U],
+    pred: Fn3[T, S, U, bool],
     tree: PyTree,
     *,
     none_is_leaf: bool = True,

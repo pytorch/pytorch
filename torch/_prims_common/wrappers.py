@@ -8,7 +8,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_unflatten, tree_leaves
 
 from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
@@ -117,7 +117,7 @@ class elementwise_type_promotion_wrapper(object):
                 if x in bound.arguments.keys()
             )
 
-            flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
+            flattened_type_promoting_args = tree_leaves(type_promoting_args)
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,

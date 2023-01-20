@@ -14,7 +14,7 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.utils import unwrap_local_tensor
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_map, tree_unflatten, tree_leaves
 
 
 """
@@ -78,7 +78,7 @@ def pack_args_kwargs_with_local_tensor(
     redistribute_with_schema: bool = False,
 ) -> Union[ArgsType, KwargsType]:
     flatten_args, args_tree_spec = tree_flatten(args)
-    flatten_args_schema, _ = tree_flatten(args_schema)
+    flatten_args_schema = tree_leaves(args_schema)
 
     for i, arg in enumerate(flatten_args):
         if isinstance(arg, dtensor.DTensor):

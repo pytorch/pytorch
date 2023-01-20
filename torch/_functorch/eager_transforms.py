@@ -8,8 +8,8 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from .pytree_hacks import tree_map_, treespec_pprint
+from torch.utils.pytree import tree_flatten, tree_unflatten, tree_map, tree_map_, tree_leaves
+from .pytree_hacks import treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
@@ -75,7 +75,7 @@ def _is_differentiable(maybe_tensor):
 
 
 def _any_differentiable(tensor_or_tuple_of_tensors):
-    flat_args, _ = tree_unflatten(tensor_or_tuple_of_tensors)
+    flat_args = tree_leaves(tensor_or_tuple_of_tensors)
     return any(tuple(map(_is_differentiable, flat_args)))
 
 
@@ -513,7 +513,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                 else:  # chunk_size is None or chunk_size != 1
                     chunked_result = vmap(vjp_fn)(basis)
 
-                flat_results, _ = tree_flatten(chunked_result)
+                flat_results = tree_leaves(chunked_result)
 
                 if chunk_size == 1:
                     flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
@@ -563,7 +563,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                 else:  # chunk_size is None or chunk_size != 1
                     chunked_result = vmap(vjp_fn)(basis)
 
-                flat_results, _ = tree_flatten(chunked_result)
+                flat_results = tree_leaves(chunked_result)
 
                 # Short-circuit if we have a single chunk.
                 if chunk_size is None or chunk_size >= out_vec_size:
@@ -1574,10 +1574,10 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             func_args = _wrap_all_tensors_to_functional(args, func_level)
             func_kwargs = _wrap_all_tensors_to_functional(kwargs, func_level)
 
-            flattened_unwrapped_args, _ = tree_flatten(args)
-            flattened_wrapped_args, _ = tree_flatten(func_args)
-            flattened_unwrapped_kwargs, _ = tree_flatten(kwargs)
-            flattened_wrapped_kwargs, _ = tree_flatten(func_kwargs)
+            flattened_unwrapped_args = tree_leaves(args)
+            flattened_wrapped_args = tree_leaves(func_args)
+            flattened_unwrapped_kwargs = tree_leaves(kwargs)
+            flattened_wrapped_kwargs = tree_leaves(func_kwargs)
 
             func_outputs = func(*func_args, **func_kwargs)
             outputs = _unwrap_all_tensors_from_functional(func_outputs, reapply_views=reapply_views)

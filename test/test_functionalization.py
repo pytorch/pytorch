@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import (
     xfail_inherited_tests
 )
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
-from torch.utils._pytree import tree_map, tree_map_only, tree_flatten
+from torch.utils.pytree import tree_map_, tree_map, tree_map_only, tree_leaves
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
@@ -40,8 +40,8 @@ def _functionalize(f, *, reapply_views: bool, crossref: bool):
                 out = f(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            flat_inputs, _ = tree_flatten(inputs)
-            flat_inputs_functional, _ = tree_flatten(inputs_functional)
+            flat_inputs = tree_leaves(inputs)
+            flat_inputs_functional = tree_leaves(inputs_functional)
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 torch._sync(input_functional)
                 inpt_new = torch._from_functional_tensor(input_functional)
@@ -50,7 +50,7 @@ def _functionalize(f, *, reapply_views: bool, crossref: bool):
                     # we don't correctly mutate input metadata (yet?)
                     if inpt_new.shape == inpt.shape:
                         inpt.copy_(inpt_new)
-            tree_map(torch._sync, out)
+            tree_map_(torch._sync, out)
             out_unwrapped = tree_map(torch._from_functional_tensor, out)
             return out_unwrapped
 
@@ -89,9 +89,9 @@ class TestFunctionalization(TestCase):
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            flat_inpts, _ = tree_flatten(inpts)
-            flat_clones1, _ = tree_flatten(clones1)
-            flat_clones3, _ = tree_flatten(clones3)
+            flat_inpts = tree_leaves(inpts)
+            flat_clones1 = tree_leaves(clones1)
+            flat_clones3 = tree_leaves(clones3)
             for inpt, input_clone, input_clone3 in zip(flat_inpts, flat_clones1, flat_clones3):
                 self.assertEqual(inpt, input_clone)  # input mutations should still occur
                 self.assertEqual(inpt, input_clone3)

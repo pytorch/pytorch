@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_leaves, tree_unflatten
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -241,15 +241,15 @@ class InputGen:
 
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
-        args, _ = tree_flatten(args)
-        kwargs, _ = tree_flatten(kwargs)
+        args = tree_leaves(args)
+        kwargs = tree_leaves(kwargs)
         args = args + kwargs
         leaf_tensors = [
             arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
         ]
         return leaf_tensors
 
-    flat_results, _ = tree_flatten(results)
+    flat_results = tree_leaves(results)
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
 
@@ -354,7 +354,7 @@ def check_model(
     assert type(actual) == type(correct)
 
     correct_flat, correct_spec = tree_flatten(correct)
-    actual_flat, _ = tree_flatten(actual)
+    actual_flat = tree_leaves(actual)
     if reference_in_float:
         correct_flat = tuple(
             y.to(x.dtype)

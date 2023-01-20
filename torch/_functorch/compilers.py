@@ -21,7 +21,7 @@ from .partitioners import (
     draw_graph,
     min_cut_rematerialization_partition,
 )
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 
 
 log = logging.getLogger(__name__)

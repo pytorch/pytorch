@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import contextlib
 from typing import Any
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._C._functorch import (
     TransformType,
     RandomnessType,

@@ -21,7 +21,7 @@ from typing import (
 import torch
 import torch.distributed as dist
 
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch.utils.pytree import tree_flatten, tree_unflatten, PyTreeSpec
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -207,9 +207,9 @@ class DTensorConverter(object):
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
         self.flatten_args: List[object] = flatten_args
-        self.flatten_args_spec: TreeSpec = flatten_args_spec
+        self.flatten_args_spec: PyTreeSpec = flatten_args_spec
         self.flatten_kwargs: List[object] = flatten_kwargs
-        self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
+        self.flatten_kwargs_spec: PyTreeSpec = flatten_kwargs_spec
 
         choices_for_args = []
         for arg in self.flatten_args:

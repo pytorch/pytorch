@@ -45,7 +45,7 @@ from torch.func import functional_call, stack_module_state
 # NB: numpy is a testing dependency!
 import numpy as np
 
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils.pytree import tree_flatten, tree_unflatten, tree_map
 
 USE_TORCHVISION = False
 try:

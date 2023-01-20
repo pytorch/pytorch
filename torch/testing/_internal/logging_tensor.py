@@ -1,5 +1,5 @@
 import torch
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 from typing import Iterator, List
 import logging
 import contextlib

@@ -7,7 +7,7 @@ import contextlib
 import functools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
@@ -37,7 +37,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""

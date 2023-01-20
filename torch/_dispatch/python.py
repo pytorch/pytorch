@@ -2,7 +2,7 @@ import torch._C
 from contextlib import contextmanager
 import unittest.mock
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 import itertools
 
 __all__ = ['enable_python_dispatcher', 'no_python_dispatcher']

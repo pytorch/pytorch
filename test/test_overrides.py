@@ -21,7 +21,7 @@ from torch.overrides import (
     _get_current_function_mode_stack,
 )
 from torch.utils._mode_utils import all_same_mode
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 
 Tensor = torch.Tensor
 

@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils.pytree import tree_map, tree_map_only_
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 
 import logging
@@ -891,11 +891,11 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         class TestMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                tree_map_only(torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs))
+                tree_map_only_(torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs))
                 if kwargs is None:
                     kwargs = {}
                 r = func(*args, **kwargs)
-                tree_map_only(torch.Tensor, lambda t: seen.add(t), r)
+                tree_map_only_(torch.Tensor, lambda t: seen.add(t), r)
                 return r
 
         with TestMode():

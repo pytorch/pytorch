@@ -7,7 +7,7 @@ from typing import Callable, Dict, Sequence, Union
 import torch
 import torch.library
 from torch._ops import OpOverload, OpOverloadPacket
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map_
 
 __all__ = [
     "decomposition_table",
@@ -127,7 +127,7 @@ def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
             _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(register, aten_op)
+        tree_map_(register, aten_op)
         return fn
 
     return decomposition_decorator

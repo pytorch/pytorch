@@ -32,7 +32,7 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_map, tree_unflatten
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")

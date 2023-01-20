@@ -17,7 +17,7 @@ import sympy
 from sympy import Expr, Integer
 
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,

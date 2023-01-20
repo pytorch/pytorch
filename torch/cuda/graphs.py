@@ -2,8 +2,9 @@ import gc
 import torch
 
 from ._utils import _dummy_type
-from torch.utils._pytree import tree_flatten as _tree_flatten
-from torch.utils._pytree import tree_unflatten as _tree_unflatten
+from torch.utils.pytree import tree_flatten as _tree_flatten
+from torch.utils.pytree import tree_unflatten as _tree_unflatten
+from torch.utils.pytree import tree_leaves as _tree_leaves
 
 if not hasattr(torch._C, '_CudaStreamBase'):
     # Define dummy base classes
@@ -265,7 +266,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
             assert all(b.requires_grad is False for b in c.buffers()), "In any :class:`~torch.nn.Module` passed to " + \
                 ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have " + \
                 "``requires_grad=False``."
-        flatten_arg, _ = _tree_flatten(args)
+        flatten_arg = _tree_leaves(args)
         flatten_sample_args.append(tuple(flatten_arg))
         assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), "In the beta API, sample_args " + \
             "for each callable must contain only Tensors. Other types are not allowed."
@@ -293,7 +294,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
                                                     sample_args,
                                                     per_callable_static_input_surfaces):
             for _ in range(num_warmup_iters):
-                outputs, _ = _tree_flatten(func(*args))
+                outputs = _tree_leaves(func(*args))
                 grad_inputs = torch.autograd.grad(outputs=tuple(o for o in outputs if o.requires_grad),
                                                   inputs=tuple(i for i in static_input_surface if i.requires_grad),
                                                   grad_outputs=tuple(torch.empty_like(o) for o in outputs if o.requires_grad),
@@ -401,7 +402,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            flatten_user_args, _ = _tree_flatten(user_args)
+            flatten_user_args = _tree_leaves(user_args)
             out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
             return _tree_unflatten(out, output_unflatten_spec)
 

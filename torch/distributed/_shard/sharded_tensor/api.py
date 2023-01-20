@@ -40,7 +40,7 @@ from .utils import (
     build_global_metadata
 )
 from torch.distributed.remote_device import _remote_device
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map_
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -1082,8 +1082,8 @@ class ShardedTensor(ShardedTensorBase):
             if st_instance is None and isinstance(e, ShardedTensor):
                 st_instance = e
 
-        tree_map(find_sharded_tensor, args)
-        tree_map(find_sharded_tensor, kwargs)
+        tree_map_(find_sharded_tensor, args)
+        tree_map_(find_sharded_tensor, kwargs)
 
         if st_instance is not None:
             return dispatch(st_instance, func)

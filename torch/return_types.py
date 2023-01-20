@@ -13,7 +13,7 @@ def pytree_register_structseq(cls):
     def structseq_unflatten(values, context):
         return cls(values)
 
-    torch.utils._pytree._register_pytree_node(cls, structseq_flatten, structseq_unflatten)
+    torch.utils.pytree.register_pytree_node(cls, structseq_flatten, structseq_unflatten)
 
 for name in dir(return_types):
     if name.startswith('__'):

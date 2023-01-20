@@ -24,8 +24,8 @@ from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-import torch.utils._pytree as pytree
-import torch.fx._pytree as fx_pytree
+import torch.utils.pytree as pytree
+import torch.fx.pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
 from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
@@ -3399,7 +3399,7 @@ class TestFX(JitTestCase):
         def f_namedtuple_add(x):
             return x.x + x.y
 
-        pytree._register_pytree_node(
+        pytree.register_pytree_node(
             Foo,
             lambda x: ([x.a, x.b], None),
             lambda x, _: Foo(x[0], x[1]),

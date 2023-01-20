@@ -20,7 +20,7 @@ from torch.fx import GraphModule
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 
 from .. import config, eval_frame
 from ..utils import clone_inputs, counters

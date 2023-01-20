@@ -3,7 +3,7 @@ from functools import partial
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
 
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
@@ -21,7 +21,6 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch.utils._pytree import tree_flatten
 
 
 @dataclass
@@ -54,8 +53,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if node.op == 'output':
             false_outs.extend(node.args)
 
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_outs)
+    flat_true_outs = pytree.tree_leaves(true_outs)
+    flat_false_outs = pytree.tree_leaves(false_outs)
     assert(len(flat_true_outs) == len(flat_false_outs))
 
     for i in range(0, len(flat_true_outs)):
@@ -114,7 +113,7 @@ def cond_dense(pred, true_fn, false_fn, operands):
 @cond.py_impl(DispatchKey.AutogradCPU)
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
-    flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
+    flat_operands = pytree.tree_leaves([true_fn, false_fn, operands])
     assert all([not f.requires_grad for f in flat_operands
                 if isinstance(f, torch.Tensor)])
 
@@ -134,8 +133,8 @@ def inner(pred, true_fn, false_fn, operands):
 @cond.py_impl(FakeTensorMode)
 def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     true_outs = true_fn(*operands)
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+    flat_true_outs = pytree.tree_leaves(true_outs)
+    flat_false_outs = pytree.tree_leaves(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 

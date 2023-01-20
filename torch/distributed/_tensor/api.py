@@ -15,7 +15,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed._tensor.redistribute import Redistribute
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree import tree_leaves
 
 # NOTE [Autograd interaction between torch.Tensor]
 #
@@ -219,7 +219,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # check that we are not getting mixed vanilla and Distributed tensors
-        arg_list, _ = tree_flatten(args)
+        arg_list = tree_leaves(args)
         for arg in arg_list:
             if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
                 raise RuntimeError(

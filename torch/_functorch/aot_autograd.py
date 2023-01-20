@@ -14,7 +14,7 @@ from functorch import make_fx
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
@@ -58,12 +58,12 @@ OutputType = Enum(
     )
 )
 
-pytree._register_pytree_node(
+pytree.register_pytree_node(
     immutable_collections.immutable_list,
     lambda x: (list(x), None),
     lambda x, c: immutable_collections.immutable_list(x),
 )
-pytree._register_pytree_node(
+pytree.register_pytree_node(
     immutable_collections.immutable_dict,
     lambda x: (list(x.values()), list(x.keys())),
     lambda x, c: immutable_collections.immutable_dict(
@@ -2285,12 +2285,10 @@ def aot_function(
     def returned_function(*args, **kwargs):
         nonlocal cached_res
         # Now flatten the tensor args
-        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        flat_args, tensor_args_spec = pytree.tree_flatten((args, kwargs))
 
         # Compile the function and save it in the cache
         if cached_res is None:
-            # Save the args_spec for flat_tensor_args to unflatten while tracing
-            _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
             out_spec = PytreeThunk()
 
             def flat_fn(*flat_args):

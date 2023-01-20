@@ -5,7 +5,7 @@ from functools import partial
 
 import torch
 import torch._dynamo as dynamo
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import profile, ProfilerActivity, record_function

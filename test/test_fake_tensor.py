@@ -23,9 +23,9 @@ import contextlib
 import weakref
 import copy
 
+from torch.utils.pytree import tree_leaves
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -148,7 +148,7 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.FakeTensorMode():
             out_fake = fn()
 
-        for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
+        for a, b in zip(tree_leaves(out), tree_leaves(out_fake)):
             if not isinstance(a, FakeTensor):
                 self.assertTrue(not isinstance(b, FakeTensor))
                 continue

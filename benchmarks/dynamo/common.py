@@ -38,7 +38,7 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils._pytree import tree_map
+from torch.utils.pytree import tree_map
 
 try:
     from .microbenchmarks.operator_inp_utils import OperatorInputsMode

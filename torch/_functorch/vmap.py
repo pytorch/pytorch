@@ -8,8 +8,7 @@ import torch
 import functools
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
-from .pytree_hacks import tree_map_
+from torch.utils.pytree import tree_flatten, tree_unflatten, tree_map_, _broadcast_to_and_flatten, PyTreeSpec
 from functools import partial
 import os
 import itertools
@@ -74,7 +73,7 @@ def _as_tuple(value: Any, num_elements: int, error_message_lambda: Callable[[], 
 
 def _process_batched_inputs(
     in_dims: in_dims_t, args: Tuple, func: Callable
-) -> Tuple[int, List[Any], List[Any], TreeSpec]:
+) -> Tuple[int, List[Any], List[Any], PyTreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f'vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): '
