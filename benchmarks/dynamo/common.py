@@ -92,7 +92,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
-    "mobilevit_s",  # Accuracy
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
 ]

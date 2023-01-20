@@ -14011,10 +14011,18 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('exp2',
                    aliases=('special.exp2', ),
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
-                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
+                   supports_fwgrad_bwgrad=True,
+                   skips=(
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    dtypes=[torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/48010
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                   )),
     UnaryUfuncInfo('expm1',
                    aliases=('special.expm1', ),
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
@@ -17590,8 +17598,6 @@ python_ref_db = [
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
         ),
-        # returns a view of an intermediate tensor (prims.to_dtype)
-        validate_view_consistency=False,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17614,8 +17620,6 @@ python_ref_db = [
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
         ),
-        # returns a view of an intermediate tensor (prims.to_dtype)
-        validate_view_consistency=False,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
