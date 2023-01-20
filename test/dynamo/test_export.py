@@ -1456,6 +1456,62 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_export_with_map_cond(self):
+        from functorch.experimental.control_flow import cond, map
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def inner(self, x, pred):
+                def true_fn(x):
+                    return x + x
+
+                def false_fn(x):
+                    return x * x
+
+                return cond(pred, true_fn, false_fn, [x])
+
+            def forward(self, pred, xs):
+                def body(x, pred):
+                    return self.inner(x, pred)
+
+                return map(body, xs, pred)
+
+        mod = Module()
+        x = torch.randn(3, 2, 1)
+        pred_x = torch.tensor(True)
+
+        y = torch.randn(4, 3, 2)
+        pred_y = torch.tensor(False)
+        real_result = mod(pred_y, y)
+
+        out_graph, _ = torch._dynamo.export(mod, pred_x, x)
+        self.assertEqual(real_result, out_graph(pred_y, y))
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_export_with_map_zero_sized_tensor(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return map(body, xs)
+
+        mod = Module()
+        xs = torch.randn(0, 2)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "zero-sized tensor",
+        ):
+            out_graph, _ = torch._dynamo.export(mod, xs)
+
     def test_export_meta_val(self):
         def f(x, y, z):
             return x * y + z
