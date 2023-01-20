@@ -62,9 +62,24 @@ output_filename = None
 
 CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
+    "DALLE2_pytorch",  # AttributeError: text_encodings
     "demucs",  # OOM
+    # all dynamic shapes errors for detectron variants
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_BigBird",  # OOM
     # Huggingface
     "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -79,20 +94,13 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "tacotron2",  # AssertionError: Deduped args out of bounds
     "vision_maskrcnn",
     # Huggingface
-    "AlbertForMaskedLM",  # OOM
-    "AlbertForQuestionAnswering",  # OOM
-    "BigBird",
-    "DebertaV2ForQuestionAnswering",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
-    "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
-    "XLNetLMHeadModel",  # OOM
-    "YituTechConvBert",
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
+    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
-    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -105,7 +113,6 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
 CI_SKIP_INDUCTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
-    "DALLE2_pytorch",
     "detectron2",
     "hf_T5",  # accuracy
     "hf_BigBird",  # accuracy
