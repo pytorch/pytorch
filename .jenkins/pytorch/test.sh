@@ -648,7 +648,8 @@ test_forward_backward_compatibility() {
 
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
-  python -m venv venv
+  # create a new virtual environment together with all existing libraries
+  python -mvenv --system-site-packages venv
   # shellcheck disable=SC1091
   . venv/bin/activate
 
