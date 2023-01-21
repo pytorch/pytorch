@@ -63,8 +63,8 @@ def normalize_file(f):
 
 bench = "torchbench"
 
-# 4 = 1 + number of matches in the entries split regex
-for name, name2, log in chunker(entries):
+# 3 = 1 + number of matches in the entries split regex
+for name, name2, log in chunker(entries, 3):
     if name is None:
         name = name2
     if name.startswith("Albert"):
@@ -127,8 +127,9 @@ for name, name2, log in chunker(entries):
     if "TIMING:" in log:
         result = re.search("TIMING:(.*)\n", log).group(1)
         split_str = result.split("backend_compile:")
-        backend_time = float(split_str[1])
-        frame_time = float(split_str[0].split("entire_frame_compile:")[1])
+        if len(split_str) == 2:
+            backend_time = float(split_str[1])
+            frame_time = float(split_str[0].split("entire_frame_compile:")[1])
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
     # offer to split columns
