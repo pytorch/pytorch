@@ -9498,6 +9498,18 @@ class TestAutogradDeviceType(TestCase):
         with self.assertWarnsRegex(UserWarning, "Warn from backward"):
             b.backward()
 
+    def test_complex_scalar_backward(self, device):
+        a = torch.zeros(1, device=device, requires_grad=True)
+        b = a * 0.5j
+
+        msg = "grad can be implicitly created only for real scalar outputs"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            b.backward()
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(b, a)
+
+
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
         self.assertEqual(len(list(ctx.cloned.items())), n)
