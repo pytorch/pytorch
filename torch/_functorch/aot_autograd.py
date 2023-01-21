@@ -2177,34 +2177,6 @@ def create_aot_dispatcher_function(
         return compiled_fn
 
 
-# Inspired by autodidax (thanks!)
-class PytreeThunk:
-    spec = None
-    # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
-    is_really_simple = None  # if the output spec is a LeafSpec
-
-    def set(self, spec):
-        assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if all(
-            pytree.treespec_is_strict_leaf(s)
-            for s in pytree.treespec_children(self.spec)
-        ):
-            self.is_simple = True
-        if pytree.treespec_is_strict_leaf(self.spec):
-            self.is_really_simple = True
-
-    def unflatten(self, x):
-        if self.is_really_simple:
-            return x[0]
-        if self.is_simple:
-            return x
-        return pytree.tree_unflatten(x, self.spec)
-
-
 def aot_function(
     fn: Callable,
     fw_compiler: Callable,
@@ -2290,7 +2262,7 @@ def aot_function(
 
         # Compile the function and save it in the cache
         if cached_res is None:
-            out_spec = PytreeThunk()
+            out_spec = None
 
             def flat_fn(*flat_args):
                 # The input are flattened tensor args. Prepare the args in the
@@ -2299,7 +2271,7 @@ def aot_function(
                 nonlocal out_spec
                 args, kwargs = pytree.tree_unflatten(flat_args, tensor_args_spec)
                 tree_out = fn(*args, **kwargs)
-                flat_out, spec = pytree.tree_flatten(tree_out)
+                flat_out, out_spec = pytree.tree_flatten(tree_out)
                 for i in flat_out:
                     is_known_type = False
                     for j in KNOWN_TYPES:
@@ -2315,7 +2287,6 @@ def aot_function(
                             "leave a comment explaining your use case and we'll make this more "
                             "ergonomic to deal with"
                         )
-                out_spec.set(spec)
                 return flat_out
 
             compiled_fn = create_aot_dispatcher_function(
@@ -2327,7 +2298,7 @@ def aot_function(
 
         cached_fn, out_spec = cached_res
         out = cached_fn(flat_args)
-        return out_spec.unflatten(out)
+        return pytree.tree_unflatten(out, out_spec)
 
     return returned_function
 
