@@ -33,6 +33,9 @@ hash = subprocess.check_output(
 entries = re.split(
     r"(?:cuda (?:train|eval) +([^ ]+)|WARNING:root:([^ ]+) failed to load)", full_log
 )[1:]
+# Entries schema example:
+# `['hf_Bert', None, '
+#  PASS\nTIMING: entire_frame_compile:1.80925 backend_compile:6e-05\nDynamo produced 1 graph(s) covering 367 ops\n']`
 
 
 def chunker(seq, size):
@@ -60,8 +63,8 @@ def normalize_file(f):
 
 bench = "torchbench"
 
-# 3 = 1 + number of matches in the entries split regex
-for name, name2, log in chunker(entries, 3):
+# 4 = 1 + number of matches in the entries split regex
+for name, name2, log in chunker(entries):
     if name is None:
         name = name2
     if name.startswith("Albert"):
@@ -95,6 +98,7 @@ for name, name2, log in chunker(entries, 3):
         r'File "([^"]+)", line ([0-9]+), in .+\n +(.+)\n([A-Za-z]+(?:Error|Exception|NotImplementedError): ?.*)',
         log,
     )
+
     if m is not None:
         r = "FAIL"
         component = f"{normalize_file(m.group(1))}:{m.group(2)}"
@@ -118,6 +122,13 @@ for name, name2, log in chunker(entries, 3):
     if r == "UNKNOWN":
         c += 1
 
+    backend_time = None
+    frame_time = None
+    if "TIMING:" in log:
+        result = re.search("TIMING:(.*)\n", log).group(1)
+        split_str = result.split("backend_compile:")
+        backend_time = float(split_str[1])
+        frame_time = float(split_str[0].split("entire_frame_compile:")[1])
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
     # offer to split columns
@@ -130,7 +141,9 @@ for name, name2, log in chunker(entries, 3):
         component = "generated code"
         context = ""
 
-    out.writerow([bench, name, "", r, component, context, explain])
+    out.writerow(
+        [bench, name, "", r, component, context, explain, frame_time, backend_time]
+    )
     i += 1
 
 if c:
