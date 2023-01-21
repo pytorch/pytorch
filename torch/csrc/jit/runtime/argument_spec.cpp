@@ -172,7 +172,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
-        auto obj_ptr = iv->toObjectRef().slots().data();
+        auto obj_ptr = &iv->toObjectRef().slots()[0];
         // push list of object elements to the stack
         stack[++stack_top] = obj_ptr;
       } break;
