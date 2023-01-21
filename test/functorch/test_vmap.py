@@ -3539,8 +3539,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcmul'),
         xfail('clamp'),
         # AssertionError: Tensor-likes are not equal!
-        xfail('bitwise_left_shift', device_type='cpu'),
-        decorate('bitwise_right_shift', device_type='cpu',
+        xfail('bitwise_left_shift'),
+        decorate('bitwise_right_shift',
                  decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
 
         # UBSAN: runtime error: shift exponent -1 is negative
@@ -3707,8 +3707,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('_softmax_backward_data'),
         # AssertionError: Tensor-likes are not equal!
         # Issue: https://github.com/pytorch/pytorch/issues/70904
-        xfail('bitwise_left_shift', device_type='cpu'),
-        xfail('bitwise_right_shift', device_type='cpu'),
+        xfail('bitwise_left_shift'),
+        xfail('bitwise_right_shift'),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
