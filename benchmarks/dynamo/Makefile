@@ -10,7 +10,7 @@ clone-deps:
 		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
 		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
-		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \
+		&& (test -e triton || (git clone --recursive https://github.com/openai/triton.git && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)) \
 	)
 
 pull-deps: clone-deps
@@ -21,7 +21,7 @@ pull-deps: clone-deps
 	(cd ../../../torchaudio      && git pull && git submodule update --init --recursive)
 	(cd ../../../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../../../torchbenchmark && git pull && git submodule update --init --recursive)
-	(cd ../../../triton         && git checkout master && git pull && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
+	(cd ../../../triton         && git fetch && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo

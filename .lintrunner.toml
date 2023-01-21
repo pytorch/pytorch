@@ -108,7 +108,6 @@ exclude_patterns = [
     'torch/_functorch/eager_transforms.py',
     'torch/_functorch/fx_minifier.py',
     'torch/_functorch/partitioners.py',
-    'torch/_functorch/make_functional.py',
     'torch/_functorch/top_operators_github_usage.py',
     'torch/_functorch/vmap.py',
     'torch/distributed/elastic/agent/server/api.py',
@@ -377,7 +376,6 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/*.svg',
     '**/*Makefile',
-    '**/*Makefile_dashboard',
     '**/contrib/**',
     'third_party/**',
     '**/.gitattributes',
@@ -830,7 +828,14 @@ include_patterns = [
     'torchgen/**/*.py',
     'functorch/functorch/_src/aot_autograd.py',
     'functorch/functorch/_src/compilers.py',
+    'torch/_functorch/make_functional.py',
     'torch/testing/*.py',
+    'torch/distributed/fsdp/*.py',
+    'test/distributed/fsdp/*.py',
+    'torch/testing/_internal/common_fsdp.py',
+    'torch/distributed/_composable/*.py',
+    'test/distributed/_composable/*.py',
+    'torch/testing/_internal/common_dist_composable.py',
 ]
 command = [
     'python3',

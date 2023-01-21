@@ -161,15 +161,15 @@ class PyOperator(PyOperatorABC):
 
         if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-            curr_mode = type(_get_current_dispatch_mode())
+            curr_mode = _get_current_dispatch_mode()
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
             assert (
-                curr_mode in self.python_key_mode_table
+                type(curr_mode) in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            return self.python_key_mode_table[curr_mode](*args, **kwargs)
+            return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
 
         assert dispatch_key in self.table, dispatch_key
         return self.table[dispatch_key](*args, **kwargs)
