@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <utility>
 #include <vector>
 
 namespace torch {
@@ -125,9 +124,8 @@ void PropagateRequiresGrad(Node* node) {
     std::vector<bool> body_inputs_require = loop_inputs_require;
     std::vector<bool> body_outputs_require(node->outputs().size(), false);
 
-    std::vector<bool> new_body_inputs_require = std::move(body_inputs_require);
-    std::vector<bool> new_body_outputs_require =
-        std::move(body_outputs_require);
+    std::vector<bool> new_body_inputs_require = body_inputs_require;
+    std::vector<bool> new_body_outputs_require = body_outputs_require;
 
     // continue iterating until the results have converged
     do {
@@ -144,8 +142,7 @@ void PropagateRequiresGrad(Node* node) {
     } while (new_body_inputs_require != body_inputs_require ||
              new_body_outputs_require != body_outputs_require);
 
-    setRequiresGrad(
-        node, bitwiseOr(std::move(body_outputs_require), loop_inputs_require));
+    setRequiresGrad(node, bitwiseOr(body_outputs_require, loop_inputs_require));
   } else {
     PropagateRequiresGradSimpleNode(node);
   }
