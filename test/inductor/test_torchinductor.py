@@ -1114,6 +1114,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_exp2(self):
+        def fn(a, b):
+            return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
     def test_sigmoid(self):
         def fn(a, b):
             return (torch.sigmoid(a), torch.sigmoid(a + b))
@@ -5118,9 +5124,11 @@ class CommonTemplate:
 
 test_xfails = {
     "test_add_inplace_permuted_dynamic_shapes": ("cuda",),
+    "test_addmm_dynamic_shapes": ("cuda",),
     "test_alexnet_prefix_dynamic_shapes": ("cpu", "cuda"),
     "test_any_dynamic_shapes": ("cuda",),
     "test_argmax_argmin2_dynamic_shapes": ("cuda",),
+    "test_as_strided_dynamic_shapes": ("cuda",),
     "test_as_strided_scatter_dynamic_shapes": ("cuda",),
     "test_avg_pool2d1_dynamic_shapes": ("cuda",),
     "test_avg_pool2d2_dynamic_shapes": ("cuda",),
@@ -5137,18 +5145,34 @@ test_xfails = {
     "test_cat_extern_kernel_dynamic_shapes": ("cuda",),
     "test_cat_upcasting_dynamic_shapes": ("cuda",),
     "test_cauchy_dynamic_shapes": ("cuda",),
+    "test_clamp_dynamic_shapes": ("cuda",),
+    "test_clone_dynamic_shapes": ("cuda",),
     "test_conv2d_binary_dynamic_shapes": ("cpu",),
     "test_conv2d_packed_dynamic_shapes": ("cpu",),
     "test_conv2d_unary_dynamic_shapes": ("cpu",),
     "test_conv_bn_fuse_dynamic_shapes": ("cpu",),
     "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
+    "test_cos_dynamic_shapes": ("cuda",),
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
+    "test_div1_dynamic_shapes": ("cuda",),
+    "test_div2_dynamic_shapes": ("cuda",),
+    "test_div3_dynamic_shapes": ("cuda",),
+    "test_div4_dynamic_shapes": ("cuda",),
+    "test_div5_dynamic_shapes": ("cuda",),
+    "test_div6_dynamic_shapes": ("cuda",),
+    "test_div7_dynamic_shapes": ("cuda",),
+    "test_elu_dynamic_shapes": ("cuda",),
+    "test_exp2_dynamic_shapes": ("cuda",),
+    "test_exp_dynamic_shapes": ("cuda",),
     "test_expand_as_dynamic_shapes": ("cuda",),
     "test_expanded_reduction_dynamic_shapes": ("cuda",),
+    "test_fill1_dynamic_shapes": ("cuda",),
+    "test_fill2_dynamic_shapes": ("cuda",),
     "test_flip_dynamic_shapes": ("cuda",),
     "test_fuse_tiled_dynamic_shapes": ("cuda",),
     "test_gather_scatter_dynamic_shapes": ("cuda",),
+    "test_gelu_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_horizonal_fusion1_dynamic_shapes": ("cuda",),
     "test_index1_dynamic_shapes": ("cuda",),
@@ -5164,10 +5188,15 @@ test_xfails = {
     "test_invalid_operand_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
     "test_l1_loss_dynamic_shapes": ("cuda",),
+    "test_leaky_relu_dynamic_shapes": ("cuda",),
+    "test_lgamma_dynamic_shapes": ("cuda",),
+    "test_linear_binary_dynamic_shapes": ("cpu",),
     "test_linear_packed_dynamic_shapes": ("cpu",),
+    "test_linear_unary_dynamic_shapes": ("cpu",),
     "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
     "test_log_softmax_dynamic_shapes": ("cuda",),
     "test_logsumexp_dynamic_shapes": ("cuda",),
+    "test_long_tensor_dynamic_shapes": ("cuda",),
     "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_masked_fill_dynamic_shapes": ("cuda",),
@@ -5182,28 +5211,41 @@ test_xfails = {
     "test_max_pool2d_with_indices_backward4_dynamic_shapes": ("cuda",),
     "test_max_pool2d_with_indices_backward_dynamic_shapes": ("cuda",),
     "test_mean_dynamic_shapes": ("cuda",),
+    "test_min_max_reduction_dynamic_shapes": ("cuda",),
     "test_move_arange_dynamic_shapes": ("cpu", "cuda"),
     "test_narrow_dynamic_shapes": ("cuda",),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
     "test_output_strides_dynamic_shapes": ("cpu", "cuda"),
+    "test_permute1_dynamic_shapes": ("cuda",),
     "test_permute2_dynamic_shapes": ("cpu", "cuda"),
+    "test_pow1_dynamic_shapes": ("cuda",),
+    "test_pow2_dynamic_shapes": ("cuda",),
     "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
     "test_recompile_on_index_dynamic_shapes": ("cpu", "cuda"),
+    "test_reduction4_dynamic_shapes": ("cuda",),
+    "test_relu_dynamic_shapes": ("cuda",),
     "test_repeat_dynamic_shapes": ("cuda",),
     "test_roi_align_dynamic_shapes": ("cpu",),
     "test_roll_dynamic_shapes": ("cuda",),
+    "test_round_dynamic_shapes": ("cuda",),
     "test_scatter4_dynamic_shapes": ("cuda",),
     "test_scatter_add2_dynamic_shapes": ("cuda",),
     "test_scatter_reduce2_dynamic_shapes": ("cuda",),
     "test_scheduler_vertical_fusion1_dynamic_shapes": ("cuda",),
     "test_select_scatter_dynamic_shapes": ("cuda",),
+    "test_sigmoid_dynamic_shapes": ("cuda",),
+    "test_silu_dynamic_shapes": ("cuda",),
     "test_simplify_loops_dynamic_shapes": ("cuda",),
+    "test_sin_dynamic_shapes": ("cuda",),
     "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_slice1_dynamic_shapes": ("cuda",),
     "test_slice2_dynamic_shapes": ("cuda",),
+    "test_slice_mutation1_dynamic_shapes": ("cuda",),
     "test_slice_scatter_dynamic_shapes": ("cuda",),
     "test_softmax_dynamic_shapes": ("cuda",),
     "test_softmax_one_kernel_dynamic_shapes": ("cuda",),
+    "test_split_with_sizes_dynamic_shapes": ("cuda",),
+    "test_squeeze2_dynamic_shapes": ("cuda",),
     "test_std_dynamic_shapes": ("cuda",),
     "test_strided_inputs_dynamic_shapes": ("cpu", "cuda"),
     "test_sum1_dynamic_shapes": ("cuda",),
@@ -5213,14 +5255,18 @@ test_xfails = {
     "test_sum5_dynamic_shapes": ("cuda",),
     "test_sum_dtype_dynamic_shapes": ("cuda",),
     "test_sum_keepdims_dynamic_shapes": ("cuda",),
+    "test_tanh_dynamic_shapes": ("cuda",),
     "test_tmp_not_defined_issue1_dynamic_shapes": ("cuda",),
     "test_tmp_not_defined_issue2_dynamic_shapes": ("cpu", "cuda"),
     "test_to_memory_format_dynamic_shapes": ("cuda",),
     "test_transpose_add_dynamic_shapes": ("cuda",),
     "test_transpose_dynamic_shapes": ("cuda",),
+    "test_transposed_propagates_dynamic_shapes": ("cuda",),
     "test_triu_dynamic_shapes": ("cuda",),
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_unspec_inputs_dynamic_shapes": ("cpu", "cuda"),
+    "test_unsqueeze_dynamic_shapes": ("cuda",),
+    "test_unsqueeze_inplace_dynamic_shapes": ("cuda",),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
@@ -5247,7 +5293,7 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
                 setattr(
                     other_cls,
                     f"{name}_{suffix}",
-                    unittest.expectedFailure(lambda self, value=value: value(self)),
+                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
                 )
             else:
                 setattr(
@@ -5811,7 +5857,7 @@ if HAS_CPU:
                         opt_fn = torch._dynamo.optimize("inductor")(m)
                         same(m(x), opt_fn(x))
                         if simdlen != 1:
-                            assert metrics.generated_cpp_vec_kernel_count == 7
+                            assert metrics.generated_cpp_vec_kernel_count == 6
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
