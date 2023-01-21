@@ -1350,8 +1350,8 @@
 
 # [Note: Sometimes view derivatives]
 # The following situation applies to other operations as well.
-# TODO: This note is only referenced once by to_dense. Make this
-# more generic if it's been referenced more than once.
+# TODO: This note is only referenced by to_dense and to_sparse*. Make
+# this more generic if it's been referenced more than once.
 #
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1680,21 +1680,45 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
+# DO NOT define a backward for to_sparse.sparse_dim
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+#
 - name: _to_sparse_copy.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
+# DO NOT define a backward for to_sparse
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+#
 - name: _to_sparse_copy(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
+# DO NOT define a backward for to_sparse_csr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+#
 - name: _to_sparse_csr_copy(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
+# DO NOT define a backward for to_sparse_csc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+#
 - name: _to_sparse_csc_copy(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
+# DO NOT define a backward for to_sparse_bsr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
 - name: _to_sparse_bsr_copy(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
+# DO NOT define a backward for to_sparse_bsc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
 - name: _to_sparse_bsc_copy(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
