@@ -836,7 +836,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // such as `Tensor(a!)[]`
     if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
       // Use the first containedType in alias info.
-      formal = &(formal->containedTypes()[0]);
+      formal = formal->containedTypes().data();
     }
 
     const auto& formalAlias = formal->beforeSet();
@@ -889,7 +889,7 @@ void AliasDb::analyzeImpl(Node* node) {
     TORCH_INTERNAL_ASSERT(formal->beforeSets() == formal->afterSets());
     if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
       // Use the first containedType in alias info.
-      formal = &(formal->containedTypes()[0]);
+      formal = formal->containedTypes().data();
     }
     if (formal->isWildcardBefore()) {
       TORCH_INTERNAL_ASSERT(

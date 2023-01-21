@@ -481,7 +481,7 @@ namespace impl {
 using GenericList = List<IValue>;
 
 inline const IValue* ptr_to_first_element(const GenericList& list) {
-  return &list.impl_->list[0];
+  return list.impl_->list.data();
 }
 
 }
