@@ -371,6 +371,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "_linalg_solve_ex",
     "silu",
     "silu_backward",
+    "cpu",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
