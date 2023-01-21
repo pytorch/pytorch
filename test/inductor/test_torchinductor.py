@@ -1120,6 +1120,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_exp2(self):
+        def fn(a, b):
+            return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
     def test_sigmoid(self):
         def fn(a, b):
             return (torch.sigmoid(a), torch.sigmoid(a + b))
@@ -5663,7 +5669,7 @@ if HAS_CPU:
                         opt_fn = torch._dynamo.optimize("inductor")(m)
                         same(m(x), opt_fn(x))
                         if simdlen != 1:
-                            assert metrics.generated_cpp_vec_kernel_count == 7
+                            assert metrics.generated_cpp_vec_kernel_count == 6
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
