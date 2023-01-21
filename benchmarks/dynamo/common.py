@@ -148,21 +148,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
 ]
 
 
-CI_SKIP_OPTIMIZER = {
-    # NB: these errors occur with the
-    # eager optimizer as well
-    # TorchBench
-    "mobilenet_v2",  # accuracy
-    "resnet18",  # accuracy
-    "resnet50",  # accuracy
-    "shufflenet_v2_x1_0",  # accuracy
-    "timm_vovnet",  # accuracy
-    # Huggingface
-    "PegasusForConditionalGeneration",  # OOM
-    # TIMM
-    "resnest101e",  # accuracy
-    "botnet26t_256",  # accuracy
-}
+CI_SKIP_OPTIMIZER = {}
 
 
 def model_specified_by_path(path_and_class_str):
