@@ -981,7 +981,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.Adam(params)
+            self.optimizer = torch.optim.Adam(params, fused=False)
         else:
             self.optimizer = None
 
