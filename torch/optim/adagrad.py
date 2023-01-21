@@ -350,7 +350,7 @@ def _multi_tensor_adagrad(
         torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in device_state_steps]
 

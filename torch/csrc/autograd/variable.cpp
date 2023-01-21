@@ -156,7 +156,7 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   return get_autograd_meta(self);
 }
 
-void update_cpp_hooks_on_new_gradfn(
+void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
     const std::shared_ptr<torch::autograd::Node>& old_fn,
     const std::shared_ptr<torch::autograd::Node>& new_fn) {
@@ -176,6 +176,11 @@ void update_cpp_hooks_on_new_gradfn(
   TORCH_INTERNAL_ASSERT(meta);
   TORCH_INTERNAL_ASSERT(new_fn);
   meta->cpp_hooks_list_ = nullptr;
+  const c10::impl::PyInterpreter* interp =
+      self.unsafeGetTensorImpl()->pyobj_slot()->pyobj_interpreter();
+  if (interp) {
+    (*interp)->reset_backward_hooks(self.unsafeGetTensorImpl());
+  }
   if (self.retains_grad()) {
     TORCH_INTERNAL_ASSERT(old_fn);
     auto out = old_fn->pop_retains_grad_hook(self.output_nr());
@@ -214,7 +219,7 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
 
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
-  torch::autograd::impl::update_cpp_hooks_on_new_gradfn(
+  torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
       self, old_fn, self.grad_fn());
 }
 
@@ -703,7 +708,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       }
       diff_view_meta->set_attr_version(current_version);
 
-      torch::autograd::impl::update_cpp_hooks_on_new_gradfn(
+      torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
           self, old_fn, diff_view_meta->grad_fn_);
     }
     return diff_view_meta->grad_fn_;
