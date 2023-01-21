@@ -64,12 +64,12 @@ If you want your backend to be called by AOTAutograd rather than TorchDynamo, yo
 ``torch._dynamo.optimizations.training.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.
 Backend functions wrapped by ``aot_autograd`` should have the same contract as before.
 
-Backend functions are passed to ``aot_autograd`` through the ``fw_compiler`` (forward compiler) 
+Backend functions are passed to ``aot_autograd`` through the ``fw_compiler`` (forward compiler)
 or ``bw_compiler`` (backward compiler) kwargs. If ``bw_compiler`` is not specified, the backward compile function
 defaults to the forward compile function.
 
 One caveat is that AOTAutograd requires compiled functions returned by backends to be "boxed". This can be done by wrapping
-the compiled function with ``functorch.compile.make_boxed_func``. 
+the compiled function with ``functorch.compile.make_boxed_func``.
 
 For example,
 
