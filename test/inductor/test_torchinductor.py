@@ -5280,7 +5280,7 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use lambdas here to
-            # create objects with different ids. Otherwise, expectedFailure
+            # create objects with different ids. Otherwise, unittest.skip
             # would modify all methods sharing the same object id. Also, by
             # using a default argument in a lambda, we create a copy instead of
             # a reference. Otherwise, we would lose access to the value.
