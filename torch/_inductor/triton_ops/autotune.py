@@ -1,5 +1,6 @@
 import builtins
 import copy
+import getpass
 import hashlib
 import json
 import logging
@@ -35,6 +36,7 @@ else:
 
 
 class CachingAutotuner(KernelInterface):
+
     """
     Simplified version of Triton autotuner that has no invalidation
     key and caches the best config to disk to improve cold start times.
@@ -51,6 +53,11 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.launchers = []
         self.lock = threading.Lock()
+        triton_cache_dir = os.path.join(
+            "/tmp", getpass.getuser(), str(self.meta.get("device", 0)), "triton/cache"
+        )
+        os.environ["TRITON_CACHE_DIR"] = triton_cache_dir
+        log.info(f"Triton cache directory: {triton_cache_dir}")
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:

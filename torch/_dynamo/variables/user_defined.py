@@ -302,6 +302,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
+            subobj = None
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
@@ -313,6 +314,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, staticmethod):
+            return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
+        elif isinstance(subobj, classmethod):
+            return variables.UserMethodVariable(subobj.__func__, self, **options)
+        elif isinstance(subobj, types.FunctionType):
+            return variables.UserMethodVariable(subobj, self, **options)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -359,11 +366,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ),
         ):
             return UserDefinedObjectVariable(subobj, **options)
-
-        if isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
-        elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, **options)
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)

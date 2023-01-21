@@ -1034,13 +1034,13 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
 }
 
 void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
-  static const std::string invalid_device(
-      "Unknown0"); /* Temp solution to idetify unassigned devices */
-  if (coll->device.toString().compare(invalid_device) == 0 ||
-      coll->unlocker.size() > 0) {
-    return;
-  }
   if (coll) {
+    static const std::string invalid_device(
+        "Unknown0"); /* Temp solution to idetify unassigned devices */
+    if (coll->device.toString().compare(invalid_device) == 0 ||
+        coll->unlocker.size() > 0) {
+      return;
+    }
     VLOG(4) << "Waiting on device barrier for device " << coll->device
             << " ...";
     {
