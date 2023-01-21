@@ -86,8 +86,7 @@ def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy
     sympy.Expr.
     """
     return [
-        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i)
-        for i in lst
+        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
     ]
 
 
