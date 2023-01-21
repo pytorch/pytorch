@@ -46,7 +46,7 @@ std::pair<TypePtr, bool> MergeInferredType(
       // an empty one) return inferred type directly.
       return std::make_pair(new_tensor_type, true);
     }
-    auto type = old_tensor_type;
+    auto type = std::move(old_tensor_type);
     if (new_tensor_type->dim()) {
       type = type->withSymbolicShapes(new_tensor_type->symbolic_sizes());
       use_inferred_type = true;
@@ -80,8 +80,8 @@ void MergeInferredTypeAndSetMap(
   TypePtr mergedType;
   bool inferred;
   std::tie(mergedType, inferred) =
-      MergeInferredType(existing_type, inferred_type);
-  dest_v->setType(mergedType);
+      MergeInferredType(std::move(existing_type), std::move(inferred_type));
+  dest_v->setType(std::move(mergedType));
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
 
@@ -139,7 +139,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
           ONNXDimToShapeSymbol(onnx_shape.dim(i), symbol_dim_map));
     }
     v_type = TensorType::create(scalar_type, at::kCPU, sizes.size(), {});
-    v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
+    v_type = v_type->withSymbolicShapes(c10::SymbolicShape(std::move(sizes)));
 
     if (v_type->sizes().concrete_sizes().has_value()) {
       // Populate strides based on sizes info, if sizes are all static.
@@ -288,7 +288,7 @@ Value* CloneValueFromListConstruct(
         c10::SymbolicShape(),
         c10::VaryingShape<c10::Stride>{},
         {});
-    input->setType(v_type);
+    input->setType(std::move(v_type));
   }
   return input;
 }
@@ -361,10 +361,10 @@ bool HasValidType(TypePtr type, std::string name) {
     }
   } else if (auto s_type = type->cast<ListType>()) {
     auto e_type = s_type->getElementType();
-    return HasValidType(e_type, name);
+    return HasValidType(std::move(e_type), std::move(name));
   } else if (auto o_type = type->cast<OptionalType>()) {
     auto e_type = o_type->getElementType();
-    return HasValidType(e_type, name);
+    return HasValidType(std::move(e_type), std::move(name));
   }
   return true;
 }
@@ -549,7 +549,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
         shape_vector[i].value() == 0 ? input_shape_vector[i] : shape_vector[i]);
     final_shape.push_back(cur_shape);
   }
-  c10::SymbolicShape final_shape_0(final_shape);
+  c10::SymbolicShape final_shape_0(std::move(final_shape));
   return final_shape_0;
 }
 
@@ -588,7 +588,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
       final_shape[idx] = ::c10::ShapeSymbol::newSymbol();
     }
   }
-  ::c10::SymbolicShape shape(final_shape);
+  ::c10::SymbolicShape shape(std::move(final_shape));
   return shape;
 }
 
@@ -613,7 +613,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
       final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
     }
   }
-  ::c10::SymbolicShape shape(final_shape);
+  ::c10::SymbolicShape shape(std::move(final_shape));
   return shape;
 }
 
@@ -622,7 +622,7 @@ void UpdateRank(Value* value, size_t rank) {
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
     c10::optional<size_t> rank_opt = rank;
     auto shape = ::c10::SymbolicShape(rank_opt);
-    value->setType(value_type->withSymbolicShapes(shape));
+    value->setType(value_type->withSymbolicShapes(std::move(shape)));
   }
 }
 
@@ -637,7 +637,7 @@ void UpdateShapeFromVector(
   }
   ConstantValueMap::SetRank(value->debugName(), shape_size.size());
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
-    value->setType(value_type->withSymbolicShapes(shape));
+    value->setType(value_type->withSymbolicShapes(std::move(shape)));
   }
 }
 
@@ -704,7 +704,7 @@ void SetShapeValueFromListConstructNode(Node* lc_node) {
     }
   }
   if (lc_node->inputs().size() == shape_size.size()) {
-    c10::SymbolicShape final_shape(shape_size);
+    c10::SymbolicShape final_shape(std::move(shape_size));
     ConstantValueMap::SetShapeValue(
         lc_node->output()->debugName(), final_shape);
   }
@@ -768,7 +768,7 @@ void ProcessBroadcastNode(Node* n) {
     auto input_shape_1 = ConstantValueMap::GetShape(n->input(1)->debugName());
     auto input_shape_value_1 = input_shape_1.value().sizes().value();
     auto final_shape = Broadcast(input_shape_value_0, input_shape_value_1);
-    UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
+    UpdateShape(n->output(0), c10::SymbolicShape(std::move(final_shape)));
   }
 }
 
@@ -829,7 +829,7 @@ void ProcessShapeForConcatNode(Node* n) {
         }
       }
     }
-    UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
+    UpdateShape(n->output(0), c10::SymbolicShape(std::move(final_shape)));
   }
 }
 
@@ -854,7 +854,7 @@ void ProcessShapeValueForConcatNode(Node* n) {
     }
   }
   if (rank == shape_size.size()) {
-    c10::SymbolicShape final_shape(shape_size);
+    c10::SymbolicShape final_shape(std::move(shape_size));
     ConstantValueMap::SetShapeValue(n->output(0)->debugName(), final_shape);
   }
 }
@@ -908,7 +908,7 @@ void ProcessMatMulNode(Node* n) {
     if (!is_rank_1_1) {
       final_shape.emplace_back(input_shape_value_1[rank_1 - 1]);
     }
-    UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
+    UpdateShape(n->output(0), c10::SymbolicShape(std::move(final_shape)));
   }
 }
 
@@ -945,7 +945,7 @@ void ProcessReduceNode(Node* n) {
         final_shape.emplace_back(input_shape_value_0.value()[idx]);
       }
     }
-    UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
+    UpdateShape(n->output(0), c10::SymbolicShape(std::move(final_shape)));
   }
 }
 
@@ -1065,7 +1065,7 @@ c10::SymbolicShape ComputeShapeForSlice(
           (cur_start - cur_end - 1) / (-cur_step) + 1);
     }
   }
-  return c10::SymbolicShape(final_shape);
+  return c10::SymbolicShape(std::move(final_shape));
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
@@ -1190,7 +1190,7 @@ void ProcessTimeSeriesNode(Node* n) {
   if (n->outputs().size() > 1) {
     std::vector<c10::ShapeSymbol> final_shape = {
         seq_length, num_directions, batch_size, hidden_size};
-    UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
+    UpdateShape(n->output(0), c10::SymbolicShape(std::move(final_shape)));
   }
   for (const auto idx : c10::irange(2U, 4U)) {
     if (n->outputs().size() > idx) {
@@ -1276,7 +1276,7 @@ void ComputeConstant(Node* n, int opset_version) {
         ConstantValueMap::SetValue(n->output()->debugName(), f_copy);
         std::vector<::c10::ShapeSymbol> final_shape_vector(
             1, c10::ShapeSymbol::fromStaticSize(shape_value_size));
-        ::c10::SymbolicShape final_shape(final_shape_vector);
+        ::c10::SymbolicShape final_shape(std::move(final_shape_vector));
         UpdateShape(n->output(), final_shape);
       }
       break;
@@ -1313,7 +1313,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 final_shape_vector[i] = shape_vector_0[perm_v[i]];
               }
             }
-            ::c10::SymbolicShape final_shape(final_shape_vector);
+            ::c10::SymbolicShape final_shape(std::move(final_shape_vector));
             UpdateShape(n->output(), final_shape);
             shape_updated = true;
           }
@@ -1386,7 +1386,8 @@ void ComputeConstant(Node* n, int opset_version) {
                   std::back_inserter(final_shape),
                   expand_shape.value()[0],
                   ::c10::ShapeSymbol::newSymbol);
-              UpdateShape(n->output(), c10::SymbolicShape(final_shape));
+              UpdateShape(
+                  n->output(), c10::SymbolicShape(std::move(final_shape)));
             }
           }
         }
@@ -1425,7 +1426,7 @@ void ComputeConstant(Node* n, int opset_version) {
         if (dims.size() == 1) {
           dims.emplace_back(c10::ShapeSymbol::newSymbol());
         }
-        c10::SymbolicShape shape_v(dims);
+        c10::SymbolicShape shape_v(std::move(dims));
         UpdateShape(n->output(), shape_v);
       }
       break;
@@ -1692,7 +1693,7 @@ void SpecialPostProcess(Node* n) {
           return nullptr;
         };
         return find_sequence_empty_impl(
-            input, t_type, find_sequence_empty_impl);
+            input, std::move(t_type), find_sequence_empty_impl);
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
@@ -1740,14 +1741,14 @@ void SpecialPostProcess(Node* n) {
           if (orig_type && orig_type->dim()) {
             // Assign symbolic shape of original input of onnx::Shape.
             v_type = v_type->withSymbolicShapes(orig_type->symbolic_sizes());
-            n->output()->setType(v_type);
+            n->output()->setType(std::move(v_type));
           } else if (
               shape_node->input()->node()->kind() ==
               ::c10::prim::ListConstruct) {
             // Assign rank of original input of onnx::Shape.
             v_type = v_type->withSizes({static_cast<int64_t>(
                 shape_node->input()->node()->inputs().size())});
-            n->output()->setType(v_type);
+            n->output()->setType(std::move(v_type));
           }
         }
       } else if (shape_node->kind() == ::c10::prim::ListConstruct) {
@@ -1758,8 +1759,9 @@ void SpecialPostProcess(Node* n) {
           v_type = v_type->withScalarType(value.scalar_type());
           std::vector<c10::ShapeSymbol> sizes(
               shape_node->inputs().size(), c10::ShapeSymbol::newSymbol());
-          v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
-          n->output()->setType(v_type);
+          v_type =
+              v_type->withSymbolicShapes(c10::SymbolicShape(std::move(sizes)));
+          n->output()->setType(std::move(v_type));
         }
       }
       break;
@@ -2023,7 +2025,7 @@ void ONNXShapeTypeInference(
       //       e.g: ListConstruct, ListUnpack, etc.
       std::shared_ptr<onnx::ModelProto> model_proto;
       ConvertGraphToONNXProto(
-          n_graph, model_proto, symbol_dim_map, opset_version);
+          std::move(n_graph), model_proto, symbol_dim_map, opset_version);
       GRAPH_DEBUG(
           "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
 

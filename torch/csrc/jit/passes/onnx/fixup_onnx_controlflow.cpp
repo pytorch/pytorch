@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -190,7 +192,7 @@ Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
   TypePtr elem_type = opt_type->getElementType();
   Node* opt_node = g->create(::c10::onnx::Optional, 1);
   opt_node->ty_(Symbol::attr("type"), elem_type);
-  opt_node->output()->setType(OptionalType::create(elem_type));
+  opt_node->output()->setType(OptionalType::create(std::move(elem_type)));
   return opt_node;
 }
 
@@ -205,7 +207,7 @@ void ReplaceBlockOutputWithOptional(
     OptionalTypePtr opt_type,
     Block* block,
     size_t i) {
-  Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
+  Node* opt_node = ONNXOptionalNode(std::move(opt_type), block->owningGraph());
   opt_node->insertBefore(block->return_node());
   Value* block_output = block->outputs().at(i);
   // replace only the last value as Optional type only affects
@@ -424,7 +426,7 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
-    const_node = ONNXOptionalNode(output_type, graph);
+    const_node = ONNXOptionalNode(std::move(output_type), graph);
   }
   TORCH_CHECK(
       const_node,
@@ -534,7 +536,7 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
           dims.emplace_back(::c10::ShapeSymbol::newSymbol());
         }
       }
-      return ::c10::SymbolicShape(dims);
+      return ::c10::SymbolicShape(std::move(dims));
     }
     if (a.rank() && a.rank().value() > 0) {
       return a;
@@ -552,7 +554,7 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
       const auto& a_shape = a->symbolic_sizes();
       const auto& b_shape = b->symbolic_sizes();
       auto commonShape = findCommonShape(a_shape, b_shape);
-      return a->withSymbolicShapes(commonShape);
+      return a->withSymbolicShapes(std::move(commonShape));
     } else if (a) {
       return a;
     } else if (b) {
@@ -566,9 +568,10 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
     if (a && b) {
       auto a_tensor_type = a->getElementType()->cast<TensorType>();
       auto b_tensor_type = b->getElementType()->cast<TensorType>();
-      auto tensor_type = mergeTensorType(a_tensor_type, b_tensor_type);
+      auto tensor_type =
+          mergeTensorType(std::move(a_tensor_type), std::move(b_tensor_type));
       if (tensor_type) {
-        return a->withContained({tensor_type})->cast<ListType>();
+        return a->withContained({std::move(tensor_type)})->cast<ListType>();
       }
       // Both branches produce ListType without tensor shape.
       return a;
@@ -587,18 +590,21 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
       if (a->getElementType()->cast<TensorType>()) {
         auto a_tensor_type = a->getElementType()->cast<TensorType>();
         auto b_tensor_type = b->getElementType()->cast<TensorType>();
-        auto tensor_type = mergeTensorType(a_tensor_type, b_tensor_type);
+        auto tensor_type =
+            mergeTensorType(std::move(a_tensor_type), std::move(b_tensor_type));
         if (tensor_type) {
-          return a->withContained({tensor_type})->cast<OptionalType>();
+          return a->withContained({std::move(tensor_type)})
+              ->cast<OptionalType>();
         }
         // Both branches produce OptionalType without tensor shape.
         return a;
       } else if (a->getElementType()->cast<ListType>()) {
         auto a_list_type = a->getElementType()->cast<ListType>();
         auto b_list_type = b->getElementType()->cast<ListType>();
-        auto list_type = mergeListType(a_list_type, b_list_type);
+        auto list_type =
+            mergeListType(std::move(a_list_type), std::move(b_list_type));
         if (list_type) {
-          return a->withContained({list_type})->cast<OptionalType>();
+          return a->withContained({std::move(list_type)})->cast<OptionalType>();
         }
         // Both branches produce OptionalType without tensor shape.
         return a;
