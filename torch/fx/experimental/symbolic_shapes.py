@@ -1109,26 +1109,28 @@ class ShapeEnv(object):
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        try:
-            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
-            if len(solutions) != 1:
-                return
-            solution = solutions[0][free[0]]
-            if all(t.is_integer for t in sympy.preorder_traversal(solution)):
-                new_var = self._find(solution)
-                self.replacements[cast(sympy.Symbol, free[0])] = new_var
-        except NotImplementedError:
-            if expr.has(sympy.Mod):
-                mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                try:
-                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
-                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
-                        self.divisible.add(mod_expr)
-                except NotImplementedError:
-                    pass
-            return
-        except RecursionError:
-            log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+        if not expr.has(sympy.Mod):
+            try:
+                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+                if len(solutions) != 1:
+                    return
+                solution = solutions[0][free[0]]
+                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                    new_var = self._find(solution)
+                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
+            except NotImplementedError:
+                pass
+            except RecursionError:
+                log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+        if expr.has(sympy.Mod):
+            mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+            try:
+                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                    self.divisible.add(mod_expr)
+            except NotImplementedError:
+                pass
+        return
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
