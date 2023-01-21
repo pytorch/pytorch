@@ -220,7 +220,8 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
 
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
-  torch::autograd::impl::update_tensor_hooks_on_new_gradfn(self, self.grad_fn());
+  torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
+      self, self.grad_fn());
 }
 
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
