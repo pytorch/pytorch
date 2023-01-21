@@ -1052,7 +1052,7 @@ class AOTConfig:
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
-        log.debug("====== Forward (only) graph {aot_config.aot_id} ======")
+        log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1672,8 +1672,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
         if config.debug_graphs:
-            log.debug("====== Forward graph {aot_config.aot_id} ======")
+            log.debug(f"====== Forward graph {aot_config.aot_id} ======")
             log.debug(fw_module.print_readable(print_output=False))
+            log.debug(f"====== Backward graph {aot_config.aot_id} ======")
+            log.debug(bw_module.print_readable(print_output=False))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
