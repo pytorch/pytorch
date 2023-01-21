@@ -63,8 +63,8 @@ def normalize_file(f):
 
 bench = "torchbench"
 
-# 4 = 1 + number of matches in the entries split regex
-for name, name2, log in chunker(entries):
+# 3 = 1 + number of matches in the entries split regex
+for name, name2, log in chunker(entries, 3):
     if name is None:
         name = name2
     if name.startswith("Albert"):
