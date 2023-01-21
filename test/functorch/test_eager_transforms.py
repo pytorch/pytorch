@@ -4190,8 +4190,8 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False)
-    empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([4], device = 'cpu', dtype = torch.float32, pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([2, 2], device = 'cpu', dtype = torch.float32, pin_memory = False)
     view_copy = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
     view_copy_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
     aminmax = torch.ops.aten.aminmax.default(view_copy_1, dim = 0);  view_copy_1 = None
