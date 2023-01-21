@@ -274,10 +274,19 @@ def print_summary(filename):
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
+    if "tag" in data.columns:
+        for tag in data.tag.unique():
+            print(f"\nSummary for tag={tag}:")
+            print_summary_table(data[data.tag == tag])
+    else:
+        print_summary_table(data)
+
+
+def print_summary_table(data):
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
-            if col in ("dev", "name", "batch_size"):
+            if col in ("dev", "name", "batch_size", "tag"):
                 continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
@@ -287,13 +296,16 @@ def print_summary(filename):
                 print(col.ljust(width), f"mean={data[col].mean():.1f} seconds")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.1f}x")
+            elif col in ("accuracy"):
+                pass_rate = (data[col] == "pass").mean()
+                print(col.ljust(width), f"pass_rate={100*pass_rate:.1f}%")
             else:
                 cdata = data[col].clip(1)
                 print(
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
                 )
-        except Exception:
+        except Exception as e:
             pass
 
 
@@ -557,16 +569,15 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    headers = ("dev", "name", "batch_size", "speedup", "abs_latency")
-    row = [
-        current_device,
-        current_name,
-        current_batch_size,
-        float(speedup),
-        median[1] * 1000,
-    ]
+    first_headers = ["dev", "name", "batch_size"]
+    first_fields = [current_device, current_name, current_batch_size]
+    if "tag" in kwargs:
+        first_headers.append("tag")
+        first_fields.append(kwargs["tag"])
+    headers = first_headers + ["speedup", "abs_latency"]
+    row = first_fields + [float(speedup), median[1] * 1000]
     if "compilation_latency" in kwargs:
-        headers = headers + ("compilation_latency", "compression_ratio")
+        headers += ["compilation_latency", "compression_ratio"]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
 
@@ -581,8 +592,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     ), f"expected output_filename to be a .csv, but got {output_filename}"
     output_csv(
         output_filename[:-4] + "_compilation_metrics.csv",
-        ["dev", "name", "batch_size"] + headers,
-        [current_device, current_name, current_batch_size] + data,
+        first_headers + headers,
+        first_fields + data,
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -1152,7 +1163,9 @@ class BenchmarkRunner:
         )
         return start, end
 
-    def check_accuracy(self, name, model, example_inputs, optimize_ctx, experiment):
+    def check_accuracy(
+        self, name, model, example_inputs, optimize_ctx, experiment, tag
+    ):
         """
         Checks accuracy.
         1) Collect the outputs with fp64 datatype. This is useful for error checking.
@@ -1167,11 +1180,14 @@ class BenchmarkRunner:
                 if accuracy_status in ("pass", "eager_variation", "fail_accuracy"):
                     accuracy_status = "pass"
 
-            output_csv(
-                output_filename,
-                ("dev", "name", "batch_size", "accuracy"),
-                [current_device, current_name, current_batch_size, accuracy_status],
-            )
+            headers = ["dev", "name", "batch_size", "accuracy"]
+            fields = [current_device, current_name, current_batch_size, accuracy_status]
+
+            if tag is not None:
+                headers.insert(3, "tag")
+                fields.insert(3, tag)
+
+            output_csv(output_filename, headers, fields)
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
@@ -1284,7 +1300,7 @@ class BenchmarkRunner:
         return record_status(accuracy_status)
 
     def run_performance_test(
-        self, name, model, example_inputs, optimize_ctx, experiment
+        self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         def warmup(fn, model, example_inputs, mode, niters=5):
             peak_mem = 0
@@ -1314,6 +1330,8 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
+            if tag is not None:
+                experiment_kwargs["tag"] = tag
             results = []
 
             eager_latency, eager_peak_mem = warmup(
@@ -1367,45 +1385,39 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        diff=False,
+        explain,
+        comparison_branch=None,
         branch=None,
     ):
         assert branch is None, "Branch set during top level flow."
         import git
 
-        repo = git.Repo(
-            "../torch._dynamo"
-        )  # Hack assumption of torchbenchmark positioning
+        repo = git.Repo()
         curr_branch = repo.active_branch.name
-        if curr_branch != "main":
-            if repo.is_dirty():
-                raise RuntimeError(
-                    "--diff_main called on dirty branch. Commit, stash, or reset."
-                )
+        if curr_branch != comparison_branch:
             # Run current
             try:
                 self.run_one_model(
                     name,
                     model,
-                    self.model_iter_fn,
                     example_inputs,
                     optimize_ctx,
                     experiment,
-                    diff=False,
+                    explain=explain,
                     branch=curr_branch,
+                    tag=curr_branch,
                 )
-                # Swap to main
-                repo.git.checkout("main")
-                # Run main
+                # Run comparison branch
+                repo.git.checkout(comparison_branch)
                 self.run_one_model(
                     name,
                     model,
-                    self.model_iter_fn,
                     example_inputs,
                     optimize_ctx,
                     experiment,
-                    diff=False,
-                    branch="main",
+                    explain=explain,
+                    branch=comparison_branch,
+                    tag=comparison_branch,
                 )
             finally:
                 # Swap back
@@ -1413,7 +1425,7 @@ class BenchmarkRunner:
             return
         else:
             raise RuntimeError(
-                "--diff_main called on main branch, what are you diffing?"
+                f"--diff-branch: current branch is same as {comparison_branch} branch, what are you diffing?"
             )
 
     def run_one_model(
@@ -1423,28 +1435,37 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        diff=False,
+        comparison_branch=None,
         branch=None,
         explain=False,
+        tag=None,
     ):
-        if diff:
+        if comparison_branch is not None:
             self.compare_branches(
-                name, model, example_inputs, optimize_ctx, experiment, diff, branch
+                name,
+                model,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+                comparison_branch=comparison_branch,
+                explain=explain,
             )
-        elif branch:
-            print("RUNNING ON BRANCH:", branch)
+            return
         mode = "train" if self.args.training else "eval"
-        print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
+        msg = f"{current_device:4} {mode:5} {current_name:34} "
+        if branch:
+            msg += f" {branch:26}"
+        print(msg, end=" ", flush=True)
         start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if self.args.accuracy:
             status = self.check_accuracy(
-                name, model, example_inputs, optimize_ctx, experiment
+                name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
         elif self.args.performance:
             status = self.run_performance_test(
-                name, model, example_inputs, optimize_ctx, experiment
+                name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
         if self.args.timing:
@@ -1674,9 +1695,7 @@ def parse_args(args=None):
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
     parser.add_argument(
-        "--diff_main",
-        action="store_true",
-        help="Delta this branch against main. In the future, we may add support for picking the branch.",
+        "--diff-branch", default=None, help="Delta current branch against given branch."
     )
 
     parser.add_argument(
@@ -1714,6 +1733,12 @@ def parse_args(args=None):
         cause time measurement not accurate""",
     )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
+
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Print n/k models message between each model run.",
+    )
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1819,7 +1844,20 @@ def parse_args(args=None):
 
 
 def main(runner, original_dir=None):
+    if original_dir:
+        os.chdir(original_dir)
     args = parse_args()
+
+    if args.diff_branch:
+        import git
+
+        # We do this here so we error out earlier if there's an issue
+        repo = git.Repo()
+        if repo.is_dirty():
+            raise RuntimeError(
+                "--diff-branch called on dirty branch. Commit, stash, or reset."
+            )
+
     with maybe_init_distributed(
         (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
@@ -2230,7 +2268,7 @@ def run(runner, args, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                diff=args.diff_main,
+                comparison_branch=args.diff_branch,
                 explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
@@ -2250,9 +2288,13 @@ def run(runner, args, original_dir=None):
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
-        for name in runner.iter_model_names(args):
+        model_names = list(runner.iter_model_names(args))
+        nmodels = len(model_names)
+        for i, name in enumerate(model_names):
             current_name = name
             placeholder_batch_size = 0
+            if args.progress:
+                print(f"Running model {i+1}/{nmodels}", flush=True)
 
             def write_csv():
                 for device in args.devices:
