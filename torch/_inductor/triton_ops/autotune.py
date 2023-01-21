@@ -575,6 +575,12 @@ def grid(xnumel, ynumel=None, znumel=None):
                 f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
                 f"({label.lower()}numel=={numel}, {block_name}={block})."
             )
+        max_block = config.triton.max_block[label]
+        max_block_str = f'config.triton.max_block["{label}"]'
+        assert max_block % block == 0, (
+            f"TritonKernel.indexing assumes {block_name} divides {max_block_str}."
+            f"({block_name}={block}, {max_block_str}={max_block})."
+        )
         return cdiv(numel, block)
 
     def grid_fn(meta):
