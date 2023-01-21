@@ -5122,7 +5122,7 @@ class CommonTemplate:
         )
 
 
-test_xfails = {
+test_skips = {
     "test_add_inplace_permuted_dynamic_shapes": ("cuda",),
     "test_addmm_dynamic_shapes": ("cuda",),
     "test_alexnet_prefix_dynamic_shapes": ("cpu", "cuda"),
@@ -5284,8 +5284,8 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
             # would modify all methods sharing the same object id. Also, by
             # using a default argument in a lambda, we create a copy instead of
             # a reference. Otherwise, we would lose access to the value.
-            xfails = test_xfails.get(name)
-            if xfails and suffix in xfails:
+            skips = test_skips.get(name)
+            if skips and suffix in skips:
                 setattr(
                     other_cls,
                     f"{name}_{suffix}",
