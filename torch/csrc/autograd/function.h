@@ -113,7 +113,6 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(uint64_t sequence_nr, edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr), next_edges_(std::move(next_edges)) {
     for (const Edge& edge : next_edges_) {
@@ -135,7 +134,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     thread_id_ = at::RecordFunction::currentThreadId();
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(edge_list&& next_edges = edge_list())
       : Node(
             /*sequence_nr=*/at::sequence_number::get_and_increment(),
@@ -659,7 +657,6 @@ struct TraceableFunction : public Node {
 
 namespace detail {
 // Implementation of `collect_next_edges` (see below).
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   edge_list next_edges;
   using IterArgs<MakeNextFunctionList>::operator();
