@@ -281,6 +281,9 @@
 - name: _is_all_true(Tensor self) -> Tensor
   self: non_differentiable
 
+- name: _is_any_true(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: all(Tensor self) -> Tensor
   output_differentiability: [False]
 

@@ -4969,6 +4969,25 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
         check_vmap_fallback(self, test, torch._is_all_true)
 
+    def test__is_any_true(self, device):
+        def test():
+            def f(x, *, expected_result):
+                result = torch.ops.aten._is_any_true(x)
+                self.assertFalse(torch._C._functorch.is_batchedtensor(result))
+                self.assertEqual(result.shape, torch.Size([]))
+                self.assertEqual(result.item(), expected_result)
+                return result
+
+            x = torch.zeros(10, device=device, dtype=torch.bool)
+            vmap(f)(x > 0, expected_result=False)
+
+            x[5] = True
+            vmap(f)(x > 0, expected_result=True)
+            vmap(f)(x[1::2], expected_result=True)
+            vmap(f)(x[0::2], expected_result=False)
+
+        check_vmap_fallback(self, test, torch._is_any_true)
+
     def test_check_tensor(self, device):
         def test():
             test_sizes = [
