@@ -3,7 +3,6 @@ from torch._ops import PyOperator
 from torch._C._functorch import TransformType
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.utils.pytree as pytree
-from torch._functorch.pytree_hacks import treespec_pprint
 from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
@@ -186,8 +185,8 @@ def wrap_outputs_maintaining_identity(
                 f"incompatible (output, out_dims) tuple. "
                 f"Expected out_dims={out_dims} "
                 f"to be compatible with the structure of `output`. "
-                f"out_dims has structure {treespec_pprint(pytree.tree_structure(out_dims))} "
-                f"but output has structure {treespec_pprint(spec)}. "
+                f"out_dims has structure {pytree.treespec_pprint(pytree.tree_structure(out_dims))} "
+                f"but output has structure {pytree.treespec_pprint(spec)}. "
                 f"For more details, please see "
                 f"https://pytorch.org/docs/master/notes/extending.func.html"
             )

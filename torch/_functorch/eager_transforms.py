@@ -8,8 +8,14 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils.pytree import tree_flatten, tree_unflatten, tree_map, tree_map_, tree_leaves
-from .pytree_hacks import treespec_pprint
+from torch.utils.pytree import (
+    tree_flatten,
+    tree_unflatten,
+    tree_map,
+    tree_map_,
+    tree_leaves,
+    treespec_pprint,
+)
 import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes

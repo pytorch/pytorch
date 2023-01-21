@@ -47,6 +47,7 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "_broadcast_to_and_flatten",
+    "treespec_pprint",
     "treespec_children",
     "treespec_is_leaf",
     "treespec_is_strict_leaf",
@@ -463,6 +464,16 @@ def _broadcast_to_and_flatten(
         )
     except ValueError:
         return None
+
+
+class _DummyLeaf:
+    def __repr__(self) -> str:
+        return "*"
+
+
+def treespec_pprint(spec: PyTreeSpec) -> str:
+    dummy_tree = tree_unflatten([_DummyLeaf() for _ in range(spec.num_leaves)], spec)
+    return repr(dummy_tree)
 
 
 def treespec_children(treespec: PyTreeSpec) -> List[PyTreeSpec]:
