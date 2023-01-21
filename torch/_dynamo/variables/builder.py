@@ -75,6 +75,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
     GetAttrVariable,
@@ -479,6 +480,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.autograd.function.FunctionCtx):
+            # The autograd.function context
+            return AutogradFunctionContextVariable()
         elif (
             isinstance(value, types.MethodType)
             and type(getattr(value, "__self__", None))
