@@ -1532,33 +1532,31 @@ class TestAutograd(TestCase):
         var_mean = partial(torch.var_mean, dim=0)
 
         for fn in (DoubleMul.apply, var_mean):
-            count1 = [0]
-            count2 = [0]
+            counts = [0, 0, 0]
 
-            def fn1(grad):
-                count1[0] += 1
+            def fn0(grad):
+                counts[0] += 1
                 self.assertEqual(grad, torch.ones_like(out1) * 2)
 
-            def fn2(grad):
-                count2[0] += 1
+            def fn1(grad):
+                counts[1] += 1
                 self.assertEqual(grad, torch.ones_like(out1) * 3)
 
-            def fn3(grad):
-                count2[0] += 1
+            def fn2(grad):
+                counts[2] += 1
                 self.assertEqual(grad, torch.ones_like(out1))
 
             b = torch.rand(3, 3, requires_grad=True)
             out1, out2 = fn(b)
-            out1.register_hook(fn1)
-            out2.register_hook(fn2)
+            out1.register_hook(fn0)
+            out2.register_hook(fn1)
             # node refers to two hook dicts
             # out1 no longer no longer points to its old hook dict
             out1.mul_(2)
-            # fn3 is registered to out1's new hook dict
-            out1.register_hook(fn3)
+            # fn2 is registered to out1's new hook dict
+            out1.register_hook(fn2)
             (out1 + out2 * 3).sum().backward()
-            self.assertEqual(count1[0], 1)
-            self.assertEqual(count2[0], 1)
+            self.assertEqual(counts, [1, 1, 1])
 
     def test_tensor_hooks_inplace_over_view(self):
         # There might be a better UX here, but this is the way it is now

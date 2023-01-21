@@ -86,9 +86,8 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   // In theory this shouldn't be necessary, because retains_grad_hooks should
   // not contain any PyFunctionTensorPreHooks. The alternative is to have a
   // check that actually guarantees this.
-  for (const auto& pair : fn.retains_grad_hooks()) {
-    if (auto pyhook =
-            dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
+  for (const auto& hook : fn.retains_grad_hooks()) {
+    if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
