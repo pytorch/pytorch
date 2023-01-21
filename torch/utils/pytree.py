@@ -47,6 +47,9 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "_broadcast_to_and_flatten",
+    "treespec_children",
+    "treespec_is_leaf",
+    "treespec_is_strict_leaf",
 ]
 
 
@@ -460,3 +463,15 @@ def _broadcast_to_and_flatten(
         )
     except ValueError:
         return None
+
+
+def treespec_children(treespec: PyTreeSpec) -> List[PyTreeSpec]:
+    return treespec.children()
+
+
+def treespec_is_leaf(treespec: PyTreeSpec) -> bool:
+    return treespec.num_nodes == 1
+
+
+def treespec_is_strict_leaf(treespec: PyTreeSpec) -> bool:
+    return treespec.num_nodes == 1 and treespec.num_leaves == 1

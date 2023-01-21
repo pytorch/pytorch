@@ -639,7 +639,10 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if any(not isinstance(i, pytree.LeafSpec) for i in in_spec.children_specs):
+        if any(
+            not pytree.treespec_is_strict_leaf(s)
+            for s in pytree.treespec_children(in_spec)
+        ):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.

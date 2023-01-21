@@ -2189,11 +2189,12 @@ class PytreeThunk:
     def set(self, spec):
         assert self.spec is None or self.spec == spec
         self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
+        if all(
+            pytree.treespec_is_strict_leaf(s)
+            for s in pytree.treespec_children(self.spec)
         ):
             self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
+        if pytree.treespec_is_strict_leaf(self.spec):
             self.is_really_simple = True
 
     def unflatten(self, x):
