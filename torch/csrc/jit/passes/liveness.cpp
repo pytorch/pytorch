@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <memory>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -128,14 +127,14 @@ struct LivenessAnalyzer {
         // N.B. merge in changes from the loop header
         auto loop_header = *lv.bodyBlock()->nodes().begin();
         auto loop_block = liveness | liveness_sets_[loop_header];
-        loop_block = processBlock(lv.bodyBlock(), std::move(loop_block));
+        loop_block = processBlock(lv.bodyBlock(), loop_block);
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(lv.bodyBlock()->inputs());
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
         IfView iv(it);
         auto true_liveness = processBlock(iv.thenBlock(), liveness);
-        auto false_liveness = processBlock(iv.elseBlock(), std::move(liveness));
+        auto false_liveness = processBlock(iv.elseBlock(), liveness);
         liveness |= true_liveness;
         liveness |= false_liveness;
       }
