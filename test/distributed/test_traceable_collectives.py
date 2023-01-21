@@ -157,8 +157,24 @@ class TestCollectives(torch._dynamo.test_case.TestCase):
         dist.destroy_process_group()
         super().tearDownClass()
 
-    @unittest.skip("inductor lowering isn't quite right, buffer isn't allocated")
+    """
+    async_compile.wait(globals())                                         
+    del async_compile   
+
+    def call(args):  
+        arg0_1, = args                                                            
+        args.clear()
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0) # no-op to ensure context
+            buf0 = dist.all_reduce(arg0_1, async_op=True, group=0, op=ReduceOp.SUM)
+            buf0.wait()
+            del arg0_1
+            return (buf1, )    
+        
+    """
+    # @unittest.skip("inductor lowering isn't quite right, buffer isn't allocated")
     def test_inductor_single_op(self):
+        torch._inductor.config.debug = True
         def func(inp, *, pg_id):
             ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
             return ar
