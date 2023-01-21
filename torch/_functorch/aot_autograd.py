@@ -20,7 +20,7 @@ from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
-from torch.fx import immutable_collections, Interpreter
+from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -56,19 +56,6 @@ OutputType = Enum(
         # a base tensor, user_outputs[base_idx]
         "alias_of_intermediate_base_is_user_output",
     )
-)
-
-pytree.register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree.register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        {key: value for key, value in zip(c, x)}
-    ),
 )
 
 aten = torch.ops.aten
