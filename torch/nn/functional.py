@@ -4869,8 +4869,8 @@ def _scaled_dot_product_attention(
         is_causal: bool = False):
     r""" TODO This function is for merge purposes only and needs to be removed
     """
-    attn = scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, is_causal)
-    return attn, None
+    warnings.warn("This function is deprecated please rebuild your models with the public version of sdpa.")
+    return torch._C._nn.scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):

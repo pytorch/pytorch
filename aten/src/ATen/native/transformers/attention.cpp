@@ -662,6 +662,26 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
+//  !!!!!! TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS
+//  WITH THIS OP BUILTIN !!!!!!
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool need_attn_weights,
+    bool is_causal) {
+  if (!need_attn_weights) {
+    return std::make_tuple(
+        at::scaled_dot_product_attention(
+            query_, key, value, attn_mask_, dropout_p, is_causal),
+        Tensor());
+  }
+  return at::_scaled_dot_product_attention_math(
+      query_, key, value, attn_mask_, dropout_p, is_causal);
+}
+
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -718,13 +738,13 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
-      return at::_scaled_dot_product_attention_math(
+      return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
           value,
           attn_mask_,
           dropout_p,
-          is_causal);
+          is_causal));
     default:
       TORCH_CHECK(
           false,
@@ -733,7 +753,7 @@ Tensor scaled_dot_product_attention(
   }
 }
 
-Tensor _scaled_dot_product_attention_math(
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
@@ -780,7 +800,7 @@ Tensor _scaled_dot_product_attention_math(
     if (dropout_p > 0.0) {
       attn = at::dropout(attn, dropout_p, true);
     }
-    return at::matmul(attn, value);
+    return std::make_tuple(at::matmul(attn, value), attn);
 }
 
 Tensor triton_multi_head_attention(

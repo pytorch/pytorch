@@ -13943,6 +13943,12 @@
     CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
+# TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS WITH THIS OP BUILTIN
+- func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
+  python_module: nn
+  variants: function
+  autogen: _scaled_dot_product_attention.out
+
 - func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> Tensor
   python_module: nn
   variants: function
@@ -13954,7 +13960,7 @@
     CPU, NestedTensorCPU, Meta: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
 
-- func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> Tensor
+- func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> (Tensor, Tensor)
   variants: function
 
 - func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False) -> (Tensor, Tensor)
