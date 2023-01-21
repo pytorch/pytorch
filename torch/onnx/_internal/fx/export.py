@@ -46,6 +46,7 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
             table[op_overload] = op_overload_packet._qualified_op_name
 
     table[torch.ops.prims.convert_element_type.default] = "prim::convert_element_type"
+    table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
     return table
 
 
@@ -120,9 +121,13 @@ def _retrieve_or_wrap_scalar_as_constant(
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.int64))
     elif isinstance(ts_value, list) and all(isinstance(val, float) for val in ts_value):
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
+    elif isinstance(ts_value, list) and all(isinstance(val, torch.fx.Node) for val in ts_value):
+        # A list of torch.fx.Node's (aka ts_value) should be mapped to a list of TorchScript values
+        # in TorchScript graph.
+        ts_list = [fx_name_to_ts_value[val.name] for val in ts_value]
+        ts_value = g.op("prim::ListConstruct", *ts_list)
     elif isinstance(ts_value, torch.dtype):
         from torch.onnx import _type_utils
-
         ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
     else:
         raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
@@ -278,6 +283,10 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                     # that case, v is a tuple of TorchScript values.
                     fx_name_to_ts_value[node.name] = v
+            elif node.target == torch.fx._symbolic_trace._assert_is_none:
+                # Skip the assert_is_none node because it is isolated from other computation and
+                # ONNX doesn't have a corresponding ASSERT op.
+                pass
             else:
                 raise RuntimeError(
                     "Unknown call_function target: {}".format(node.target)
@@ -377,11 +386,36 @@ def _ts_graph_to_onnx_model_in_protobuf(
     return proto
 
 
+def get_innermost_fake_tensor_mode():
+    """
+    This function inspects Pytorch's mode stack found by
+    _get_current_dispatch_mode_stack(...) and return the innermost
+    FakeTensorMode (or None if no FakeTensorMode is found).
+    It also ensures the uniqueness of FakeTensorMode in that mode stack.
+    """
+    number_of_fake_tensor_modes = 0
+    # The innermost FakeTensorMode.
+    fake_tensor_mode = None
+    for mode in torch.utils._python_dispatch._get_current_dispatch_mode_stack():
+        if isinstance(mode, fake_tensor.FakeTensorMode):
+            number_of_fake_tensor_modes += 1
+            fake_tensor_mode = mode
+    # Recursive FakeTensorMode's easily leads to runtime error.
+    assert number_of_fake_tensor_modes <= 1
+    # Return the innermost FakeTensorMode found. Otherwise, reture None.
+    return fake_tensor_mode 
+
+
 def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
-    # Use this mode to
+    # Use this FakeTensorMode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor
     # 2. run FakeTensorProp
-    fake_tensor_mode = fake_tensor.FakeTensorMode()
+    # If (1) and (2) are done with difference FakeTensorMode's, undefined behavior may
+    # happen.
+    fake_tensor_mode = get_innermost_fake_tensor_mode()
+    if fake_tensor_mode is None:
+        # Create a temporary FakeTensorMode for FakeTensorProp.
+        fake_tensor_mode = fake_tensor.FakeTensorMode()
 
     def to_fake_tensor(x):
         if isinstance(x, torch.Tensor) and not isinstance(x, fake_tensor.FakeTensor):
@@ -422,17 +456,24 @@ def _export(
     # Export FX graph to ONNX ModelProto.
     if decomposition_table is None:
         # Use default decomposition table.
-        decomposition_table = torch._decomp.decomposition_table
+        decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
     # Apply decomposition table to the input graph.
-    decomposed_module = proxy_tensor.make_fx(module, decomposition_table)(*args)
+    decomposed_module = proxy_tensor.make_fx(
+        module, decomposition_table=decomposition_table, tracing_mode="fake")(*args)
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
-    ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module, opset_version)
-    # Export TorchScript graph to ONNX ModelProto.
-    onnx_model = _ts_graph_to_onnx_model_in_protobuf(
-        ts_graph, ts_initializers, opset_version
-    )
+    # We want to pass list of ints and floats to TorchScript graph correctly
+    # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
+    # receive FakeTensor and results runtime error. In addition, TorchScript-based
+    # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
+    # with FakeTensorMode.
+    with torch.utils._mode_utils.no_dispatch():
+        ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module, opset_version)
+        # Export TorchScript graph to ONNX ModelProto.
+        onnx_model = _ts_graph_to_onnx_model_in_protobuf(
+            ts_graph, ts_initializers, opset_version
+        )
     if use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model
