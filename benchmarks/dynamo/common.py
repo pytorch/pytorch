@@ -2268,7 +2268,7 @@ def run(runner, args, original_dir=None):
             current_name = name
             placeholder_batch_size = 0
             if args.progress:
-                print(f"Running model {i+1}/{nmodels}")
+                print(f"Running model {i+1}/{nmodels}", flush=True)
 
             def write_csv():
                 for device in args.devices:
