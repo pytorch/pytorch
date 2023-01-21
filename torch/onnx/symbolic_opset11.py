@@ -872,7 +872,23 @@ def arange(g: jit_utils.GraphContext, *args):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
 
-    if len(args) == 2 or len(args) == 5:
+    if len(args) == 2 and all(map(lambda val: isinstance(val, int), args)):
+        # aten::arange(Scalar end, ScalarType dtype)
+        dtype = torch.int64
+        start = g.op(
+            "Constant",
+            value_t=torch.tensor(args[0], dtype=dtype),
+        )
+        end = g.op(
+            "Constant",
+            value_t=torch.tensor(args[1], dtype=dtype),
+        )
+        delta_default = g.op(
+            "Constant",
+            value_t=torch.tensor(1, dtype=dtype),
+        )
+        return g.op("Range", start, end, delta_default)
+    elif len(args) == 2 or len(args) == 5:
         if len(args) == 2:
             # aten::arange(Scalar end, Tensor out)
             dtype = None
