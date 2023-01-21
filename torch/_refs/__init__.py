@@ -571,10 +571,10 @@ def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     return a
 
 
-def zero_(a: TensorLikeType) -> TensorLikeType:
-    r = prims.fill(a, 0)
-    prims.copy_to(a, r)
-    return a
+@register_decomposition(aten.zero)
+@out_wrapper()
+def zero(input: TensorLikeType) -> TensorLikeType:
+    return torch.zeros_like(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -717,7 +717,7 @@ def logsumexp(
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
+    maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -1097,6 +1097,14 @@ def pow(
             return a * a  # type: ignore[return-value]
         elif b == 0.5:
             return torch.sqrt(a)  # type: ignore[arg-type]
+    elif isinstance(a, Number):
+        if a == 1.0:
+            return torch.fill(b, True)
+        if a == 2.0 and (
+            utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
+        ):
+            return torch.exp2(b)
+
     return prims.pow(a, b)
 
 
@@ -1124,10 +1132,8 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
-    if isinstance(a, TensorLike) and a.dtype != dtype:
-        a = prims.to_dtype(a, dtype)
-    if isinstance(b, TensorLike) and b.dtype != dtype:
-        b = prims.to_dtype(b, dtype)
+    a = _maybe_convert_to_dtype(a, dtype)
+    b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
     return pow(a, b)
@@ -2920,12 +2926,6 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeT
     return x
 
 
-def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
-    for dim in reversed(sorted(dimensions)):
-        x = torch.squeeze(x, dim)
-    return x
-
-
 @register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
@@ -2974,8 +2974,8 @@ def native_group_norm(
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
+    mean = torch.squeeze(mean, reduction_dims)
+    rstd = torch.squeeze(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
@@ -4129,7 +4129,7 @@ def new_zeros(
 
     return torch.full(
         size,
-        False if dtype == torch.bool else 0,
+        False if (dtype or a.dtype) == torch.bool else 0,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4181,7 +4181,7 @@ def new_ones(
 
     return torch.full(
         size,
-        True if dtype == torch.bool else 1,
+        True if (dtype or a.dtype) == torch.bool else 1,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4428,7 +4428,7 @@ def logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return prims.to_dtype(torch.pow(base, ret), dtype)
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
 
 
 @overload
@@ -4693,10 +4693,50 @@ def full_like(
     return fill(e, fill_value)
 
 
-zeros_like = partial(full_like, fill_value=False)
+@register_decomposition(aten.zeros_like)
+def zeros_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        False if (dtype or a.dtype) == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
-ones_like = partial(full_like, fill_value=True)
+@register_decomposition(aten.ones_like)
+def ones_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    return torch.full_like(
+        a,
+        True if (dtype or a.dtype) == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
 
 
 @register_decomposition(aten.randn.default)
@@ -5004,8 +5044,8 @@ def tril_indices(
     b = m_first_row - 0.5
     row_inds1 = torch.floor(-b + torch.sqrt(b * b + 2 * xs1))
     col_inds1 = torch.floor(xs1 - (2 * m_first_row - 1 + row_inds1) * row_inds1 * 0.5)
-    row_inds1 = prims.to_dtype(row_inds1 + row_offset, dtype)
-    col_inds1 = prims.to_dtype(col_inds1, dtype)
+    row_inds1 = _maybe_convert_to_dtype(row_inds1 + row_offset, dtype)
+    col_inds1 = _maybe_convert_to_dtype(col_inds1, dtype)
 
     # then bottom rectangle
     xs2 = arange_kw(0, rectangle_size, dtype=dtype)
@@ -5068,8 +5108,8 @@ def triu_indices(
     b = -0.5 - m_first_row
     row_inds1 = torch.floor(-b - torch.sqrt(b * b - 2 * xs1))
     col_inds1 = torch.floor(xs1 - ((2 * m_first_row - 1 - row_inds1) * row_inds1) * 0.5)
-    row_inds1 = prims.to_dtype(row_inds1, dtype)
-    col_inds1 = prims.to_dtype(col_inds1, dtype)
+    row_inds1 = _maybe_convert_to_dtype(row_inds1, dtype)
+    col_inds1 = _maybe_convert_to_dtype(col_inds1, dtype)
 
     if col:
         row_inds1 = row_inds1 + (rectangle_size // col)
@@ -5239,6 +5279,7 @@ true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
 exponential_ = _make_inplace(exponential)
+zero_ = _make_inplace(zero)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
