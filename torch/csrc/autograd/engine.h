@@ -254,7 +254,6 @@ struct TORCH_API Engine {
     // allocated inside Engine::execute and lives for the duration of execute
     std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     ThreadPoolShared() : num_workers_(0) {}
   };
 
