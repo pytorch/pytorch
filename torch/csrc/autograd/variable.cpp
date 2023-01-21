@@ -156,7 +156,7 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   return get_autograd_meta(self);
 }
 
-void update_cpp_hooks_on_new_gradfn(
+void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
     const std::shared_ptr<torch::autograd::Node>& new_fn) {
   // This function is called whenever the grad_fn of the tensor is
@@ -173,6 +173,11 @@ void update_cpp_hooks_on_new_gradfn(
   //     old grad_fn so hooks registered to the older version of the tensor
   //     will continue to be active.
   meta->cpp_hooks_list_ = nullptr;
+  const c10::impl::PyInterpreter* interp =
+      self.unsafeGetTensorImpl()->pyobj_slot()->pyobj_interpreter();
+  if (interp) {
+    (*interp)->reset_backward_hooks(self.unsafeGetTensorImpl());
+  }
   // (2) If there is a retains_grad hook registered, move that from the
   //     old cpp_hooks_list_ to the new one
   if (self.retains_grad()) {
@@ -215,7 +220,8 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
 
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
-  torch::autograd::impl::update_cpp_hooks_on_new_gradfn(self, self.grad_fn());
+  torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
+      self, self.grad_fn());
 }
 
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
@@ -728,7 +734,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       }
       diff_view_meta->set_attr_version(current_version);
 
-      torch::autograd::impl::update_cpp_hooks_on_new_gradfn(
+      torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
           self, diff_view_meta->grad_fn_);
     }
     return diff_view_meta->grad_fn_;
