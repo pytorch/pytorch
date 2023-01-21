@@ -6447,6 +6447,7 @@ class ExprPrinterTests(TestCase):
 
 
 if HAS_CUDA:
+
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
             def __init__(self):
