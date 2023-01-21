@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_foreach,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -163,12 +164,11 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {maximize}
         {differentiable}
 
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 def rprop(
     params: List[Tensor],
@@ -177,7 +177,7 @@ def rprop(
     step_sizes: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
     *,
@@ -192,8 +192,7 @@ def rprop(
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        foreach = _default_to_foreach([params, grads, prevs, step_sizes], differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
