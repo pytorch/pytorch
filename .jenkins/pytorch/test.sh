@@ -249,7 +249,7 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --include distributed/test_traceable_collectives --verbose
   assert_git_not_dirty
 }
 

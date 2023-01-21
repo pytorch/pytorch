@@ -9,7 +9,7 @@ New traceable, functional collectives.
   compiler: trace these ops with plain-old-data schemas, then choose how to lower them.
   eager: execute these 'functional' ops which in eager return AsyncCollectiveTensor subclasses,
          automatically calling .wait() on underlying/hidden async 'work' obj only when fed to
-         a downstream op. 
+         a downstream op.
 
 Issues:
 * Where should these ops live? Couldn't `import torch` if putting these ops in existing torch.distributed files
@@ -52,7 +52,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: Any):
             if isinstance(e, AsyncCollectiveTensor):
                 # print(f"unwrapping {e}")
-                e._work.wait()
+                e._work.wait()  # type: ignore[union-attr]
                 return e._tensor
             return e
 
@@ -76,7 +76,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 # ...
 # @impl(aten_cuda_lib, 'all_reduce')
 
-# TODO also support CPU. whats the right way to register to all backends or should i just enable CPU/CUDA?
+@torch._ops.ops.aten.all_reduce.default.py_impl(DispatchKey.CPU)
 @torch._ops.ops.aten.all_reduce.default.py_impl(DispatchKey.CUDA)
 def all_reduce(self, group_id, reduce_op):
     group = torch.ops.c10d.lookup_pg(torch.empty(()), group_id)

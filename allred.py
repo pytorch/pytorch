@@ -1,14 +1,11 @@
 import os
-from typing import Any, Optional
 import torch
-from torch._C import DispatchKey
 import torch.distributed as dist
 from functools import partial
 from torch._dynamo.utils import same
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.traceable_collectives import all_reduce
 from torch._C._distributed_c10d import _register_process_group
 from torch._dispatch.python import enable_python_dispatcher
 
@@ -34,6 +31,8 @@ if __name__ == '__main__':
     world_size = int(os.getenv("WORLD_SIZE"))
     torch.cuda.set_device(rank)
     dist.init_process_group(backend='nccl')
+
+    torch._inductor.config.debug = True
 
     # this is a useless thing to do for the simple case of using default pg.
     # however, i did it to demonstrate the API proposed, whereby pg as int is passed
