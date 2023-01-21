@@ -665,7 +665,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [8])
     arange = torch.ops.aten.arange.default(4, device = device(type='cpu'), pin_memory = False)
-    arange_1 = torch.ops.aten.arange.default(4, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    arange_1 = torch.ops.aten.arange.default(4, device = device(type='cpu'), dtype = torch.float32, pin_memory = False)
     index_put = torch.ops.aten.index_put.default(view_copy, [arange], arange_1);  view_copy = arange = arange_1 = None
     view_copy_1 = torch.ops.aten.view_copy.default(index_put, [4, 2]);  index_put = None
     view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [8])
