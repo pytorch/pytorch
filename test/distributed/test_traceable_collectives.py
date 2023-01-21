@@ -157,21 +157,21 @@ class TestCollectives(torch._dynamo.test_case.TestCase):
         dist.destroy_process_group()
         super().tearDownClass()
 
-    # inductor lowering isn't quite right
-    # def test_inductor_single_op(self):
-    #     def func(inp, *, pg_id):
-    #         ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
-    #         return ar
+    @unittest.skip("inductor lowering isn't quite right, buffer isn't allocated")
+    def test_inductor_single_op(self):
+        def func(inp, *, pg_id):
+            ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
+            return ar
 
-    #     pg = _get_default_group()
-    #     pg_id = _register_process_group(pg)
-    #     inputs = torch.ones(4, 4, device="cuda")
+        pg = _get_default_group()
+        pg_id = _register_process_group(pg)
+        inputs = torch.ones(4, 4, device="cuda")
 
-    #     with enable_python_dispatcher():
-    #         compiled = torch.compile(func)
-    #         out = compiled(inputs, pg_id=pg_id)
-    #         correct = func(inputs, pg_id=pg_id)
-    #         assert same(out, correct)
+        with enable_python_dispatcher():
+            compiled = torch.compile(func)
+            out = compiled(inputs, pg_id=pg_id)
+            correct = func(inputs, pg_id=pg_id)
+            assert same(out, correct)
 
     def test_dynamo_trace_allreduce(self):
         def func(inp, *, pg_id):
