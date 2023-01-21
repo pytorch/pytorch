@@ -1,10 +1,10 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
-import math
 
 import sympy
 
@@ -1540,8 +1540,10 @@ def _full(fill_value, device, dtype, size):
         value = value.value
 
     if isinstance(value, (int, float, sympy.Expr)):
+
         def inner_fn(index):
             return ops.constant(value, dtype)
+
     else:
         assert len(value.get_size()) == 0
         value_loader = value.make_loader()
@@ -3660,6 +3662,7 @@ register_inplace(aten.sigmoid_, sigmoid)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
+
 @register_lowering(aten.sym_stride)
 def sym_stride(a, dim):
     return a.get_stride()[dim]
@@ -3679,25 +3682,31 @@ def op_mul(a, b):
 def op_add(a, b):
     return a + b
 
+
 @register_lowering(operator.sub)
 def op_sub(a, b):
     return a - b
+
 
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
     return IndexingDiv(a, b)
 
+
 @register_lowering(operator.truediv)
 def op_truediv(a, b):
     return a / b
+
 
 @register_lowering(math.ceil)
 def op_ceil(a):
     return sympy.ceiling(a)
 
+
 @register_lowering(math.floor)
 def op_floor(a):
     return sympy.floor(a)
+
 
 @register_lowering(torch.sym_float)
 def op_sym_float(a):
