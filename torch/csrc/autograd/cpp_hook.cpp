@@ -48,5 +48,22 @@ variable_list CppFunctionTensorPreHook::operator()(
   return results;
 }
 
+// NOLINTNEXTLINE(modernize-pass-by-value)
+CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
+    std::function<at::TensorBase(const at::TensorBase&)> hook,
+    int value_idx)
+    : hook_(hook), value_idx_(value_idx) {}
+
+variable_list CppFunctionSingleTensorPreHook::operator()(
+    const variable_list& values) {
+  auto value = values[value_idx_];
+  auto res = hook_(value);
+  TORCH_INTERNAL_ASSERT(
+      !res.defined(),
+      "CppFunctionSingleTensorPreHook currently only supports hooks that don't return");
+  variable_list results(values);
+  return results;
+}
+
 } // namespace autograd
 } // namespace torch
