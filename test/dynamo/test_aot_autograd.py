@@ -1,19 +1,12 @@
 # Owner(s): ["module: dynamo"]
-import functools
 from unittest.mock import patch
 
 import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
-
-
-def compiler_safe_fn(gm, example_inputs, is_safe):
-    is_safe[0] = is_aot_autograd_safe_to_run(gm, example_inputs)
-    return gm.forward
 
 
 class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
@@ -30,10 +23,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 self_mod_model_lstm_lstm = self.self_mod_model_lstm_lstm(permute)
                 return (self_mod_model_lstm_lstm,)
 
-        is_safe = [True]
         mod = Repro()
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_mod = torch._dynamo.optimize(compiler_fn)(mod)
+
+        aot_mod = torch._dynamo.optimize("aot_eager")(mod)
 
         args = [((92, 4, 64), (1, 5888, 92), torch.float32, "cpu", False)]
         args = [
@@ -41,8 +33,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
 
-        aot_mod(*args)
-        self.assertTrue(not is_safe[0])
+        eager_result = mod(*args)
+        aot_result = aot_mod(*args)
+        self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
 
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301
@@ -57,11 +50,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(4)
         x = torch.nn.Parameter(torch.randn(4))
-        is_safe = [True]
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
-        aot_fn(x, y)
-        self.assertTrue(is_safe[0])
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "a leaf Variable that requires grad is being used in an in-place operation.",
+        ):
+            aot_fn(x, y)
 
     def test_mutation1(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
@@ -86,11 +80,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(torch.Size([12, 4, 256, 513]))
         y = torch.randn(torch.Size([12, 3, 512, 513]))
-        is_safe = [True]
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
         aot_fn(x, y)
-        self.assertTrue(is_safe[0])
 
     def test_negative_testing_mutation(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
@@ -116,11 +107,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(torch.Size([12, 4, 256, 513]))
         y = torch.randn(torch.Size([12, 3, 512, 513]))
-        is_safe = [True]
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
         aot_fn(x, y)
-        self.assertTrue(is_safe[0])
 
     def test_negative_testing(self):
         def fn(x, y):
@@ -128,11 +116,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(4)
         x = torch.randn(4)
-        is_safe = [True]
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
         aot_fn(x, y)
-        self.assertTrue(is_safe[0])
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -159,13 +144,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         graph, _ = torch._dynamo.export(mod, rx)
 
         # Run exported graph with AOT
-        is_safe = [True]
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(graph)
+        aot_fn = torch._dynamo.optimize("aot_eager")(graph)
         aot_fn(rx)
-        self.assertTrue(is_safe[0])
 
     def test_call_fn_with_non_const_inputs_aot_unsafe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -199,12 +181,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
 
         # Run exported graph with AOT
-        is_safe = [True]
-
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(graph)
-        aot_fn(x, y)
-        self.assertTrue(is_safe[0])
+        aot_fn = torch._dynamo.optimize("aot_eager")(graph)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "a leaf Variable that requires grad is being used in an in-place operation.",
+        ):
+            aot_fn(x, y)
 
     def test_call_fn_with_non_const_inputs_aot_unsafe_control_flow(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -276,12 +258,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         # Run fn with AOT
         torch._dynamo.reset()
-        is_safe = [True]
 
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch._dynamo.optimize(compiler_fn)(optimized_mod)
+        aot_fn = torch._dynamo.optimize("aot_eager")(optimized_mod)
         aot_fn(x, y)
-        self.assertTrue(is_safe[0])
 
     # Note: Dynamo recompilation guarding invalid grad
     #

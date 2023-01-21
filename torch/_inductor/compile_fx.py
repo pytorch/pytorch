@@ -13,10 +13,7 @@ import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.optimizations.normalize import normalize_ir
-from torch._dynamo.optimizations.training import (
-    aot_autograd,
-    is_aot_autograd_safe_to_run,
-)
+from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
@@ -369,10 +366,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
 ):
     """Main entrypoint to a compile given FX graph"""
-
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
-        log.warning("Aot Autograd is not safe to run, so falling back to eager")
-        return model_
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True

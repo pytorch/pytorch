@@ -322,6 +322,11 @@ class VariableBuilder:
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
+            if (
+                isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
+                and not config.allow_rnn
+            ):
+                unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
             if mutation_guard.is_dynamic_nn_module(value):
                 # created dynamically, don't specialize on it
                 result = UnspecializedNNModuleVariable(
