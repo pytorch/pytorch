@@ -13,7 +13,6 @@ from caffe2.python import workspace, core
 from caffe2.proto import caffe2_pb2
 import enum
 import logging
-from future.utils import viewitems, viewvalues
 import caffe2.python._import_c_extension as C
 
 log = logging.getLogger("memonger")
@@ -439,7 +438,7 @@ def topological_sort_traversal_longest_path(g):
     gt = _add_single_target_ifneeded(g)
     source_nodes = _find_source_nodes(gt)
     lpaths = _get_longest_paths(gt, source_nodes)
-    tree, root = _build_tree(list(viewvalues(lpaths)))
+    tree, root = _build_tree(list(lpaths.values()))
     sorted_sources = _sort_tree_leaves(tree, root)
     assert(sorted(sorted_sources) == sorted(source_nodes))
 
@@ -729,7 +728,7 @@ def compute_assignments(ranges, static_blobs, algo):
     # be consumed externally. Sort these to the end of the list as opposed
     # to the beginning so that they can be shared as well.
     ranges = sorted(
-        viewitems(ranges),
+        ranges.items(),
         key=lambda p: (p[1].used is None, p[1].used),
     )
     # Update None values
@@ -822,7 +821,7 @@ def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
                 step_arg.n.external_input[i] = canonical_name(einp)
 
     # Store renamings
-    for blob, renamed in viewitems(blob_assignments):
+    for blob, renamed in blob_assignments.items():
         if blob in list(op.input) + list(op.output):
             a = caffe2_pb2.Argument()
             a.name = blob + ".rename"
@@ -983,7 +982,7 @@ def compute_statistics(assignments):
     blob_bytes = {
         blob: blob_nbytes(blob) for assignment in assignments
         for (blob, _) in assignment}
-    baseline_nbytes = sum(viewvalues(blob_bytes))
+    baseline_nbytes = sum(blob_bytes.values())
     optimized_nbytes = sum(
         max(blob_bytes[blob] for (blob, _) in assignment)
         for assignment in assignments)
