@@ -343,13 +343,13 @@ test_inductor_benchmark_perf() {
 
 # No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench 0
-  test_aot_eager_benchmark huggingface 0
-  test_aot_eager_benchmark timm_models 0
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
+  test_aot_eager_benchmark huggingface ""
+  test_aot_eager_benchmark timm_models ""
 }
 
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface 0
+  test_inductor_benchmark huggingface ""
 }
 
 test_inductor_huggingface_perf() {
@@ -373,7 +373,7 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench 0
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
 }
 
 test_inductor_torchbench_perf() {
