@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
@@ -1537,7 +1538,8 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
-    if isinstance(value, (int, float)):
+
+    if isinstance(value, (int, float, sympy.Expr)):
 
         def inner_fn(index):
             return ops.constant(value, dtype)
@@ -3661,6 +3663,11 @@ def sym_size(a, dim):
     return a.get_size()[dim]
 
 
+@register_lowering(aten.sym_stride)
+def sym_stride(a, dim):
+    return a.get_stride()[dim]
+
+
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
     return a.get_numel()
@@ -3676,9 +3683,34 @@ def op_add(a, b):
     return a + b
 
 
+@register_lowering(operator.sub)
+def op_sub(a, b):
+    return a - b
+
+
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
     return IndexingDiv(a, b)
+
+
+@register_lowering(operator.truediv)
+def op_truediv(a, b):
+    return a / b
+
+
+@register_lowering(math.ceil)
+def op_ceil(a):
+    return sympy.ceiling(a)
+
+
+@register_lowering(math.floor)
+def op_floor(a):
+    return sympy.floor(a)
+
+
+@register_lowering(torch.sym_float)
+def op_sym_float(a):
+    return a
 
 
 @register_lowering(aten._foobar)

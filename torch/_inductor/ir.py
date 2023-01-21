@@ -2050,7 +2050,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        return str(self.shape)
+        return str(V.graph.sizevars.simplify(self.shape))
 
 
 @dataclasses.dataclass
@@ -2514,6 +2514,8 @@ class ExternKernel(InputsKernel):
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
+                if isinstance(arg, sympy.Expr):
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
@@ -3018,8 +3020,8 @@ class FallbackKernel(ExternKernelAlloc):
                     FixedLayout(
                         output.device,
                         output.dtype,
-                        [sympy.Integer(s) for s in output.size()],
-                        [sympy.Integer(s) for s in output.stride()],
+                        convert_shape_to_inductor(output.size()),
+                        convert_shape_to_inductor(output.stride()),
                     ),
                     packed,
                     index,

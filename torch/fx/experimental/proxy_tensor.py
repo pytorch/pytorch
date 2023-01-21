@@ -392,7 +392,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
-        super().__init__()
+        super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
 
