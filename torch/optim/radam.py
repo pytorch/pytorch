@@ -331,7 +331,7 @@ def _multi_tensor_radam(
         bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         bias_correction2 = [1 - beta2 ** _get_value(step) for step in grouped_state_steps]
         if weight_decay != 0:
-            torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_mul_(grouped_exp_avgs, beta1)
