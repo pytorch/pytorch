@@ -157,6 +157,11 @@ _SKIP_PYTHON_BINDINGS = [
     "_nested_tensor_offsets",  # don't want to expose this to python
     "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
     "_nested_view_from_buffer_copy",
+    "_to_sparse_copy",
+    "_to_sparse_csr_copy",
+    "_to_sparse_csc_copy",
+    "_to_sparse_bsr_copy",
+    "_to_sparse_bsc_copy",
 ]
 
 SKIP_PYTHON_BINDINGS = list(
