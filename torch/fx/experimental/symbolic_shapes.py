@@ -52,7 +52,7 @@ SYM_FUNCTION_MODE = None
 #     invoked your API with; e.g., if you call torch.ops.aten.foo(a, b),
 #     you get (a, b) as args to your call.  In SymDispatchMode, if
 #     you call a + b (where a and b are SymInts), you will get
-#     (a.get_pyobj(), b.get_pyobj()) as your args (these are PySymInts)
+#     (a.node, b.node) as your args (these are PySymInts)
 #
 #   - SymInt/PySymInt don't have FX proxy support (unlike, e.g., Tensor).
 #     So you have to manually call Tracer/create_node to write into

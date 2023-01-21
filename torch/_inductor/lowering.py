@@ -17,6 +17,7 @@ from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
+    is_float_dtype,
     is_integer_dtype,
     Number,
 )
@@ -289,7 +290,7 @@ def promote_constants(inputs, override_return_dtype=None):
             *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
         return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
-    ex = next(x for x in inputs if isinstance(x, TensorBox))
+    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
@@ -1586,10 +1587,6 @@ def tensor_constructor(fill_value):
     return inner
 
 
-zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
-ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
-
-
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
@@ -1638,12 +1635,9 @@ def constant_like(fill_value):
 
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
-zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
-ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
+ones_like = create_tensor_like(tensor_constructor(1))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-
-register_lowering(aten.zero)(zeros_like)
 
 
 def new_constant(fill_value):
@@ -1659,10 +1653,6 @@ def new_constant(fill_value):
         return _full(fill_value, device, dtype, size)
 
     return _new_constant
-
-
-register_lowering(aten.new_zeros)(new_constant(0))
-register_lowering(aten.new_ones)(new_constant(1))
 
 
 @register_lowering(aten.new_empty)
@@ -3381,8 +3371,14 @@ def pow(a, b):
             inner_fn=fn,
             ranges=a.get_size(),
         )
-    else:
-        return pow_native(a, b)
+
+    if isinstance(a, Number):
+        if a == 1:
+            return full_like(b, 1)
+        if a == 2 and is_float_dtype(b.get_dtype()):
+            return exp2(b)
+
+    return pow_native(a, b)
 
 
 def mutate_to(changed, val):
@@ -3416,11 +3412,6 @@ def mutate_to(changed, val):
 @register_lowering(aten.fill_)
 def fill_(x, fill_value):
     return mutate_to(x, full_like(x, fill_value))
-
-
-@register_lowering(aten.zero_)
-def zero_(x):
-    return mutate_to(x, full_like(x, 0))
 
 
 @register_lowering(aten.copy_, type_promotion_kind=None)
@@ -3549,6 +3540,14 @@ exp = register_pointwise(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
 )
+exp2 = register_pointwise(
+    aten.exp2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+expm1 = register_pointwise(
+    aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
     aten.sigmoid,
@@ -3590,11 +3589,6 @@ register_lowering(
 
 register_pointwise(
     aten.log1p,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-register_pointwise(
-    aten.expm1,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
@@ -3666,6 +3660,10 @@ register_inplace(aten.sigmoid_, sigmoid)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
+@register_lowering(aten.sym_stride)
+def sym_stride(a, dim):
+    return a.get_stride()[dim]
+
 
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
@@ -3682,7 +3680,7 @@ def op_add(a, b):
     return a + b
 
 @register_lowering(operator.sub)
-def op_add(a, b):
+def op_sub(a, b):
     return a - b
 
 @register_lowering(operator.floordiv)

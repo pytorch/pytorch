@@ -247,36 +247,8 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        left = sympy.expand(left)
-        right = sympy.expand(right)
-        if left == right:
-            return left
-        expr = self.simplify(left - right)
-        assert self.size_hint(expr) == 0, (expr, self.size_hint(expr))
-        free = list(expr.free_symbols)
-        if len(free) == 0:
-            assert expr == 0
-            return left
-        elif len(free) in (1, 2, 3):
-            # remove the largest of the guarded variables
-            free.sort(key=self.size_hint)
-            try:
-                solutions = sympy.solve(expr, free[-1])
-                if (
-                    len(solutions) == 1
-                    and solutions[0]
-                    and "/" not in str(solutions[0])
-                ):
-                    self.replacements[free[-1]] = solutions[0]
-            except NotImplementedError:
-                pass
-
-        self.guards.append(ZeroGuard(expr))
-
-        if len(right.free_symbols) < len(left.free_symbols):
-            return right
-        else:
-            return left
+        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
