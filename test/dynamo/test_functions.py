@@ -713,6 +713,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @make_test
+    def test_torch_distributions_functions(x):
+        normal = torch.distributions.Normal(x, torch.tensor(1))
+        independent = torch.distributions.Independent(normal, 1)
+        return independent.log_prob(x)
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
