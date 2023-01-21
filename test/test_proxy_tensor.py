@@ -304,7 +304,7 @@ class TestGenericProxyTensor(TestCase):
 
 
 def forward(self, x_1):
-    zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    zeros = torch.ops.aten.zeros.default([2], device = device(type='cpu'), dtype = torch.float32, pin_memory = False)
     copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
     return copy_
     """)
