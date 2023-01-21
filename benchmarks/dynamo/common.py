@@ -76,7 +76,9 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
+    "moco",  # Please convert all Tensors to FakeTensors first
     "hf_BigBird",  # OOM
+    "tacotron2",  # AssertionError: Deduped args out of bounds
     # Huggingface
     "BartForConditionalGeneration",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
@@ -91,7 +93,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
-    "tacotron2",  # AssertionError: Deduped args out of bounds
     "vision_maskrcnn",
     # Huggingface
     "M2M100ForConditionalGeneration",  # OOM
