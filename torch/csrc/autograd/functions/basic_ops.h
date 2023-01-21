@@ -69,7 +69,6 @@ struct TORCH_API UndefinedGradBackward : public Node {
 };
 
 struct TORCH_API GraphRoot : public Node {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)), outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current

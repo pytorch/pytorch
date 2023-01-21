@@ -381,6 +381,16 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, err):
                 gx.backward()
 
+        # create_graph=False
+        def f4(x):
+            y = x.sin().exp()
+            return y
+
+        compiled_f4 = torch.compile(backend="aot_eager")(f4)
+        x = torch.tensor(1.0, requires_grad=True)
+        y = compiled_f4(x)
+        (gx,) = torch.autograd.grad(y, x, create_graph=False, grad_outputs=grad_output)
+
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles(self):
         class F(torch.nn.Module):

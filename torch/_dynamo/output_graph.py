@@ -48,7 +48,6 @@ from .utils import (
     clone_inputs,
     count_calls,
     counters,
-    dynamo_timed,
     format_graph_tabular,
     same,
 )
@@ -625,7 +624,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
-    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         try:
             name = (
@@ -780,6 +778,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
