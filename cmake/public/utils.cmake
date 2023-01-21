@@ -512,15 +512,6 @@ function(torch_compile_options libname)
 
 endfunction()
 
-
-##############################################################################
-# Set standard target properties.
-# Usage:
-#   torch_set_target_props(lib_name)
-function(torch_set_target_props libname)
-endfunction()
-
-
 ##############################################################################
 # Set old-style FindCuda.cmake compile flags from modern CMake cuda flags.
 # Usage:
