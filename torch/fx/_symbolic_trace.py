@@ -429,10 +429,13 @@ class Tracer(TracerBase):
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
         """
-        module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        #module_qualified_name = self.path_of_module(m)
+        #if not self.is_leaf_module(m, module_qualified_name):
+        #    return forward(*args, **kwargs)
+        #return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+
+        # Calling into forward can expand sub-modules into ops in the traced graph.
+        return forward(*args, **kwargs)
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
@@ -1066,12 +1069,45 @@ def symbolic_trace(
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
     """
-    tracer = Tracer()
-    graph = tracer.trace(root, concrete_args)
-    name = (
-        root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
-    )
-    return GraphModule(tracer.root, graph, name)
+    _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full", "empty"]
+
+    def gen_constructor_wrapper(target):
+        @functools.wraps(target)
+        def wrapper(*args, **kwargs):
+            proxy = None
+
+            def check_has_proxy(v):
+                if isinstance(v, torch.fx.Proxy):
+                    nonlocal proxy
+                    proxy = v
+            torch.fx.node.map_aggregate(args, check_has_proxy)
+            torch.fx.node.map_aggregate(kwargs, check_has_proxy)
+
+            if proxy is not None:
+                return proxy.tracer.create_proxy('call_function', target, args, kwargs)
+            else:
+                return target(*args, **kwargs)
+        return wrapper, target
+
+    patched_torch_methods = {
+        target: gen_constructor_wrapper(getattr(torch, target)) for target in _TORCH_METHODS_TO_PATCH
+    }
+    orig_fns = set()
+
+    for name, (wrapper, orig) in patched_torch_methods.items():
+        setattr(torch, name, wrapper)
+        orig_fns.add(orig)
+
+    try:
+        tracer = Tracer()
+        graph = tracer.trace(root, concrete_args)
+        name = (
+            root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
+        )
+        return GraphModule(tracer.root, graph, name)
+    finally:
+        for name, (_, orig) in patched_torch_methods.items():
+            setattr(torch, name, orig)    
 
 
 @wrap

@@ -143,8 +143,24 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
-    # first construct a tensor with the correct dtype/device
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.utils._mode_utils import no_dispatch
+    from torch.utils._python_dispatch import _get_current_dispatch_mode
+    mode = _get_current_dispatch_mode()
+    if isinstance(mode, FakeTensorMode):
+        # Create a real tensor and then convert it to FakeTensor.
+        # We cannot directly create a FakeTensor because it tensor.set_(...)
+        # is not supported in FakeTensorMode dispatcher.
+
+        with no_dispatch():
+            # First construct a tensor with the correct dtype/device.
+            t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+            # Set storage (i.e., content) of the newly created tensor.
+            t.set_(storage._untyped_storage, storage_offset, size, stride)
+        return mode.from_tensor(t)
+    # First construct a tensor with the correct dtype/device.
     t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    # Set storage (i.e., content) of the newly created tensor.
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
