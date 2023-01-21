@@ -4162,7 +4162,7 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([], device = 'cpu', dtype = torch.float32, pin_memory = False)
     add = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
     view_copy = torch.ops.aten.view_copy.default(add, [4])
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
