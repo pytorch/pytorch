@@ -430,7 +430,6 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 MultiheadAttentionImpl::MultiheadAttentionImpl(
     const MultiheadAttentionOptions& options_)
     : Module("torch::nn::MultiheadAttention"), options(options_) {

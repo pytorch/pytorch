@@ -1349,8 +1349,8 @@ def native_batch_norm_helper(
 
         output = (input - mean) * rstd
 
-        save_mean = _squeeze_multiple(mean, reduction_dims)
-        save_rstd = _squeeze_multiple(rstd, reduction_dims)
+        save_mean = torch.squeeze(mean, reduction_dims)
+        save_rstd = torch.squeeze(rstd, reduction_dims)
         if running_mean is not None:
             new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
             if not functional:
@@ -1360,7 +1360,7 @@ def native_batch_norm_helper(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            squeezed_var = _squeeze_multiple(biased_var, reduction_dims)
+            squeezed_var = torch.squeeze(biased_var, reduction_dims)
             unbiased_var = squeezed_var * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
@@ -1925,16 +1925,6 @@ def _index_copy(
         return x
     else:
         return out.squeeze(0) if zero_dim else out.contiguous()
-
-
-def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
-    ndim = self.dim()
-    wrapped_dims = utils.canonicalize_dims(ndim, dims)
-    assert isinstance(wrapped_dims, tuple)
-    for idx in range(ndim - 1, -1, -1):
-        if idx in wrapped_dims:
-            self = self.squeeze(idx)
-    return self
 
 
 # nb: Should use acc_t, not op_math
@@ -2754,16 +2744,6 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
-@register_decomposition(aten.zero)
-def zero(input: Tensor) -> Tensor:
-    return torch.fill(input, 0)
-
-
-@register_decomposition([aten.zeros_like])
-def zeros_like(self: Tensor, *args, **kwargs) -> Tensor:
-    return torch.full_like(self, 0, *args, **kwargs)
-
-
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -2773,12 +2753,24 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-register_inplace(aten.add_, aten.add)
-register_inplace(aten.sub_, aten.sub)
-register_inplace(aten.mul_, aten.mul)
-register_inplace(aten.relu_, aten.relu)
-register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.addbmm_, aten.addbmm)
+register_inplace(aten.addmm_, aten.addmm)
+register_inplace(aten.addmv_, aten.addmv)
+register_inplace(aten.baddbmm_, aten.baddbmm)
+register_inplace(aten.cumprod_, aten.cumprod)
+register_inplace(aten.fill_, aten.fill)
+register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
+register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.hardsigmoid_, aten.hardsigmoid)
+register_inplace(aten.index_put_, aten.index_put)
+register_inplace(aten.index_reduce_, aten.index_reduce)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
+register_inplace(aten.logit_, aten.logit)
+register_inplace(aten.relu_, aten.relu)
+register_inplace(aten.renorm_, aten.renorm)
+register_inplace(aten.round_, aten.round)
+register_inplace(aten.scatter_, aten.scatter)
+register_inplace(aten.scatter_add_, aten.scatter_add)
+register_inplace(aten.scatter_reduce_, aten.scatter_reduce)
 register_inplace(aten.silu_, aten.silu)
-register_inplace(aten.zero_, aten.zero)
