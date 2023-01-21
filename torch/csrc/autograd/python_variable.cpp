@@ -1943,13 +1943,46 @@ static PyObject* THPVariable_NewWithVar(
   // Make sure it is not set otherwise we would leak memory
   auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
       self_interpreter.get());
-  TORCH_CHECK(
-      !mb_obj.has_value() || !mb_obj.value(),
-      "Creating a new Tensor subclass ",
-      type->tp_name,
-      " but the raw Tensor object is already associated to a python object ",
-      "of type ",
-      mb_obj.value()->ob_type->tp_name);
+
+  // Under some circumstances, we may attempt to create a new Python
+  // object for a variable that already has a Python object.  The most common
+  // situation this can occur is if you have a TorchDispatchMode active that
+  // is returning a subclass from lift_fresh (which is invoked to
+  // appropriately "wrap" a constant tensor into whatever ambient modes are
+  // active.)
+  //
+  // In general, it is impossible to handle this case compositionally.
+  // Suppose you have a user call ATensor(...) when a mode is active that
+  // is transforming all ops to output BTensor, where ATensor and BTensor
+  // are completely unrelated subclasses and there is no way to compose them.
+  // There is no way to satisfy the user request here; we must error.
+  //
+  // However, a more common case is a user just called torch.Tensor(...),
+  // and a fake tensor mode is active, and you really just want a FakeTensor
+  // to pop out of the constructor call.  This case is compositional because
+  // FakeTensor is a subclass of Tensor, so it's valid for us to return it
+  // in place of a Tensor.  So this is what we do.
+
+  if(mb_obj.has_value() && mb_obj.value()) {
+    PyObject* obj = *mb_obj;
+    // Check if it's OK to just directly return the Python object without
+    // allocating a new variable.  We just check that the existing Python
+    // object is a subclass of the requested type.
+    int r = PyObject_IsSubclass(PyObject_Type(obj), (PyObject*)type);
+    if (r == -1) {
+      throw python_error();
+    }
+    if (r == 1) {
+      return obj;
+    }
+    TORCH_CHECK(
+        0,
+        "Creating a new Tensor subclass ",
+        type->tp_name,
+        " but the raw Tensor object is already associated to a python object ",
+        "of type ",
+        mb_obj.value()->ob_type->tp_name);
+  }
 
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
