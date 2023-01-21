@@ -52,7 +52,7 @@ $MAYBE_SUDO pip -q uninstall -y coverage
 # CircleCI, so we host a copy on S3 instead
 $MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
 $MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-$MAYBE_SUDO pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
+$MAYBE_SUDO pip -q install hypothesis==4.57.1
 
 ##############
 # ONNX tests #
