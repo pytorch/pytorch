@@ -22,19 +22,20 @@ namespace at::native {
 const char exp2_name[] = "exp2_kernel";
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "exp2_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "exp2_cuda", [&]() {
       jitted_gpu_kernel</*name=*/exp2_name,
                         /*return_dtype=*/ scalar_t,
                         /*common_dtype=*/ scalar_t,
                         /*arity=*/ 1>(iter, exp2_string);
       });
   #else
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         ScalarType::Half, ScalarType::BFloat16,
         iter.common_dtype(), "exp2_cuda",
         [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-            return ::exp2(a);
+            return exp2_impl(a);
           });
         });
   #endif
