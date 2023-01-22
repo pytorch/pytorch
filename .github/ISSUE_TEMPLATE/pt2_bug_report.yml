@@ -1,6 +1,6 @@
 name: 🐛 torch.compile Bug Report
 description: Create a report to help us reproduce and fix the bug
-labels: ["bug"]
+labels: ["oncall: pt2"]
 
 body:
   - type: markdown
