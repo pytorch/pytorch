@@ -142,8 +142,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
       AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
-        grad_inputs[i] = std::move(result); // NOLINT(bugprone-use-after-move)
+        grad_inputs[i] = result;
       } else {
         grad_inputs[i] = std::move(res[i]);
       }
