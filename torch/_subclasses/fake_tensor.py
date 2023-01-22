@@ -582,13 +582,13 @@ class FakeTensor(torch.Tensor):
         # normalize cuda device.
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        self.fake_device = device
-        self.fake_mode = fake_mode
-        self.constant = constant
+        self.fake_device = device  # type: ignore[attr-defined]
+        self.fake_mode = fake_mode  # type: ignore[attr-defined]
+        self.constant = constant  # type: ignore[attr-defined]
         if FakeTensorConfig.debug:
             import traceback
 
-            self._debug_trace = traceback.extract_stack()
+            self._debug_trace = traceback.extract_stack()  # type: ignore[attr-defined]
         return self
 
     # In some circumstances, a conventional torch.Tensor constructor
