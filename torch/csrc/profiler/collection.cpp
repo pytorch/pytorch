@@ -1129,12 +1129,16 @@ RecordQueue::getRecords(
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
+        time_t start_time_ns;
+        if constexpr (std::is_same<
+                          typename std::remove_reference<decltype(i)>::type,
+                          ExtraFields<EventType::Backend>>::value) {
+          start_time_ns = i.start_time_us_ * 1000;
+        } else {
+          start_time_ns = converter(i.start_time_);
+        }
         out.emplace_back(Result::create(
-            /*start_time_ns_=*/c10::guts::if_constexpr<std::is_same<
-                typename std::remove_reference<decltype(i)>::type,
-                ExtraFields<EventType::Backend>>::value>(
-                [&](auto _) { return _(i).start_time_us_ * 1000; },
-                [&](auto _) { return converter(_(i).start_time_); }),
+            /*start_time_ns_=*/start_time_ns,
             /*start_tid_=*/queue.tid(),
             /*kineto_info_=*/queue.kineto_info(),
             /*extra_fields_=*/std::move(i)));
