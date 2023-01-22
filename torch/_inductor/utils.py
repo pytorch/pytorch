@@ -90,20 +90,6 @@ def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy
     ]
 
 
-def convert_shape_to_symint(
-    lst: List[Union[int, sympy.Expr]]
-) -> List[Union[torch.SymInt]]:
-    """
-    Takes a list of shapes from Inductor and converts them into symints (or just
-    ints if all shapes are static).
-    """
-    if all(isinstance(i, int) for i in lst):
-        return lst
-    if all(isinstance(i, sympy.Integer) for i in lst):
-        return [int(i) for i in lst]
-    return [V.graph.sizevars.shape_env.create_symintnode(i) for i in lst]
-
-
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []

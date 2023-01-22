@@ -33,7 +33,6 @@ from .utils import (
     argsort,
     cache_on_self,
     convert_shape_to_inductor,
-    convert_shape_to_symint,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -126,6 +125,18 @@ def reads_from_conv(buf, var_ranges):
             if read_from_conv:
                 return True, addr
     return False, None
+
+
+def convert_shape_to_symint(lst: List[Union[int, sympy.Expr]]) -> List[torch.SymInt]:
+    """
+    Takes a list of shapes from Inductor and converts them into symints (or just
+    ints if all shapes are static).
+    """
+    if all(isinstance(i, int) for i in lst):
+        return lst
+    if all(isinstance(i, sympy.Integer) for i in lst):
+        return [int(i) for i in lst]
+    return [V.graph.sizevars.shape_env.create_symintnode(i) for i in lst]
 
 
 def ir_node_to_tensor(x, guard_shape=True):
