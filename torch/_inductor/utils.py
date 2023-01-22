@@ -92,11 +92,13 @@ def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy
 
 def convert_shape_to_symint(
     lst: List[Union[int, sympy.Expr]]
-) -> List[Union[torch.SymInt]]:
+) -> List[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
+    from .virtualized import V
+
     if all(isinstance(i, int) for i in lst):
         return lst
     if all(isinstance(i, sympy.Integer) for i in lst):
