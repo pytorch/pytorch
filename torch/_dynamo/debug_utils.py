@@ -411,9 +411,7 @@ def inductor_fails(fx_g, args, check_str=None):
             # Ensures that segfaults are surfaced
             torch.cuda.synchronize()
 
-    compile_fx_inner = import_module(
-        f"{config.inductor_import}.compile_fx"
-    ).compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     try:
         result = fx_g(*args)
@@ -421,7 +419,6 @@ def inductor_fails(fx_g, args, check_str=None):
         assert not any([isinstance(x, (tuple, list)) for x in result])
     except Exception:
         return False
-    result = None
 
     sync()
 
