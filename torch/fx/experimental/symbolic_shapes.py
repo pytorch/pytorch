@@ -215,6 +215,8 @@ class SymNode:
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
+        if len(self.expr.free_symbols) == 0:
+            return int(self.expr)
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
     # You can manually trigger a guard with this function
