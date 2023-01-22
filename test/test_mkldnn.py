@@ -304,16 +304,16 @@ class TestMkldnn(TestCase):
         input_shapes = (55, 55)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
         for train, bias, dilation, groups in options:
-            # skip tests for ConvTransposed2d with groups
-            # lift this when groups are enabled.
-            if conv_module is torch.nn.ConvTranspose2d:
-                groups = 1
-
             N = torch.randint(3, 10, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes
             x = torch.randn(x_shape, dtype=dtype)
+
+            # TODO: remove this when group depthwise is supported:
+            if conv_module is torch.nn.ConvTranspose2d and groups > 1 and C == groups:
+                continue
+
             # conv1: mkldnn conv in contiguous memory format (nchw)
             # conv2: mkldnn conv in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
@@ -391,8 +391,6 @@ class TestMkldnn(TestCase):
                                     dilation=dilation,
                                     bias=bias,
                                     groups=groups).to(dtype=torch.float32)
-            print(data.size(), data.stride())
-            print(conv)
             x = data.clone()
             x_ref = x.clone()
             if train:
