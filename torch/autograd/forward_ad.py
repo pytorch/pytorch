@@ -1,9 +1,10 @@
 import torch
 import os
-from .grad_mode import _DecoratorContextManager
-from collections import namedtuple
 
-from typing import Any
+from dataclasses import dataclass
+from .grad_mode import _DecoratorContextManager
+
+from typing import Any, Optional
 
 __all__ = ["UnpackedDualTensor", "enter_dual_level", "exit_dual_level", "make_dual", "unpack_dual", "dual_level"]
 
@@ -102,13 +103,27 @@ def make_dual(tensor, tangent, *, level=None):
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
-_UnpackedDualTensor = namedtuple('_UnpackedDualTensor', ['primal', 'tangent'])
+# NOTE: This class was originally implemented as namedtuple, which is internally considered as a
+# container by `torch.utils.pytree`. So tree-flatten operations will flatten the namedtuple into two
+# leaves. Refactor this class to dataclass to prevent this behavior.
+@dataclass(eq=True, order=True, unsafe_hash=True, frozen=True)
+class UnpackedDualTensor:
+    r"""A dataclass contains ``(primal, tangent)`` returned by :func:`unpack_dual` containing the
+    primal and tangent components of the dual tensor.
 
+    See :func:`unpack_dual` for more details.
+    """
+    primal: torch.Tensor
+    tangent: Optional[torch.Tensor]
 
-class UnpackedDualTensor(_UnpackedDualTensor):
-    r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
-    See :func:`unpack_dual` for more details."""
-    pass
+    def __iter__(self):  # support for `primal, tangent = unpacked_dual_tensor`
+        return iter((self.primal, self.tangent))
+
+    def __getitem__(self, item):  # support for `unpacked_dual_tensor[0]`
+        return (self.primal, self.tangent)[item]
+
+    def __len__(self):  # support for `len(unpacked_dual_tensor)`
+        return 2
 
 
 def unpack_dual(tensor, *, level=None):
