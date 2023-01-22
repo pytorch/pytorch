@@ -102,6 +102,21 @@ class TestControlFlowTraced(TestCase):
 
         self.assertFalse(any([op._schema.is_mutable for op in all_ops_in_true_branch]))
 
+    def test_cond_retrace_functionalized(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f(x):
+            return cond(x.all(), true_fn, false_fn, (x,))
+
+        inp = torch.ones(1, 2)
+        gm_non_functional = make_fx(f, tracing_mode="real")(inp)
+        gm_functional = make_fx(functionalize(gm_non_functional), tracing_mode="real")(inp)
+        self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
+
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
             y = x.cos()
@@ -300,11 +315,11 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);
+            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [x_1]);
             pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);
+            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);
             pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
             add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
             return add
@@ -317,10 +332,9 @@ class TestControlFlowTraced(TestCase):
 
         code = graph.true_graph_0.code
         out = """
-        def forward(self, flat_args):
-            flat_args_1, = fx_pytree.tree_flatten_spec([flat_args], self._in_spec)
-            mul = torch.ops.aten.mul.Tensor(flat_args_1, flat_args_1);  flat_args_1 = None
-            return pytree.tree_unflatten([mul], self._out_spec)
+        def forward(self, y_1):
+            mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
+            return mul
         """
         # Normalization hack, cause .code makes some weird whitespace
         code = "".join(code.split())
@@ -463,11 +477,11 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);
+            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [x_1]);
             pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);
+            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);
             pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
             add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
             return add
@@ -480,10 +494,9 @@ class TestControlFlowTraced(TestCase):
 
         code = graph.true_graph_0.code
         out = """
-        def forward(self, flat_args):
-            flat_args_1, = fx_pytree.tree_flatten_spec([flat_args], self._in_spec)
-            mul = torch.ops.aten.mul.Tensor(flat_args_1, flat_args_1);  flat_args_1 = None
-            return pytree.tree_unflatten([mul], self._out_spec)
+        def forward(self, y_1):
+            mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
+            return mul
         """
         # Normalization hack, cause .code makes some weird whitespace
         code = "".join(code.split())
