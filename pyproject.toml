@@ -9,6 +9,7 @@ requires = [
     "setuptools",
     "cmake",
     "typing_extensions",
+    "future ; python_version<3",
     "six",
     "requests",
 ]
