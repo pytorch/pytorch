@@ -279,6 +279,7 @@ class TimmRunnner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
                 continue
