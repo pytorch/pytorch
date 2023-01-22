@@ -1,5 +1,4 @@
 blas=1.0
-cffi=1.15.1
 cmake=3.22.1
 mkl=2022.1.0
 mkl-include=2022.1.0
