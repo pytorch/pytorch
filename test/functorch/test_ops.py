@@ -41,7 +41,6 @@ from common_utils import (
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
 )
-from torch.autograd.function import _set_autograd_function_extension_enabled
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -366,7 +365,6 @@ aliasing_ops_list_return = {
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
@@ -443,7 +441,6 @@ class TestOperators(TestCase):
             self.assertEqual(result, expected)
             self.assertEqual(result_noncontig, expected)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
@@ -566,7 +563,6 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
@@ -642,7 +638,6 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             _test(f, inplace=True)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
@@ -708,7 +703,6 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapvjpvjp', vjp_fail.union({
         skip("atleast_1d"),  # Takes too long
@@ -905,7 +899,6 @@ class TestOperators(TestCase):
         # ---------------------------------------------------------------------
     })
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -999,7 +992,6 @@ class TestOperators(TestCase):
         # ----------------------------------------------------------------------
     }
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1038,7 +1030,6 @@ class TestOperators(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -1113,7 +1104,6 @@ class TestOperators(TestCase):
                     pass
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
@@ -1231,7 +1221,6 @@ class TestOperators(TestCase):
 
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
         skip('bernoulli', ''),  # vjpvmap testing can't handle randomness
@@ -1343,7 +1332,6 @@ class TestOperators(TestCase):
         else:
             self.assertEqual(jacobian_jvp, jacobian_vjp)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
         xfail('to_sparse', ''),  # NYI
@@ -1444,7 +1432,6 @@ class TestOperators(TestCase):
             expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
         # Following operatos take too long, hence skipped
@@ -1757,7 +1744,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
@@ -1918,7 +1904,6 @@ class TestOperators(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
                     vjp(f, torch.randn_like(without_grad))
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     # NOTE: [three-transform testing]
     # We only test the autograd_function_db tests here.
@@ -1971,7 +1956,6 @@ class TestOperators(TestCase):
                     self.assertEqual(result, expected)
 
     # See NOTE: [three-transform testing]
-    @_set_autograd_function_extension_enabled()
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vjpvmapvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
@@ -2009,7 +1993,6 @@ class TestOperators(TestCase):
                     self.assertEqual(result_vjps, expected_vjps)
 
     # See NOTE: [three-transform testing]
-    @_set_autograd_function_extension_enabled()
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vjpvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
@@ -2039,7 +2022,6 @@ class TestOperators(TestCase):
     # into another operator and we test jvp support for operators). So
     # we only test it on the things we're not sure about:
     # - the autograd.Function <> functorch interaction
-    @_set_autograd_function_extension_enabled()
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
@@ -2067,7 +2049,6 @@ class TestOperators(TestCase):
                 self.assertEqual(result, expected)
 
     # See NOTE: [three-transform testing]
-    @_set_autograd_function_extension_enabled()
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpvmapvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
@@ -2100,7 +2081,6 @@ class TestOperators(TestCase):
                     self.assertEqual(result, expected)
 
     # See NOTE: [three-transform testing]
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vmapjvpvmap', {
@@ -2136,7 +2116,6 @@ class TestOperators(TestCase):
                     self.assertEqual(result, expected)
 
     # See NOTE: [three-transform testing]
-    @_set_autograd_function_extension_enabled()
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpjvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
@@ -2165,7 +2144,6 @@ class TestOperators(TestCase):
                 self.assertEqual(result, expected)
 
     # See NOTE: [three-transform testing]
-    @_set_autograd_function_extension_enabled()
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable

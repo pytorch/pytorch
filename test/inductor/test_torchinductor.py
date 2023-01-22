@@ -188,6 +188,14 @@ class TestCase(TorchTestCase):
         cls._stack.close()
         super().tearDownClass()
 
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.reset()
+
 
 class ToTuple(torch.nn.Module):
     def forward(self, x):
