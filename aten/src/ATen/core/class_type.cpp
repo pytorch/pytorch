@@ -469,12 +469,12 @@ ClassTypePtr ClassType::create(
     bool is_module,
     std::string doc_string,
     std::vector<std::string> unresolved_class_attributes) {
-  return ClassTypePtr(new ClassType(
+  return std::make_shared<ClassType>(
       std::move(qualifiedName),
       std::move(cu),
       is_module,
       std::move(doc_string),
-      std::move(unresolved_class_attributes)));
+      std::move(unresolved_class_attributes));
 }
 
 ClassType::ClassType(

@@ -897,8 +897,7 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
 }
 
 InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {
-  return InterfaceTypePtr(
-      new InterfaceType(std::move(qualifiedName), is_module));
+  return std::make_shared<InterfaceType>(std::move(qualifiedName), is_module);
 }
 
 FunctionType::FunctionType(torch::jit::Function* function)
