@@ -1461,6 +1461,9 @@ def parse_args(args=None):
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
     )
     parser.add_argument(
+        "--exclude-exact", action="append", help="filter benchmarks with exact match"
+    )
+    parser.add_argument(
         "--total-partitions",
         type=int,
         default=1,
@@ -1818,6 +1821,7 @@ def run(runner, args, original_dir=None):
 
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+    args.exclude_exact = args.exclude_exact or []
 
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
@@ -1842,7 +1846,7 @@ def run(runner, args, original_dir=None):
                     - set(CI_SKIP_AOT_EAGER_TRAINING)
                 )
             else:
-                args.exclude = (
+                args.exclude_exact = (
                     CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
                     if args.training and args.dynamic_shapes
                     else CI_SKIP_AOT_EAGER_TRAINING
@@ -1850,7 +1854,7 @@ def run(runner, args, original_dir=None):
                     else CI_SKIP_AOT_EAGER_INFERENCE
                 )
         elif args.inductor:
-            args.exclude = (
+            args.exclude_exact = (
                 CI_SKIP_INDUCTOR_TRAINING
                 if args.training
                 else CI_SKIP_INDUCTOR_INFERENCE
