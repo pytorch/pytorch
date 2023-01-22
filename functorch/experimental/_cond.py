@@ -40,10 +40,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
-    flattened_inputs, spec = pytree.tree_flatten(operands)
     with disable_proxy_modes_tracing():
-        true_graph = make_fx(true_fn)(*flattened_inputs)
-        false_graph = make_fx(false_fn)(*flattened_inputs)
+        true_graph = make_fx(true_fn)(*operands)
+        false_graph = make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
