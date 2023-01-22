@@ -351,9 +351,9 @@ test_inductor_benchmark_perf() {
 # No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
   local exit_status=0
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" || exit_status=$?
-  test_aot_eager_benchmark huggingface "" || exit_status=$?
-  test_aot_eager_benchmark timm_models "" || exit_status=$?
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "$@" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" "$@" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" "$@" || exit_status=$?
   if [[ $exit_status -ne 0 ]]; then
     echo "Some benchmarks failed; scroll up for details"
   fi
@@ -864,7 +864,11 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   checkout_install_torchbench
   install_huggingface
   install_timm
-  test_aot_eager_all
+  if [[ "${TEST_CONFIG}" == *dynamic_aot_eager_all* ]]; then
+    test_aot_eager_all --dynamic-shapes
+  else
+    test_aot_eager_all
+  fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
