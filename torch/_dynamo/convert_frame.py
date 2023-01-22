@@ -270,7 +270,7 @@ def convert_frame_assert(
             frame,
         )
 
-    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
+    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
