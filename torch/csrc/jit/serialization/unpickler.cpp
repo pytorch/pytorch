@@ -1005,7 +1005,7 @@ std::string Unpickler::readBytes(size_t length) {
     // If the string is smallish, do a full buffer read,
     // and read out of that buffer.
     data.resize(length);
-    readSlowWithBuffer(&data[0], length);
+    readSlowWithBuffer(data.data(), length);
   } else {
     // Otherwise, for larger strings, read what we can from
     // the buffer, and then read directly to the destination.

@@ -434,9 +434,9 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
     if (vec.size() == 0) {
       return BufList(); // Return arbitrarily typed vector
-    } else if (c10::get_if<BufHandle>(&vec[0])) {
+    } else if (c10::get_if<BufHandle>(vec.data())) {
       return convertVecArgValue<BufHandle>(vec);
-    } else if (c10::get_if<int64_t>(&vec[0])) {
+    } else if (c10::get_if<int64_t>(vec.data())) {
       return convertVecArgValue<int64_t>(vec);
     }
     throw unsupported_dtype();
