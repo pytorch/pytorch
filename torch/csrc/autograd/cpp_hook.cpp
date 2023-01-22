@@ -3,6 +3,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <utility>
+
 namespace {
 using torch::autograd::Variable;
 void check_single_result(
@@ -13,7 +15,7 @@ void check_single_result(
     throw std::runtime_error(
         "can't replace a empty gradient with a non-empty value");
   }
-  torch::autograd::check_variable_result(value, result, hook_name);
+  torch::autograd::check_variable_result(value, result, std::move(hook_name));
 }
 } // namespace
 
