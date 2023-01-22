@@ -98,6 +98,7 @@ def convert_shape_to_symint(
     ints if all shapes are static).
     """
     from .virtualized import V
+
     if all(isinstance(i, int) for i in lst):
         return lst
     if all(isinstance(i, sympy.Integer) for i in lst):
