@@ -5218,6 +5218,7 @@ test_skips = {
     "test_output_strides_dynamic_shapes": ("cpu", "cuda"),
     "test_permute1_dynamic_shapes": ("cuda",),
     "test_permute2_dynamic_shapes": ("cpu", "cuda"),
+    "test_pixel_shuffle_channels_last_dynamic_shapes": ("cpu",),
     "test_pow1_dynamic_shapes": ("cuda",),
     "test_pow2_dynamic_shapes": ("cuda",),
     "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
