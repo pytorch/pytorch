@@ -52,13 +52,13 @@ RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
 
 TensorMetadata::TensorMetadata(
     const RawTensorMetadata& r,
-    const std::vector<int64_t>& sizes,
-    const std::vector<int64_t>& strides)
+    std::vector<int64_t> sizes,
+    std::vector<int64_t> strides)
     : RawTensorMetadataBase(r),
       weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
       device_{r.device_type_, r.device_index_},
-      sizes_{sizes},
-      strides_{strides} {
+      sizes_{std::move(sizes)},
+      strides_{std::move(strides)} {
   SOFT_ASSERT(r.weak_self_.has_value());
 }
 
