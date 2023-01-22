@@ -32,12 +32,7 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import (
-    convert_shape_to_inductor,
-    gather_origins,
-    get_dtype_size,
-    sympy_product,
-)
+from .utils import gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -67,9 +62,8 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
-            )
+            size = ex.size()
+            stride = ex.stride()
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 

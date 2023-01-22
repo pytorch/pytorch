@@ -32,8 +32,6 @@ from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
     cache_on_self,
-    convert_shape_to_inductor,
-    convert_shape_to_symint,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -129,14 +127,11 @@ def reads_from_conv(buf, var_ranges):
 
 
 def ir_node_to_tensor(x, guard_shape=True):
-    if not guard_shape:
-        shape_fn = V.graph.sizevars.size_hint
-    else:
-
-        def nop(x):
-            return x
-
-        shape_fn = nop
+    shape_fn = (
+        V.graph.sizevars.guard_static_shape
+        if guard_shape
+        else V.graph.sizevars.size_hint
+    )
     size = [shape_fn(s) for s in x.get_size()]
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]
@@ -144,8 +139,6 @@ def ir_node_to_tensor(x, guard_shape=True):
         stride = make_contiguous_strides_for(size)
     dtype = x.get_dtype()
     device = x.get_device()
-    size = convert_shape_to_symint(size)
-    stride = convert_shape_to_symint(stride)
     t = torch.empty_strided(
         size=size, stride=stride, dtype=dtype, device=device
     ).zero_()
@@ -226,12 +219,6 @@ class IndexingDiv(sympy.Function):
     """
 
     nargs = (2,)
-    precedence = 50  # precedence of mul  # noqa: F811
-
-    def _sympystr(self, printer):
-        base = printer.parenthesize(self.args[0], self.precedence)
-        divisor = printer.parenthesize(self.args[1], self.precedence)
-        return f"{base}//{divisor}"
 
     @classmethod
     def eval(cls, base, divisor):
@@ -1620,7 +1607,6 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -3212,8 +3198,8 @@ class Convolution(ExternKernelAlloc):
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
-            convert_shape_to_inductor(output_size),
-            convert_shape_to_inductor(strides),
+            output_size,
+            strides,
         )
 
         if bias is not None:
