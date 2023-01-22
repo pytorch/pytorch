@@ -459,7 +459,7 @@ def _export(
         decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
     # Apply decomposition table to the input graph.
     decomposed_module = proxy_tensor.make_fx(
-        module, decomposition_table=decomposition_table, tracing_mode="fake")(*args)
+        module, decomposition_table=decomposition_table, tracing_mode="fake", _allow_non_fake_inputs=True)(*args)
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
