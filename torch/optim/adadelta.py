@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _default_to_foreach
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
@@ -192,19 +192,9 @@ def adadelta(
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    # We try to use the foreach implementation on CUDA whenever possible since
-    # it is faster than the for-loop implementation. However, the foreach
-    # implementation is not differentiable, so we must check differentiable=False.
     # We still respect when the user inputs False for foreach.
     if foreach is None:
-        all_tensors = []
-        all_tensors.extend(params)
-        all_tensors.extend(grads)
-        all_tensors.extend(square_avgs)
-        all_tensors.extend(acc_deltas)
-        foreach = not torch.jit.is_scripting() and not differentiable and all(
-            p.is_cuda for p in all_tensors
-        )
+        foreach = _default_to_foreach([params, grads, square_avgs, acc_deltas], differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

@@ -483,9 +483,19 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
     if target_meta_tensor._base is not None:
         # The base that we want to replay our view off of might have a different shape than the view's original base.
         b = target_meta_tensor._base
-        reshaped_base_tensor = aliased_base_tensor.as_strided(
-            b.size(), b.stride(), b.storage_offset()
-        )
+        abt = aliased_base_tensor
+        # Don't unnecessarily call as_strided if nothing changed; as_strided's
+        # backward is poorly implemented and slow
+        if abt is not b and (
+            abt.size() != b.size() or
+            abt.stride() != b.stride() or
+            abt.storage_offset() != b.storage_offset()
+        ):
+            reshaped_base_tensor = aliased_base_tensor.as_strided(
+                b.size(), b.stride(), b.storage_offset()
+            )
+        else:
+            reshaped_base_tensor = aliased_base_tensor
         out = target_meta_tensor._view_func(reshaped_base_tensor)
         if out is not None:
             out.requires_grad_(target_requires_grad)
