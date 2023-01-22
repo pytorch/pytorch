@@ -257,7 +257,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       std::set<torch::profiler::impl::ActivityType> activities)
       : ProfilerStateBase(config),
         start_time_(getTimeUs()),
-        record_queue_(config, activities) {}
+        record_queue_(config, std::move(activities)) {}
   ~KinetoThreadLocalState() override = default;
 
   static KinetoThreadLocalState* get(bool global) {
