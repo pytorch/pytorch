@@ -1988,7 +1988,7 @@ static PyObject* THPVariable_NewWithVar(
         " which is not a subclass of the "
         "requested type");
     // We may (in fact, we typically will) need to resurrect this
-    return THPVariable_Wrap(_var);
+    return THPVariable_Wrap(std::move(_var));
   }
 
   PyObject* obj = type->tp_alloc(type, 0);
