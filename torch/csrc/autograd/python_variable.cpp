@@ -1974,16 +1974,16 @@ static PyObject* THPVariable_NewWithVar(
     if (r == -1) {
       throw python_error();
     }
-    if (r == 1) {
-      return obj;
-    }
     TORCH_CHECK(
-        0,
+        r == 1,
         "Creating a new Tensor subclass ",
         type->tp_name,
         " but the raw Tensor object is already associated to a python object ",
         "of type ",
-        mb_obj.value()->ob_type->tp_name);
+        mb_obj.value()->ob_type->tp_name, " which is not a subclass of the "
+        "requested type");
+    Py_INCREF(obj);
+    return obj;
   }
 
   // Make sure that the reinterpret into a THPVariable* will be valid
