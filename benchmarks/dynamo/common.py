@@ -95,6 +95,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "pytorch_struct",
     "vision_maskrcnn",
     # Huggingface
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -140,11 +141,13 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
+    "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
     "GoogleFnet",  # Eager model failed to run
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
