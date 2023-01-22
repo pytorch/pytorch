@@ -146,6 +146,13 @@ CI_SKIP[CI("inductor", training=False)] = [
     "ghostnet_100",  # Accuracy
 ]
 
+CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
+    # NB: Don't include this, because inductor doesn't include
+    # the aot eager training list in general
+    # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False)],
+]
+
 CI_SKIP[CI("inductor", training=True)] = [
     *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
