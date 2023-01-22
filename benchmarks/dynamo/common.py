@@ -1826,6 +1826,9 @@ def run(runner, args, original_dir=None):
     args.exclude = args.exclude or [r"^$"]
     args.exclude_exact = args.exclude_exact or []
 
+    if args.inductor:
+        assert args.backend is None
+        args.backend = "inductor"
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
