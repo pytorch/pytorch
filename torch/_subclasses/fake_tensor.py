@@ -560,7 +560,7 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
-        return torch.Tensor._make_subclass(
+        self = torch.Tensor._make_subclass(
             cls,
             elem,
             elem.requires_grad,
@@ -568,13 +568,6 @@ class FakeTensor(torch.Tensor):
             device_for_backend_keys=device,
         )
 
-    def __init__(
-        self,
-        fake_mode,
-        elem,
-        device: Union[torch.device, str],
-        constant: Optional[torch.Tensor] = None,
-    ):
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
@@ -596,6 +589,15 @@ class FakeTensor(torch.Tensor):
             import traceback
 
             self._debug_trace = traceback.extract_stack()
+        return self
+
+    # In some circumstances, a conventional torch.Tensor constructor
+    # will get rewritten to call into FakeTensor.  We must provide an
+    # __init__ method that can accept the Python interpreters initialization
+    # in such a situation; we must also be able to handle direct fake
+    # tensor construction via FakeTensor()
+    def __init__(self, *args, **kwargs):
+        super().__init__()
 
     @staticmethod
     def from_tensor(t, fake_mode):

@@ -314,6 +314,7 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
     // too late to rescue the object, so just stub out the PyObject
     // so that it fails on subsequent uses.  Don't raise an error here;
     // you're probably in a destructor.
+    TORCH_INTERNAL_ASSERT(0);
     TORCH_WARN(
         "Deallocating Tensor that still has live PyObject references.  "
         "This probably happened because you took out a weak reference to "
@@ -1941,6 +1942,12 @@ static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     Variable _var,
     c10::impl::PyInterpreterStatus status) {
+  // Make sure that the reinterpret into a THPVariable* will be valid
+  TORCH_CHECK(
+      PyType_IsSubtype(type, &THPVariableType),
+      "Creating a Tensor subclass from a class ",
+      "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
+
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
   auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
@@ -1965,32 +1972,24 @@ static PyObject* THPVariable_NewWithVar(
   // FakeTensor is a subclass of Tensor, so it's valid for us to return it
   // in place of a Tensor.  So this is what we do.
 
-  if(mb_obj.has_value() && mb_obj.value()) {
+  if (mb_obj.has_value() && mb_obj.value()) {
     PyObject* obj = *mb_obj;
     // Check if it's OK to just directly return the Python object without
     // allocating a new variable.  We just check that the existing Python
     // object is a subclass of the requested type.
-    int r = PyObject_IsSubclass(PyObject_Type(obj), (PyObject*)type);
-    if (r == -1) {
-      throw python_error();
-    }
+    PyTypeObject* obj_type = Py_TYPE(obj);
     TORCH_CHECK(
-        r == 1,
+        obj_type == type || PyType_IsSubtype(obj_type, type),
         "Creating a new Tensor subclass ",
         type->tp_name,
         " but the raw Tensor object is already associated to a python object ",
         "of type ",
-        mb_obj.value()->ob_type->tp_name, " which is not a subclass of the "
+        mb_obj.value()->ob_type->tp_name,
+        " which is not a subclass of the "
         "requested type");
-    Py_INCREF(obj);
-    return obj;
+    // We may (in fact, we typically will) need to resurrect this
+    return THPVariable_Wrap(_var);
   }
-
-  // Make sure that the reinterpret into a THPVariable* will be valid
-  TORCH_CHECK(
-      PyType_IsSubtype(type, &THPVariableType),
-      "Creating a Tensor subclass from a class ",
-      "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
 
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
