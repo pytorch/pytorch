@@ -21,7 +21,7 @@ import torch
 
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
+from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
@@ -674,6 +674,12 @@ class TestIndexingSimplification(TorchTestCase):
 
 
 class CommonTemplate:
+    @classmethod
+    def install(my_cls, other_cls, suffix):  # noqa: B902
+        for name, value in my_cls.__dict__.items():
+            if name.startswith("test_"):
+                setattr(other_cls, f"{name}_{suffix}", value)
+
     def test_bool(self):
         def fn(a, b):
             return (
@@ -5122,199 +5128,6 @@ class CommonTemplate:
         )
 
 
-test_skips = {
-    "test_add_inplace_permuted_dynamic_shapes": ("cuda",),
-    "test_addmm_dynamic_shapes": ("cuda",),
-    "test_alexnet_prefix_dynamic_shapes": ("cpu", "cuda"),
-    "test_any_dynamic_shapes": ("cuda",),
-    "test_argmax_argmin2_dynamic_shapes": ("cuda",),
-    "test_as_strided_dynamic_shapes": ("cuda",),
-    "test_as_strided_scatter_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d1_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d2_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d3_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d4_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d5_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d6_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d_backward2_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d_backward3_dynamic_shapes": ("cuda",),
-    "test_avg_pool2d_backward_dynamic_shapes": ("cuda",),
-    "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
-    "test_batch_norm_2d_dynamic_shapes": ("cuda",),
-    "test_cat_dynamic_shapes": ("cuda",),
-    "test_cat_extern_kernel_dynamic_shapes": ("cuda",),
-    "test_cat_upcasting_dynamic_shapes": ("cuda",),
-    "test_cauchy_dynamic_shapes": ("cuda",),
-    "test_clamp_dynamic_shapes": ("cuda",),
-    "test_clone_dynamic_shapes": ("cuda",),
-    "test_conv2d_binary_dynamic_shapes": ("cpu",),
-    "test_conv2d_packed_dynamic_shapes": ("cpu",),
-    "test_conv2d_unary_dynamic_shapes": ("cpu",),
-    "test_conv_bn_fuse_dynamic_shapes": ("cpu",),
-    "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
-    "test_cos_dynamic_shapes": ("cuda",),
-    "test_cpp_wrapper_dynamic_shapes": ("cpu",),
-    "test_cudnn_rnn_dynamic_shapes": ("cuda",),
-    "test_div1_dynamic_shapes": ("cuda",),
-    "test_div2_dynamic_shapes": ("cuda",),
-    "test_div3_dynamic_shapes": ("cuda",),
-    "test_div4_dynamic_shapes": ("cuda",),
-    "test_div5_dynamic_shapes": ("cuda",),
-    "test_div6_dynamic_shapes": ("cuda",),
-    "test_div7_dynamic_shapes": ("cuda",),
-    "test_elu_dynamic_shapes": ("cuda",),
-    "test_exp2_dynamic_shapes": ("cuda",),
-    "test_exp_dynamic_shapes": ("cuda",),
-    "test_expand_as_dynamic_shapes": ("cuda",),
-    "test_expanded_reduction_dynamic_shapes": ("cuda",),
-    "test_fill1_dynamic_shapes": ("cuda",),
-    "test_fill2_dynamic_shapes": ("cuda",),
-    "test_flip_dynamic_shapes": ("cuda",),
-    "test_fuse_tiled_dynamic_shapes": ("cuda",),
-    "test_gather_scatter_dynamic_shapes": ("cuda",),
-    "test_gelu_dynamic_shapes": ("cuda",),
-    "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
-    "test_horizonal_fusion1_dynamic_shapes": ("cuda",),
-    "test_index1_dynamic_shapes": ("cuda",),
-    "test_index2_dynamic_shapes": ("cuda",),
-    "test_index_put1_dynamic_shapes": ("cuda",),
-    "test_index_put2_dynamic_shapes": ("cuda",),
-    "test_index_put3_dynamic_shapes": ("cuda",),
-    "test_index_select_dynamic_shapes": ("cuda",),
-    "test_indirect_load_broadcast_dynamic_shapes": ("cpu", "cuda"),
-    "test_inplace_add_dynamic_shapes": ("cpu", "cuda"),
-    "test_inplace_mixed_dtype_ops_dynamic_shapes": ("cpu", "cuda"),
-    "test_input_mutation2_dynamic_shapes": ("cpu", "cuda"),
-    "test_invalid_operand_issue1_dynamic_shapes": ("cpu", "cuda"),
-    "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_l1_loss_dynamic_shapes": ("cuda",),
-    "test_leaky_relu_dynamic_shapes": ("cuda",),
-    "test_lgamma_dynamic_shapes": ("cuda",),
-    "test_linear_binary_dynamic_shapes": ("cpu",),
-    "test_linear_packed_dynamic_shapes": ("cpu",),
-    "test_linear_unary_dynamic_shapes": ("cpu",),
-    "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
-    "test_log_softmax_dynamic_shapes": ("cuda",),
-    "test_logsumexp_dynamic_shapes": ("cuda",),
-    "test_long_tensor_dynamic_shapes": ("cuda",),
-    "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
-    "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
-    "test_masked_fill_dynamic_shapes": ("cuda",),
-    "test_masked_fill_promotion_dynamic_shapes": ("cuda",),
-    "test_max_pool2d1_dynamic_shapes": ("cuda",),
-    "test_max_pool2d2_dynamic_shapes": ("cuda",),
-    "test_max_pool2d3_dynamic_shapes": ("cuda",),
-    "test_max_pool2d4_dynamic_shapes": ("cuda",),
-    "test_max_pool2d5_dynamic_shapes": ("cuda",),
-    "test_max_pool2d_with_indices_backward2_dynamic_shapes": ("cuda",),
-    "test_max_pool2d_with_indices_backward3_dynamic_shapes": ("cuda",),
-    "test_max_pool2d_with_indices_backward4_dynamic_shapes": ("cuda",),
-    "test_max_pool2d_with_indices_backward_dynamic_shapes": ("cuda",),
-    "test_mean_dynamic_shapes": ("cuda",),
-    "test_min_max_reduction_dynamic_shapes": ("cuda",),
-    "test_move_arange_dynamic_shapes": ("cpu", "cuda"),
-    "test_narrow_dynamic_shapes": ("cuda",),
-    "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
-    "test_output_strides_dynamic_shapes": ("cpu", "cuda"),
-    "test_permute1_dynamic_shapes": ("cuda",),
-    "test_permute2_dynamic_shapes": ("cpu", "cuda"),
-    "test_pow1_dynamic_shapes": ("cuda",),
-    "test_pow2_dynamic_shapes": ("cuda",),
-    "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
-    "test_recompile_on_index_dynamic_shapes": ("cpu", "cuda"),
-    "test_reduction4_dynamic_shapes": ("cuda",),
-    "test_relu_dynamic_shapes": ("cuda",),
-    "test_repeat_dynamic_shapes": ("cuda",),
-    "test_roi_align_dynamic_shapes": ("cpu",),
-    "test_roll_dynamic_shapes": ("cuda",),
-    "test_round_dynamic_shapes": ("cuda",),
-    "test_scatter4_dynamic_shapes": ("cuda",),
-    "test_scatter_add2_dynamic_shapes": ("cuda",),
-    "test_scatter_reduce2_dynamic_shapes": ("cuda",),
-    "test_scheduler_vertical_fusion1_dynamic_shapes": ("cuda",),
-    "test_select_scatter_dynamic_shapes": ("cuda",),
-    "test_sigmoid_dynamic_shapes": ("cuda",),
-    "test_silu_dynamic_shapes": ("cuda",),
-    "test_simplify_loops_dynamic_shapes": ("cuda",),
-    "test_sin_dynamic_shapes": ("cuda",),
-    "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
-    "test_slice1_dynamic_shapes": ("cuda",),
-    "test_slice2_dynamic_shapes": ("cuda",),
-    "test_slice_mutation1_dynamic_shapes": ("cuda",),
-    "test_slice_scatter_dynamic_shapes": ("cuda",),
-    "test_softmax_dynamic_shapes": ("cuda",),
-    "test_softmax_one_kernel_dynamic_shapes": ("cuda",),
-    "test_split_with_sizes_dynamic_shapes": ("cuda",),
-    "test_squeeze2_dynamic_shapes": ("cuda",),
-    "test_std_dynamic_shapes": ("cuda",),
-    "test_strided_inputs_dynamic_shapes": ("cpu", "cuda"),
-    "test_sum1_dynamic_shapes": ("cuda",),
-    "test_sum2_dynamic_shapes": ("cuda",),
-    "test_sum3_dynamic_shapes": ("cuda",),
-    "test_sum4_dynamic_shapes": ("cuda",),
-    "test_sum5_dynamic_shapes": ("cuda",),
-    "test_sum_dtype_dynamic_shapes": ("cuda",),
-    "test_sum_keepdims_dynamic_shapes": ("cuda",),
-    "test_tanh_dynamic_shapes": ("cuda",),
-    "test_tmp_not_defined_issue1_dynamic_shapes": ("cuda",),
-    "test_tmp_not_defined_issue2_dynamic_shapes": ("cpu", "cuda"),
-    "test_to_memory_format_dynamic_shapes": ("cuda",),
-    "test_transpose_add_dynamic_shapes": ("cuda",),
-    "test_transpose_dynamic_shapes": ("cuda",),
-    "test_transposed_propagates_dynamic_shapes": ("cuda",),
-    "test_triu_dynamic_shapes": ("cuda",),
-    "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
-    "test_unspec_inputs_dynamic_shapes": ("cpu", "cuda"),
-    "test_unsqueeze_dynamic_shapes": ("cuda",),
-    "test_unsqueeze_inplace_dynamic_shapes": ("cuda",),
-    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest3d_dynamic_shapes": ("cpu", "cuda"),
-    "test_var_mean_dynamic_shapes": ("cuda",),
-    "test_vertical_fusion1_dynamic_shapes": ("cuda",),
-    "test_views1_dynamic_shapes": ("cuda",),
-    "test_views3_dynamic_shapes": ("cpu",),
-}
-
-
-def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
-    for name, value in my_cls.__dict__.items():
-        if name.startswith("test_"):
-            # You cannot copy functions in Python, so we use lambdas here to
-            # create objects with different ids. Otherwise, unittest.skip
-            # would modify all methods sharing the same object id. Also, by
-            # using a default argument in a lambda, we create a copy instead of
-            # a reference. Otherwise, we would lose access to the value.
-            skips = test_skips.get(name)
-            if skips and suffix in skips:
-                setattr(
-                    other_cls,
-                    f"{name}_{suffix}",
-                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
-                )
-            else:
-                setattr(
-                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
-                )
-
-
-def make_dynamic_cls(cls):
-    return make_test_cls_with_patches(
-        cls,
-        "DynamicShapes",
-        "_dynamic_shapes",
-        (config, "dynamic_shapes", True),
-        (torch._dynamo.config, "dynamic_shapes", True),
-        (functorch_config, "use_dynamic_shapes", True),
-    )
-
-
-DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
-
-
 if HAS_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
@@ -5326,8 +5139,7 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(CommonTemplate, CpuTests, "cpu")
-    copy_tests(DynamicShapesCommonTemplate, CpuTests, "cpu")
+    CommonTemplate.install(CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
         def test_conv_stride_constraints(self):
@@ -6059,8 +5871,7 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
-    copy_tests(CommonTemplate, CudaTests, "cuda")
-    copy_tests(DynamicShapesCommonTemplate, CudaTests, "cuda")
+    CommonTemplate.install(CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
         common = check_model_cuda

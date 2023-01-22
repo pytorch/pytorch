@@ -259,8 +259,8 @@ def _make_fn_with_patches(fn, *patches):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         with contextlib.ExitStack() as stack:
-            for module, attr, val in patches:
-                stack.enter_context(patch.object(module, attr, val))
+            for attr, val in patches:
+                stack.enter_context(patch.object(config, attr, val))
 
             return fn(*args, **kwargs)
 
@@ -281,6 +281,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             new_name = f"{name}{fn_suffix}"
             fn = _make_fn_with_patches(fn, *patches)
             fn.__name__ = new_name
+            setattr(DummyTestClass, name, None)
             setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass
