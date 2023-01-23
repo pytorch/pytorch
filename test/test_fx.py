@@ -25,7 +25,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils.pytree as pytree
-import torch.fx.pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
 from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
@@ -3404,7 +3403,6 @@ class TestFX(JitTestCase):
             lambda x: ([x.a, x.b], None),
             lambda x, _: Foo(x[0], x[1]),
         )
-        fx_pytree.register_pytree_flatten_spec(Foo, lambda x, _: [x.a, x.b])
 
         def f_custom(x):
             return x.a + x.b
@@ -3432,7 +3430,7 @@ class TestFX(JitTestCase):
 
         def verify_pytree(f, inp):
             val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
-            num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
+            num_flat_args = len([i == PH for i in pytree.tree_leaves(inp)])
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
