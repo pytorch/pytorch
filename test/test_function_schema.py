@@ -236,6 +236,16 @@ class TestFunctionSchema(TestCase):
         # print real types in FunctionSchema
         self.assertEqual(str(schema), schema_str)
 
+    def test_sym_int_argument_properly_parsed(self):
+        schema_str = 'sym_size.int(Tensor self, int dim) -> SymInt'
+        schema = parse_schema(schema_str)
+        # fake type of SymInt is int
+        self.assertEqual(schema.returns[-1].type.str(), "int")
+        # real type of SymInt is SymInt
+        self.assertEqual(schema.returns[-1].real_type.str(), "SymInt")
+        # print real types in FunctionSchema
+        self.assertEqual(str(schema), schema_str)
+
 
 if __name__ == '__main__':
     run_tests()

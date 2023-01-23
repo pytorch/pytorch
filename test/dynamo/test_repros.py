@@ -5,6 +5,7 @@ import inspect
 import itertools
 import random
 import unittest
+import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
@@ -2045,6 +2046,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same_two_models(mod, opt_mod, args))
         opt_mod(*args)
 
+    def test_output_aliases_intermediate(self):
+        def f(x):
+            intermediate = x.mul(2)
+            return intermediate.view(-1)
+
+        opt_f = torch._dynamo.optimize("aot_eager")(f)
+
+        for b in [True, False]:
+            x = torch.randn(4, requires_grad=b)
+            out = f(x)
+            out_test = opt_f(x)
+            self.assertEqual(out, out_test)
+            self.assertEqual(out.requires_grad, out_test.requires_grad)
+            self.assertEqual(out._is_view(), out_test._is_view())
+            self.assertEqual(out._base.requires_grad, out_test._base.requires_grad)
+
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
         def inner(x):
@@ -2064,6 +2081,56 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
+
+    def test_nested_while_loop_graph_break(self):
+        def inner_loop(x):
+            i = 3
+            while i > 0:
+                i -= 1
+                x += 1
+                torch._dynamo.graph_break()
+            return x
+
+        def inner(x):
+            inner_loop(x)
+            return torch.sin(x)
+
+        def fn(x):
+            i = 20
+            while i > 10:
+                x = inner(x)
+                i -= 1
+                torch._dynamo.graph_break()
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_while_loop_graph_break_inside_call_function(self):
+        # Repro of huggingface graph break inside loop in `get_parameter_dtype`.
+        # Skip only the inner frame that has loop that contains graph break.
+        def inner(x):
+            for i in range(3):
+                x += 1
+                torch._dynamo.graph_break()
+            return x
+
+        def fn(x):
+            x += 2
+            inner(x)
+            x += 3
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
 
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
@@ -2261,6 +2328,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
+
+    def test_grad_references_cleared(self):
+        model = torch.nn.Linear(2048, 2048, bias=False)
+        x = torch.ones(2048)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        def opt_step():
+            optimizer.step()
+
+        compiled_opt_step = torch._dynamo.optimize("eager")(opt_step)
+
+        def compiled_model_step(x):
+            optimizer.zero_grad(True)
+            y = model(x)
+            torch.sum(y).backward()
+            compiled_opt_step()
+
+        compiled_model_step(x)
+        param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
+        optimizer.zero_grad(True)
+        self.assertIsNone(param_grad_ref())
 
 
 if __name__ == "__main__":

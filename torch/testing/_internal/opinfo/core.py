@@ -2571,6 +2571,7 @@ class ForeachFuncInfo(OpInfo):
         dtypesIfROCM=None,
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
+        supports_autograd=False,
         **kwargs,
     ):
         super().__init__(
@@ -2579,6 +2580,7 @@ class ForeachFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
             **kwargs,
         )
 
@@ -2596,6 +2598,14 @@ class ForeachFuncInfo(OpInfo):
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
+        elif name == "minimum":
+            # because minimum ref does not support inplace or scalar
+            self.ref = torch.clamp_max
+            self.ref_inplace = torch.Tensor.clamp_max_
+        elif name == "maximum":
+            # because maximum ref does not support inplace or scalar
+            self.ref = torch.clamp_min
+            self.ref_inplace = torch.Tensor.clamp_min_
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
