@@ -359,10 +359,20 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(addcmul);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
+  BINARY_POINTWISE2(bitwise_and_, Tensor);
+  POINTWISE_BOXED(bitwise_and.Scalar_Tensor);
   BINARY_POINTWISE2(bitwise_or, Tensor);
+  BINARY_POINTWISE2(bitwise_or_, Tensor);
+  POINTWISE_BOXED(bitwise_or.Scalar_Tensor);
   BINARY_POINTWISE2(bitwise_xor, Tensor);
+  BINARY_POINTWISE2(bitwise_xor_, Tensor);
+  POINTWISE_BOXED(bitwise_xor.Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
+  POINTWISE_BOXED(bitwise_left_shift_.Tensor_Scalar);
+  POINTWISE_BOXED(bitwise_left_shift_.Tensor);
   BINARY_SCALAR_3(bitwise_right_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
+  POINTWISE_BOXED(bitwise_right_shift_.Tensor_Scalar);
+  POINTWISE_BOXED(bitwise_right_shift_.Tensor);
 
   UNARY_POINTWISE(clamp);
   POINTWISE_BOXED(clamp.Tensor);
