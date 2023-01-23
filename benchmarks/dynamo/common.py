@@ -117,9 +117,15 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
+CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
+]
+
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
-    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     "twins_pcpvt_base",  # timeout
 ]
 
