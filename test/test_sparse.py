@@ -3458,8 +3458,11 @@ class TestSparse(TestSparseBase):
             c.backward(g)
 
             a_grad, b_grad = test_grad_dense(a, b, g)
-            self.assertEqual(a.grad, a_grad)
-            self.assertEqual(b.grad, b_grad)
+
+            # We convert grad to dense since dense and sparse mm
+            # implementations handle materialized zeroes differently.
+            self.assertEqual(a.grad.to_dense(), a_grad.to_dense())
+            self.assertEqual(b.grad.to_dense(), b_grad.to_dense())
 
         def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a, dtype, device, coalesced)
@@ -3602,9 +3605,9 @@ class TestSparse(TestSparseBase):
         nnz = 10
 
         def check(self, x, y):
+            res_sparse = x * y
             res_dense = x.to_dense() * y.to_dense()
-            self.assertEqual(res_dense, x * y)
-            self.assertEqual(res_dense, y * x)
+            self.assertEqual(res_sparse.to_dense(), res_dense)
 
         def check_empty(sparse_shape, nnz, dense_shape, coalesce):
             from itertools import product
