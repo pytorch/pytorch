@@ -282,9 +282,6 @@ at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& mat1,
     const at::Tensor& mat2,
     const at::Scalar& alpha);
-at::Tensor sparse_coo_constructor_backward(
-    const at::Tensor& grad,
-    const at::Tensor& result);
 at::Tensor sparse_sparse_matmul_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,

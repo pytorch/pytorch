@@ -26,13 +26,6 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/sparse_coo_tensor.h>
-#endif
-
 #include <algorithm>
 #include <ciso646>
 #include <functional>
@@ -1330,27 +1323,6 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
-// This function return a new SparseTensor with values from Tensor `input`
-// filtered by indices of `mask` and values are ignored. `input` and `mask` are
-// sparse matrices, a sparse tensor with sparse_dim=2 and  dense_dim=2, and they
-// must have the same shape. Note that the `output` must have the same `indices`
-// as the `mask` so we are using just a clone. However, to get `values` we have
-// to use specific helper function for CPU/CUDA and use the `mask` data to
-// filter `values` That's why we created this `_sparse_mask_helper` function.
-Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask) {
-  Tensor output = at::empty_like(mask);
-  Tensor mask_indices = mask._indices().clone();
-  Tensor r_values;
-  if (mask._nnz() == 0) {
-    r_values = at::zeros_like(mask._values());
-  } else {
-    r_values = _sparse_mask_helper(input, mask_indices.contiguous());
-  }
-  at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(
-      mask_indices, r_values);
-  return output;
-}
-
 Tensor sparse_sparse_matmul_backward(
     const Tensor& grad,
     const Tensor& a,
@@ -1375,79 +1347,20 @@ Tensor sparse_sparse_matmul_backward(
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
+  const auto mask_ones_like = [](const Tensor& t) -> Tensor {
+    return at::sparse_coo_tensor(
+        t._indices(),
+        at::ones({1}, t._values().options()).expand_as(t._values()),
+        t.sizes()
+    );
+  };
+
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return _sparse_matrix_mask(a_grad.coalesce(), a.coalesce());
+    return a_grad.mul(mask_ones_like(a.coalesce()));
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
-}
-
-Tensor sparse_coo_constructor_backward(
-    const Tensor& grad,
-    const Tensor& result) {
-  const auto result_coalesced = result.coalesce();
-  const auto ones_like_result = at::sparse_coo_tensor(
-      result_coalesced.indices(),
-      at::ones({1}, result_coalesced.values().options()).expand_as(result_coalesced.values()),
-      result.sizes()
-  );
-  const auto nonzero_values_grad = grad.mul(ones_like_result).coalesce();
-
-  // Short circuit on empty intersection
-  if (nonzero_values_grad._nnz() == 0) {
-    return at::zeros_like(result._values());
-  }
-
-  const auto sparse_dims =
-      at::DimVector(result.sizes().slice(0, result.sparse_dim()));
-  const auto sparse_dims_numel = [&]() -> int64_t {
-    int64_t numel = 1;
-    for (const auto d : sparse_dims) {
-      numel *= d;
-    }
-    return numel;
-  }();
-
-  const auto result_indices_hash =
-      at::sparse::flatten_indices(result._indices(), sparse_dims);
-  Tensor result_indices_hash_values, result_indices_hash_indices;
-  std::tie(result_indices_hash_values, result_indices_hash_indices) =
-      result_indices_hash.sort();
-  auto result_indices_hash_coo_idx = at::sparse_coo_tensor(
-      result_indices_hash_values.unsqueeze(0),
-      result_indices_hash_indices,
-      {sparse_dims_numel});
-  result_indices_hash_coo_idx._coalesced_(true);
-  auto result_indices_hash_coo_count = at::sparse_coo_tensor(
-      result_indices_hash_values.unsqueeze(0),
-      at::ones({1}, result_indices_hash_indices.options())
-          .expand_as(result_indices_hash_values),
-      {sparse_dims_numel});
-  result_indices_hash_coo_count._coalesced_(true);
-
-  const auto nonzero_grad_indices_hash =
-      at::sparse::flatten_indices(nonzero_values_grad._indices(), sparse_dims);
-  auto nonzero_grad_indices_hash_coo = at::sparse_coo_tensor(
-      nonzero_grad_indices_hash.unsqueeze(0),
-      at::ones({1}, result_indices_hash_indices.options())
-          .expand_as(nonzero_grad_indices_hash),
-      {sparse_dims_numel});
-  nonzero_grad_indices_hash_coo._coalesced_(false);
-
-  const auto matched_idx =
-      nonzero_grad_indices_hash_coo.mul(result_indices_hash_coo_idx)._values();
-  const auto num_matches =
-      nonzero_grad_indices_hash_coo.mul(result_indices_hash_coo_count)
-          .coalesce()
-          ._values();
-
-  auto values_grad = at::zeros_like(result._values());
-  values_grad.index_add_(
-      0,
-      matched_idx,
-      nonzero_values_grad._values().repeat_interleave(num_matches, 0));
-  return values_grad;
+  return b_grad.mul(mask_ones_like(b.coalesce()));
 }
 
 Tensor renorm_backward(

@@ -82,8 +82,9 @@ void binary_op_intersection_kernel(
   const auto* RESTRICT ptr_lhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(2));
   const auto* RESTRICT ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
   const auto* RESTRICT ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
+  const auto* RESTRICT ptr_match_bytes = reinterpret_cast<bool*>(iter.data_ptr(5));
 
-  auto offset_calc = make_offset_calculator<5>(iter);
+  auto offset_calc = make_offset_calculator<6>(iter);
   auto loop = [=] FUNCAPI (int i) {
     auto offsets = offset_calc.get(i);
 
@@ -92,10 +93,13 @@ void binary_op_intersection_kernel(
     const auto lhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_lhs_select_idx_bytes + offsets[2]);
     const auto* RESTRICT ptr_rhs_values = reinterpret_cast<const scalar_t*>(ptr_rhs_values_bytes + offsets[3]);
     const auto rhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_rhs_select_idx_bytes + offsets[4]);
+    const auto match = *reinterpret_cast<const bool*>(ptr_match_bytes + offsets[5]);
 
-    *ptr_res_values = binary_op_t::apply(
-        *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
-        *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
+    if (match) {
+      *ptr_res_values = binary_op_t::apply(
+          *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
+          *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
+    }
   };
 
   launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -108,7 +112,8 @@ struct CUDAValueSelectionIntersectionKernel {
       const Tensor& lhs_values,
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
-      const Tensor& rhs_select_idx) {
+      const Tensor& rhs_select_idx,
+      const c10::optional<Tensor>& match_mask = c10::nullopt) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
@@ -155,7 +160,7 @@ void sparse_mask_intersection_out_cuda_kernel(
     const Tensor& y) {
   using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
-      result, x, y
+      result, x, y, true
   );
 }
 
