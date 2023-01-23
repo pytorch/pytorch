@@ -112,7 +112,7 @@ case "$image" in
     CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.9
+    ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -120,7 +120,7 @@ case "$image" in
     CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
