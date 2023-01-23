@@ -15,7 +15,6 @@ from .backend_config import (  # noqa: F401
     BackendConfig,
     get_tensorrt_backend_config,
 )
-from .fx.graph_module import ObservedGraphModule
 from .fx.custom_config import (
     ConvertCustomConfig,
     FuseCustomConfig,
@@ -76,7 +75,7 @@ def _prepare_fx(
     _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
     is_standalone_module: bool = False,
-) -> ObservedGraphModule:
+) -> GraphModule:
     r""" Internal helper function for prepare_fx
     Args:
       `model`, `qconfig_mapping`, `prepare_custom_config`, `_equalization_config`:
@@ -151,13 +150,14 @@ def _prepare_standalone_module_fx(
 
     Returns:
 
-        * model(GraphModule): prepared standalone module. It has these attributes:
+        * model(GraphModule): prepared standalone module. It has these attributes in
+          model.meta:
 
-            * `_standalone_module_input_quantized_idxs(List[Int])`: a list of
+            * `standalone_module_input_quantized_idxs(List[Int])`: a list of
               indexes for the graph input that is expected to be quantized,
               same as input_quantized_idxs configuration provided
               for the standalone module
-            * `_standalone_module_output_quantized_idxs(List[Int])`: a list of
+            * `standalone_module_output_quantized_idxs(List[Int])`: a list of
               indexs for the graph output that is quantized
               same as input_quantized_idxs configuration provided
               for the standalone module
@@ -220,7 +220,7 @@ def prepare_fx(
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
     _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
-) -> ObservedGraphModule:
+) -> GraphModule:
     r""" Prepare a model for post training static quantization
 
     Args:
@@ -370,7 +370,7 @@ def prepare_qat_fx(
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
-) -> ObservedGraphModule:
+) -> GraphModule:
     r""" Prepare a model for quantization aware training
 
     Args:

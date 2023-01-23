@@ -5543,7 +5543,11 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping = get_default_qconfig_mapping("fbgemm")
         example_inputs = (torch.randn(1, 5),)
         m = prepare_fx(m, qconfig_mapping, example_inputs)
+        print("m.meta:", m.meta)
+        print("is graph_module:", isinstance(m, torch.fx.GraphModule))
         m_ref = copy.deepcopy(m)
+        print("is graph_module:", isinstance(m_ref, torch.fx.GraphModule))
+        print("m_ref.meta:", m_ref.meta)
         m_ref = convert_to_reference_fx(m_ref)
         m = _convert_to_reference_decomposed_fx(m)
         expected_occurrence = {

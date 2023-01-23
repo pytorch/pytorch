@@ -707,7 +707,9 @@ class {module_name}(torch.nn.Module):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         res = GraphModule(fake_mod, fake_mod.__dict__['_graph'])
+        print("self.meta:", self.meta)
         res.meta = copy.deepcopy(getattr(self, 'meta', {}))
+        print("deepcopy, res.meta:", res.meta)
         return res
 
     def __copy__(self):
