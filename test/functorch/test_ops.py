@@ -1113,7 +1113,6 @@ class TestOperators(TestCase):
         xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
-        xfail('cumprod'),
         xfail('fill'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
@@ -1181,11 +1180,9 @@ class TestOperators(TestCase):
         xfail('cfloat', ''),
         xfail('chalf', ''),
         xfail('index_reduce', ''),
-        xfail('linalg.vander', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
-        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
@@ -1476,7 +1473,6 @@ class TestOperators(TestCase):
         # were not batched.
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
-        xfail('nn.functional.binary_cross_entropy'),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # ForwardAD not implemented and no decomposition
         xfail('nn.functional.dropout2d'),  # calls random op
         xfail('nn.functional.dropout3d'),  # calls random op

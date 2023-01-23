@@ -67,7 +67,7 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return -math.log(math.pi) - self.scale.log() - (1 + ((value - self.loc) / self.scale)**2).log()
+        return -math.log(math.pi) - self.scale.log() - (((value - self.loc) / self.scale)**2).log1p()
 
     def cdf(self, value):
         if self._validate_args:
