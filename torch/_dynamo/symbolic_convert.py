@@ -662,8 +662,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
-        value = importlib.import_module(module_name)
-        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        if "torch_package" in module_name:
+            value = torch.package.package_importer._package_imported_modules[
+                module_name
+            ]
+            alias = (
+                module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            )
+        else:
+            value = importlib.import_module(module_name)
+            alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
