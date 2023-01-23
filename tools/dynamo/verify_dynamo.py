@@ -150,9 +150,11 @@ _SANITY_CHECK_ARGS = (
 
 
 def main():
+    import torch
+
     python_ver = check_python()
     torch_ver = check_torch()
-    cuda_ver = check_cuda()
+    cuda_ver = check_cuda() if torch.version.hip is None else "None"
     print(
         f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
         f"`torch` version: {torch_ver}\n"
