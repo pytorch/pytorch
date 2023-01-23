@@ -5,8 +5,17 @@ from .common import parse_args, run
 
 from .torchbench import setup_torchbench_cwd, TorchBenchmarkRunner
 
+try:
+    # fbcode only
+    from aiplatform.utils.sanitizer_status import is_asan_or_tsan
+except ImportError:
+
+    def is_asan_or_tsan():
+        return False
+
 
 class TestDynamoBenchmark(unittest.TestCase):
+    @unittest.skipIf(is_asan_or_tsan(), "ASAN/TSAN not supported")
     def test_benchmark_infra_runs(self) -> None:
         """
         Basic smoke test that TorchBench runs.

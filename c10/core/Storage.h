@@ -8,7 +8,7 @@ struct C10_API Storage {
  public:
   struct use_byte_size_t {};
 
-  Storage() {}
+  Storage() = default;
   Storage(c10::intrusive_ptr<StorageImpl> ptr)
       : storage_impl_(std::move(ptr)) {}
 
@@ -20,7 +20,7 @@ struct C10_API Storage {
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            size_bytes,
+            std::move(size_bytes),
             allocator,
             resizable)) {}
 
@@ -76,7 +76,7 @@ struct C10_API Storage {
   }
 
   void set_nbytes(c10::SymInt size_bytes) const {
-    storage_impl_.get()->set_nbytes(size_bytes);
+    storage_impl_.get()->set_nbytes(std::move(size_bytes));
   }
 
   bool resizable() const {

@@ -23,28 +23,35 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from test_c10d_common import (
-    LOOPBACK,
     gpus_for_rank,
-    Task,
+    LOOPBACK,
     ModuleForDdpCommHook,
     SparseGradientModule,
+    Task,
 )
 from torch import nn
+from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
+    Shard,
+    ShardedTensor,
+    ShardMetadata,
+)
 from torch.nn.parallel import DistributedDataParallel
+from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
 from torch.testing._internal.common_distributed import (
+    create_device,
     MultiProcessTestCase,
     requires_gloo,
-    skip_if_lt_x_gpu,
     simple_sparse_reduce_tests,
+    skip_if_lt_x_gpu,
     skip_if_win32,
-    create_device,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
     retry_on_connect_failures,
+    run_tests,
     sandcastle_skip,
+    TestCase,
 )
 
 
@@ -68,7 +75,7 @@ def simple_reduce_tests(rank, world_size):
         (
             c10d.ReduceOp.MAX,
             torch.tensor([rank + 1.0]),
-            torch.tensor([world_size]),
+            torch.tensor([float(world_size)]),
         ),
     ]
 
@@ -121,7 +128,7 @@ def simple_coalesced_reduce_tests(rank, world_size):
     return [
         (
             c10d.ReduceOp.SUM,
-            [torch.tensor([rank + 1]), torch.tensor([(rank + 1) ** 2])],
+            [torch.tensor([rank + 1.0]), torch.tensor([(rank + 1.0) ** 2])],
             [
                 torch.tensor([float(world_size * (world_size + 1) / 2)]),
                 torch.tensor(
@@ -145,7 +152,7 @@ def simple_coalesced_reduce_tests(rank, world_size):
         (
             c10d.ReduceOp.MAX,
             [torch.tensor([rank + x]) for x in [1.0, 2.0]],
-            [torch.tensor([world_size]), torch.tensor([world_size + 1.0])],
+            [torch.tensor([float(world_size)]), torch.tensor([world_size + 1.0])],
         ),
     ]
 
@@ -170,7 +177,7 @@ def simple_multi_input_reduce_tests(rank, world_size):
         (
             c10d.ReduceOp.MAX,
             [torch.tensor([2 * rank + 1.0]), torch.tensor([2 * rank + 2.0])],
-            torch.tensor([2 * world_size]),
+            torch.tensor([2.0 * world_size]),
         ),
     ]
 
@@ -247,7 +254,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         fut.wait()
         output = fut.value()
         self.assertEqual(0, output[0].numel())
-        self.assertEqualIgnoreType(xs[0], output[0])
+        self.assertEqual(xs[0], output[0])
 
     @requires_gloo()
     def test_broadcast_checks(self):
@@ -321,8 +328,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             # Run with 1 input tensor
             x = fn(torch.tensor([self.rank]))
             output = broadcast([x], i, 0)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.tensor([i]), output[0])
+            self.assertEqual(torch.tensor([i]), output[0])
 
             # Run with 2 input tensors
             num = 2
@@ -333,10 +339,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 ]
 
                 output = broadcast(xs, i, j)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.tensor([i * num + j]), output[0])
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.tensor([i * num + j]), output[1])
+                self.assertEqual(torch.tensor([i * num + j], dtype=torch.float32), output[0])
+                self.assertEqual(torch.tensor([i * num + j], dtype=torch.float32), output[1])
 
         # Test overloaded convenience function
         x = torch.tensor([self.rank + 1.0])
@@ -422,8 +426,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             fut = pg.allreduce([tensor], opts).get_future()
             fut.wait()
             result = fut.value()
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(expected, result[0])
+            self.assertEqual(expected, result[0])
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
@@ -435,8 +438,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             fut.wait()
             result = fut.value()
             for tensor in result:
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(output, tensor)
+                self.assertEqual(output, tensor)
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
@@ -474,8 +476,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allreduce([tensor], opts)
             work.wait()
             result = work.result()
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(expected, result[0])
+            self.assertEqual(expected, result[0])
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
@@ -487,8 +488,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work.wait()
             result = work.result()
             for tensor in result:
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(output, tensor)
+                self.assertEqual(output, tensor)
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
@@ -519,12 +519,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         for i, future_handle in enumerate(future_handles):
             future_handle.wait()
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(
+            self.assertEqual(
                 torch.tensor(
                     [
                         (i * self.world_size)
-                        + (self.world_size * (self.world_size - 1) / 2)
+                        + (self.world_size * (self.world_size - 1) // 2)
                     ]
                 ),
                 future_handle.value()[0],
@@ -598,8 +597,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             fut.wait()
             result = fut.value()
             for result_tensor, expected in zip(result, outputs):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(result_tensor, expected)
+                self.assertEqual(result_tensor, expected)
 
     @requires_gloo()
     def test_allreduce_coalesced_basics(self):
@@ -607,7 +605,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _expected_output(self, i):
         ws = self.world_size
-        return 2 * [torch.tensor([(i * ws) + (ws * (ws - 1) / 2)])]
+        return 2 * [torch.tensor([(i * ws) + (ws * (ws - 1) // 2)])]
 
     def _test_allreduce_coalesced_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -620,8 +618,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, future_handle in enumerate(future_handles):
             future_handle.wait()
             result = future_handle.value()
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(
+            self.assertEqual(
                 self._expected_output(i),
                 result,
                 msg="Mismatch in iteration {}".format(i),
@@ -643,7 +640,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         futs = [c10d.all_reduce_coalesced(x, async_op=True) for x in xs]
         torch.futures.wait_all(futs)
         for i, fut in enumerate(futs):
-            self.assertEqualIgnoreType(
+            self.assertEqual(
                 self._expected_output(i),
                 fut.wait(),
                 msg="Mismatch in iteration {}".format(i),
@@ -1233,11 +1230,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 # one output tensor list
                 for y, z in zip(y_out, z_out):
                     # one tensor in output tensor list
-                    self.assertEqualIgnoreType(y, z)
+                    self.assertEqual(y, z)
 
         # Added to address https://github.com/pytorch/pytorch/issues/65231
-        # In the failed tests, all assertEqualIgnoreType are passed on all
-        # processes. However, one of the process didn't call ProcessGroupGloo
+        # In the failed tests, all assertEqual are passed on all processes.
+        # However, one of the processes didn't call ProcessGroupGloo
         # destructor before exiting program. This is not surprising as the only
         # guarantee that Python makes is that garbage collection MAY happen
         # before the program exits. If GC didn't happen, the two threads in
@@ -1296,8 +1293,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 fut.wait()
                 result = fut.value()
                 if root == self.rank:
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(output, result[0])
+                    self.assertEqual(output, result[0])
 
     @requires_gloo()
     def test_reduce_basics(self):
@@ -1330,12 +1326,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             iter = i // self.world_size
             root = i % self.world_size
             if root == self.rank:
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
+                self.assertEqual(
                     torch.tensor(
                         [
                             (iter * self.world_size)
-                            + (self.world_size * (self.world_size - 1) / 2)
+                            + (self.world_size * (self.world_size - 1) // 2)
                         ]
                     ),
                     result[0],
@@ -1420,14 +1415,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_round_robin(self):
         num_process_groups = 2
         store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
         pg = c10d._round_robin_process_groups(
             [
-                c10d.ProcessGroupGloo(
-                    c10d.PrefixStore(str(i), store),
-                    self.rank,
-                    self.world_size,
-                    self.opts(),
-                )
+                c10d.new_group(pg_options=self.opts())
                 for i in range(num_process_groups)
             ]
         )
@@ -1442,16 +1433,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_round_robin_create_destroy(self):
         store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
 
         def create(num, prefix):
             return c10d._round_robin_process_groups(
                 [
-                    c10d.ProcessGroupGloo(
-                        c10d.PrefixStore("%s/%d" % (prefix, i), store),
-                        self.rank,
-                        self.world_size,
-                        self.opts(),
-                    )
+                    c10d.new_group(pg_options=self.opts())
                     for i in range(num)
                 ]
             )
@@ -1476,17 +1463,18 @@ class DistributedDataParallelTest(
 
     def _get_process_group(self):
         store = self._get_store()
-        return c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        return c10d.distributed_c10d._get_default_group()
 
     def _test_gloo_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
     ):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo._Options()
-        options._devices = [create_device(interface=LOOPBACK)]
-        process_group = c10d.ProcessGroupGloo(
-            store, self.rank, self.world_size, options
-        )
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = devices[-1]
+        backend = process_group._get_backend(device)
+        backend.create_device(interface=LOOPBACK)
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
@@ -1570,8 +1558,7 @@ class DistributedDataParallelTest(
             self.assertIsNotNone(t1_p.grad)
             self.assertIsNone(task_unused_p.grad)
 
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
@@ -1646,8 +1633,7 @@ class DistributedDataParallelTest(
             # Now locally unused parameter should have grad updated on all ranks.
             [self.assertIsNotNone(t_p.grad) for t_p in model.module.task_parameters()]
 
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
@@ -1673,8 +1659,7 @@ class DistributedDataParallelTest(
         Test that the output of a model can be ignored and that there is no
         implicit requirement that `backward` gets called.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
@@ -1716,8 +1701,7 @@ class DistributedDataParallelTest(
         implicit requirement that `backward` gets called, if not all model
         parameters participated in computing the model output.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
             def __init__(self):
@@ -1753,6 +1737,49 @@ class DistributedDataParallelTest(
             output = model(input)
             loss = criterion(output, target)
             loss.backward()
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_sharded_tensor(self):
+        class MyModule(nn.Module):
+            def __init__(self, shard_tensor: ShardedTensor) -> None:
+                super().__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.st = nn.Parameter(shard_tensor)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                return F.softmax(x, dim=1)
+        pg = dist.init_process_group(
+            "gloo",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        local_shard_metadata = ShardMetadata(
+            shard_offsets=[(self.rank % 2) * 5, 0],
+            shard_sizes=[5, 10],
+            placement=f"rank:{self.rank}/cuda:{self.rank}"
+        )
+        local_shards = [Shard(torch.randn(5, 10, device=device), local_shard_metadata)]
+        st = init_from_local_shards(local_shards, [10, 10])
+        m = MyModule(st)
+        with _ddp_replicated_tensor(False):
+            DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                module=m,
+                params_and_buffers_to_ignore={'st'}
+            )
+            # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
+            DistributedDataParallel(
+                m,
+                device_ids=[device] if device.type == "gpu" else None,
+                process_group=pg,
+                gradient_as_bucket_view=True,
+                broadcast_buffers=False,
+                static_graph=True,
+            )
 
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
@@ -1881,8 +1908,7 @@ class DistributedDataParallelTest(
             self.assertEqual(p_non_ddp_withload, p_withoutload)
 
     def _test_sparse_gradients(self, gradient_as_bucket_view=False):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         # Ensure initialized weights and inputs are identical across processes
         torch.manual_seed(1337)
@@ -1911,7 +1937,7 @@ class DistributedDataParallelTest(
         The callback function creates a Future object and sets a value to it.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
@@ -1949,8 +1975,7 @@ class DistributedDataParallelTest(
         This unit test verifies whether the Future object is passed properly using gloo backend.
         The hook callback function creates a Future object and sets a value to it.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         # Get GPU model with simple_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
@@ -1966,8 +1991,7 @@ class DistributedDataParallelTest(
         of hook defined by user. The Python hook must be callable. This test also
         checks whether bucket annotation checked properly if defined.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         model = DistributedDataParallel(
             ModuleForDdpCommHook(), process_group=process_group
@@ -1994,8 +2018,7 @@ class DistributedDataParallelTest(
         checks whether an internal error is thrown if return type is incorrect and user
         hasn't specified any return type annotation.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         model = DistributedDataParallel(
             ModuleForDdpCommHook(), process_group=process_group
@@ -2036,8 +2059,7 @@ class DistributedDataParallelTest(
         DDP communication hook can only be registered once. This test validates whether
         the error is thrown properly when register_comm_hook is called more than once.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         model = DistributedDataParallel(
             ModuleForDdpCommHook(), process_group=process_group
@@ -2062,8 +2084,7 @@ class DistributedDataParallelTest(
         Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
         simple hook that does allreduce and works with gloo backend for this test.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        process_group = self._get_process_group()
 
         # Ensure initialized weights and inputs are identical across processes
         torch.manual_seed(1337)
@@ -2109,8 +2130,18 @@ class ReducerModule(nn.Module):
 class ReducerTest(TestCase):
     def setUp(self):
         self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.store = c10d.FileStore(self.file.name, 1)
-        self.process_group = c10d.ProcessGroupGloo(self.store, 0, 1)
+        world_size = 1
+        self.store = c10d.FileStore(self.file.name, world_size)
+        c10d.init_process_group(backend="gloo", store=self.store, rank=0, world_size=world_size)
+        self.process_group = c10d.distributed_c10d._get_default_group()
+
+    def tearDown(self):
+        c10d.destroy_process_group()
+        try:
+            os.remove(self.file.name)
+        except OSError as e:
+            print(str(e))
+            pass
 
     @requires_gloo()
     def test_single_dtype_single_bucket(self):
@@ -2262,7 +2293,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         target += torch.arange(60, dtype=half, device=device).chunk(5)
         target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
 
-        # The tensors to pass to broadcast are idential to the target
+        # The tensors to pass to broadcast are identical to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
             tensors = list(tensor.clone() for tensor in target)
@@ -2283,12 +2314,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo._Options()
-        options._devices = [create_device(interface=LOOPBACK)]
-        process_group = c10d.ProcessGroupGloo(
-            store, self.rank, self.world_size, options
-        )
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device("cuda:%d" % self.rank)
+        backend = process_group._get_backend(device)
+        backend.create_device(interface=LOOPBACK)
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
@@ -2296,12 +2326,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        options = c10d.ProcessGroupGloo._Options()
-        options._devices = [create_device(interface=LOOPBACK)]
-        process_group = c10d.ProcessGroupGloo(
-            store, self.rank, self.world_size, options
-        )
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device("cpu")
+        backend = process_group._get_backend(device)
+        backend.create_device(interface=LOOPBACK)
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
@@ -2362,6 +2391,39 @@ class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
     @requires_gloo()
     def test_collectives(self):
         self._test_collectives(backend="gloo")
+
+    @requires_gloo()
+    def test_allreduce_coalesced(self):
+        self._test_allreduce_coalesced(backend="gloo")
+
+    @requires_gloo()
+    def test_all_to_all_single(self):
+        self._test_all_to_all_single(backend="gloo")
+
+    @requires_gloo()
+    def test_allgather_coalesced(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        input_tensor = torch.ones(10, 10, dtype=torch.float32)
+        output_tensor_list = [torch.zeros_like(input_tensor)]
+        dist.all_gather_coalesced([output_tensor_list], [input_tensor])
+        self.assertEqual(output_tensor_list, [input_tensor])
+
+    @requires_gloo()
+    def test_monitored_barrier(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        dist.monitored_barrier()
 
 class CompilerTest(test_c10d_common.CompilerTest):
 

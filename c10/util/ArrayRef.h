@@ -255,7 +255,7 @@ template <typename T>
 std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
   int i = 0;
   out << "[";
-  for (auto e : list) {
+  for (const auto& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;

@@ -152,8 +152,8 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
         !(output_size.has_value())) {
       Tensor nt_sizes = nt_input->get_nested_size_tensor();
-      Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
-      Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
+      Tensor sizes_dim1 = at::native::narrow_symint(nt_sizes, 1, 0, 1);
+      Tensor sizes_dim2 = at::native::narrow_symint(nt_sizes, 1, 1, 1);
       Tensor result = at::detail::make_tensor<NestedTensorImpl>(
           nt_input->get_buffer(), sizes_dim1 * sizes_dim2[0]);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.dim() == 2);
@@ -214,26 +214,6 @@ Tensor NestedTensor_to_padded_tensor_cuda(
   return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
 }
 
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
-        const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-
-    // Determine which efficient kernel to use
-    sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, need_attn_weights, is_causal};
-    auto backend = select_sdp_backend(kernel_params);
-    switch(backend){
-      case sdp::SDPBackend::flash_attention:
-          // TODO: enable flash attention kernel
-          return mem_efficient_helper_nested_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
-      case sdp::SDPBackend::efficient_attention:
-          return mem_efficient_helper_nested_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
-      case sdp::SDPBackend::math:
-        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-      default:
-        TORCH_CHECK(false, "Unsupported backend for scaled_dot_product_attention");
-        return std::make_tuple(Tensor(), Tensor());
-    }
-}
 namespace{
 
 /**
@@ -340,14 +320,75 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
 }
 
 } // namespace
-std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
+
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool need_atten_weights,
+    bool return_softmax,
     bool is_causal) {
+  TORCH_CHECK(false, "There are currently cuda memory errors being returned from this path.")
   // Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
+  // Key   (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
+  // Value (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim = query.size(3);
+
+  // Query -> Query (Batch x {Q_seq_len}  x Num_heads x Dim_per_head)
+  // Key   -> Key   (Batch x {KV_seq_len} x Num_heads x Dim_per_head)
+  // Value -> Value (Batch x {KV_seq_len} x Num_heads x Dim_per_head)
+  Tensor q_t = query.transpose(1, 2).contiguous();
+  Tensor k_t = key.transpose(1, 2).contiguous();
+  Tensor v_t = value.transpose(1, 2).contiguous();
+
+  // K and V have to have the same Nnz, should probably torch_check
+  // assume in order to not iterate over v
+
+  auto cumulative_and_max_q = cumulative_and_max_seq_len(q_t);
+  auto cumulative_and_max_k = cumulative_and_max_seq_len(k_t);
+
+  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
+  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k);
+
+  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
+  const int64_t max_seqlen_batch_k = std::get<1>(cumulative_and_max_k);
+
+  const int64_t Nnz_q  = cumulative_sequence_length_q[-1].item<int64_t>();
+  const int64_t Nnz_kv = cumulative_sequence_length_k[-1].item<int64_t>();
+
+  auto query_buffer_reshaped =
+      get_buffer(q_t).view({Nnz_q, num_heads, head_dim});
+  auto key_buffer_reshaped =
+      get_buffer(k_t).view({Nnz_kv, num_heads, head_dim});
+  auto value_buffer_reshaped =
+      get_buffer(v_t).view({Nnz_kv, num_heads, head_dim});
+
+  auto attention_and_lse_and_softmax =
+  at::_flash_attention_forward(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      return_softmax,
+      dropout_p,
+      is_causal);
+  // Reshape output to convert nnz to batch_size and seq_len
+  Tensor attention = std::get<0>(attention_and_lse_and_softmax);
+  attention = wrap_buffer(attention.view(-1), get_nested_size_tensor(q_t).clone()).transpose(1,2);
+  return std::tie(attention, std::get<1>(attention_and_lse_and_softmax), std::get<2>(attention_and_lse_and_softmax));
+}
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool compute_log_sumexp,
+    bool is_causal) {
+   // Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
   // Key   (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
   // Value (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
   const int64_t num_heads = query.size(1);
@@ -432,7 +473,7 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
       {Nnz_kv, num_heads, head_dim},
       {nnz_v_stride, head_v_stride, head_dim_stride},
       value_impl->get_storage_offsets()[0]);
-  std::tuple<Tensor, Tensor> attention_and_weights =
+  std::tuple<Tensor, Tensor> attention_and_logsumexp=
       at::_efficient_attention_forward(
           query_buffer_reshaped.unsqueeze(0),
           key_buffer_reshaped.unsqueeze(0),
@@ -440,14 +481,14 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
           cumulative_sequence_length_q,
           cumulative_sequence_length_k,
           max_seqlen_batch_q,
-          false,
-          false);
+          compute_log_sumexp,
+          is_causal);
   // Reshape output to convert nnz to batch_size and seq_len
-  Tensor attention = std::get<0>(attention_and_weights);
+  Tensor attention = std::get<0>(attention_and_logsumexp);
   attention =
       wrap_buffer(attention.view(-1), get_nested_size_tensor(q_t).clone())
           .transpose(1, 2);
-  return std::tie(attention, std::get<1>(attention_and_weights));
+  return std::tie(attention, std::get<1>(attention_and_logsumexp));
 }
 
 Tensor flash_attention_helper(
@@ -492,7 +533,7 @@ Tensor flash_attention_helper(
   // If we are passing in query, key, value all the same tensors then we have
   // packed them into one tensor and need to slice for flash attention
   Tensor attention =
-      at::_flash_scaled_dot_product_attention(
+      std::get<0>(at::_flash_attention_forward(
           q,
           k,
           v,
@@ -500,8 +541,9 @@ Tensor flash_attention_helper(
           cumulative_sequence_length_q,
           max_seqlen_batch_q,
           max_seqlen_batch_q,
+          false /*return_softmax*/,
           dropout_p,
-          is_causal);
+          is_causal));
   // Output of flash_attention is a regular tensor lets wrap it back up to
   // form a nested tensor
 
