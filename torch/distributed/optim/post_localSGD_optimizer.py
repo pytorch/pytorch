@@ -1,6 +1,7 @@
+import warnings
+
 import torch
 import torch.distributed.algorithms.model_averaging.averagers as averagers
-import warnings
 
 
 class PostLocalSGDOptimizer(torch.optim.Optimizer):
@@ -53,11 +54,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>    opt.step()
     """
 
-    def __init__(
-        self,
-        optim: torch.optim.Optimizer,
-        averager: averagers.ModelAverager
-    ):
+    def __init__(self, optim: torch.optim.Optimizer, averager: averagers.ModelAverager):
         self.optim = optim
         self.param_groups = self.optim.param_groups
         self.averager = averager
@@ -76,7 +73,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         to ensure reload does not cause unnecessary warm up again.
         """
         optim_state_dict = self.optim.state_dict()
-        optim_state_dict['step'] = self.averager.step
+        optim_state_dict["step"] = self.averager.step
         return optim_state_dict
 
     def load_state_dict(self, state_dict):
@@ -89,11 +86,13 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         it will raise a warning and initialize the model averager's step to 0.
         """
         self.optim.load_state_dict(state_dict)
-        if 'step' in state_dict:
-            self.averager.step = state_dict['step']
+        if "step" in state_dict:
+            self.averager.step = state_dict["step"]
         else:
-            warnings.warn("Loaded state dict does not contain a step counter for an averager. "
-                          "Setting step counter to 0.")
+            warnings.warn(
+                "Loaded state dict does not contain a step counter for an averager. "
+                "Setting step counter to 0."
+            )
             self.averager.step = 0
 
     def step(self):

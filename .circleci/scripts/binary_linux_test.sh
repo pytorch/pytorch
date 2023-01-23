@@ -89,7 +89,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
 
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
       CUDA_PACKAGE="cudatoolkit"
-      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" ]]; then
+      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" || "$DESIRED_CUDA" == "cu118" ]]; then
         CUDA_PACKAGE="cuda"
       fi
 
@@ -98,7 +98,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg"
+  pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
   retry pip install -q future numpy protobuf typing-extensions six
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then

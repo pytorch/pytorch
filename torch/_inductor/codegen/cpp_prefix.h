@@ -57,3 +57,15 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
                                                std::memory_order_relaxed));
 }
+
+// This function is used to convert bool or uint8 to float mask for
+// vectorization. The caller needs to make sure the src represents TRUE/FALSE
+// correctly.
+template <typename T>
+void flag_to_float(const T* src, float* dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    uint32_t* dst_u32 = (uint32_t*)dst;
+    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
+  }
+}

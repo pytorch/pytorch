@@ -394,7 +394,7 @@ void quantile_out_impl(
   resize_output(out, out_shape);
 
   auto quantile = quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
   out.copy_(quantile);
 }
 
@@ -412,7 +412,7 @@ Tensor quantile_impl(
   auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
 
   return quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(

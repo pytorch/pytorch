@@ -9,7 +9,7 @@ def get_correct_mypy_version():
     # there's probably a more elegant way to do this
     match, = re.finditer(
         r'mypy==(\d+(?:\.\d+)*)',
-        Path('.circleci/docker/requirements-ci.txt').read_text(),
+        (Path(__file__).parent.parent / '.circleci' / 'docker' / 'requirements-ci.txt').read_text(),
     )
     version, = match.groups()
     return version

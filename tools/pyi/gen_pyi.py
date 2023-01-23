@@ -364,14 +364,8 @@ def gen_pyi(
                     f"{n2}_indices: Union[Tensor, List],"
                     " values: Union[Tensor, List], size: Optional[_size]=None,"
                     " *, dtype: Optional[_dtype]=None,"
-                    " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-                ],
-                f"_sparse_{n}_tensor_unsafe": [
-                    f"def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],"
-                    f"{n2}_indices: Union[Tensor, List],"
-                    " values: Union[Tensor, List], size: List[int],"
-                    " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                    " requires_grad: bool = False) -> Tensor: ..."
+                    " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
+                    " check_invariants:_bool=None) -> Tensor: ..."
                 ],
             }
         )
@@ -411,27 +405,16 @@ def gen_pyi(
             "sparse_coo_tensor": [
                 "def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],"
                 " size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-            ],
-            "_sparse_coo_tensor_unsafe": [
-                "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
-                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
+                " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
+                " check_invariants:_bool=None) -> Tensor: ..."
             ],
             "sparse_compressed_tensor": [
                 "def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],"
                 "plain_indices: Union[Tensor, List],"
                 " values: Union[Tensor, List], size: Optional[_size]=None,"
                 " *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-            ],
-            "_sparse_compressed_tensor_unsafe": [
-                "def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],"
-                "plain_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: List[int],"
-                " dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,"
-                " device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
+                " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
+                " check_invariants:_bool=None) -> Tensor: ..."
             ],
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
@@ -443,6 +426,10 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_enable_functionalization": [
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+            ],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -661,7 +648,7 @@ def gen_pyi(
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
             ],
-            "storage": ["def _storage(self) -> Storage: ..."],
+            "storage": ["def untyped_storage(self) -> Storage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
                 "def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...",

@@ -1210,7 +1210,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x.T
 
         self.run_test(NumpyTranspose(), torch.randn(4, 7))
-        self.run_test(NumpyTranspose(), torch.tensor(-42.0))
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
@@ -2643,6 +2642,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    def test_bernoulli_p(self):
+        class Bernoulli_float(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.bernoulli(x, 0.2).size(0))
+
+        class Bernoulli_tensor(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.rand_like(x).bernoulli_(x).size(0))
+
+        x = torch.rand(3, 3)
+        self.run_test(Bernoulli_float(), x)
+        self.run_test(Bernoulli_tensor(), x)
+
+        x = torch.rand(2, 3, 3, dtype=torch.double)
+        self.run_test(Bernoulli_float(), x)
+        self.run_test(Bernoulli_tensor(), x)
+
     @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
@@ -3910,6 +3926,52 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         src = torch.rand(3, 2)
         index = torch.tensor([[0, 0], [1, 1], [0, 1]], dtype=torch.int64)
         self.run_test(ScatterModel(), (src, index))
+
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_add_different_size_index_src(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices, src):
+                return input.scatter_add(0, indices, src)
+
+        src = torch.ones((2, 5))
+        input = torch.zeros(3, 5, dtype=src.dtype)
+        indices = torch.tensor([[0, 1, 2, 0, 0]])
+        self.run_test(ScatterModel(), input_args=(input, indices, src))
+
+    @common_utils.parametrize(
+        "src, indices",
+        [
+            common_utils.subtest(
+                [torch.ones((1, 5)), torch.tensor([[0, 1, 2, 0, 0]])],
+                name="src_indices_dynamic_combination1",
+            ),
+            common_utils.subtest(
+                [torch.ones((2, 5)), torch.tensor([[0, 1, 2, 0, 0], [1, 0, 2, 1, 2]])],
+                name="src_indices_dynamic_combination2",
+            ),
+            common_utils.subtest(
+                [torch.ones((3, 5)), torch.tensor([[0, 1, 2, 0, 0], [1, 0, 2, 1, 2]])],
+                name="src_indices_dynamic_combination3",
+            ),
+            common_utils.subtest(
+                [torch.ones((3, 5)), torch.tensor([[0, 1, 2, 0], [1, 0, 2, 1]])],
+                name="src_indices_dynamic_combination4",
+            ),
+        ],
+    )
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_add_dynamic_index(self, src, indices):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices, src):
+                return input.scatter_add(0, indices, src)
+
+        input = torch.zeros(3, 5, dtype=src.dtype)
+        self.run_test(
+            ScatterModel(),
+            input_args=(input, indices, src),
+            input_names=["input", "indices", "src"],
+            dynamic_axes={"indices": {0: "a", 1: "b"}, "src": {0: "c", 1: "d"}},
+        )
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_bucketize(self):
@@ -6096,6 +6158,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_inplace_zero_qkv(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x[2:4].zero_()
+
+        x = torch.randn(24, 3, 4)
+        self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_zeros(self):
         class Zero_(torch.nn.Module):
@@ -8222,6 +8293,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(CrossEntropyLossMeanWeight(ignore_index), input_args=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_MSELoss(self):
+        class MSELoss(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.loss1 = torch.nn.MSELoss(reduction="none")
+                self.loss2 = torch.nn.MSELoss(reduction="sum")
+                self.loss3 = torch.nn.MSELoss(reduction="mean")
+
+            def forward(self, input, target):
+                return (
+                    self.loss1(input, target),
+                    self.loss2(input, target),
+                    self.loss3(input, target),
+                )
+
+        x = torch.randn(2, 3, 5)
+        y = torch.randn(2, 3, 5)
+        self.run_test(MSELoss(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
         x = torch.rand(5).log()
@@ -8728,6 +8819,28 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.full_like(x, True)
         self.run_test(MinimumModel(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_maximum_dtypes(self):
+        class MaximumModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.maximum(x, y)
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randn((5, 5), dtype=torch.float)
+        self.run_test(MaximumModel(), (x, y))
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randint(10, (5, 5), dtype=torch.int16)
+        self.run_test(MaximumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int16)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(MaximumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int)
+        y = torch.full_like(x, True)
+        self.run_test(MaximumModel(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):
         class M(torch.nn.Module):
@@ -9129,7 +9242,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @skipScriptTest(
-        skip_before_opset_version=11, reason="dynamic split support addded in 11"
+        skip_before_opset_version=11, reason="dynamic split support added in 11"
     )
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
@@ -9867,7 +9980,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
         script_model = torch.jit.script(model)
@@ -9881,7 +9994,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -9915,7 +10028,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
 
         y = model(input)
         output = y.cpu().numpy()
@@ -9940,7 +10053,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
         pyt_mask = np.where(output != 0, 1, 0)
 
@@ -11681,7 +11794,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model_export, dummy_input, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_onnx(ort_sess, inputs=dummy_input)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -11712,7 +11825,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model_export, test_inputs, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_out = verification._run_ort(ort_sess, inputs=test_inputs)
+        ort_out = verification._run_onnx(ort_sess, inputs=test_inputs)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -11756,7 +11869,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         ort_sess = verification._ort_session(model_onnx)
 
-        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_onnx(ort_sess, inputs=dummy_input)
         actual_min = np.min(ort_out)
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)
@@ -12423,6 +12536,35 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             (input, grid),
             **atol_rtol,
         )
+
+        # ONNX Opset 16 GridSample with 5D volumetric input is not supported.
+        d_in = 2
+        d_out = 3
+        volumetric_input_tensor = torch.randn(n, c, d_in, h_in, w_in)
+        volumetric_grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
+        for mode, padding_mode, align_corners in itertools.product(
+            (
+                "bilinear",
+                "nearest",
+            ),  # PyTorch grid_sample "bicubic" mode does not support 5D volumetric input.
+            (
+                "zeros",
+                "border",
+                "reflection",
+            ),
+            (
+                True,
+                False,
+            ),
+        ):
+            with self.assertRaises(
+                torch.onnx.errors.OnnxExporterError,
+            ):
+                self.run_test(
+                    GridSampleModule(mode, padding_mode, align_corners),
+                    (volumetric_input_tensor, volumetric_grid_tensor),
+                    **atol_rtol,
+                )
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
