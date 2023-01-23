@@ -9,6 +9,8 @@
 #include <string>
 
 using namespace torch;
+using namespace at;
+using namespace c10;
 
 namespace {
 
