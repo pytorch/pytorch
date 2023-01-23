@@ -29,12 +29,13 @@ from ._traverse import (
 from .utils import _element_wise_add
 
 
-# TODO: update docstring for nested_tensor.py
-def flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
-    """
-    Transform ``state_dict`` by flattening all nested ShardedTensor instances found.
+def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    r"""
+    Transforms ``state_dict`` by flattening all nested ShardedTensor instances found.
+
     The resulting ShardedTensor instances are only correct regarding the local shard and
-    MUST not be used for any other purpose but checkpointing, no operator will work with them.
+    MUST not be used for any other purpose but checkpointing, as no operator will work with them.
+
     This function should be used in conjunction with a state_dict produced by FSDP's
     StateDictType.SHARDED_STATE_DICT methods.
     """
@@ -80,13 +81,14 @@ def flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
 
         st_meta: ShardedTensorMetadata = copy.deepcopy(value.metadata())
         other_rank = 0 if dist.get_rank() > 0 else 1
+
         # Remove the outer ST shard the inner ST covers
         for i, shard_md in enumerate(st_meta.shards_metadata):
             if shard_md.shard_offsets == outer_shard.metadata.shard_offsets:
                 st_meta.shards_metadata.pop(i)
                 break
 
-        # blame other rank for the other shards
+        # Attribute other rank for the other shards
         for shard_md in st_meta.shards_metadata:
             shard_md.placement = _remote_device(f"rank:{other_rank}/cuda:0")
 
