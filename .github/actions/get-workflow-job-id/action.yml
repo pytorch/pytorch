@@ -16,6 +16,8 @@ runs:
   using: composite
   steps:
     - name: Get jobid or fail
+      # timeout-minutes is unsupported for composite workflows, see https://github.com/actions/runner/issues/1979
+      # timeout-minutes: 10
       shell: bash
       run: |
         set -eux
