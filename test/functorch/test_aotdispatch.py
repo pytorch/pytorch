@@ -2416,7 +2416,6 @@ symbolic_aot_autograd_failures = {
     xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('unsafe_split', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
@@ -2574,7 +2573,6 @@ aot_autograd_module_failures = set({
 })
 
 symbolic_aot_autograd_module_failures = {
-    torch.nn.GRU,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
