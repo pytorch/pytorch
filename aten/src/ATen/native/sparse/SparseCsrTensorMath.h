@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Scalar.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/ReductionType.h>
 #include <ATen/native/cpu/SpmmReduceKernel.h>
 
 namespace at {
@@ -59,20 +60,6 @@ inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view 
       " but got ",
       self.dim(),
       " instead.");
-}
-
-inline SPMM_REDUCE_OP get_operator_enum(const c10::string_view reduce) {
-  if (reduce == "sum") {
-    return SPMM_SUM;
-  } else if (reduce == "mean") {
-    return SPMM_MEAN;
-  } else if (reduce == "max") {
-    return SPMM_MAX;
-  } else if (reduce == "min") {
-    return SPMM_MIN;
-  } else {
-    TORCH_CHECK(false, "spmm_reduce: reduce argument must be either sum, mean, max or min.");
-  }
 }
 
 template <bool train>

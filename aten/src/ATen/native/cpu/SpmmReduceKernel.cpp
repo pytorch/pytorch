@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/SpmmReduceKernel.h>
+#include <ATen/native/cpu/ReduceUtils.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -19,16 +20,16 @@ namespace at { namespace native {
 
 namespace {
 
-template <typename scalar_t, SPMM_REDUCE_OP reduce>
+template <typename scalar_t, ReductionType reduce>
 struct Reducer {
   static inline void init(scalar_t* ptr, int64_t size) {
     using acc_t = vec::vec_scalar_t<scalar_t>;
     using Vec = vec::Vectorized<acc_t>;
 
     acc_t val;
-    if (reduce == SPMM_MAX) {
+    if (reduce == ReductionType::MAX) {
       val = std::numeric_limits<acc_t>::lowest();
-    } else if (reduce == SPMM_MIN) {
+    } else if (reduce == ReductionType::MIN) {
       val = std::numeric_limits<acc_t>::max();
     } else {
       return;
@@ -42,9 +43,9 @@ struct Reducer {
   }
 
   static inline void update(scalar_t& out, const scalar_t data) {
-    if (reduce == SPMM_SUM || reduce == SPMM_MEAN) {
+    if (reduce == ReductionType::SUM || reduce == ReductionType::MEAN) {
       out += data;
-    } else if (reduce == SPMM_MAX) {
+    } else if (reduce == ReductionType::MAX) {
       out = std::max(out, data);
     } else {
       out = std::min(out, data);
@@ -54,9 +55,9 @@ struct Reducer {
   static inline void update(
       vec::Vectorized<scalar_t>& out_vec,
       const vec::Vectorized<scalar_t>& data_vec) {
-    if (reduce == SPMM_SUM || reduce == SPMM_MEAN) {
+    if (reduce == ReductionType::SUM || reduce == ReductionType::MEAN) {
       out_vec += data_vec;
-    } else if (reduce == SPMM_MAX) {
+    } else if (reduce == ReductionType::MAX) {
       out_vec = vec::maximum(out_vec, data_vec);
     } else {
       out_vec = vec::minimum(out_vec, data_vec);
@@ -64,7 +65,7 @@ struct Reducer {
   }
 };
 
-template <typename scalar_t, typename index_t, SPMM_REDUCE_OP reduce>
+template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_kernel_impl(
     const Tensor& out,
     const Tensor& crow_indices_,
@@ -185,7 +186,7 @@ void spmm_reduce_kernel_impl(
         }
       }
 
-      if (reduce == SPMM_MEAN && count != 0) {
+      if (reduce == ReductionType::MEAN && count != 0) {
         int64_t k = 0;
         for (; k < K - (K % Vec::size()); k += Vec::size()) {
           Vec out_vec = Vec::loadu(out_ptr + k);
@@ -200,16 +201,16 @@ void spmm_reduce_kernel_impl(
   });
 }
 
-template <typename scalar_t, typename index_t, SPMM_REDUCE_OP reduce>
+template <typename scalar_t, typename index_t, ReductionType reduce>
 inline void update(scalar_t *val, scalar_t new_val, index_t *arg, index_t new_arg) {
-  if ((reduce == SPMM_MIN && new_val < *val) ||
-      (reduce == SPMM_MAX && new_val > *val)) {
+  if ((reduce == ReductionType::MIN && new_val < *val) ||
+      (reduce == ReductionType::MAX && new_val > *val)) {
     *val = new_val;
     *arg = new_arg;
   }
 }
 
-template <typename scalar_t, typename index_t, SPMM_REDUCE_OP reduce>
+template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_arg_kernel_impl(
     const Tensor& out,
     const Tensor& arg_out,
@@ -218,7 +219,7 @@ void spmm_reduce_arg_kernel_impl(
     const Tensor& values_,
     const Tensor& other_) {
 
-  TORCH_CHECK(reduce == SPMM_MAX || reduce == SPMM_MIN);
+  TORCH_CHECK(reduce == ReductionType::MAX || reduce == ReductionType::MIN);
   int64_t nnz = values_.numel();
   if (nnz == 0) {
     return;
@@ -266,7 +267,7 @@ void spmm_reduce_arg_kernel_impl(
   });
 }
 
-template <typename scalar_t, typename index_t, SPMM_REDUCE_OP reduce>
+template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_backward_input_kernel_impl(
     const Tensor& grad_self,
     const Tensor& grad_out_,
@@ -307,7 +308,7 @@ void spmm_reduce_backward_input_kernel_impl(
           grad_out_data + row * K,
           K);
 
-      if (reduce == SPMM_MEAN) {
+      if (reduce == ReductionType::MEAN) {
         index_t row_start = crow_data[row], row_end = crow_data[row + 1];
         val /= std::max((index_t)1, row_end - row_start);
       }
@@ -317,7 +318,7 @@ void spmm_reduce_backward_input_kernel_impl(
   });
 }
 
-// backward for reduce type 'max' or 'min'
+// backward for reduce type 'amax' or 'amin'
 template <typename scalar_t, typename index_t>
 void spmm_reduce_backward_input_arg_kernel_impl(
     const Tensor& grad_self,
@@ -467,7 +468,7 @@ void spmm_reduce_kernel(
     const Tensor& col_indices,
     const Tensor& values,
     const Tensor& other,
-    SPMM_REDUCE_OP reduce_op) {
+    ReductionType reduce_op) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
@@ -485,7 +486,7 @@ void spmm_reduce_arg_kernel(
     const Tensor& col_indices,
     const Tensor& values,
     const Tensor& other,
-    SPMM_REDUCE_OP reduce_op) {
+    ReductionType reduce_op) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
@@ -503,8 +504,8 @@ void spmm_reduce_backward_input_kernel(
     const Tensor& col_indices,
     const Tensor& other,
     const Tensor& row_indices,
-    SPMM_REDUCE_OP reduce_op) {
-  TORCH_CHECK(reduce_op == SPMM_SUM || reduce_op == SPMM_MEAN);
+    ReductionType reduce_op) {
+  TORCH_CHECK(reduce_op == ReductionType::SUM || reduce_op == ReductionType::MEAN);
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
@@ -521,8 +522,8 @@ void spmm_reduce_backward_input_arg_kernel(
     const Tensor& col_indices,
     const Tensor& other,
     const Tensor& arg_out,
-    SPMM_REDUCE_OP reduce_op) {
-  TORCH_CHECK(reduce_op == SPMM_MAX || reduce_op == SPMM_MIN);
+    ReductionType reduce_op) {
+  TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_arg_indices", [&]() {
       spmm_reduce_backward_input_arg_kernel_impl<scalar_t, index_t>(
@@ -552,13 +553,13 @@ void spmm_reduce_backward_other_kernel(
     const Tensor& row_indices,
     const Tensor& ccol_indices,
     const Tensor& csr2csc,
-    SPMM_REDUCE_OP reduce_op) {
-  TORCH_CHECK(reduce_op == SPMM_SUM || reduce_op == SPMM_MEAN);
+    ReductionType reduce_op) {
+  TORCH_CHECK(reduce_op == ReductionType::SUM || reduce_op == ReductionType::MEAN);
   // need to permute row_indices to CSC order
   auto row = row_indices.index_select(0, csr2csc);
 
   Tensor val;
-  if (reduce_op == SPMM_MEAN) {
+  if (reduce_op == ReductionType::MEAN) {
     // for reduce type "mean", need to update the values
     // with rowcount for each of the nonzero element.
     Tensor updated_values = at::empty(values.sizes(), values.options());
@@ -568,9 +569,7 @@ void spmm_reduce_backward_other_kernel(
     val = values.index_select(0, csr2csc);
   }
 
-  if (reduce_op == SPMM_SUM || reduce_op == SPMM_MEAN) {
-    spmm_reduce_kernel(grad_other, ccol_indices, row, val, grad_out, SPMM_SUM);
-  }
+  spmm_reduce_kernel(grad_other, ccol_indices, row, val, grad_out, ReductionType::SUM);
 }
 
 void spmm_reduce_backward_other_arg_kernel(
@@ -579,8 +578,8 @@ void spmm_reduce_backward_other_arg_kernel(
     const Tensor& col_indices,
     const Tensor& values,
     const Tensor& arg_out,
-    SPMM_REDUCE_OP reduce_op) {
-  TORCH_CHECK(reduce_op == SPMM_MAX || reduce_op == SPMM_MIN);
+    ReductionType reduce_op) {
+  TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_other_arg_indices", [&]() {
       spmm_reduce_backward_other_arg_kernel_impl<scalar_t, index_t>(

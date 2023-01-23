@@ -2398,20 +2398,13 @@ class TestSparseCSR(TestCase):
             row, col = coo_indices[0], coo_indices[1]
 
             def ref(row, col, val, mat):
-                if reduce_type == "max":
-                    scatter_type = "amax"
-                elif reduce_type == "min":
-                    scatter_type = "amin"
-                else:
-                    scatter_type = reduce_type
-
                 out = torch.zeros([m, k], dtype=dtype)
                 weight = mat.index_select(0, col)
                 src = weight.mul(val.view(-1, 1))
                 index = row.view(-1, 1).expand_as(weight)
                 index = index.to(dtype=torch.int64)
                 # scatter_reduce expect index to be int64
-                out.scatter_reduce_(0, index, src, reduce=scatter_type, include_self=False)
+                out.scatter_reduce_(0, index, src, reduce=reduce_type, include_self=False)
                 return out
 
             if train:
@@ -2437,7 +2430,7 @@ class TestSparseCSR(TestCase):
 
         for train in [False, True]:
             for index_dtype in [torch.int32, torch.int64]:
-                for reduce_type in ["sum", "mean", "max", "min"]:
+                for reduce_type in ["sum", "mean", "amax", "amin"]:
                     # by setting nnz < M, create empty rows
                     run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
                     run_test(3, 4, 11, 6, reduce_type, index_dtype, train)

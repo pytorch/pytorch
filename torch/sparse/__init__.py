@@ -151,23 +151,25 @@ Examples::
 
 
 spmm_reduce = _add_docstr(_sparse.spmm_reduce, r"""
-sparse.spmm_reduce(input, weight, reduce, row_indices=None, ccol_indices=None, csr2csc=None) -> Tensor
+sparse.spmm_reduce(self, other, reduce, *, row_indices=None, ccol_indices=None, csr2csc=None) -> Tensor
 
-Reduce rows from dense matrices :attr:`weight` at the locations specified by the sparsity pattern of :attr:`input`.
-The matrix :attr:`input` is not added to the final result.
+Reduce rows from dense matrices :attr:`other` at the locations specified by the sparsity pattern of :attr:`self`.
+The matrix :attr:`self` is not added to the final result.
 
-For each element in :attr:`input` at index [i, j], pick the rows from :attr:`weight` specified by j,
+For each element in :attr:`self` at index [i, j], pick the rows from :attr:`other` specified by j,
 and reduce to :attr:`output` at row i.
 
 .. note::
-    :attr:`input` must be a sparse CSR tensor. :attr:`weight` must be dense tensors.
+    :attr:`self` must be a sparse CSR tensor. :attr:`other` must be a dense tensors.
     This function is implemented only for tensors on CPU device.
 
 Args:
-    input (Tensor): a sparse CSR matrix of shape `(m, n)`.
-    weight (Tensor): a dense matrix of shape `(m, k)` to be reduced.
+    self (Tensor): a sparse CSR matrix of shape `(m, n)`.
+    other (Tensor): a dense matrix of shape `(n, k)` to be reduced.
     reduce (str): the reduction operation to apply for non-unique indices
-        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"max"`, :obj:`"min"`).
+        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
+
+Keyword args:
     row_indices (Tensor, optional): row indices for each element in :attr:`input`, 1-D tensor of size `nse`.
     ccol_indices (Tensor, optional): compressed col indices for each element in :attr:`input`, 1-D tensor of size `n + 1`.
     csr2csc (Tensor, optional): permute pattern to convert :attr:`input` from CSR to CSC.
@@ -183,8 +185,8 @@ Examples::
        col_indices=tensor([2, 0, 1, 3]),
        values=tensor([1., 2., 3., 4.]), size=(3, 4), nnz=4,
        layout=torch.sparse_csr)
-    >>> weight = torch.ones(4, 3)
-    >>> torch.sparse.spmm_reduce(csr, weight, "sum")
+    >>> dense = torch.ones(4, 3)
+    >>> torch.sparse.spmm_reduce(csr, dense, "sum")
     tensor([[1., 1., 1.],
         [5., 5., 5.],
         [4., 4., 4.]])

@@ -1313,11 +1313,14 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
   sparse::impl::check_spmm_reduce_inputs</*train*/false>(
       self, Tensor(), other, row_indices, ccol_indices, csr2csc);
 
-  auto op = sparse::impl::get_operator_enum(reduce);
+  auto op = get_reduction_enum(reduce);
+  TORCH_CHECK(op != ReductionType::PROD, "spmm_reduce: reduce type of prod has not been enabled.")
 
   auto crow = self.crow_indices();
   auto col = self.col_indices();
   auto val = self.values();
+
+  TORCH_CHECK(val.ndimension() == 1, "spmm_reduce: expect self.values() to be 1-dimensional.")
 
   // init output to be all zeros, for `rows` that has no nonzero elements,
   // the corresponding rows in the output will be zero.
@@ -1330,10 +1333,10 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
   }
 
   // only need to calculate the out args
-  // for reduce type "max" and "min" for training
+  // for reduce type "amax" and "amin" for training
   bool need_arg_out = at::GradMode::is_enabled()
       && (self.requires_grad() || other.requires_grad())
-      && (op == SPMM_MAX || op == SPMM_MIN);
+      && (op == ReductionType::MAX || op == ReductionType::MIN);
 
   if (!need_arg_out) {
     spmm_reduce_stub(kCPU, out, crow, col, val, other, op);
@@ -1361,7 +1364,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
   sparse::impl::check_spmm_reduce_inputs</*train*/true>(
       self, grad_out, other, row_indices, ccol_indices, csr2csc);
 
-  auto op = sparse::impl::get_operator_enum(reduce);
+  auto op = get_reduction_enum(reduce);
 
   auto crow = self.crow_indices();
   auto col = self.col_indices();
@@ -1388,7 +1391,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
 
     // calculte the global index for CSC
     // and get the conversion permute pattern
-    Tensor index = col.mul(self.size(0)).add(row);
+    Tensor index = col.mul(self.size(0)).add_(row);
     permute = index.argsort();
 
     ccol = at::_convert_indices_from_coo_to_csr(
@@ -1402,7 +1405,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
     // grad_input has the same indices and nnz with input
     grad_self = at::empty_like(self);
     grad_self.values().zero_();
-    if (op == SPMM_MAX || op == SPMM_MIN) {
+    if (op == ReductionType::MAX || op == ReductionType::MIN) {
       spmm_reduce_backward_input_arg_stub(kCPU, grad_self, grad_out, col, other, arg_out, op);
     } else {
       spmm_reduce_backward_input_stub(kCPU, grad_self, grad_out, crow, col, other, row, op);
@@ -1410,7 +1413,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
   }
   if (output_mask[1]) {
     grad_other = at::zeros(other.sizes(), other.options());
-    if (op == SPMM_MAX || op == SPMM_MIN) {
+    if (op == ReductionType::MAX || op == ReductionType::MIN) {
       spmm_reduce_backward_other_arg_stub(kCPU, grad_other, grad_out, col, val, arg_out, op);
     } else {
       spmm_reduce_backward_other_stub(kCPU, grad_other, grad_out, crow, val, row, ccol, permute, op);
