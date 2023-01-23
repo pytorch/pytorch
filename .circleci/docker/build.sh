@@ -85,18 +85,6 @@ _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
-    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
-    CUDNN_VERSION=8
-    TENSORRT_VERSION=8.0.1.6
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    CONDA_CMAKE=yes
-    ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
@@ -162,26 +150,6 @@ case "$image" in
   pytorch-linux-bionic-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes

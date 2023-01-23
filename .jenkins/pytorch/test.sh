@@ -259,34 +259,67 @@ test_inductor() {
   PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
 }
 
-test_inductor_benchmark() {
+test_single_dynamo_benchmark() {
+  # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
+
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  PARTITION_FLAGS=""
-  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
-    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
-  fi
   mkdir -p "$TEST_REPORTS_DIR"
+
+  local name="$1"
+  shift
+  local suite="$1"
+  shift
+  # shard id is mandatory, even if it is not passed
+  local shard_id="$1"
+  shift
+
+  local partition_flags=()
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
+    partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
+  fi
+
+  # Feel free to remove --device cuda if you ever decide to need to
+  # test CPU as well in CI
+  python "benchmarks/dynamo/$suite.py" \
+    --ci --accuracy --device cuda \
+    "$@" "${partition_flags[@]}" \
+    --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+  python benchmarks/dynamo/check_csv.py \
+    -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+}
+
+test_aot_eager_benchmark() {
+  # Usage: test_dynamo_benchmark huggingface 0
+
+  local exit_status=0
+
   # Check inference with --float32
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --accuracy \
-    --device cuda --inductor --float32 $PARTITION_FLAGS --output "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager || exit_status=$?
+
   # Check training with --amp
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --training --accuracy \
-    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp || exit_status=$?
+
+  if [[ $exit_status -ne 0 ]]; then
+    echo "Some benchmarks failed; scroll up for details"
+  fi
+  return $exit_status
+}
+
+test_inductor_benchmark() {
+  # Usage: test_dynamo_benchmark huggingface 0
+
+  # Check inference with --float32
+  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor
+
+  # Check training with --amp
+  test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
+
   # Check training with symbolic shapes (not actually inductor)
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --training --accuracy --dynamic-shapes \
-    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+  test_single_dynamo_benchmark "dynamic_aot_eager_training" "$@" \
+    --backend aot_eager --dynamic-shapes --training
 }
 
 test_inductor_benchmark_perf() {
@@ -306,14 +339,29 @@ test_inductor_benchmark_perf() {
     python benchmarks/dynamo/torchbench.py --performance --backend inductor --float16 --training \
       --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
       --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+    # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
+    # this value needs to be actively maintained to make this check useful
+    python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   else
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   fi
 }
 
+# No sharding for the periodic job, we don't care if latency is bad
+test_aot_eager_all() {
+  local exit_status=0
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" || exit_status=$?
+  if [[ $exit_status -ne 0 ]]; then
+    echo "Some benchmarks failed; scroll up for details"
+  fi
+  return $exit_status
+}
+
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface
+  test_inductor_benchmark huggingface ""
 }
 
 test_inductor_huggingface_perf() {
@@ -337,7 +385,7 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
 }
 
 test_inductor_torchbench_perf() {
@@ -811,6 +859,14 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  install_huggingface
+  install_timm
+  test_aot_eager_all
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
