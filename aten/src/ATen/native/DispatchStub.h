@@ -278,22 +278,18 @@ struct RegisterHIPDispatch {
 // it from a 'cpp' file it will not work!
 #if defined(__CUDACC__)
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
-#warning "__CUDACC__"
 #elif defined(__HIPCC__)
 // TODO: cut this over to HIP dispatch once we stop pretending that CUDA
 // is HIP in the PyTorch HIPify build.
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
-#warning "__HIPCC__"
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(__OBJC__) && defined(USE_MPS)
 // NB: this macro must be used from a 'mm' file in order to dispatch a MPS kernel
 #define REGISTER_DISPATCH(name, fn) REGISTER_MPS_DISPATCH(name, fn)
-#warning "__OBJC__ USE_MPS"
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define REGISTER_NO_AVX512_DISPATCH(name)       \
   REGISTER_AVX512_DISPATCH(name, nullptr)
-#warning "CPU_CAPABILITY"
 #endif
 
 
