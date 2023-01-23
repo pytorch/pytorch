@@ -6,10 +6,6 @@ if not errorlevel 0 (
   exit /b
 )
 
-echo "Installing test dependencies"
-pip install networkx
-if errorlevel 1 exit /b
-
 echo "Test functorch"
 pushd test
 python run_test.py --functorch --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose

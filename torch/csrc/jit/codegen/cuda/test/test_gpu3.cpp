@@ -4096,7 +4096,7 @@ TEST_F(NVFuserTest, FusionUnsqueeze1_CUDA) {
   fusion.addOutput(tv2);
 
   TORCH_CHECK(
-      tv2->nDims() == 2, "Unpected unsqueeze result: ", tv2->toString());
+      tv2->nDims() == 2, "Unexpected unsqueeze result: ", tv2->toString());
   TORCH_CHECK(
       tv2->axis(1)->isBroadcast(),
       "Unexpected unsqueeze result: ",

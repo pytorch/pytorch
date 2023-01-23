@@ -10,6 +10,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/clone.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -21,7 +23,7 @@ namespace native {
 
 // NOTE: To use this fallback, `clone` and `copy_` should fully understand and be able to correctly handle the semantic of your math bit.
 struct MathOpFallback {
-  MathOpFallback(DispatchKey key_, string op_name_) : key(key_), op_name(op_name_) {}
+  MathOpFallback(DispatchKey key_, string op_name_) : key(key_), op_name(std::move(op_name_)) {}
   virtual bool is_bit_set(const Tensor&) = 0;
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
     /*
@@ -107,7 +109,7 @@ struct MathOpFallback {
         if (mut_arg) {
           TORCH_CHECK(mutable_inputs_with_their_clones.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
             op_name, "bit set to true.");
-          mutable_inputs_with_their_clones.emplace_back(std::make_pair(std::move(tensor), resolved_tensor));
+          mutable_inputs_with_their_clones.emplace_back(std::move(tensor), resolved_tensor);
         }
         (*stack)[stack_start + i] = std::move(resolved_tensor);
       } else if (ivalue.isTensorList()) {

@@ -22,7 +22,6 @@ EIGEN = "eigen"
 
 GENERIC_ENV_VARS = ("USE_CUDA=0", "USE_ROCM=0")
 BASE_PKG_DEPS = (
-    "cffi",
     "cmake",
     "hypothesis",
     "ninja",

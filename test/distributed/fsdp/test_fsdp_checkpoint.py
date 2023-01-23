@@ -12,10 +12,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     offload_wrapper,
 )
+from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
+
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest
 from torch.testing._internal.common_utils import (
@@ -278,6 +280,92 @@ class TestFSDPCheckpoint(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
+
+
+class CheckpointModule(nn.Module):
+    def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
+        super().__init__()
+        self.seq = nn.Sequential(*[nn.Linear(100, 100) for _ in range(4)])
+        self.checkpoint = checkpoint
+        self.use_reentrant = use_reentrant
+
+    def forward(self, x):
+        return (
+            checkpoint(self.seq, x, use_reentrant=self.use_reentrant)
+            if self.checkpoint
+            else self.seq(x)
+        )
+
+
+class ModelWithCheckpointSubmodule(nn.Module):
+    def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.s1 = CheckpointModule(checkpoint, use_reentrant)
+        self.s2 = CheckpointModule(checkpoint, use_reentrant)
+        self.relu = nn.ReLU()
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.relu(self.s2(self.s1(self.l1(x)))))
+
+
+class TestModel(nn.Module):
+    def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.relu = nn.ReLU()
+        self.checkpoint1 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
+        self.checkpoint2 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.relu(self.checkpoint2(self.checkpoint1(self.l1(x)))))
+
+
+class TestFSDPCheckpointSubmodule(FSDPTest):
+
+    # TODO: grad value checks occasionally fails when use_reentrant = True
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [False])
+    def test_checkpoint_submodule(self, use_reentrant: bool):
+        model = TestModel(use_reentrant=use_reentrant).cuda()
+        model_ac = deepcopy(model)
+
+        for _, m in model_ac.named_modules():
+            if isinstance(m, CheckpointModule):
+                m.checkpoint = True
+
+        self.assertTrue(model_ac.checkpoint1.s1.checkpoint)
+        self.assertTrue(model_ac.checkpoint2.s2.checkpoint)
+
+        fsdp_kwargs = {
+            "device_id": torch.cuda.current_device(),
+            "sharding_strategy": ShardingStrategy.NO_SHARD,
+        }
+
+        # Wrap no checkpointing model submodules with FSDP
+        model.checkpoint1 = FSDP(module=model.checkpoint1, **fsdp_kwargs)
+        model.checkpoint2 = FSDP(module=model.checkpoint2, **fsdp_kwargs)
+
+        # Wrap checkpointing model submodules with FSDP
+        model_ac.checkpoint1 = FSDP(module=model_ac.checkpoint1, **fsdp_kwargs)
+        model_ac.checkpoint2 = FSDP(module=model_ac.checkpoint2, **fsdp_kwargs)
+
+        x = torch.randn(2, 100, device="cuda")
+
+        model(x).sum().backward()
+        model_ac(x).sum().backward()
+
+        for (n1, p1), (n2, p2) in zip(
+            model.named_parameters(), model_ac.named_parameters()
+        ):
+            self.assertEqual(n1, n2)
+            self.assertTrue(p1.grad.allclose(p2.grad))
+
+
+instantiate_parametrized_tests(TestFSDPCheckpointSubmodule)
+
 
 if __name__ == "__main__":
     run_tests()

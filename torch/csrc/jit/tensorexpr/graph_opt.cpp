@@ -6,9 +6,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // Move the given user of `aten::cat` op to its inputs.
 Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
@@ -488,6 +486,4 @@ std::shared_ptr<Graph> trimGraph(
   return graph;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
