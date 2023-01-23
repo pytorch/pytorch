@@ -1534,7 +1534,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
     def test_init_process_group_for_all_backends(self):
         for backend in dist.Backend.backend_list:
-            # skip is the backend is not available on the system
+            # skip if the backend is not available on the system
             if backend == dist.Backend.UNDEFINED:
                 continue
             elif backend == dist.Backend.MPI:
