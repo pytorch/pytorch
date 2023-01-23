@@ -5171,7 +5171,7 @@ def multi_head_attention_forward(
         elif attn_mask.dtype == torch.bool:
             attn_mask = attn_mask.logical_or(key_padding_mask)
         else:
-            attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
+            attn_mask = attn_mask.add(key_padding_mask)
 
     # convert mask to float
     if attn_mask is not None and attn_mask.dtype == torch.bool:
