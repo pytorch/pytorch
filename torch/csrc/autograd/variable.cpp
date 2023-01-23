@@ -554,7 +554,6 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
     return at::TensorBase{};
   };
 
-
   const auto& fn = self.grad_fn();
   std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionSingleTensorPreHook(
       std::move(retain_grad_hook), self.output_nr())};
