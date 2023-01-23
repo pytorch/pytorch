@@ -1922,9 +1922,11 @@ class TestSparse(TestSparseBase):
                 [17, 18, 19, 20],
             ], dtype=dtype, device=device)
             exp_v = torch.tensor([7, 14, 3, 20], dtype=dtype, device=device)
-            res = dense.sparse_mask(x)
+            res_dense_lhs = dense.sparse_mask(x)
+            res_sparse_lhs = dense.to_sparse().sparse_mask(x)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4]), dtype=dtype, device=device)
-            self.assertEqual(res.coalesce(), expected.coalesce())
+            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
 
             i = self.index_tensor([
                 [1, 3, 0, 4],
@@ -1934,9 +1936,11 @@ class TestSparse(TestSparseBase):
             x = self.sparse_tensor(i, v, torch.Size([5, 4, 0])).coalesce()
             dense = torch.empty([5, 4, 0], dtype=dtype, device=device)
             exp_v = torch.empty([4, 0], dtype=dtype, device=device)
-            res = dense.sparse_mask(x)
+            res_dense_lhs = dense.sparse_mask(x)
+            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 0]), dtype=dtype, device=device)
-            self.assertEqual(res.coalesce(), expected.coalesce())
+            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
 
         _test_sparse_mask_fixed()
 
@@ -1969,10 +1973,12 @@ class TestSparse(TestSparseBase):
                 [[13, 5], [14, 1], [15, 1], [16, 6]],
                 [[17, 7], [18, 2], [19, 7], [20, 1]],
             ])
-            res = dense.sparse_mask(x)
+            res_dense_lhs = dense.sparse_mask(x)
+            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
             exp_v = torch.tensor([[7, 9], [14, 1], [3, 3], [20, 1]])
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2]))
-            self.assertEqual(res.coalesce(), expected.coalesce())
+            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
 
             i = self.index_tensor([
                 [1, 3, 0, 4],
@@ -1981,10 +1987,12 @@ class TestSparse(TestSparseBase):
             v = torch.empty(4, 2, 0)
             x = self.sparse_tensor(i, v, torch.Size([5, 4, 2, 0])).coalesce()
             dense = torch.empty(5, 4, 2, 0)
-            res = dense.sparse_mask(x)
+            res_dense_lhs = dense.sparse_mask(x)
+            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
             exp_v = torch.empty(4, 2, 0)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2, 0]))
-            self.assertEqual(res.coalesce(), expected.coalesce())
+            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
 
         _test_sparse_mask_hybrid_fixed()
 
@@ -3458,8 +3466,11 @@ class TestSparse(TestSparseBase):
             c.backward(g)
 
             a_grad, b_grad = test_grad_dense(a, b, g)
-            self.assertEqual(a.grad, a_grad)
-            self.assertEqual(b.grad, b_grad)
+
+            # We convert grad to dense since dense and sparse mm
+            # implementations handle materialized zeroes differently.
+            self.assertEqual(a.grad.to_dense(), a_grad.to_dense())
+            self.assertEqual(b.grad.to_dense(), b_grad.to_dense())
 
         def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a, dtype, device, coalesced)

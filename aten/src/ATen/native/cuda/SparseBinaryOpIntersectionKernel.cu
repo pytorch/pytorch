@@ -18,15 +18,22 @@ struct CUDAKernelLauncher {
 
 struct MulOp {
   template <typename scalar_t>
-  static FUNCAPI scalar_t apply(scalar_t a, scalar_t b) {
+  static FUNCAPI INLINE scalar_t apply(scalar_t a, scalar_t b) {
     return a * b;
   }
 };
 
 template <>
-FUNCAPI bool MulOp::apply(bool a, bool b) {
+FUNCAPI INLINE bool MulOp::apply(bool a, bool b) {
   return a && b;
 }
+
+struct LhsProjOp {
+  template <typename scalar_t>
+  static FUNCAPI scalar_t apply(scalar_t a, scalar_t b) {
+    return a;
+  }
+};
 
 template <int nt, int vt, typename loop_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
@@ -75,8 +82,9 @@ void binary_op_intersection_kernel(
   const auto* RESTRICT ptr_lhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(2));
   const auto* RESTRICT ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
   const auto* RESTRICT ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
+  const auto* RESTRICT ptr_match_bytes = reinterpret_cast<bool*>(iter.data_ptr(5));
 
-  auto offset_calc = make_offset_calculator<5>(iter);
+  auto offset_calc = make_offset_calculator<6>(iter);
   auto loop = [=] FUNCAPI (int i) {
     auto offsets = offset_calc.get(i);
 
@@ -85,10 +93,13 @@ void binary_op_intersection_kernel(
     const auto lhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_lhs_select_idx_bytes + offsets[2]);
     const auto* RESTRICT ptr_rhs_values = reinterpret_cast<const scalar_t*>(ptr_rhs_values_bytes + offsets[3]);
     const auto rhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_rhs_select_idx_bytes + offsets[4]);
+    const auto match = *reinterpret_cast<const bool*>(ptr_match_bytes + offsets[5]);
 
-    *ptr_res_values = binary_op_t::apply(
-        *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
-        *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
+    if (match) {
+      *ptr_res_values = binary_op_t::apply(
+          *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
+          *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
+    }
   };
 
   launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -101,7 +112,8 @@ struct CUDAValueSelectionIntersectionKernel {
       const Tensor& lhs_values,
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
-      const Tensor& rhs_select_idx) {
+      const Tensor& rhs_select_idx,
+      const c10::optional<Tensor>& match_mask = c10::nullopt) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
@@ -142,8 +154,19 @@ void mul_sparse_sparse_out_cuda_kernel(
   );
 }
 
+void sparse_mask_intersection_out_cuda_kernel(
+    Tensor& result,
+    const Tensor& x,
+    const Tensor& y) {
+  using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
+  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
+      result, x, y, true
+  );
+}
+
 }
 
 REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel);
+REGISTER_CUDA_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cuda_kernel);
 
 } // namespace at::native
