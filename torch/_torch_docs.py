@@ -10640,14 +10640,14 @@ add_docstr(
     r"""
 squeeze(input, dim=None) -> Tensor
 
-Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
+Returns a tensor with all specified dimensions of :attr:`input` of size `1` removed.
 
 For example, if `input` is of shape:
-:math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` tensor
+:math:`(A \times 1 \times B \times C \times 1 \times D)` then the `input.squeeze()`
 will be of shape: :math:`(A \times B \times C \times D)`.
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
-dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
+dimension(s). If `input` is of shape: :math:`(A \times 1 \times B)`,
 ``squeeze(input, 0)`` leaves the tensor unchanged, but ``squeeze(input, 1)``
 will squeeze the tensor to the shape :math:`(A \times B)`.
 
@@ -10656,12 +10656,15 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 
 .. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
           will also remove the batch dimension, which can lead to unexpected
-          errors.
+          errors. Consider specifying only the dims you wish to be squeezed.
 
 Args:
     {input}
-    dim (int, optional): if given, the input will be squeezed only in
-           this dimension
+    dim (int or tuple of ints, optional): if given, the input will be squeezed
+           only in the specified dimensions.
+
+        .. versionchanged:: 2.0
+           :attr:`dim` now accepts tuples of dimensions.
 
 Example::
 
@@ -10677,6 +10680,8 @@ Example::
     >>> y = torch.squeeze(x, 1)
     >>> y.size()
     torch.Size([2, 2, 1, 2])
+    >>> y = torch.squeeze(x, (1, 2, 3))
+    torch.Size([2, 2, 2])
 """.format(
         **common_args
     ),
@@ -12407,34 +12412,34 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y, *, out=None) -> Tensor
+where(condition, input, other, *, out=None) -> Tensor
 
-Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
+Return a tensor of elements selected from either :attr:`input` or :attr:`other`, depending on :attr:`condition`.
 
 The operation is defined as:
 
 .. math::
     \text{out}_i = \begin{cases}
-        \text{x}_i & \text{if } \text{condition}_i \\
-        \text{y}_i & \text{otherwise} \\
+        \text{input}_i & \text{if } \text{condition}_i \\
+        \text{other}_i & \text{otherwise} \\
     \end{cases}
 """
     + r"""
 .. note::
-    The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
+    The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
-    condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor or Scalar): value (if :attr:`x` is a scalar) or values selected at indices
+    condition (BoolTensor): When True (nonzero), yield input, otherwise yield other
+    input (Tensor or Scalar): value (if :attr:`input` is a scalar) or values selected at indices
                           where :attr:`condition` is ``True``
-    y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
+    other (Tensor or Scalar): value (if :attr:`other` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
 
 Keyword args:
     {out}
 
 Returns:
-    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
+    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
 
 Example::
 
@@ -13900,3 +13905,59 @@ Performs the same operation as :func:`torch.alias`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )
+
+for unary_base_func_name in (
+    "exp",
+    "sqrt",
+    "abs",
+    "acos",
+    "asin",
+    "atan",
+    "ceil",
+    "cos",
+    "cosh",
+    "erf",
+    "erfc",
+    "expm1",
+    "floor",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "neg",
+    "tan",
+    "tanh",
+    "sin",
+    "sinh",
+    "round",
+    "lgamma",
+    "frac",
+    "reciprocal",
+    "sigmoid",
+    "trunc",
+    "zero",
+):
+    unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
+    if hasattr(torch, unary_foreach_func_name):
+        add_docstr(
+            getattr(torch, unary_foreach_func_name),
+            r"""
+{}(self: List[Tensor]) -> List[Tensor]
+
+Apply :func:`torch.{}` to each Tensor of the input list.
+            """.format(
+                unary_foreach_func_name, unary_base_func_name
+            ),
+        )
+    unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
+    if hasattr(torch, unary_inplace_foreach_func_name):
+        add_docstr(
+            getattr(torch, unary_inplace_foreach_func_name),
+            r"""
+{}(self: List[Tensor]) -> None
+
+Apply :func:`torch.{}` to each Tensor of the input list.
+        """.format(
+                unary_inplace_foreach_func_name, unary_base_func_name
+            ),
+        )

@@ -102,9 +102,6 @@ kernel_name_max_ops = 10
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
 
-# How to import torchdynamo, either torchdynamo or torch.dynamo
-dynamo_import = inductor_import.replace("inductor", "dynamo")
-
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
 
@@ -176,9 +173,6 @@ class triton:
     ordered_kernel_names = False
     # should we put op names in kernel names
     descriptive_kernel_names = True
-
-    # theses are not enforced, but they are checked by asserts in autotune.grid
-    max_block = {"X": 1024, "Y": 1024, "Z": 1024}
 
 
 # create a directory containing lots of debug information

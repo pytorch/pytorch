@@ -15,7 +15,7 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Implement as functors since lambdas don't get optimized.
 class ReduceMultiply {
@@ -563,4 +563,4 @@ REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel);
 
-}} // namespace at::native
+} // namespace at::native

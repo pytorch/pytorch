@@ -13,6 +13,7 @@ from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
+from torch._prims_common import is_float_dtype
 
 from . import config
 from .optimizations.backends import register_backend
@@ -410,9 +411,7 @@ def inductor_fails(fx_g, args, check_str=None):
             # Ensures that segfaults are surfaced
             torch.cuda.synchronize()
 
-    compile_fx_inner = import_module(
-        f"{config.inductor_import}.compile_fx"
-    ).compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     try:
         result = fx_g(*args)
@@ -420,7 +419,6 @@ def inductor_fails(fx_g, args, check_str=None):
         assert not any([isinstance(x, (tuple, list)) for x in result])
     except Exception:
         return False
-    result = None
 
     sync()
 
@@ -680,11 +678,28 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     return passing
 
 
+def cast_convert_element_type_to_fp64(model):
+    for node in model.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.prims.convert_element_type.default
+        ):
+            assert len(node.args) == 2
+            if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
+                node.args = (node.args[0], torch.float64)
+    model.graph.lint()
+    model.recompile()
+    return model
+
+
 def cast_to(dtype, model, inputs):
     from torch.utils._pytree import tree_map
 
-    # cast model and inputs to fp16
     model = model.to(dtype)
+    if dtype == torch.float64:
+        # If casting to fp64 for accuracy comparison, we need to
+        # take care of convert_element_type explicitly
+        model = cast_convert_element_type_to_fp64(model)
 
     inputs = tree_map(
         lambda x: x.to(dtype)
