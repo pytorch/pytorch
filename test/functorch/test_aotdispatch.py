@@ -1956,14 +1956,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
-        def f(x):
-            return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
-        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-
-        ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
-
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_recomputable_ops(self):
         def f(x):
@@ -2424,7 +2416,6 @@ symbolic_aot_autograd_failures = {
     xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('unsafe_split', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):

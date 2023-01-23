@@ -73,13 +73,13 @@ class EnableVmapFallbackWarnings:
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(ValueError, "got type <class 'float'> as a return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
             vmap(lambda x: 3.14)(torch.ones(3))
 
         def multiple_outputs(x):
             return x, 3
 
-        with self.assertRaisesRegex(ValueError, "got type <class 'int'> as a return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'int'>"):
             vmap(multiple_outputs)(torch.ones(3))
 
     def test_different_map_dim_size_raises(self):
@@ -317,6 +317,49 @@ class TestVmapAPI(TestCase):
         result = vmap(foo, out_dims=(1,))(tensor)
         self.assertEqual(result, expected)
 
+    def test_out_dims_none_tuple(self):
+        def foo(x):
+            return x, 'hello world'
+
+        tensor = torch.randn(2, 3)
+        result = vmap(foo, out_dims=(0, None))(tensor)
+        self.assertEqual(result[1], 'hello world')
+        self.assertEqual(result[0], tensor)
+
+        def foo(x):
+            x.add_(1)
+            return None, 'hello world'
+        result = vmap(foo, out_dims=(None, None))(tensor)
+        self.assertEqual(result, (None, 'hello world'))
+
+
+    def test_out_dims_none(self):
+        def foo(x):
+            return x
+
+        tensor = torch.randn(2, 3)
+        with self.assertRaisesRegex(ValueError, 'can not return a BatchedTensor when out_dim is None'):
+            vmap(foo, out_dims=None)(tensor)
+
+        def foo(x):
+            x.add_(1)
+            return 'hello world'
+        result = vmap(foo, out_dims=None)(tensor)
+        self.assertEqual(result, 'hello world')
+
+    def test_out_dims_normal_tensor(self):
+
+        def foo(x):
+            return torch.arange(3)
+
+        tensor = torch.randn(2, 3)
+        result = vmap(foo)(tensor)
+        self.assertEqual(result.shape, [2, 3])
+
+        result = vmap(foo, out_dims=None)(tensor)
+        self.assertEqual(result, torch.arange(3))
+
+
     def test_pytree_returns(self):
         x = torch.randn(2, 3)
 
@@ -382,16 +425,12 @@ class TestVmapAPI(TestCase):
         self.assertEqual(y2, y0.t())
 
     def test_out_dims_must_be_int_or_collection_of_int_err_msg(self):
-        msg = 'must be an int or a python collection of ints'
+        msg = 'must be an int, None or a python collection of ints'
         tensor = torch.randn(2, 3)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims='lol')(tensor)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims=('lol',))(tensor)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=None)(tensor)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=(None,))(tensor)
 
     def test_out_dims_and_num_outputs_mismatch_err_msg(self):
         msg = 'not compatible'
@@ -3701,14 +3740,16 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # AssertionError: Tensor-likes are not equal!
+        # Issue: https://github.com/pytorch/pytorch/issues/70904
+        xfail('bitwise_left_shift', device_type='cpu'),
+        xfail('bitwise_right_shift', device_type='cpu'),
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
@@ -4929,6 +4970,25 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
             vmap(f)(x <= 0, expected_result=True)
 
         check_vmap_fallback(self, test, torch._is_all_true)
+
+    def test__is_any_true(self, device):
+        def test():
+            def f(x, *, expected_result):
+                result = torch.ops.aten._is_any_true(x)
+                self.assertFalse(torch._C._functorch.is_batchedtensor(result))
+                self.assertEqual(result.shape, torch.Size([]))
+                self.assertEqual(result.item(), expected_result)
+                return result
+
+            x = torch.zeros(10, device=device, dtype=torch.bool)
+            vmap(f)(x > 0, expected_result=False)
+
+            x[5] = True
+            vmap(f)(x > 0, expected_result=True)
+            vmap(f)(x[1::2], expected_result=True)
+            vmap(f)(x[0::2], expected_result=False)
+
+        check_vmap_fallback(self, test, torch._is_any_true)
 
     def test_check_tensor(self, device):
         def test():
