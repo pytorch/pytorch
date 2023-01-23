@@ -324,18 +324,15 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
-  int64_t nbytes = element_size * size;
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t nsize; // convert little endian storage to big endian cpu
-    nsize = nbytes;
+    int64_t tsize; // convert little endian storage to big endian cpu
+    tsize = size;
     torch::utils::THP_decodeInt64Buffer(
-        &nbytes,
-        (const uint8_t*)&nsize,
-        torch::utils::THP_nativeByteOrder(),
-        1);
+        &size, (const uint8_t*)&tsize, torch::utils::THP_nativeByteOrder(), 1);
   }
+  int64_t nbytes = element_size * size;
   if (!storage.defined()) {
     storage = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
