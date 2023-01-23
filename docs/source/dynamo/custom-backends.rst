@@ -13,8 +13,9 @@ A backend function has the contract
 Backend functions can be called by TorchDynamo, the graph tracing component of ``torch.compile``,
 after tracing an FX graph and are
 expected to return a compiled function that is equivalent to the traced FX graph.
-The returned callable should have the same contract as the ``forward`` function of an ``nn.Module``:
-``(*args: Any) -> Any``.
+The returned callable should have the same contract as the ``forward`` function of the original ``torch.fx.GraphModule``
+passed into the backend:
+``(*args: torch.Tensor) -> List[torch.Tensor]``.
 
 In order for TorchDynamo to call your backend, pass your backend function as the ``backend`` kwarg in
 ``torch.compile``. For example,
@@ -60,7 +61,14 @@ Registration serves two purposes:
 Custom Backends after AOTAutograd
 ---------------------------------
 
-If you want your backend to be called by AOTAutograd rather than TorchDynamo, you can wrap your backend with
+It is possible to define custom backends that are called by AOTAutograd rather than TorchDynamo.
+This is useful for 2 main reasons:
+
+* Users can define backends that support model training, as AOTAutograd can generate the backward graph for compilation.
+* AOTAutograd produces FX graphs consisting of `canonical Aten ops <https://pytorch.org/docs/master/ir.html#canonical-aten-ir>`__. As a result,
+  custom backends only need to support the canonical Aten opset, which is a significantly smaller opset than the entire torch/Aten opset.
+
+Wrap your backend with
 ``torch._dynamo.optimizations.training.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.
 Backend functions wrapped by ``aot_autograd`` should have the same contract as before.
 
