@@ -26,13 +26,6 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/sparse_coo_tensor.h>
-#endif
-
 #include <algorithm>
 #include <ciso646>
 #include <functional>
@@ -1368,73 +1361,6 @@ Tensor sparse_sparse_matmul_backward(
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
   return b_grad.mul(mask_ones_like(b.coalesce()));
-}
-
-Tensor sparse_coo_constructor_backward(
-    const Tensor& grad,
-    const Tensor& result) {
-  const auto result_coalesced = result.coalesce();
-  const auto ones_like_result = at::sparse_coo_tensor(
-      result_coalesced.indices(),
-      at::ones({1}, result_coalesced.values().options()).expand_as(result_coalesced.values()),
-      result.sizes()
-  );
-  const auto nonzero_values_grad = grad.mul(ones_like_result).coalesce();
-
-  // Short circuit on empty intersection
-  if (nonzero_values_grad._nnz() == 0) {
-    return at::zeros_like(result._values());
-  }
-
-  const auto sparse_dims =
-      at::DimVector(result.sizes().slice(0, result.sparse_dim()));
-  const auto sparse_dims_numel = [&]() -> int64_t {
-    int64_t numel = 1;
-    for (const auto d : sparse_dims) {
-      numel *= d;
-    }
-    return numel;
-  }();
-
-  const auto result_indices_hash =
-      at::sparse::flatten_indices(result._indices(), sparse_dims);
-  Tensor result_indices_hash_values, result_indices_hash_indices;
-  std::tie(result_indices_hash_values, result_indices_hash_indices) =
-      result_indices_hash.sort();
-  auto result_indices_hash_coo_idx = at::sparse_coo_tensor(
-      result_indices_hash_values.unsqueeze(0),
-      result_indices_hash_indices,
-      {sparse_dims_numel});
-  result_indices_hash_coo_idx._coalesced_(true);
-  auto result_indices_hash_coo_count = at::sparse_coo_tensor(
-      result_indices_hash_values.unsqueeze(0),
-      at::ones({1}, result_indices_hash_indices.options())
-          .expand_as(result_indices_hash_values),
-      {sparse_dims_numel});
-  result_indices_hash_coo_count._coalesced_(true);
-
-  const auto nonzero_grad_indices_hash =
-      at::sparse::flatten_indices(nonzero_values_grad._indices(), sparse_dims);
-  auto nonzero_grad_indices_hash_coo = at::sparse_coo_tensor(
-      nonzero_grad_indices_hash.unsqueeze(0),
-      at::ones({1}, result_indices_hash_indices.options())
-          .expand_as(nonzero_grad_indices_hash),
-      {sparse_dims_numel});
-  nonzero_grad_indices_hash_coo._coalesced_(false);
-
-  const auto matched_idx =
-      nonzero_grad_indices_hash_coo.mul(result_indices_hash_coo_idx)._values();
-  const auto num_matches =
-      nonzero_grad_indices_hash_coo.mul(result_indices_hash_coo_count)
-          .coalesce()
-          ._values();
-
-  auto values_grad = at::zeros_like(result._values());
-  values_grad.index_add_(
-      0,
-      matched_idx,
-      nonzero_values_grad._values().repeat_interleave(num_matches, 0));
-  return values_grad;
 }
 
 Tensor renorm_backward(

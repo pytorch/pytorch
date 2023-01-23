@@ -745,26 +745,9 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   }
 
   if (t.layout() == at::kSparse) {
-    auto intersection = at::empty({0}, t.options());
-    sparse_mask_intersection_out_stub(intersection.device().type(), intersection, t, mask);
-
-    if (intersection._nnz() == 0) {
-      return mask.clone().to(t.device(), t.scalar_type());
-    }
-
-    // TODO: once union kernels are fast, reimplement with something along the lines of
-    // return intersection + zeros_like(mask)
-    const auto union_indices = at::cat(
-        {intersection._indices(), mask._indices()},
-        /*dim=*/-1);
-    const auto union_values = at::cat(
-        {intersection._values(), at::zeros({1}, t._values().options()).expand_as(mask._values())},
-        /*dim=*/0);
-    const auto union_sparse_tensor = at::sparse_coo_tensor(
-        union_indices,
-        union_values,
-        t.sizes());
-    return union_sparse_tensor;
+    auto res = at::empty({0}, t.options());
+    sparse_mask_intersection_out_stub(res.device().type(), res, t, mask);
+    return res;
   }
 
   const auto mask_values = mask._values();
