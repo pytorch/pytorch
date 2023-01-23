@@ -387,7 +387,8 @@ auto wrap_pybind_function_impl_(
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f), release_gil](Arg<Func, Is>... args) -> result_type {
+  return [f = std::forward<Func>(f),
+          release_gil](Arg<Func, Is>... args) -> result_type {
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;
