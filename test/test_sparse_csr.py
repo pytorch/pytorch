@@ -893,7 +893,7 @@ class TestSparseCompressed(TestCase):
                 elif n_batchdim and dim >= n_batchdim and dim < n_batchdim + 2:
                     with self.assertRaisesRegex(
                             RuntimeError,
-                            "selecting sparse dimensions is not implemented for batched sparse compressed tensors"):
+                            "selecting sparse dimensions is not supported for batched sparse compressed tensors"):
                         torch.select_copy(sparse, dim, 0)
                 else:
                     for index in {0, sparse.shape[dim] // 2, sparse.shape[dim] - 1}:
@@ -991,7 +991,7 @@ class TestSparseCSR(TestCase):
             sparse[0, 0, 0, 0] = 99.0
 
         # select from sparse dimensions without removing batch dims
-        msg = "selecting sparse dimensions is not implemented for batched sparse compressed tensors."
+        msg = "selecting sparse dimensions is not supported for batched sparse compressed tensors."
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-2, 0)
 

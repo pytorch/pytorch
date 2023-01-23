@@ -4321,44 +4321,16 @@ class TestSparseAny(TestCase):
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
-            if from_layout is torch.sparse_coo and to_layout in {torch.sparse_bsr} and t.sparse_dim() == 2 and is_hybrid:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsr to SparseBsr for input tensors with dim\(\)!=2 is not supported"):
+            if from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and is_batch:
+                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsr to SparseBsr for batched inputs is not supported"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsr to SparseBsr for input tensors with dim\(\)!=2 is not supported"):
+                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsr to SparseBsr for batched inputs is not supported"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout is torch.sparse_coo and to_layout in {torch.sparse_bsc} and t.sparse_dim() == 2 and is_hybrid:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsc to SparseBsc for input tensors with dim\(\)!=2 is not supported"):
+            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and is_batch:
+                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsc to SparseBsc for batched inputs is not supported"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsc to SparseBsc for input tensors with dim\(\)!=2 is not supported"):
-                    explicit_to_sparse(t)
-                continue
-            elif from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and (is_batch or is_hybrid):
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsr to SparseBsr for input tensors with dim\(\)!=2 is not supported"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsr to SparseBsr for input tensors with dim\(\)!=2 is not supported"):
-                    explicit_to_sparse(t)
-                continue
-            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and (is_batch or is_hybrid):
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsc to SparseBsc for input tensors with dim\(\)!=2 is not supported"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        r"conversion from SparseCsc to SparseBsc for input tensors with dim\(\)!=2 is not supported"):
+                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsc to SparseBsc for batched inputs is not supported"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
