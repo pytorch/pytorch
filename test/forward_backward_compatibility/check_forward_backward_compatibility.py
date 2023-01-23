@@ -286,8 +286,6 @@ ALLOW_LIST = [
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
-    ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
-    ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),
@@ -319,9 +317,10 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact1d_backward", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 12, 15)),
-    ("aten::_scaled_dot_product_attention_forward", datetime.date(2022, 12, 15)),
-    ("aten::_efficient_attention_backward", datetime.date(2022, 12, 15)),
+    ("aten::_scaled_dot_product_attention", datetime.date(2023, 3, 15)),
+    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 3, 15)),
+    ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
+    ("aten::_flash_attention_forward", datetime.date(2023, 3, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
 ]
 
