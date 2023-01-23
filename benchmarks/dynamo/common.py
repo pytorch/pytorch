@@ -1887,6 +1887,7 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
+        torch._inductor.config.dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
