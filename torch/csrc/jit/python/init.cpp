@@ -119,8 +119,7 @@
 #include <tuple>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using c10::AliasInfo;
 using c10::Argument;
@@ -1160,6 +1159,7 @@ void initJITBindings(PyObject* module) {
       SYMNODE_UNARY(clone)
       SYMNODE_UNARY(is_int)
       SYMNODE_UNARY(is_float)
+      SYMNODE_UNARY(is_bool)
       SYMNODE_UNARY(bool_)
       SYMNODE_UNARY(int_)
       SYMNODE_UNARY(sym_float)
@@ -1171,21 +1171,34 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(floordiv)
       SYMNODE_BINARY(mod)
       SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(ne)
       SYMNODE_BINARY(gt)
       SYMNODE_BINARY(lt)
       SYMNODE_BINARY(le)
       SYMNODE_BINARY(ge)
-      SYMNODE_BINARY(min)
-      SYMNODE_BINARY(max)
+      SYMNODE_BINARY(sym_min)
+      SYMNODE_BINARY(sym_max)
+      SYMNODE_BINARY(sym_and)
+      SYMNODE_BINARY(sym_or)
+      SYMNODE_UNARY(sym_not)
       SYMNODE_UNARY(ceil)
       SYMNODE_UNARY(floor)
       SYMNODE_UNARY(neg)
       // Intentionally don't set file line, as the
       // Python backtrace matters more here
+      .def("is_non_overlapping_and_dense",
+          [](c10::SymNode a, c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) {
+            return a->is_non_overlapping_and_dense(sizes, strides);
+          })
       .def(
           "guard_int",
           [](c10::SymNode a) {
             return a->guard_int(nullptr, 0);
+          })
+      .def(
+          "guard_bool",
+          [](c10::SymNode a) {
+            return a->guard_bool(nullptr, 0);
           })
       .def(
           "guard_float",
@@ -1201,6 +1214,11 @@ void initJITBindings(PyObject* module) {
           "wrap_float",
           [](c10::SymNode a, double b) {
             return a->wrap_float(b);
+          })
+      .def(
+          "wrap_bool",
+          [](c10::SymNode a, bool b) {
+            return a->wrap_bool(b);
           })
       .def(
           "__str__",
@@ -1316,7 +1334,7 @@ void initJITBindings(PyObject* module) {
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
 
-  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+  py::enum_<MobileOptimizerType>(m, "_MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
       .value(
           "INSERT_FOLD_PREPACK_OPS",
@@ -1328,8 +1346,7 @@ void initJITBindings(PyObject* module) {
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
       .value(
           "VULKAN_AUTOMATIC_GPU_TRANSFER",
-          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)
-      .export_values();
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER);
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -1998,5 +2015,5 @@ void initJITBindings(PyObject* module) {
   atexit.attr("register")(
       py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit
