@@ -42,7 +42,7 @@
 #     to that argument could exist. You should either:
 #       - Specify the formula for that gradient
 #       - Specify not_implemented("function_name") as a formula to say that this is not
-#         implement yet (but might be in the future and the user can request that on an issue)
+#         implemented yet (but might be in the future and the user can request that on an issue)
 #   - If that argument is not differentiable, because it is not a floating point dtype or the
 #     function is not differentiable with respect to that argument  for
 #     example. You should either:
