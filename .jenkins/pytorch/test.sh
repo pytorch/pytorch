@@ -294,18 +294,11 @@ test_single_dynamo_benchmark() {
 test_aot_eager_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
-  local exit_status=0
-
   # Check inference with --float32
-  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager || exit_status=$?
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager
 
   # Check training with --amp
-  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp || exit_status=$?
-
-  if [[ $exit_status -ne 0 ]]; then
-    echo "Some benchmarks failed; scroll up for details"
-  fi
-  return $exit_status
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp
 }
 
 test_inductor_benchmark() {
@@ -350,18 +343,13 @@ test_inductor_benchmark_perf() {
 
 # No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
-  local exit_status=0
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" || exit_status=$?
-  test_aot_eager_benchmark huggingface "" || exit_status=$?
-  test_aot_eager_benchmark timm_models "" || exit_status=$?
-  if [[ $exit_status -ne 0 ]]; then
-    echo "Some benchmarks failed; scroll up for details"
-  fi
-  return $exit_status
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench 0
+  test_aot_eager_benchmark huggingface 0
+  test_aot_eager_benchmark timm_models 0
 }
 
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface ""
+  test_inductor_benchmark huggingface 0
 }
 
 test_inductor_huggingface_perf() {
@@ -385,7 +373,7 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench 0
 }
 
 test_inductor_torchbench_perf() {
