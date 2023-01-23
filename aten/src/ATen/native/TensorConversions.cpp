@@ -1421,6 +1421,7 @@ void _compressed_to_block_compressed_cpu_kernel(
     const I n_dim_plain,
     const I C,
     const I P,
+    const I D,
     const I* input_compressed_indices,
     const I* input_plain_indices,
     const T* input_values,
@@ -1442,7 +1443,7 @@ void _compressed_to_block_compressed_cpu_kernel(
   I n_bplain = n_dim_plain / P;
 
   // Number of elements per block
-  I CP = C * P;
+  I CPD = C * P * D;
   // Number of blocks overall
   I n_blks = 0;
 
@@ -1456,7 +1457,7 @@ void _compressed_to_block_compressed_cpu_kernel(
       for (I i = input_compressed_indices[C * block_c]; i < input_compressed_indices[C * (block_c + 1)]; i++) {
         I p = input_plain_indices[i]; // plain dim element index
         if (p / P == block_p) {
-          blocks[block_p] = result_values + CP * n_blks;
+          blocks[block_p] = result_values + CPD * n_blks;
           result_plain_indices[n_blks] = block_p;
           n_blks++;
           break;
@@ -1480,7 +1481,9 @@ void _compressed_to_block_compressed_cpu_kernel(
         // A possible answer: Scipy code supports "uncoalesced CSR"
         // format that allows repeated plain dim indices, and
         // compressed and plain indices may be unsorted.
-        *(blocks[block_p] + (compressed_rows ? P * cb + pb : C * pb + cb)) = input_values[i];
+        for (I j = 0; j < D; j++) {
+          *(blocks[block_p] + (compressed_rows ? P * cb + pb : C * pb + cb) * D + j) = input_values[i * D + j];
+        }
       }
     }
 
@@ -1546,11 +1549,12 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
   auto input_compressed_indices = compressed_rows ? self.crow_indices().contiguous() : self.ccol_indices().contiguous();
   auto input_plain_indices = compressed_rows ? self.col_indices().contiguous() : self.row_indices().contiguous();
 
-  // First we determine the number of blocks needed. For each given block, if it
-  // contains a non-zero element we will allocate values and indices for it.
+  // First we determine the number of blocks needed. For each given
+  // block, if it contains a non-zero element we will allocate values
+  // and indices for it.
   int64_t num_blocks;
-  int64_t n_row = self.size(0);
-  int64_t n_col = self.size(1);
+  auto n_row = self.size(0);
+  auto n_col = self.size(1);
   AT_DISPATCH_INDEX_TYPES(
       input_compressed_indices.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
         if (compressed_rows) {
@@ -1572,24 +1576,18 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
                 input_compressed_indices.data_ptr<index_t>(),
                 input_plain_indices.data_ptr<index_t>());
         }});
-  DimVector values_size{num_blocks, blocksize[0], blocksize[1]};
+  DimVector dense_shape{input_values.sizes().slice(1, input_values.dim() - 1)};
+  DimVector values_shape{num_blocks, blocksize[0], blocksize[1]};
+  values_shape.append(dense_shape);
 
-  // While we don't support conversion of hybrid csr-to-bsr yet, we'll
-  // compute hybrid compatible values sizes to meet the invariants of
-  // the BSR tensor when the support will be implemented.
-  int64_t numel_dense = 1;
-  for (int i=0; i<self.dense_dim(); i++) {
-    values_size.push_back(self.size(2 + i));
-    numel_dense *= self.size(2 + i);
-  }
-  TORCH_CHECK(numel_dense == 1, "conversion from hybrid csr to block csr is not supported yet.");
-
-  Tensor result_values = input_values.new_zeros(values_size);
+  Tensor result_values = input_values.new_zeros(values_shape);
   Tensor result_compressed_indices =
       input_compressed_indices.new_empty({(compressed_rows ? n_row / blocksize[0] : n_col / blocksize[1]) + 1});
   Tensor result_plain_indices = input_plain_indices.new_empty({num_blocks});
 
   // Next we copy over non-zero elements into the allocated blocks.
+  auto n_dense = std::accumulate(
+      dense_shape.begin(), dense_shape.end(), 1, std::multiplies<int64_t>());
   AT_DISPATCH_INDEX_TYPES(
       input_compressed_indices.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
         AT_DISPATCH_SPARSE_VALUE_TYPES(
@@ -1600,6 +1598,7 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
                     n_col,
                     blocksize[0],
                     blocksize[1],
+                    n_dense,
                     input_compressed_indices.data_ptr<index_t>(),
                     input_plain_indices.data_ptr<index_t>(),
                     input_values.data_ptr<scalar_t>(),
@@ -1612,6 +1611,7 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
                     n_row,
                     blocksize[1],
                     blocksize[0],
+                    n_dense,
                     input_compressed_indices.data_ptr<index_t>(),
                     input_plain_indices.data_ptr<index_t>(),
                     input_values.data_ptr<scalar_t>(),
@@ -1662,9 +1662,9 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
     return sparse_compressed_clone(self, blocksize, "to_sparse_bsr");
   }
   if (self.layout() == kSparseCsr) {
-    TORCH_CHECK(self.dim() == 2,
-        "to_sparse_bsr(): conversion from Csr to Bsr is only possible for 2d inputs, ",
-        "but got input of dimension ", self.dim(), " instead.");
+    TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
+                "to_sparse_bsr: conversion from Csr to Bsr for batched inputs is not implemented.");
+
     Tensor self_values = self.values();
     Tensor self_crow_indices = self.crow_indices();
     Tensor self_col_indices = self.col_indices();
@@ -1717,9 +1717,9 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
     return sparse_compressed_clone(self, blocksize, "to_sparse_bsc");
   }
   if (self.layout() == kSparseCsc) {
-    TORCH_CHECK(self.dim() == 2,
-        "to_sparse_bsc(): conversion from Csc to Bsc is only possible for 2d inputs, ",
-        "but got input of dimension ", self.dim(), " instead.");
+    TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
+                "to_sparse_bsc: conversion from Csc to Bsc for batched inputs is not implemented.");
+
     Tensor self_values = self.values();
     Tensor self_ccol_indices = self.ccol_indices();
     Tensor self_row_indices = self.row_indices();
