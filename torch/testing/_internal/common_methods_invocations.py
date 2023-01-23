@@ -7990,6 +7990,10 @@ class foreach_inputs_sample_func:
                         yield SampleInput(input, *args, **kwargs)
                         args.pop()
                 else:
+                    if opinfo.ref in (torch.abs, torch.neg):
+                        kwargs["disable_fastpath"] = False
+                    else:
+                        kwargs["disable_fastpath"] = dtype in integral_types_and(torch.bool)
                     yield SampleInput(input, *args, **kwargs)
 
 
@@ -8037,7 +8041,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         super().__init__(3 + 1, True, True)
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
-        return dtype in integral_types_and(torch.bool)
+        return dtype in integral_types_and(torch.bool) and opinfo.ref in (torch.addcmul,)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
@@ -8070,25 +8074,26 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
 
 foreach_unary_op_db: List[OpInfo] = [
-    ForeachFuncInfo('exp', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('acos', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('asin', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('atan', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('cos', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('cosh', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('log', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('log10', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('log2', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('tan', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('tanh', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('sin', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
-    ForeachFuncInfo('sinh', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('exp', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('acos', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('asin', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('atan', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('cos', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('cosh', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('log', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('log10', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('log2', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('tan', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('tanh', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('sin', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo('sinh', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
 
     ForeachFuncInfo(
         'neg',
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex(),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8096,6 +8101,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8103,6 +8109,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8110,6 +8117,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8117,6 +8125,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8124,6 +8133,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8131,6 +8141,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8138,6 +8149,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8145,6 +8157,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8152,6 +8165,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8159,6 +8173,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8166,6 +8181,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8173,6 +8189,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 
     ForeachFuncInfo(
@@ -8182,6 +8199,7 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 ]
 
