@@ -3740,16 +3740,14 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
-        # AssertionError: Tensor-likes are not equal!
-        # Issue: https://github.com/pytorch/pytorch/issues/70904
-        xfail('bitwise_left_shift', device_type='cpu'),
-        xfail('bitwise_right_shift', device_type='cpu'),
-        # UBSAN: runtime error: shift exponent -1 is negative
-        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
+        xfail('bitwise_and'),
+        xfail('bitwise_or'),
+        xfail('bitwise_xor'),
+        xfail('bitwise_left_shift'),
+        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
