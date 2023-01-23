@@ -26,6 +26,16 @@ try:
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
     HAS_SYMPY = True
+
+    original_expand = sympy.expand
+    @lru_cache(256)
+    def safe_expand(r):
+        if hasattr(r, 'expand'):
+            return original_expand(r)
+        else:
+            return r
+
+    sympy.expand = safe_expand
 except ImportError:
     HAS_SYMPY = False
 
@@ -289,12 +299,6 @@ if HAS_SYMPY:
                 ))
             return None
 
-def safe_expand(r):
-    if hasattr(r, 'expand'):
-        return sympy.expand(r)
-    else:
-        return r
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
@@ -434,7 +438,7 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
-        out = safe_expand(out)
+        out = sympy.expand(out)
         pytype: Type
         if method in always_float_magic_methods:
             pytype = float
@@ -463,7 +467,7 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning(f"failed to eval {method}({expr})")
             raise
-        out = safe_expand(out)
+        out = sympy.expand(out)
         pytype: Type
         if method in always_int_magic_methods:
             pytype = int
@@ -1002,7 +1006,7 @@ class ShapeEnv(object):
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
+        new_expr = sympy.expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -1010,7 +1014,7 @@ class ShapeEnv(object):
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
         replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
-        return safe_expand(expr.xreplace(replacements))
+        return sympy.expand(expr.xreplace(replacements))
 
     @_lru_cache
     def _update_divisible(self):
@@ -1033,7 +1037,7 @@ class ShapeEnv(object):
                 if self.replace(base % divisor) in self.divisible:
                     div_replacements[atom] = base / divisor
             expr = expr.xreplace(div_replacements)
-            expr = safe_expand(expr)
+            expr = sympy.expand(expr)
         return expr
 
     @lru_cache(256)
@@ -1043,7 +1047,7 @@ class ShapeEnv(object):
         Does not introduce a guard, so only use this when you can guarantee that
         your code is still valid for arbitrary shapes (such as optimization decisions)
         """
-        result_expr = safe_expand(expr).xreplace(self.var_to_val)
+        result_expr = sympy.expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
             raise self._make_data_dependent_error(result_expr)
         return result_expr
