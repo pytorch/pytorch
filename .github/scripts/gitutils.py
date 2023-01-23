@@ -380,8 +380,8 @@ def update_labels(labels: List[str], info: str) -> None:
 
 
 @lru_cache()
-def get_pytorch_labels() -> List[str]:
-    prefix = "https://api.github.com/repos/pytorch/pytorch/labels?per_page=100"
+def gh_get_labels(org: str, repo: str) -> List[str]:
+    prefix = f"https://api.github.com/repos/{org}/{repo}/labels?per_page=100"
     header, info = request_for_labels(prefix + "&page=1")
     labels: List[str] = []
     update_labels(labels, info)

@@ -8,7 +8,7 @@ from gitutils import (
     _shasum,
     request_for_labels,
     get_last_page,
-    get_pytorch_labels,
+    gh_get_labels,
 )
 from pathlib import Path
 from unittest import TestCase, main, mock, SkipTest
@@ -101,10 +101,10 @@ class TestLabels(TestCase):
     @mock.patch("gitutils.get_last_page", return_value=3)
     @mock.patch("gitutils.request_for_labels", return_value=("foo", "bar"))
     @mock.patch("gitutils.update_labels")
-    def test_get_pytorch_labels(
+    def test_gh_get_labels(
         self, mock_update_labels: Any, mock_request_for_labels: Any, mock_get_last_page: Any
     ) -> None:
-        get_pytorch_labels()
+        gh_get_labels("foo", "bar")
         mock_get_last_page.assert_called_once()
         self.assertEqual(mock_update_labels.call_count, 3)
         self.assertEqual(mock_request_for_labels.call_count, 3)
@@ -112,11 +112,11 @@ class TestLabels(TestCase):
     @mock.patch("gitutils.get_last_page", return_value=0)
     @mock.patch("gitutils.request_for_labels", return_value=("foo", "bar"))
     @mock.patch("gitutils.update_labels")
-    def test_get_pytorch_labels_raises_with_no_pages(
+    def test_gh_get_labels_raises_with_no_pages(
         self, mock_update_labels: Any, mock_request_for_labels: Any, mock_get_last_page: Any
     ) -> None:
         with self.assertRaises(AssertionError):
-            get_pytorch_labels()
+            gh_get_labels("foo", "bar")
             mock_get_last_page.assert_called_once()
             mock_update_labels.assert_called_once()
             mock_request_for_labels.call_count.assert_called_once()

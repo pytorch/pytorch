@@ -13,7 +13,7 @@ This script assumes the correct env vars are set for AWS permissions.
 import boto3  # type: ignore[import]
 import json
 from typing import List
-from gitutils import get_pytorch_labels
+from gitutils import gh_get_labels
 
 
 def send_labels_to_S3(labels: List[str]) -> None:
@@ -23,7 +23,7 @@ def send_labels_to_S3(labels: List[str]) -> None:
 
 
 def main() -> None:
-    send_labels_to_S3(get_pytorch_labels())
+    send_labels_to_S3(gh_get_labels("pytorch", "pytorch"))
 
 
 if __name__ == '__main__':

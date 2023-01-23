@@ -38,46 +38,7 @@ if 'GIT_REMOTE_URL' not in os.environ:
     os.environ['GIT_REMOTE_URL'] = "https://github.com/pytorch/pytorch"
 
 release_notes_labels = [
-    "release notes: AO frontend",
-    "release notes: autograd",
-    "release notes: benchmark",
-    "release notes: build",
-    "release notes: complex",
-    "release notes: composability",
-    "release notes: cpp",
-    "release notes: cuda",
-    "release notes: cudnn",
-    "release notes: dataloader",
-    "release notes: distributed (c10d)",
-    "release notes: distributed (ddp)",
-    "release notes: distributed (fsdp)",
-    "release notes: distributed (pipeline)",
-    "release notes: distributed (rpc)",
-    "release notes: distributed (sharded)",
-    "release notes: foreach_frontend",
-    "release notes: functorch",
-    "release notes: fx",
-    "release notes: hub",
-    "release notes: jit",
-    "release notes: lazy",
-    "release notes: linalg_frontend",
-    "release notes: memory format",
-    "release notes: Meta API",
-    "release notes: mobile",
-    "release notes: mps",
-    "release notes: nested tensor",
     "release notes: nn",
-    "release notes: onnx",
-    "release notes: package/deploy",
-    "release notes: performance_as_product",
-    "release notes: profiler",
-    "release notes: python_frontend",
-    "release notes: quantization",
-    "release notes: releng",
-    "release notes: rocm",
-    "release notes: sparse",
-    "release notes: visualization",
-    "release notes: vulkan",
 ]
 
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
@@ -500,14 +461,14 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.GitHubPR.get_comments', return_value=mock_get_comments())
-    @mock.patch('trymerge.delete_comment')
+    @mock.patch('trymerge.gh_post_delete_comment')
     def test_correctly_delete_all_label_err_comments(
-        self, mock_delete_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
+        self, mock_gh_post_delete_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
     ) -> None:
         "Test only delete label err comment."
         pr = GitHubPR("pytorch", "pytorch", 75095)
         delete_all_label_err_comments(pr)
-        mock_delete_comment.assert_called_once_with(2)
+        mock_gh_post_delete_comment.assert_called_once_with("pytorch", "pytorch", 2)
 
 
 if __name__ == "__main__":
