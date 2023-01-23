@@ -863,7 +863,13 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   checkout_install_torchbench
   install_huggingface
   install_timm
-  test_aot_eager_all
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    # NB: This code path is currently dead because dynamic shapes takes
+    # too long to run unsharded
+    test_aot_eager_all --dynamic-shapes
+  else
+    test_aot_eager_all
+  fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   install_torchvision
   install_filelock
@@ -889,9 +895,9 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   install_filelock
   checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark torchbench "" --dynamic-shapes
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
   else
-    test_aot_eager_benchmark torchbench ""
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
