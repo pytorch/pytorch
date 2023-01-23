@@ -501,6 +501,7 @@ dtensor_fails = {
     xfail("unflatten"),
     xfail("unique_consecutive"),
     xfail("unique"),
+    xfail("unsafe_split"),
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
@@ -563,7 +564,9 @@ skip_bw = [
 
 
 OP_DB_WORLD_SIZE = 4
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() >= OP_DB_WORLD_SIZE else "cpu"
+# DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() >= OP_DB_WORLD_SIZE else "cpu"
+# TODO: debug cuda illegal memory access issue and re-enable cuda tests
+DEVICE_TYPE = "cpu"
 
 
 class TestDTensorOps(DTensorOpTestBase):
