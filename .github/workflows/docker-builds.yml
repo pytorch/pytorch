@@ -66,19 +66,37 @@ jobs:
       - name: Build docker image
         id: build-docker-image
         uses: ./.github/actions/calculate-docker-image
-        env:
-          GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
           skip_push: false
           force_push: true
-          push-ghcr-image: ${{ github.event_name == 'push' }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+
+      - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        name: Push to https://https://ghcr.io/
+        id: push-to-ghcr-io
+        if: ${{ github.event_name == 'push' }}
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          IMAGE_NAME: ${{ matrix.docker-image-name }}
+        with:
+          shell: bash
+          timeout_minutes: 15
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            ghcr_image="ghcr.io/pytorch/ci-image"
+            tag=${ECR_DOCKER_IMAGE##*:}
+            # Push docker image to the ghcr.io
+            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
+            docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
