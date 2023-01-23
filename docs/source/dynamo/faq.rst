@@ -231,7 +231,7 @@ generated:
 How are you speeding up my code?
 --------------------------------
 
-There are 3 major ways to accelerat PyTorch code:
+There are 3 major ways to accelerate PyTorch code:
 
 1. Kernel fusion via vertical fusions which fuse sequential operations to avoid
    excessive read/writes. For example, fuse 2 subsequent cosines means you
