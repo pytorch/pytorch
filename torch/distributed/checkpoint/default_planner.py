@@ -72,8 +72,8 @@ class DefaultSavePlanner(SavePlanner):
 
     def __init__(
         self,
-        flatten_state_dict: bool = False,
-        flatten_sharded_tensors: bool = False,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
         dedup_replicated_tensors: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
@@ -165,8 +165,8 @@ class DefaultLoadPlanner(LoadPlanner):
 
     def __init__(
         self,
-        flatten_state_dict: bool = False,
-        flatten_sharded_tensors: bool = False,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
@@ -179,10 +179,10 @@ class DefaultLoadPlanner(LoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        self.original_state_dict = state_dict
+
         if self.flatten_sharded_tensors:
             state_dict = flatten_sharded_tensors(state_dict)
-
-        self.original_state_dict = state_dict
 
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
