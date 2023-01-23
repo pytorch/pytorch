@@ -277,6 +277,8 @@ struct ConcretePyInterpreterVTable final
     CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
+  void reset_backward_hooks(const TensorImpl* self) const override;
+
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
     return &s;
@@ -659,6 +661,8 @@ static int THPVariable_clear(THPVariable* self) {
       if (auto grad_acc =
               torch::autograd::impl::try_get_grad_accumulator(tensor)) {
         grad_acc->pre_hooks().clear();
+        grad_acc->tensor_pre_hooks().clear();
+        grad_acc->retains_grad_hooks().clear();
       }
     }
   }
@@ -1316,7 +1320,7 @@ int THPVariable_set_backwards_hooks(
   torch::autograd::impl::clear_hooks(tensor);
   if (obj) {
     torch::autograd::impl::add_hook(
-        tensor, std::make_shared<PyFunctionTensorPreHook>(obj, 0));
+        tensor, std::make_unique<PyFunctionTensorPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2128,9 +2132,8 @@ static int THPVariable_subclass_traverse(
       // object, which requires the GIL to be accessed. Note that this is only
       // valid as long as user don't share non-owning references across
       // different threads (which is crazy and should never be done).
-
+      auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
       if (tensor.use_count() == 1) {
-        auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
         if (autograd_meta) {
           // Do NOT call grad_fn() here as that might trigger a recompute
           const auto& grad_fn = autograd_meta->grad_fn_;
@@ -2144,10 +2147,12 @@ static int THPVariable_subclass_traverse(
           }
         }
       }
-
-      for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-          Py_VISIT(pyhook->dict);
+      if (autograd_meta) {
+        for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
+          if (auto pyhook =
+                  dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+            Py_VISIT(pyhook->dict);
+          }
         }
       }
     }
@@ -2180,7 +2185,6 @@ void initTensorImplConversion(PyObject* module) {
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
-    // NOLINTNEXTLINE(performance-move-const-arg)
     return py::cast(std::move(tensor));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
@@ -2810,6 +2814,19 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   int64_t len = result[1];
 
   return c10::SymIntArrayRef(start, len);
+  END_HANDLE_TH_ERRORS_PYBIND
+}
+
+void ConcretePyInterpreterVTable::reset_backward_hooks(
+    const c10::TensorImpl* self) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  HANDLE_TH_ERRORS
+  Tensor self_t = Tensor(
+      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
+          unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
 }
 

@@ -618,8 +618,27 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+
+Symbolic Numbers
+----------------
+.. autoclass:: SymInt
+    :members:
+
+.. autoclass:: SymFloat
+    :members:
+
+.. autoclass:: SymBool
+    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     sym_float
     sym_int
+    sym_max
+    sym_min
+    sym_not
 
 Optimizations
 -------------

@@ -225,6 +225,16 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.exp()"
 
     @staticmethod
+    def exp2(x):
+        return f"{x}.exp2()"
+
+    @staticmethod
+    def expm1(x):
+        # decompose for a better performance
+        vec_one = f"decltype({x})(1)"
+        return f"{x}.exp() - {vec_one}"
+
+    @staticmethod
     def erf(x):
         return f"{x}.erf()"
 
@@ -391,10 +401,6 @@ class CppVecOverrides(OpOverrides):
         return f"({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"{x}.expm1()"
-
-    @staticmethod
     def log1p(x):
         return f"{x}.log1p()"
 
@@ -425,6 +431,14 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def exp2(x):
+        return f"std::exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def erf(x):
         return f"std::erf({x})"
 
@@ -439,10 +453,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"std::log1p({x})"
-
-    @staticmethod
-    def expm1(x):
-        return f"std::expm1({x})"
 
     @staticmethod
     def tanh(x):
@@ -526,6 +536,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if dtype in (torch.float16, torch.bfloat16):
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
+
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -1710,10 +1725,12 @@ class LoopLevel:
 
     def clone(self):
         loop = copy(self)
+        loop.inner = []
         if self.inner:
-            for idx, inner_loop in enumerate(self.inner):
-                loop.inner[idx] = inner_loop.clone()
-                loop.inner[idx].parent = loop
+            for inner_loop in self.inner:
+                inner_loop_clone = inner_loop.clone()
+                inner_loop_clone.parent = loop
+                loop.inner.append(inner_loop_clone)
         loop.kernel = deepcopy(self.kernel)
         return loop
 
