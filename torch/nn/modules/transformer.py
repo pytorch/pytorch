@@ -151,11 +151,17 @@ class Transformer(Module):
         return output
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int, device='cpu') -> Tensor:
-        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
+    def generate_square_subsequent_mask(sz: int, device='cpu', use_bool_type: bool = True) -> Tensor:
+        r"""Generate a square mask for the sequence. The masked positions are filled with True, and
+        unmasked positions with False.
+            With use_bool_type = False, reverts to deprecated float usage: masked positions are filled
+        with float('-inf'), and unmasked positions with float(0.0).
         """
-        return torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
+        mask = torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
+
+        if use_bool_type:
+            mask = torch.isinf(mask)
+        return mask
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
