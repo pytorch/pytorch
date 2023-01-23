@@ -1323,27 +1323,6 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
-// This function return a new SparseTensor with values from Tensor `input`
-// filtered by indices of `mask` and values are ignored. `input` and `mask` are
-// sparse matrices, a sparse tensor with sparse_dim=2 and  dense_dim=2, and they
-// must have the same shape. Note that the `output` must have the same `indices`
-// as the `mask` so we are using just a clone. However, to get `values` we have
-// to use specific helper function for CPU/CUDA and use the `mask` data to
-// filter `values` That's why we created this `_sparse_mask_helper` function.
-Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask) {
-  Tensor output = at::empty_like(mask);
-  Tensor mask_indices = mask._indices().clone();
-  Tensor r_values;
-  if (mask._nnz() == 0) {
-    r_values = at::zeros_like(mask._values());
-  } else {
-    r_values = _sparse_mask_helper(input, mask_indices.contiguous());
-  }
-  at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(
-      mask_indices, r_values);
-  return output;
-}
-
 Tensor sparse_sparse_matmul_backward(
     const Tensor& grad,
     const Tensor& a,
@@ -1368,12 +1347,19 @@ Tensor sparse_sparse_matmul_backward(
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
+  const auto mask_ones_like = [](const Tensor& t) -> Tensor {
+    return at::sparse_coo_tensor(
+        t._indices(),
+        at::ones({1}, t._values().options()).expand_as(t._values()),
+        t.sizes());
+  };
+
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return _sparse_matrix_mask(a_grad.coalesce(), a.coalesce());
+    return a_grad.mul(mask_ones_like(a.coalesce()));
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
+  return b_grad.mul(mask_ones_like(b.coalesce()));
 }
 
 Tensor renorm_backward(
