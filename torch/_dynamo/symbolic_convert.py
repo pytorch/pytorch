@@ -282,12 +282,18 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             x = value.var_getattr(self, "__bool__")
             # __bool__ is function
             if isinstance(x, UserMethodVariable):
+                inst = self.instructions[self.instruction_pointer]
+                checkpoint = inst, self.copy_graphstate()
                 result = x.call_function(self, [], {})
-                if isinstance(result, ConstantVariable):
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
                 else:
+                    # rollback to the state before the __bool__ inline
+                    self.checkpoint = checkpoint
                     unimplemented(
                         "generic_jump on UserDefined with __bool__ returning non-constant"
                     )
