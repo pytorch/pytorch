@@ -830,11 +830,11 @@ include_patterns = [
     'functorch/functorch/_src/compilers.py',
     'torch/_functorch/make_functional.py',
     'torch/testing/*.py',
-    'torch/distributed/fsdp/*.py',
-    'test/distributed/fsdp/*.py',
+    'torch/distributed/fsdp/**/*.py',
+    'test/distributed/fsdp/**/*.py',
     'torch/testing/_internal/common_fsdp.py',
-    'torch/distributed/_composable/*.py',
-    'test/distributed/_composable/*.py',
+    'torch/distributed/_composable/**/*.py',
+    'test/distributed/_composable/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
 ]
 command = [
