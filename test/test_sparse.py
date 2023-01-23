@@ -4321,28 +4321,16 @@ class TestSparseAny(TestCase):
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
-            if from_layout is torch.sparse_coo and to_layout in {torch.sparse_bsr} and t.sparse_dim() == 2 and is_hybrid:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+            if from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and is_batch:
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout is torch.sparse_coo and to_layout in {torch.sparse_bsc} and t.sparse_dim() == 2 and is_hybrid:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc is only possible for 2d inputs"):
+            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and is_batch:
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc is only possible for 2d inputs"):
-                    explicit_to_sparse(t)
-                continue
-            elif from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and (is_batch or is_hybrid):
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
-                    explicit_to_sparse(t)
-                continue
-            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and (is_batch or is_hybrid):
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc is only possible for 2d inputs"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc is only possible for 2d inputs"):
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
