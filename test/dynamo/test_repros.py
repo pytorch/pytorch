@@ -2350,6 +2350,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
+    def test_default_torch_device_arg(self):
+        def inner(device=torch.device("cuda")):
+            if device == torch.device("cuda"):
+                return torch.ones(2, 2)
+            else:
+                return torch.ones(1, 1)
+
+        def fn():
+            inner(device=torch.device("cuda"))
+
+        compiled_fn = torch._dynamo.optimize("eager")(fn)
+
+        compiled_fn()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
