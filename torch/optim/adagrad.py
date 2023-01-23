@@ -2,7 +2,8 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
-                        _differentiable_doc, _maximize_doc)
+                        _default_to_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["Adagrad", "adagrad"]
@@ -171,15 +172,14 @@ Adagrad.__doc__ = r"""Implements Adagrad algorithm.
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-10)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {maximize}
         {differentiable}
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
 
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def adagrad(
@@ -190,7 +190,7 @@ def adagrad(
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = None,
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     differentiable: bool = False,
     *,
     lr: float,
@@ -210,8 +210,7 @@ def adagrad(
         )
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        foreach = _default_to_foreach([params, grads, state_sums, state_steps], differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -322,48 +321,50 @@ def _multi_tensor_adagrad(
     if len(params) == 0:
         return
 
-    if maximize:
-        grads = torch._foreach_neg(grads)
+    grouped_tensorlists = _group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
+    for device_params, device_grads, device_state_sums, device_state_steps in grouped_tensorlists.values():
 
-    if has_sparse_grad is None:
-        has_sparse_grad = any(grad.is_sparse for grad in grads)
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
-    if has_sparse_grad:
-        return _single_tensor_adagrad(
-            params,
-            grads,
-            state_sums,
-            state_steps,
-            lr=lr,
-            weight_decay=weight_decay,
-            lr_decay=lr_decay,
-            eps=eps,
-            has_sparse_grad=has_sparse_grad,
-            maximize=False,
-            differentiable=differentiable,
-        )
+        device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
 
-    # Update steps
-    torch._foreach_add_(state_steps, 1)
+        if device_has_sparse_grad:
+            return _single_tensor_adagrad(
+                device_params,
+                device_grads,
+                device_state_sums,
+                device_state_steps,
+                lr=lr,
+                weight_decay=weight_decay,
+                lr_decay=lr_decay,
+                eps=eps,
+                has_sparse_grad=True,
+                maximize=False,
+                differentiable=differentiable,
+            )
 
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        # Update steps
+        torch._foreach_add_(device_state_steps, 1)
 
-    minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in state_steps]
+        if weight_decay != 0:
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
-    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
-    state_sums = [
-        torch.view_as_real(x) if torch.is_complex(x) else x for x in state_sums
-    ]
-    torch._foreach_addcmul_(state_sums, grads, grads, value=1)
-    std = torch._foreach_add(torch._foreach_sqrt(state_sums), eps)
-    toAdd = torch._foreach_div(torch._foreach_mul(grads, minus_clr), std)
-    toAdd = [
-        torch.view_as_complex(x) if torch.is_complex(params[i]) else x
-        for i, x in enumerate(toAdd)
-    ]
-    torch._foreach_add_(params, toAdd)
-    state_sums = [
-        torch.view_as_complex(x) if torch.is_complex(params[i]) else x
-        for i, x in enumerate(state_sums)
-    ]
+        minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in device_state_steps]
+
+        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
+        device_state_sums = [
+            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_state_sums
+        ]
+        torch._foreach_addcmul_(device_state_sums, device_grads, device_grads, value=1)
+        std = torch._foreach_add(torch._foreach_sqrt(device_state_sums), eps)
+        toAdd = torch._foreach_div(torch._foreach_mul(device_grads, minus_clr), std)
+        toAdd = [
+            torch.view_as_complex(x) if torch.is_complex(device_params[i]) else x
+            for i, x in enumerate(toAdd)
+        ]
+        torch._foreach_add_(device_params, toAdd)
+        device_state_sums = [
+            torch.view_as_complex(x) if torch.is_complex(device_params[i]) else x
+            for i, x in enumerate(device_state_sums)
+        ]
