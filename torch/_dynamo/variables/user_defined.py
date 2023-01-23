@@ -317,11 +317,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
         elif isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
+            return variables.UserFunctionVariable(
+                subobj.__get__(self.value), source=source, **options
+            )
         elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, **options)
+            return variables.UserMethodVariable(
+                subobj.__func__, self, source=source, **options
+            )
         elif isinstance(subobj, types.FunctionType):
-            return variables.UserMethodVariable(subobj, self, **options)
+            return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})

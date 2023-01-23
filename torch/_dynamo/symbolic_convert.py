@@ -60,6 +60,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -278,27 +279,26 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            try:
-                fn = inspect.getattr_static(value.value, "__bool__")
-                if isinstance(fn, types.FunctionType):
-                    result = self.inline_user_function_return(
-                        UserFunctionVariable(fn, VariableTracker.propagate(value)),
-                        [value],
-                        {},
-                    )
-                    # Python __bool__ should always return bool
-                    assert isinstance(result, ConstantVariable)
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable):
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
                 else:
                     unimplemented(
-                        "generic_jump on user defined object.__bool__ is not function"
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
                     )
-            except AttributeError:
+            # __bool__ is not existed in the user defined object
+            elif isinstance(x, GetAttrVariable):
                 if truth_fn(True):
                     push and self.push(value)
                     self.jump(inst)
+            # __bool__ is non-function
+            else:
+                unimplemented("generic_jump on UserDefined with non-function __bool__")
 
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
