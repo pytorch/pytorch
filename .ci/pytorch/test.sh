@@ -863,10 +863,36 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   checkout_install_torchbench
   install_huggingface
   install_timm
-  if [[ "${TEST_CONFIG}" == *dynamic_aot_eager_all* ]]; then
-    test_aot_eager_all --dynamic-shapes
+  test_aot_eager_all
+elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_huggingface
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark huggingface "" --dynamic-shapes
   else
-    test_aot_eager_all
+    test_aot_eager_benchmark huggingface ""
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
+  else
+    test_aot_eager_benchmark timm_models "$id"
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  test_inductor_torchbench
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark torchbench "" --dynamic-shapes
+  else
+    test_aot_eager_benchmark torchbench ""
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
