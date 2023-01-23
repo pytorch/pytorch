@@ -1351,8 +1351,7 @@ Tensor sparse_sparse_matmul_backward(
     return at::sparse_coo_tensor(
         t._indices(),
         at::ones({1}, t._values().options()).expand_as(t._values()),
-        t.sizes()
-    );
+        t.sizes());
   };
 
   if (grad_order == 0) {
