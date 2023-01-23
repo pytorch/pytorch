@@ -28,6 +28,7 @@ try:
     HAS_SYMPY = True
 
     original_expand = sympy.expand
+
     @lru_cache(256)
     def safe_expand(r):
         if hasattr(r, 'expand'):
