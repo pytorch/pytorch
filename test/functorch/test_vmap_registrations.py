@@ -281,6 +281,7 @@ xfail_not_implemented = {
     "aten::special_xlogy",
     "aten::special_xlogy.other_scalar",
     "aten::special_xlogy.self_scalar",
+    "aten::spmm_reduce",
     "aten::square_",
     "aten::sspaddmm",
     "aten::std.correction_names",
