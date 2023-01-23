@@ -5,7 +5,7 @@ from torch.utils._contextlib import _DecoratorContextManager
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
            'inference_mode', 'set_multithreading_enabled',
-           '_set_view_replay_enabled']
+           '_force_original_view_tracking']
 
 class no_grad(_DecoratorContextManager):
     r"""Context-manager that disabled gradient calculation.
@@ -256,7 +256,7 @@ class set_multithreading_enabled(_DecoratorContextManager):
         return self.__class__(self.mode)
 
 
-class _set_view_replay_enabled(_DecoratorContextManager):
+class _force_original_view_tracking(_DecoratorContextManager):
     r"""Context-manager that sets whether or not to always enable view-replay in autograd.
 
     ``set_view_replay_enabled`` will enable or disable view-replay based on its argument :attr:`mode`.
@@ -280,13 +280,13 @@ class _set_view_replay_enabled(_DecoratorContextManager):
 
     def __init__(self, mode: bool) -> None:
         self.mode = mode
-        self.view_replay_enabled_guard = torch._C._ViewReplayEnabled(mode)
+        self._force_original_view_tracking_guard = torch._C._ViewReplayEnabled(mode)
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, *args) -> None:
-        del self.view_replay_enabled_guard
+        del self._force_original_view_tracking_guard
 
     def clone(self):
         return self.__class__(self.mode)

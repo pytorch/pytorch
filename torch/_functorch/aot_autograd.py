@@ -30,6 +30,8 @@ from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
+guard__ = torch.autograd._force_original_view_tracking(True)
+
 log = logging.getLogger(__name__)
 
 MutationType = Enum(
@@ -1052,7 +1054,7 @@ class AOTConfig:
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
-        log.debug("====== Forward (only) graph {aot_config.aot_id} ======")
+        log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1630,7 +1632,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
-        with enable_python_dispatcher():
+        with enable_python_dispatcher(), torch.autograd._force_original_view_tracking(True):
             flattened_joints, _ = pytree.tree_flatten(joint_inputs)
             fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
                 *joint_inputs
@@ -1672,8 +1674,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
         if config.debug_graphs:
-            log.debug("====== Forward graph {aot_config.aot_id} ======")
+            log.debug(f"====== Forward graph {aot_config.aot_id} ======")
             log.debug(fw_module.print_readable(print_output=False))
+            log.debug(f"====== Backward graph {aot_config.aot_id} ======")
+            log.debug(bw_module.print_readable(print_output=False))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -1858,22 +1862,44 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
             del contiguous_args
-            if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
-                context = disable_autocast_manager if disable_amp else nullcontext
-                with context(), track_graph_compiling(aot_config, "backward"):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
-                    )
 
-            ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(
-                CompiledFunction.compiled_bw,
-                all_args,
-                steal_args=True,
-                disable_amp=disable_amp,
-            )
-            return tuple(out)
+            def call_compiled_backward(all_args):
+                all_args_list = list(all_args)
+                if CompiledFunction.compiled_bw is None:
+                    # TODO - pass in fake tensors ?
+                    context = disable_autocast_manager if disable_amp else nullcontext
+                    with context(), track_graph_compiling(aot_config, "backward"):
+                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            bw_module, all_args_list
+                        )
+
+                ctx.maybe_clear_saved_tensors()
+                out = call_func_with_args(
+                    CompiledFunction.compiled_bw,
+                    all_args_list,
+                    steal_args=True,
+                    disable_amp=disable_amp,
+                )
+                return tuple(out)
+
+            if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
+                # If backward pass was run with create_graph=True, ensure that the graph is
+                # properly connected, but errors when the user performs double backward.
+                # See comment for why once_differentiable is not sufficient:
+                # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
+                class CompiledFunctionBackward(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, *all_args):
+                        return call_compiled_backward(all_args)
+
+                    @staticmethod
+                    def backward(ctx, *args):
+                        raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+
+                out = CompiledFunctionBackward.apply(*all_args)
+            else:
+                out = call_compiled_backward(all_args)
+            return out
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
@@ -1897,7 +1923,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         else:
             args_with_synthetic_bases = args
 
-        with torch.autograd._set_view_replay_enabled(True):
+        with torch.autograd._force_original_view_tracking(True):
             all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
 
         num_mutated_inps = CompiledFunction.num_mutated_inputs
@@ -1998,9 +2024,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad
-                )
+                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
                 fw_outs_including_aliases.append(regenerated_out)
             return fw_outs_including_aliases
         else:
@@ -2339,7 +2363,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
-        return stateless.functional_call(mod, params_and_buffers, args, kwargs)
+        return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
     named_params = dict(_named_parameters(mod, remove_duplicate=False))
     named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
