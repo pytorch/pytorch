@@ -209,11 +209,25 @@ static PyObject* THPStorage_fromBuffer(
   torch::utils::THPByteOrder byte_order;
   if (scalar_type != at::kByte && scalar_type != at::kChar) {
     if (strcmp(byte_order_str, "native") == 0) {
-      byte_order = torch::utils::THP_nativeByteOrder();
+      // avoid to swap in THP_decode*Buffer by passing
+      // THP_LITTLE_ENDIAN that does not swap elements
+      byte_order = torch::utils::THP_LITTLE_ENDIAN;
     } else if (strcmp(byte_order_str, "big") == 0) {
       byte_order = torch::utils::THP_BIG_ENDIAN;
+      if (byte_order == torch::utils::THP_nativeByteOrder()) {
+        // if specified byte order is equal to native byte order,
+        // avoid to swap elements in THP_decode*Buffer by passing
+        // THP_LITTLE_ENDIAN that does not swap elements
+        byte_order = torch::utils::THP_LITTLE_ENDIAN;
+      }
     } else if (strcmp(byte_order_str, "little") == 0) {
       byte_order = torch::utils::THP_LITTLE_ENDIAN;
+      if (byte_order != torch::utils::THP_nativeByteOrder()) {
+        // if specified byte order is not equal to native byte order,
+        // force to swap elements in THP_decode*Buffer by passing
+        // THP_BIG_ENDIAN that always swaps elements
+        byte_order = torch::utils::THP_BIG_ENDIAN;
+      }
     } else {
       PyErr_Format(
           PyExc_ValueError,
