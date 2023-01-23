@@ -390,7 +390,8 @@ PyObject* ParameterClass = nullptr;
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     Variable _var,
-    c10::impl::PyInterpreterStatus status);
+    c10::impl::PyInterpreterStatus status,
+    bool allow_preexisting_pyobj = false);
 
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
@@ -1804,10 +1805,14 @@ PyObject* THPVariable_pynew(
   auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
   // given a raw pointer that will refcount bump
+  // NB: base_tensor_ctor can call into dispatched ATen functions (e.g.,
+  // alias(), lift_fresh()) which can return Tensor subclasses.  We allow
+  // these to be passed on directly.
   return THPVariable_NewWithVar(
       type,
       std::move(tensor),
-      c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED);
+      c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
+      /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1940,7 +1945,8 @@ void THPVariable_subclass_dealloc(PyObject* self) {
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     Variable _var,
-    c10::impl::PyInterpreterStatus status) {
+    c10::impl::PyInterpreterStatus status,
+    bool allow_preexisting_pyobj) {
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
       PyType_IsSubtype(type, &THPVariableType),
@@ -1982,6 +1988,17 @@ static PyObject* THPVariable_NewWithVar(
   // do.
 
   if (mb_obj.has_value() && mb_obj.value()) {
+    TORCH_CHECK(
+        allow_preexisting_pyobj,
+        "Creating a new Tensor subclass ",
+        type->tp_name,
+        " but the raw Tensor object is already associated to a python object ",
+        "of type ",
+        mb_obj.value()->ob_type->tp_name);
+    // Even if we allow pre-existing PyObject, we don't allow completely
+    // ignoring the requested type.  Check that we fulfilled a subtype
+    // relation here.  In the common case the requested type is Tensor and
+    // this always succeeds.
     PyObject* obj = *mb_obj;
     // Check if it's OK to just directly return the Python object without
     // allocating a new variable.  We just check that the existing Python
