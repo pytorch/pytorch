@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 
+#include <ATen/Dispatch.h>
 #include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
@@ -14,6 +15,7 @@
 #include <ATen/native/mps/operations/Indexing.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/AccumulateType.h>
 #include <torch/library.h>
 #include <ATen/native/TensorAdvancedIndexing.h>

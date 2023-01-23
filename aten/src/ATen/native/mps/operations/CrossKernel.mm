@@ -1,7 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
+#include <ATen/Dispatch.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Cross.h>
+#include <ATen/native/DispatchStub.h>
 
 namespace at::native {
 
