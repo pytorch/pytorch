@@ -286,7 +286,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
