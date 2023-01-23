@@ -31,6 +31,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     strategy:
+      fail-fast: false
       matrix:
         include:
           - docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
