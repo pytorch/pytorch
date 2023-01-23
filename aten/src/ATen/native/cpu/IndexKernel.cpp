@@ -569,14 +569,16 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
-std::array<char, 32> generate_vec_hflip_reg_mask(int64_t data_stride) {
-    std::array<char, 32> mask;
-    for (const auto k : c10::irange(16)) {
+constexpr int64_t hflip_mask_size = 32;
+
+std::array<char, hflip_mask_size> generate_vec_hflip_reg_mask(int64_t data_stride) {
+    std::array<char, hflip_mask_size> mask;
+    for (const auto k : c10::irange(hflip_mask_size / 2)) {
       int j = k / data_stride + 1;
       int v = (j * data_stride - 1) - (k % data_stride);
-      v = std::min(v, (int) 15);
-      mask[31 - k] = v;
-      mask[15 - k] = v;
+      v = std::min(v, (int) (hflip_mask_size / 2 - 1));
+      mask[hflip_mask_size - 1 - k] = v;
+      mask[hflip_mask_size / 2 - 1 - k] = v;
     }
     return mask;
 }
@@ -630,8 +632,6 @@ int64_t vectorized_cpu_hflip_channels_last(
     const auto usable_vec_stride = 2 * (vec_size / 2 / data_stride) * data_stride;
     const auto usable_vec_half_stride = usable_vec_stride / 2;
 
-    __m256i data_vec, reversed_vec;
-
     auto output_ptr = data[0] + data_stride - vec_size / 2;
     auto input_ptr = data[1];
 
@@ -641,9 +641,9 @@ int64_t vectorized_cpu_hflip_channels_last(
       auto a0 = _mm_loadu_si128((__m128i *) (input_ptr + i));
       auto b0 = _mm256_castsi128_si256(a0);
       auto a1 = _mm_loadu_si128((__m128i *) (input_ptr + i + usable_vec_half_stride));
-      data_vec = _mm256_inserti128_si256(b0, a1, 1);
+      auto data_vec = _mm256_inserti128_si256(b0, a1, 1);
 
-      reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
+      auto reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
 
       // write output in two parts
       auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 0);
@@ -665,7 +665,7 @@ void cpu_hflip_channels_last_vec(at::TensorIterator& iter) {
   const auto data_stride = input_strides[1];
 
   // Generate avx mask once
-  auto mdata = generate_vec_hflip_reg_mask(data_stride);
+  alignas(hflip_mask_size) auto mdata = generate_vec_hflip_reg_mask(data_stride);
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
@@ -687,7 +687,7 @@ void cpu_hflip_channels_last_vec(at::TensorIterator& iter) {
     int64_t i = 0;
 
     if (c >= 2 && c <= 16) {
-      i += vectorized_cpu_hflip_channels_last(data, size * stride, c, mdata) / stride;
+      i = vectorized_cpu_hflip_channels_last(data, size * stride, c, mdata) / stride;
     }
 
     auto data_stride = size0 * stride;
