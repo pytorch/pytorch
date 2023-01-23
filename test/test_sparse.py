@@ -4322,15 +4322,19 @@ class TestSparseAny(TestCase):
             # TODO: The following exception cases all correspond to
             # not implemented conversions
             if from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and is_batch:
-                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsr to SparseBsr for batched inputs is not supported"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "conversion from SparseCsr to SparseBsr for batched inputs is not supported"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsr to SparseBsr for batched inputs is not supported"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "conversion from SparseCsr to SparseBsr for batched inputs is not supported"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and is_batch:
-                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsc to SparseBsc for batched inputs is not supported"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "conversion from SparseCsc to SparseBsc for batched inputs is not supported"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from SparseCsc to SparseBsc for batched inputs is not supported"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "conversion from SparseCsc to SparseBsc for batched inputs is not supported"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
