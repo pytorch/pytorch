@@ -888,7 +888,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   install_torchvision
   install_filelock
   checkout_install_torchbench
-  test_inductor_torchbench
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
     test_aot_eager_benchmark torchbench "" --dynamic-shapes
   else
