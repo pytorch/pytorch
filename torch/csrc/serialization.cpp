@@ -330,10 +330,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     int64_t tsize; // convert little endian storage to big endian cpu
     tsize = size;
     torch::utils::THP_decodeInt64Buffer(
-        &size,
-        (const uint8_t*)&tsize,
-        torch::utils::THP_nativeByteOrder(),
-        1);
+        &size, (const uint8_t*)&tsize, torch::utils::THP_nativeByteOrder(), 1);
   }
   int64_t nbytes = element_size * size;
   if (!storage.defined()) {
