@@ -3834,12 +3834,6 @@
     SparseCUDA: sparse_sparse_matmul_cuda
   autogen: _sparse_sparse_matmul.out
 
-- func: _sparse_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
-  dispatch:
-    SparseCPU: sparse_mask_helper_cpu
-    SparseCUDA: sparse_mask_helper_cuda
-  autogen: _sparse_mask_helper.out
-
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:

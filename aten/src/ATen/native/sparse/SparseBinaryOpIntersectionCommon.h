@@ -13,6 +13,8 @@
 #else
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/ones_like.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/result_type.h>
@@ -97,7 +99,8 @@ TensorIterator make_value_selection_intersection_iter(
     const Tensor& lhs_values,
     const Tensor& lhs_select_idx,
     const Tensor& rhs_values,
-    const Tensor& rhs_select_idx) {
+    const Tensor& rhs_select_idx,
+    const c10::optional<Tensor>& match_mask_opt = c10::nullopt) {
   const auto res_values_sizes = [&]() -> std::vector<int64_t> {
     auto sizes = infer_size(
         // keep nnz dim
@@ -108,7 +111,7 @@ TensorIterator make_value_selection_intersection_iter(
     sizes[0] = lhs_select_idx.numel();
     return sizes;
   }();
-  auto res_values = at::empty(res_values_sizes, lhs_values.options());
+  auto res_values = at::zeros(res_values_sizes, lhs_values.options());
 
   const auto restride_idx = [&res_values](const Tensor& idx) -> Tensor {
     auto idx_sizes = std::vector<int64_t>(res_values.dim(), 1);
@@ -126,6 +129,14 @@ TensorIterator make_value_selection_intersection_iter(
     return values.as_strided(values_sizes, values_strides);
   };
 
+  const auto match_mask = [&match_mask_opt, &lhs_select_idx]() -> Tensor {
+    if (match_mask_opt.has_value()) {
+      return *match_mask_opt;
+    } else {
+      return at::ones_like(lhs_select_idx);
+    }
+  }();
+
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
@@ -135,6 +146,7 @@ TensorIterator make_value_selection_intersection_iter(
     .add_owned_input(restride_idx(lhs_select_idx))
     .add_owned_input(restride_values(rhs_values))
     .add_owned_input(restride_idx(rhs_select_idx))
+    .add_owned_input(restride_idx(match_mask))
     .build();
 
   return iter;
@@ -151,6 +163,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& x_,
     const Tensor& y_,
     const std::vector<int64_t> broadcasted_shape,
+    const bool restrict_indices_to_rhs = false,
     const bool commutes_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
@@ -164,8 +177,19 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   using KernelLauncher = KernelLauncher<kernel_t>;
 
-  const Tensor x = commutes_with_sum ? x_ : x_.coalesce();
-  const Tensor y = commutes_with_sum ? y_ : y_.coalesce();
+  // If the op and sum are not commutative, coalesce is required.
+  // If restrict_indices_to_rhs is true, x is coalesced so that
+  // (x.coalesce() intersection y union y).indices().counts() == y.indices().counts().
+  const Tensor x = (restrict_indices_to_rhs || commutes_with_sum) ? x_ : x_.coalesce();
+  const Tensor y = [&]() -> Tensor {
+    auto rhs = commutes_with_sum ? y_ : y_.coalesce();
+    if (restrict_indices_to_rhs) {
+      // x is coalesced and y is marked as uncoalesced so that the intersection result
+      // respects the order of indices in y.
+      rhs._coalesced_(false);
+    }
+    return rhs;
+  }();
 
   // Given sparse tensors x and y we decide which one is source, and which one
   // is probably_coalesced. The indices of both source and probably_coalesced are
@@ -391,6 +415,28 @@ void _sparse_binary_op_intersection_kernel_impl(
     return std::make_tuple(intersection_count, intersection_first_idx);
   }();
 
+  // Intersection is all we need in such a case.
+  if (restrict_indices_to_rhs) {
+    const auto res_indices = source._indices().clone();
+    const auto res_values = value_selection_intersection_kernel_t::apply(
+        probably_coalesced._values(),
+        intersection_first_idx.to(nnz_arange.scalar_type()),
+        source._values(),
+        nnz_arange.narrow(-1, 0, source._nnz()),
+        intersection_count.ge(1));
+    const auto res_sparse_dim = source.sparse_dim();
+    const auto res_dense_dim = res_values.dim() - 1;
+    const auto& res_shape = broadcasted_shape;
+    const auto res_nnz = source._nnz();
+
+    auto* res_sparse_impl = get_sparse_impl(res);
+    res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
+    res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
+    res_sparse_impl->set_nnz_and_narrow(res_nnz);
+    res._coalesced_(source.is_coalesced());
+    return;
+  }
+
   // Using intersection_count and intersection_first_idx,
   // form indices selected_source and selected_probably_coalesced such that
   // res.values = op(
@@ -547,6 +593,14 @@ void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
+    // If true, the result's indices are the same as that of the rhs'.
+    // This behavior is useful when implementing operations
+    // with the symantics similar to that of sparse_mask,
+    // and it also requires less kernel calls compared to
+    // a generic intersection.
+    const bool restrict_indices_to_rhs = false,
+    // If op commutes with the sum, the arguments are processed as is,
+    // without the calls to coalesce().
     const bool commutes_with_sum = true
 ) {
   TORCH_CHECK(
@@ -586,7 +640,7 @@ void _sparse_binary_op_intersection_kernel_out(
       using hash_t = index_t1;
       using offset_t = index_t0;
       _sparse_binary_op_intersection_kernel_impl<kernel_t, value_selection_intersection_kernel_t, index_t, hash_t, offset_t>(
-          res, x, y, broadcasted_shape, commutes_with_sum);
+          res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
   });
 }
 
