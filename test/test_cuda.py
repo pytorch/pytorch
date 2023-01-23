@@ -3361,8 +3361,6 @@ exit(2)
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
                 cwd=os.path.dirname(os.path.realpath(__file__)),)
-            print(a)
-            print("Alla good")
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 self.assertTrue(False, "Error raise by starting capture without a stream is not the expected one")
