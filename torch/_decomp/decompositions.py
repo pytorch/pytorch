@@ -1085,7 +1085,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.split_with_sizes)
+@register_decomposition([aten.split_with_sizes, aten.unsafe_split_with_sizes])
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1099,7 +1099,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split.Tensor)
+@register_decomposition([aten.split.Tensor, aten.unsafe_split.Tensor])
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1460,6 +1460,18 @@ def native_batch_norm_decomposition(
     return aten._native_batch_norm_legit(
         input, weight, bias, running_mean, running_var, training, momentum, eps
     )
+
+
+@aten.unsafe_chunk.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> List[Tensor]:
+    dim_size = tensor.size(dim)
+    split_size = (dim_size + chunks - 1) // chunks
+
+    if split_size == 0 and dim_size == 0:
+        split_sizes = [split_size for _ in chunks]
+        split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
+        return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
+    return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
 
 
 @register_decomposition(aten._native_batch_norm_legit.default)
