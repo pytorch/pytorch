@@ -79,7 +79,7 @@ jobs:
             BUILD_LITE_INTERPRETER="0"
           fi
 
-          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
+          git submodule sync && git submodule update -q --init --recursive --depth 1
           export id
           id=$(docker run -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \

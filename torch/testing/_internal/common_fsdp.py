@@ -111,9 +111,11 @@ def _assert_module_states(
 def _zero_model(
     model: nn.Module,
     zero_buffers: bool = False,
+    summon_full=True,
 ):
     """Zeros the parameters and optionally buffers of ``model`` in place."""
-    with FSDP.summon_full_params(model):
+    ctx = FSDP.summon_full_params(model) if summon_full else suppress()
+    with ctx:
         for param in model.parameters():
             with torch.no_grad():
                 param.zero_()
@@ -136,6 +138,23 @@ def subtest_name(test_name_mapping, *args):
     return "_".join(
         [test_name_mapping[str(s)] if s is not None else "none" for s in args]
     )
+
+
+def _broadcast_state_dict(rank, state_dict):
+    # For non-FSDP roots, some parts of the model state on rank 0 may
+    # not be on CPU, so we move everything to CPU to avoid issues like:
+    # https://github.com/pytorch/pytorch/issues/77113.
+    for param_name, param in state_dict.items():
+        if param.device != torch.device("cpu"):
+            state_dict[param_name] = param.cpu()
+
+    olist = [state_dict if rank == 0 else None]
+    dist.broadcast_object_list(olist)
+    state_dict = olist[0]
+    # Ensure that the state is on CUDA
+    for param_name in state_dict.keys():
+        state_dict[param_name] = state_dict[param_name].cuda()
+    return state_dict
 
 
 def get_full_params(model: nn.Module, recurse: bool = True):
@@ -290,11 +309,16 @@ class TransformerWithSharedParams(FSDPTestModel):
                 across constructions.
             add_bn (bool): Whether to include batch norm in the model.
         """
+
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            if isinstance(group, tuple):
+                pg = group[0]
+            else:
+                pg = group
             return TransformerWithSharedParams(
-                group, cuda_init_mode, add_bn, deterministic
+                pg, cuda_init_mode, add_bn, deterministic
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Default to the `ModuleWrapPolicy`
@@ -307,11 +331,27 @@ class TransformerWithSharedParams(FSDPTestModel):
                 )
             else:
                 auto_wrap_policy = fsdp_kwargs.pop("auto_wrap_policy")
+
+            if (
+                "sharding_strategy" in fsdp_kwargs
+                and fsdp_kwargs["sharding_strategy"]
+                in {ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2}
+                and not isinstance(group, tuple)
+            ):
+                fsdp_pg = None
+            else:
+                fsdp_pg = group
+
+            if isinstance(group, tuple):
+                tformer_pg = group[0]
+            else:
+                tformer_pg = group
+
             fsdp_model = FSDP(
                 TransformerWithSharedParams(
-                    group, cuda_init_mode, add_bn, deterministic
+                    tformer_pg, cuda_init_mode, add_bn, deterministic
                 ),
-                group,
+                fsdp_pg,
                 auto_wrap_policy=auto_wrap_policy,
                 **fsdp_kwargs,
             )
@@ -617,13 +657,8 @@ class MixtureOfExperts(NestedWrappedModule):
                     )
                     return orig_reshard(*args, **kwargs)
 
-                # The first patch covers any `from torch... import _reshard`
-                # uses in `fully_sharded_data_parallel.py`, and the second
-                # patch covers any `import torch..._reshard` uses in general.
+                # This patch covers any `import torch..._reshard` uses.
                 with mock.patch(
-                    "torch.distributed.fsdp.fully_sharded_data_parallel._reshard",
-                    _delayed_reshard,
-                ), mock.patch(
                     "torch.distributed.fsdp._runtime_utils._reshard", _delayed_reshard
                 ):
                     return self.module(x)
@@ -801,7 +836,6 @@ class FSDPTest(MultiProcessTestCase):
         autocast: bool,
         lr: float = 0.01,
         fsdp_cpu_offload: Optional[CPUOffload] = None,
-        norm_type: Optional[Union[float, int]] = None,
         save_model: bool = False,
         mixed_precision: Optional[MixedPrecision] = None,
         enable_sharded_grad_scaler: bool = False,
@@ -848,21 +882,6 @@ class FSDPTest(MultiProcessTestCase):
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
             model.module.run_backward(loss)
-            if norm_type is not None:
-                max_norm = 0.3
-                if isinstance(model, FSDP):
-                    model.clip_grad_norm_(max_norm, norm_type)
-                    total_norm_after_clip = _collect_total_grad_norm_fsdp(
-                        model, norm_type, self.rank
-                    )
-                else:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm, norm_type
-                    )
-                    total_norm_after_clip = _collect_total_grad_norm_local(
-                        model, norm_type
-                    )
-                self.assertTrue(total_norm_after_clip <= max_norm)
             # Post-backward, if CPU offloading model params should be on CPU.
             if cpu_offload_params and isinstance(model, FSDP):
                 for p in model.parameters():
@@ -900,7 +919,6 @@ class FSDPTest(MultiProcessTestCase):
         use_orig_params: bool = False,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        norm_type: Optional[Union[float, int]] = None,
         init_kwargs: Optional[Dict[str, Any]] = None,
         **fsdp_kwargs,
     ):
@@ -946,7 +964,6 @@ class FSDPTest(MultiProcessTestCase):
             lr=lr,
             fsdp_cpu_offload=cpu_offload,
             mixed_precision=mixed_precision,
-            norm_type=norm_type,
             enable_sharded_grad_scaler=enable_sharded_grad_scaler,
             use_pure_fp16=use_pure_fp16,
         )
@@ -972,7 +989,7 @@ class FSDPTest(MultiProcessTestCase):
                 **init_kwargs,
             )
         except Exception as e:
-            raise ValueError(f"Initializing {model_class} raised error {str(e)}")
+            raise ValueError(f"Initializing {model_class} raised error {str(e)}") from e
         if not isinstance(fsdp_model, FSDP):
             # Enforce that we wrap with top-level FSDP since we are comparing
             # assuming a data parallel reference and some test models may not
@@ -999,7 +1016,9 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
         context = (
             self.assertRaisesRegex(
-                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+                RuntimeError,
+                "An FSDP-managed module with parameter CPU offloading enabled "
+                "has parameters on cuda",
             )
             if expects_device_error
             else suppress()
@@ -1013,7 +1032,6 @@ class FSDPTest(MultiProcessTestCase):
                 fsdp_cpu_offload=cpu_offload,
                 save_model=save_model,
                 mixed_precision=mixed_precision,
-                norm_type=norm_type,
                 enable_sharded_grad_scaler=enable_sharded_grad_scaler,
                 use_pure_fp16=use_pure_fp16,
             )
@@ -1027,14 +1045,17 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
             fsdp_loss = fsdp_loss.cuda()
         fsdp_unsharded_params = get_full_params(fsdp_model)
-        # TODO: Are mismatching dtypes actually ok here or did this pass silently before, because `check_dtype=False`
-        #  was the default?
+        # Do not check dtype since the reference DDP loss may not be the same
+        # dtype as the FSDP loss in the case of mixed precision
         torch.testing.assert_close(ref_loss, fsdp_loss, check_dtype=False)
         # Do not check for parameter parity if using mixed precision since (1)
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
         # the optimizer in FP16 while FSDP runs it in FP32
-        if mixed_precision is not None:
+        # TODO: Disable checking the parameters for pure FP16 due to floating
+        # point inaccuracy. Note that this means that the backward pass is not
+        # checked: https://github.com/pytorch/pytorch/issues/90784
+        if mixed_precision is None and not use_pure_fp16:
             self.assertEqual(
                 ddp_params,
                 fsdp_unsharded_params,

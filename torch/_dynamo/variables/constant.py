@@ -5,7 +5,7 @@ import torch
 
 from .. import variables
 from ..exc import unimplemented
-from ..utils import istype
+from ..utils import HAS_NUMPY, istype, np
 from .base import typestr, VariableTracker
 
 
@@ -15,7 +15,11 @@ class ConstantVariable(VariableTracker):
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
         assert not isinstance(value, torch.SymFloat)
-        self.value = value
+
+        if HAS_NUMPY and isinstance(value, np.number):
+            self.value = value.item()
+        else:
+            self.value = value
 
     def as_proxy(self):
         return self.value
@@ -56,8 +60,8 @@ class ConstantVariable(VariableTracker):
         try:
             options = VariableTracker.propagate([self])
             return [ConstantVariable(x, **options) for x in self.as_python_constant()]
-        except TypeError:
-            raise NotImplementedError()
+        except TypeError as e:
+            raise NotImplementedError from e
 
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)

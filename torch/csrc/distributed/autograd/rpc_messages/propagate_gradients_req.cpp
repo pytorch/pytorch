@@ -23,6 +23,7 @@ PropagateGradientsReq::PropagateGradientsReq(
 c10::intrusive_ptr<Message> PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
+  ivalues.reserve(grads_.size() + 3);
   for (const auto& grad : grads_) {
     ivalues.emplace_back(grad);
   }

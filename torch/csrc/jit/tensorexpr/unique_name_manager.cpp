@@ -4,9 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <cctype>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
   // Find if we have already encountered this variable.
@@ -44,6 +42,4 @@ const std::string& UniqueNameManager::get_unique_name(const VarHandle& v) {
   return get_unique_name(v.node());
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
