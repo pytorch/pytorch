@@ -4,7 +4,6 @@ import itertools
 import operator
 from typing import Callable, Dict, Optional, Tuple, Union
 
-import onnx
 import onnxscript
 from onnxscript import evaluator
 from onnxscript.function_libs.torch_aten import graph_building, ops
