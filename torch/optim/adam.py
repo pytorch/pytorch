@@ -503,7 +503,7 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_mul_(device_exp_avgs, beta1)
@@ -604,8 +604,8 @@ def _fused_adam(
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
         if grad_scale is not None and found_inf is not None:
-            device_grad_scale = grad_scale.get(device)
-            device_found_inf = found_inf.get(device)
+            device_grad_scale = grad_scale.get(str(device))
+            device_found_inf = found_inf.get(str(device))
         else:
             device_grad_scale = None
             device_found_inf = None
