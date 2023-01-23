@@ -737,6 +737,11 @@ class FakeTensorOperatorInvariants(TestCase):
             # error
             sparse2 = sparse.new(indices, values, extra)
 
+    def test_tensor_new(self):
+        with FakeTensorMode():
+            x = torch.Tensor([1, 2, 3])
+        self.assertIsInstance(x, FakeTensor)
+
     def test_like_ops(self):
         for schema in self.get_all_aten_schemas():
             if "_like" == schema.name[-5:]:
