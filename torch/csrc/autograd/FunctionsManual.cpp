@@ -1386,7 +1386,13 @@ Tensor sparse_sparse_matmul_backward(
 Tensor sparse_coo_constructor_backward(
     const Tensor& grad,
     const Tensor& result) {
-  const auto nonzero_values_grad = grad.mul(at::ones_like(result.coalesce())).coalesce();
+  const auto result_coalesced = result.coalesce();
+  const auto ones_like_result = at::sparse_coo_tensor(
+      result_coalesced.indices(),
+      at::ones({1}, result_coalesced.values().options()).expand_as(result_coalesced.values()),
+      result.sizes()
+  );
+  const auto nonzero_values_grad = grad.mul(ones_like_result).coalesce();
 
   // Short circuit on empty intersection
   if (nonzero_values_grad._nnz() == 0) {
