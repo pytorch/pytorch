@@ -50,11 +50,10 @@ variable_list CppFunctionTensorPreHook::operator()(
   return results;
 }
 
-// NOLINTNEXTLINE(modernize-pass-by-value)
 CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
     std::function<at::TensorBase(const at::TensorBase&)> hook,
     int value_idx)
-    : hook_(hook), value_idx_(value_idx) {}
+    : hook_(std::move(hook)), value_idx_(value_idx) {}
 
 variable_list CppFunctionSingleTensorPreHook::operator()(
     const variable_list& values) {
