@@ -10616,7 +10616,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                test_self.assertTrue(torch._C._key_in_tls("my_obj"))
+                test_self.assertTrue(torch._C._is_key_in_tls("my_obj"))
                 test_self.assertTrue(torch._C._get_obj_in_tls("my_obj")[10] == 10)
                 torch._C._get_obj_in_tls("my_obj")[10] = 5
                 return gO, None

@@ -1575,7 +1575,7 @@ Call this whenever a new thread is created in order to propagate values from
     return py::handle(obj);
   });
 
-  py_module.def("_key_in_tls", [](std::string key) -> bool {
+  py_module.def("_is_key_in_tls", [](std::string key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
   });
 
