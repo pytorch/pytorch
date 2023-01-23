@@ -282,6 +282,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             x = value.var_getattr(self, "__bool__")
             # __bool__ is function
             if isinstance(x, UserMethodVariable):
+                assert isinstance(self.instruction_pointer, int)
                 inst = self.instructions[self.instruction_pointer]
                 checkpoint = inst, self.copy_graphstate()
                 result = x.call_function(self, [], {})
