@@ -37,6 +37,8 @@ modernize-*,
 performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
+misc-unused-using-decls,
+misc-unused-alias-decls,
 '
 HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
 AnalyzeTemporaryDtors: false
