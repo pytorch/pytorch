@@ -1922,11 +1922,9 @@ class TestSparse(TestSparseBase):
                 [17, 18, 19, 20],
             ], dtype=dtype, device=device)
             exp_v = torch.tensor([7, 14, 3, 20], dtype=dtype, device=device)
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse().sparse_mask(x)
+            res = dense.sparse_mask(x)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4]), dtype=dtype, device=device)
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
             i = self.index_tensor([
                 [1, 3, 0, 4],
@@ -1936,11 +1934,9 @@ class TestSparse(TestSparseBase):
             x = self.sparse_tensor(i, v, torch.Size([5, 4, 0])).coalesce()
             dense = torch.empty([5, 4, 0], dtype=dtype, device=device)
             exp_v = torch.empty([4, 0], dtype=dtype, device=device)
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
+            res = dense.sparse_mask(x)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 0]), dtype=dtype, device=device)
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
         _test_sparse_mask_fixed()
 
@@ -1973,12 +1969,10 @@ class TestSparse(TestSparseBase):
                 [[13, 5], [14, 1], [15, 1], [16, 6]],
                 [[17, 7], [18, 2], [19, 7], [20, 1]],
             ])
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
+            res = dense.sparse_mask(x)
             exp_v = torch.tensor([[7, 9], [14, 1], [3, 3], [20, 1]])
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2]))
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
             i = self.index_tensor([
                 [1, 3, 0, 4],
@@ -1987,12 +1981,10 @@ class TestSparse(TestSparseBase):
             v = torch.empty(4, 2, 0)
             x = self.sparse_tensor(i, v, torch.Size([5, 4, 2, 0])).coalesce()
             dense = torch.empty(5, 4, 2, 0)
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
+            res = dense.sparse_mask(x)
             exp_v = torch.empty(4, 2, 0)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2, 0]))
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
         _test_sparse_mask_hybrid_fixed()
 
@@ -3610,9 +3602,9 @@ class TestSparse(TestSparseBase):
         nnz = 10
 
         def check(self, x, y):
+            res_sparse = x * y
             res_dense = x.to_dense() * y.to_dense()
-            self.assertEqual(res_dense, x * y)
-            self.assertEqual(res_dense, y * x)
+            self.assertEqual(res_sparse.to_dense(), res_dense)
 
         def check_empty(sparse_shape, nnz, dense_shape, coalesce):
             from itertools import product

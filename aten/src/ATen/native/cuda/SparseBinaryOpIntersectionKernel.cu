@@ -18,22 +18,15 @@ struct CUDAKernelLauncher {
 
 struct MulOp {
   template <typename scalar_t>
-  static FUNCAPI INLINE scalar_t apply(scalar_t a, scalar_t b) {
+  static FUNCAPI scalar_t apply(scalar_t a, scalar_t b) {
     return a * b;
   }
 };
 
 template <>
-FUNCAPI INLINE bool MulOp::apply(bool a, bool b) {
+FUNCAPI bool MulOp::apply(bool a, bool b) {
   return a && b;
 }
-
-struct LhsProjOp {
-  template <typename scalar_t>
-  static FUNCAPI scalar_t apply(scalar_t a, scalar_t b) {
-    return a;
-  }
-};
 
 template <int nt, int vt, typename loop_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
@@ -149,19 +142,8 @@ void mul_sparse_sparse_out_cuda_kernel(
   );
 }
 
-void sparse_mask_intersection_out_cuda_kernel(
-    Tensor& result,
-    const Tensor& x,
-    const Tensor& y) {
-  using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
-  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
-      result, x, y
-  );
-}
-
 }
 
 REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel);
-REGISTER_CUDA_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cuda_kernel);
 
 } // namespace at::native
