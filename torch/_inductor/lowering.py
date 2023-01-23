@@ -21,6 +21,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
@@ -3706,6 +3707,11 @@ def op_ceil(a):
 @register_lowering(math.floor)
 def op_floor(a):
     return sympy.floor(a)
+
+
+@register_lowering(sym_sqrt)
+def op_sqrt(a):
+    return sympy.sqrt(a)
 
 
 @register_lowering(torch.sym_float)
