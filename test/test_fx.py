@@ -3955,6 +3955,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,
         "threshold_": BUILT_IN_FUNC,

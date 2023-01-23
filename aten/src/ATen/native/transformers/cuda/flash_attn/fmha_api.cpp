@@ -116,7 +116,7 @@ void set_params_fprop(FMHA_fprop_params &params,
     params.is_causal = is_causal;
 }
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
+std::tuple<at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -128,8 +128,10 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const float softmax_scale,
         const bool zero_tensors,
         const bool is_causal,
-        const bool return_softmax,
         c10::optional<at::Generator> gen_) {
+    // return_softmax is a parameter for flash attention
+    // but for the in core api though we are removing this parameter.
+    constexpr bool return_softmax = false;
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
@@ -199,15 +201,9 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
 
     auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
 
-    //  It appears that FlashAttention can return attention weights, but we don't use them. Since we are currently
-    //  filtering this out in the dispatch mechanism. Investigate this ouput against the math impl.
-    at::Tensor s = at::empty({0}, opts);
-    if (return_softmax) { s = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts); }
-
     if( zero_tensors ) {
         o.zero_();
         softmax_lse.fill_(-std::numeric_limits<float>::infinity());
-        if (return_softmax) {s.zero_();}
     }
 
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
@@ -224,7 +220,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
                      cu_seqlens_k.data_ptr(),
                      o.data_ptr(),
                      loop ? o_tmp.data_ptr() : nullptr,
-                     return_softmax ? s.data_ptr() : nullptr,
+                     nullptr,
                      softmax_lse.data_ptr(),
                      p_dropout,
                      softmax_scale,
@@ -243,7 +239,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
 
     run_fmha_fprop(launch_params, /*configure=*/false);
 
-    return std::make_tuple(o, softmax_lse, s);
+    return std::make_tuple(o, softmax_lse);
 }
 } // namespace fmha
 #endif

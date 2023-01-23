@@ -7,7 +7,7 @@
 namespace fmha {
 
 TORCH_API
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
+std::tuple<at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -19,7 +19,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const float softmax_scale,
         const bool zero_tensors,
         const bool is_causal,
-        const bool return_softmax,
         c10::optional<at::Generator> gen_);
 
 } // namespace fmha
