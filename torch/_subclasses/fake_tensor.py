@@ -595,7 +595,20 @@ class FakeTensor(torch.Tensor):
     # will get rewritten to call into FakeTensor.  We must provide an
     # __init__ method that can accept the Python interpreters initialization
     # in such a situation; we must also be able to handle direct fake
-    # tensor construction via FakeTensor()
+    # tensor construction via FakeTensor().
+    #
+    # In particular, the __init__ call will look funny in the following case:
+    #
+    #   with FakeTensorMode():
+    #       x = torch.Tensor([1, 2, 3])
+    #
+    # this desugars into:
+    #
+    #   with FakeTensorMode():
+    #       x = torch.Tensor.__new__([1, 2, 3])
+    #       # NB: x is a fake tensor, because of the mode!
+    #       x.__init__([1, 2, 3])  # not the normal fake tensor args!
+    #
     def __init__(self, *args, **kwargs):
         super().__init__()
 

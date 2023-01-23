@@ -15,6 +15,7 @@ import sys
 import time
 import warnings
 from contextlib import contextmanager
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -60,7 +61,16 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
-CI_SKIP_AOT_EAGER_INFERENCE = [
+
+class CI(NamedTuple):
+    backend: str  # aot_eager or inductor
+    training: bool
+    dynamic: bool = False
+
+
+CI_SKIP = collections.defaultdict(list)
+
+CI_SKIP[CI("aot_eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
     "demucs",  # OOM
@@ -84,8 +94,8 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
 
-CI_SKIP_AOT_EAGER_TRAINING = [
-    *CI_SKIP_AOT_EAGER_INFERENCE,
+CI_SKIP[CI("aot_eager", training=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
@@ -95,6 +105,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "pytorch_struct",
     "vision_maskrcnn",
     # Huggingface
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -106,14 +117,14 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
-CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
-    *CI_SKIP_AOT_EAGER_TRAINING,
+CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=True)],
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "twins_pcpvt_base",  # timeout
 ]
 
-CI_SKIP_INDUCTOR_INFERENCE = [
-    *CI_SKIP_AOT_EAGER_INFERENCE,
+CI_SKIP[CI("inductor", training=False)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
     # TorchBench
     "detectron2",
     "hf_T5",  # accuracy
@@ -135,16 +146,18 @@ CI_SKIP_INDUCTOR_INFERENCE = [
     "ghostnet_100",  # Accuracy
 ]
 
-CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_INDUCTOR_INFERENCE,
+CI_SKIP[CI("inductor", training=True)] = [
+    *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
+    "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
     "GoogleFnet",  # Eager model failed to run
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
@@ -1461,6 +1474,9 @@ def parse_args(args=None):
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
     )
     parser.add_argument(
+        "--exclude-exact", action="append", help="filter benchmarks with exact match"
+    )
+    parser.add_argument(
         "--total-partitions",
         type=int,
         default=1,
@@ -1818,7 +1834,11 @@ def run(runner, args, original_dir=None):
 
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+    args.exclude_exact = args.exclude_exact or []
 
+    if args.inductor:
+        assert args.backend is None
+        args.backend = "inductor"
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
@@ -1834,27 +1854,18 @@ def run(runner, args, original_dir=None):
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
-        if args.backend == "aot_eager":
-            if args.dynamic_ci_skips_only:
-                assert args.training and args.dynamic_shapes
-                args.filter = list(
-                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
-                    - set(CI_SKIP_AOT_EAGER_TRAINING)
-                )
-            else:
-                args.exclude = (
-                    CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
-                    if args.training and args.dynamic_shapes
-                    else CI_SKIP_AOT_EAGER_TRAINING
-                    if args.training
-                    else CI_SKIP_AOT_EAGER_INFERENCE
-                )
-        elif args.inductor:
-            args.exclude = (
-                CI_SKIP_INDUCTOR_TRAINING
-                if args.training
-                else CI_SKIP_INDUCTOR_INFERENCE
+        if args.dynamic_ci_skips_only:
+            # Test only the incremental set of jobs whose skipped was
+            # caused solely by turning on dynamic shapes
+            assert args.dynamic_shapes
+            ci = functools.partial(CI, args.backend, training=args.training)
+            args.filter = list(
+                set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
+        else:
+            args.exclude_exact = CI_SKIP[
+                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
+            ]
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.

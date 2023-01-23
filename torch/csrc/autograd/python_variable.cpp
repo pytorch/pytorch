@@ -314,7 +314,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
     // too late to rescue the object, so just stub out the PyObject
     // so that it fails on subsequent uses.  Don't raise an error here;
     // you're probably in a destructor.
-    TORCH_INTERNAL_ASSERT(0);
     TORCH_WARN(
         "Deallocating Tensor that still has live PyObject references.  "
         "This probably happened because you took out a weak reference to "
@@ -1961,16 +1960,26 @@ static PyObject* THPVariable_NewWithVar(
   // active.)
   //
   // In general, it is impossible to handle this case compositionally.
-  // Suppose you have a user call ATensor(...) when a mode is active that
-  // is transforming all ops to output BTensor, where ATensor and BTensor
-  // are completely unrelated subclasses and there is no way to compose them.
-  // There is no way to satisfy the user request here; we must error.
+  // Suppose you have a user call ATensor([1, 2, 3]) when a mode is active
+  // that is transforming all ops (including the internal lift_fresh call that
+  // transforms [1, 2, 3] into a torch.tensor([1., 2., 3.])) to output
+  // BTensor, where ATensor and BTensor are completely unrelated subclasses
+  // and there is no way to compose them.  There is no way to satisfy the user
+  // request here: in particular, you can't just try to re-invoke the ATensor
+  // constructor on the returned BTensor, because (1) this could cause an
+  // infinite loop--we are already in ATensor.__new__ and (2) there isn't any
+  // guarantee that ATensor.__new__ supports a single element constructor
+  // anyway.
   //
-  // However, a more common case is a user just called torch.Tensor(...),
-  // and a fake tensor mode is active, and you really just want a FakeTensor
-  // to pop out of the constructor call.  This case is compositional because
-  // FakeTensor is a subclass of Tensor, so it's valid for us to return it
-  // in place of a Tensor.  So this is what we do.
+  // However, a more common case is a user just called torch.Tensor([1, 2, 3]),
+  // and a fake tensor mode is active.  Really, all you want is to get back
+  // a FakeTensor, in the same way torch.tensor([1, 2, 3]) or torch.arange(3)
+  // would have returned a fake tensor (concretely, the way this happens
+  // is we create a *real* tensor torch.tensor([1., 2., 3.]), and then it
+  // turns into a FakeTensor when we call lift_fresh on this real tensor).
+  // This case is compositional because FakeTensor is a subclass of Tensor, so
+  // it's valid for us to return it in place of a Tensor.  So this is what we
+  // do.
 
   if (mb_obj.has_value() && mb_obj.value()) {
     PyObject* obj = *mb_obj;
