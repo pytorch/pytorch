@@ -269,7 +269,7 @@ Module ScriptModuleDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
-  if (reader_->hasRecord("model.json") && code_prefix_.compare("code/") == 0) {
+  if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
     return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
 #else
