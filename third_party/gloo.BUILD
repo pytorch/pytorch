@@ -70,6 +70,8 @@ cc_library(
             "gloo/rendezvous/*.cc",
             "gloo/transport/*.cc",
             "gloo/transport/tcp/*.cc",
+            # Cruise: add `tcp/tls` paths
+            "gloo/transport/tcp/tls/*.cc",
         ],
         exclude = [
             "gloo/cuda*.cc",
@@ -79,9 +81,15 @@ cc_library(
     ) + if_cuda(glob(["gloo/cuda*.cc"])),
     copts = [
         "-std=c++17",
+        # Cruise: use openssl
+        "-DUSE_TCP_OPENSSL_LOAD",
     ],
     visibility = ["//visibility:public"],
-    deps = [":gloo_headers"] + if_cuda(
+    deps = [
+        ":gloo_headers",
+        # Cruise: use openssl
+        "@openssl",
+    ] + if_cuda(
         [":gloo_cuda"],
         [],
     ),
