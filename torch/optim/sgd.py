@@ -204,7 +204,14 @@ def sgd(params: List[Tensor],
     """
 
     if foreach is None:
-        foreach = _default_to_foreach([params, d_p_list, momentum_buffer_list])
+        # why must we handle momentum_buffer_list separately?
+        # because JIT can't handle Optionals when tracing
+        momentum_buffer_all_CUDA = True
+        for t in momentum_buffer_list:
+            if t is not None and not t.is_cuda:
+                momentum_buffer_all_CUDA = False
+                break
+        foreach = _default_to_foreach([params, d_p_list]) and momentum_buffer_all_CUDA
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')

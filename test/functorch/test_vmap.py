@@ -3456,7 +3456,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('unique', ''),  # dynamic op
@@ -3640,7 +3640,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__', ''),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -4968,6 +4968,25 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
             vmap(f)(x <= 0, expected_result=True)
 
         check_vmap_fallback(self, test, torch._is_all_true)
+
+    def test__is_any_true(self, device):
+        def test():
+            def f(x, *, expected_result):
+                result = torch.ops.aten._is_any_true(x)
+                self.assertFalse(torch._C._functorch.is_batchedtensor(result))
+                self.assertEqual(result.shape, torch.Size([]))
+                self.assertEqual(result.item(), expected_result)
+                return result
+
+            x = torch.zeros(10, device=device, dtype=torch.bool)
+            vmap(f)(x > 0, expected_result=False)
+
+            x[5] = True
+            vmap(f)(x > 0, expected_result=True)
+            vmap(f)(x[1::2], expected_result=True)
+            vmap(f)(x[0::2], expected_result=False)
+
+        check_vmap_fallback(self, test, torch._is_any_true)
 
     def test_check_tensor(self, device):
         def test():
