@@ -1131,7 +1131,7 @@ RecordQueue::getRecords(
       for (auto& i : events) {
         time_t start_time_ns;
         if constexpr (std::is_same<
-                          typename std::remove_reference<decltype(i)>::type,
+                          std::remove_reference_t<decltype(i)>,
                           ExtraFields<EventType::Backend>>::value) {
           start_time_ns = i.start_time_us_ * 1000;
         } else {
