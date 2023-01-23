@@ -7,9 +7,15 @@ from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
-from . import config
 from .codegen.common import index_prevent_reordering
-from .utils import sympy_product, sympy_str, sympy_subs, sympy_symbol, VarRanges
+from .utils import (
+    get_dtype_size,
+    sympy_product,
+    sympy_str,
+    sympy_subs,
+    sympy_symbol,
+    VarRanges,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -69,11 +75,18 @@ class MemoryDep(typing.NamedTuple):
             return MemoryDep(renames[self.name], self.index, self.size)
         return self
 
-    def numel_hint(self):
+    def numbytes_hint(self):
         vars = set(self.index.free_symbols)
+        size_vars_used = []
+        for var in vars:
+            if var.name.startswith(canonicalization_prefix()):
+                # Sometimes with indirect indexing we have very weird symbol names
+                assert " " not in var.name
+                size_vars_used.append(int(var.name[len(canonicalization_prefix()) :]))
+
         return V.graph.sizevars.size_hint(
-            sympy_product([s for s in self.size if s in vars])
-        )
+            sympy_product([self.size[i] for i in size_vars_used])
+        ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
         return isinstance(self.index, (sympy.Symbol, sympy.Integer))
@@ -88,8 +101,21 @@ class StarDep(typing.NamedTuple):
             return StarDep(renames[self.name])
         return self
 
-    def numel_hint(self):
-        return 1
+    def numbytes_hint(self):
+        from .ir import MultiOutputLayout
+
+        if self.name in V.graph.name_to_buffer:
+            buf = V.graph.name_to_buffer[self.name]
+        elif self.name in V.graph.graph_inputs:
+            buf = V.graph.graph_inputs[self.name]
+        else:
+            return 1
+        if hasattr(buf, "layout") and isinstance(buf.layout, MultiOutputLayout):
+            # NB: Too annoying to acquire, should only be used for instrumentation
+            return 1
+        return V.graph.sizevars.size_hint(
+            sympy_product(buf.get_size())
+        ) * get_dtype_size(buf.get_dtype())
 
     def is_contiguous(self) -> bool:
         return False
@@ -138,23 +164,14 @@ class ReadWrites:
         )
 
 
-class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
+class _RecordLoadStoreInner(V.MockHandler):
     def __init__(self, var_ranges: VarRanges, normalize: bool):
-        super(RecordLoadStore, self).__init__()
+        super().__init__()
         self._reads: Set[MemoryDep] = set()
         self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
-
-    # Truncate the expr str by a threshold to prevent it's too long
-    # and cause process hanging. The result is not used.
-    # https://github.com/pytorch/torchdynamo/issues/1352
-    @staticmethod
-    def truncate_expr(expr):
-        if len(expr) > config.realize_bytes_threshold:
-            expr = f"{expr[:config.realize_bytes_threshold]}..."
-        return expr
 
     def canonicalize(
         self, index: sympy.Expr
@@ -201,6 +218,14 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
         return f"index_expr({sympy_str(index)}, {dtype})"
+
+
+class RecordLoadStore(V.KernelFormatterHandler):
+    def __init__(self, var_ranges: VarRanges, normalize: bool):
+        parent_handler = _RecordLoadStoreInner(
+            var_ranges=var_ranges, normalize=normalize
+        )
+        super().__init__(parent_handler=parent_handler)
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
@@ -252,8 +277,13 @@ def extract_read_writes(
     else:
         range_vars = [*itertools.chain(*args)]
 
+    inner = rw.parent_handler
     return ReadWrites(
-        set(rw._reads), set(rw._writes), rw._index_exprs, range_vars, var_ranges
+        set(inner._reads),
+        set(inner._writes),
+        inner._index_exprs,
+        range_vars,
+        var_ranges,
     )
 
 

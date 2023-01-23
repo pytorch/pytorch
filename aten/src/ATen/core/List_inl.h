@@ -135,7 +135,7 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 
 template<class T, class Iterator>
 ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(const T& new_value) && {
-  *iterator_ = c10::detail::ListElementFrom<T>::from(std::move(new_value));
+  *iterator_ = c10::detail::ListElementFrom<T>::from(new_value);
   return *this;
 }
 
@@ -152,7 +152,7 @@ void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Itera
 
 template<class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs) {
-  T lhs_tmp = lhs;
+  const T& lhs_tmp = lhs;
   return lhs_tmp == rhs;
 }
 

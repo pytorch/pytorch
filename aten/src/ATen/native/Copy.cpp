@@ -8,6 +8,7 @@
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
@@ -124,12 +125,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // 1. Memory Format for source and destination tensors is contiguous.
   // 2. Device for both the source and destination tensor is CPU.
   // 3. dtype conversion between FP32->FP16 and FP16->FP32.
+  // This checks that self.sizes() == src.sizes() because this code path doesn't
+  // support broadcasting. This also guards against out of bounds memory access
+  // when copying, see fbgemm::Float16ToFloat_ref.
+  // https://github.com/pytorch/pytorch/issues/88543
   #ifdef USE_FBGEMM
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
          (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
         ((self.is_contiguous() && src.is_contiguous()) ||
-         (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+         (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
+        (self.sizes() == src.sizes())) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
@@ -277,23 +283,9 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
   // (1) It isn't exposed to the frontend (no python bindings)
   // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
-  // Note: This implementation doesn't currently preserve the strides of `self`.
-  // That might be fine for functorch (which already doesn't preserve strides in vmap),
-  // but it's worth looking into whether or not this implementation will be problematic for LazyTensor/XLA.
-  auto intermediate = src.to(self, non_blocking);
-  // We can't use expand() here. Why?
-  // The contract for copy_() is that the output tensor has the same amount of storage as the original tensor.
-  // e.g. This should work:
-  //   a = torch.ones(4, 4)
-  //   b = torch.ones(1, 4)
-  //   c = torch.ones(4, 4)
-  //   torch.ops.aten.copy(a, b).add_(c)
-  // We don't want to emit an extra copy every time though, so we only do it if the shapes are different.
-  if (self.sym_sizes() != intermediate.sym_sizes()) {
-    return at::expand_copy_symint(intermediate, self.sym_sizes());
-  } else {
-    return intermediate;
-  }
+  auto r = clone_preserve_strides(self);
+  r.copy_(src, non_blocking);
+  return r;
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {

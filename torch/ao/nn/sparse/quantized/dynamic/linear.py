@@ -5,7 +5,7 @@ import torch.nn.intrinsic as nni
 
 from torch.ao.nn.sparse.quantized import linear
 from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
-from torch.ao.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from torch.ao.nn.quantized.modules.utils import _quantize_weight, _hide_packed_params_repr
 
 __all__ = ['Linear']
 
@@ -47,7 +47,7 @@ class Linear(torch.nn.Module):
         )
 
     def __repr__(self):
-        return hide_packed_params_repr(self, linear.LinearPackedParams)
+        return _hide_packed_params_repr(self, linear.LinearPackedParams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.ops.sparse.qlinear_dynamic(x, self._packed_params._packed_params)

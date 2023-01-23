@@ -757,7 +757,7 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
 
   TORCH_CHECK(
       !definition()->isA<GroupedReductionOp>(),
-      "For GroupedReducitonOp, use TensorView::rFactor(const std::vector<int>& axes, const std::vector<TensorView*>& tvs)");
+      "For GroupedReductionOp, use TensorView::rFactor(const std::vector<int>& axes, const std::vector<TensorView*>& tvs)");
 
   // Split tensor view into 2 parts
   auto domain_pair = domain()->rFactor(axes);

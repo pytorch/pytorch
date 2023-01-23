@@ -2366,7 +2366,7 @@ std::unordered_map<int, int> domainReorderAsRfactorMap(TensorView* tv) {
       // Should be impossible.
       TORCH_INTERNAL_ASSERT(
           pos0 != pos1,
-          "Didn't expect merge inputs to be the same iteratrion domain:\n",
+          "Didn't expect merge inputs to be the same iteration domain:\n",
           merge->toString());
 
       reordered_ids.erase(reordered_ids.begin() + pos0);

@@ -88,12 +88,12 @@ public:
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
+  ListElementReference(const ListElementReference&) = delete;
+  ListElementReference& operator=(const ListElementReference&) = delete;
+
 private:
   ListElementReference(Iterator iter)
   : iterator_(iter) {}
-
-  ListElementReference(const ListElementReference&) = delete;
-  ListElementReference& operator=(const ListElementReference&) = delete;
 
   // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
@@ -111,13 +111,15 @@ private:
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
 template <class T, class Iterator>
-class ListIterator final : public std::iterator<
-                               std::random_access_iterator_tag,
-                               T,
-                               std::ptrdiff_t,
-                               T*,
-                               ListElementReference<T, Iterator>> {
+class ListIterator final {
  public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = T;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T*;
+  using reference = ListElementReference<T, Iterator>;
+
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
@@ -166,7 +168,7 @@ class ListIterator final : public std::iterator<
     return ListIterator{iterator_ - offset};
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, T>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 

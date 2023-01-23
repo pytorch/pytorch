@@ -430,6 +430,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     (void)called;
   }
 
+  bool initialized() override {
+    return devs_initialized_flags.size() > 0;
+  }
+
   static inline void assertValidDevice(int device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");

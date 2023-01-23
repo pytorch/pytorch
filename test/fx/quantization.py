@@ -50,10 +50,10 @@ class NoObserver:
     def observe(self, node, env):
         pass
 
-DEFAULT_QUANTIZATION_PATTERNS = {}
+_DEFAULT_QUANTIZATION_PATTERNS = {}
 def register_pattern(pattern):
     def insert(fn):
-        DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
+        _DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
         return fn
     return insert
 
@@ -188,7 +188,7 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
 
 
 class Quantizer:
-    def __init__(self, mod, patterns=DEFAULT_QUANTIZATION_PATTERNS, quant_ctor=DefaultQuant):
+    def __init__(self, mod, patterns=_DEFAULT_QUANTIZATION_PATTERNS, quant_ctor=DefaultQuant):
         self.root = mod
         self.graph = mod.graph
         self.quant_ctor = quant_ctor
