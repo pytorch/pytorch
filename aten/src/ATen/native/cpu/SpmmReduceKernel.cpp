@@ -7,6 +7,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/SpmmReduceKernel.h>
 #include <ATen/native/cpu/ReduceUtils.h>
+#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,26 +23,6 @@ namespace {
 
 template <typename scalar_t, ReductionType reduce>
 struct Reducer {
-  static inline void init(scalar_t* ptr, int64_t size) {
-    using acc_t = vec::vec_scalar_t<scalar_t>;
-    using Vec = vec::Vectorized<acc_t>;
-
-    acc_t val;
-    if (reduce == ReductionType::MAX) {
-      val = std::numeric_limits<acc_t>::lowest();
-    } else if (reduce == ReductionType::MIN) {
-      val = std::numeric_limits<acc_t>::max();
-    } else {
-      return;
-    }
-
-    vec::map<scalar_t>(
-        [val](Vec x) { return Vec(val); },
-        ptr,
-        ptr,
-        size);
-  }
-
   static inline void update(scalar_t& out, const scalar_t data) {
     if (reduce == ReductionType::SUM || reduce == ReductionType::MEAN) {
       out += data;
@@ -68,9 +49,9 @@ struct Reducer {
 template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_kernel_impl(
     const Tensor& out,
-    const Tensor& crow_indices_,
-    const Tensor& col_indices_,
-    const Tensor& values_,
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
+    const Tensor& values,
     const Tensor& other_) {
 
   int64_t nnz = other_.numel();
@@ -78,50 +59,19 @@ void spmm_reduce_kernel_impl(
     return;
   }
 
-  auto crow_indices = crow_indices_.contiguous();
-  auto col_indices = col_indices_.contiguous();
-  auto values = values_.contiguous();
   auto other = other_.contiguous();
 
   scalar_t* out_data = out.data_ptr<scalar_t>();
-  index_t* csr_data = crow_indices.data_ptr<index_t>();
-  index_t* col_data = col_indices.data_ptr<index_t>();
-  scalar_t* val_data = values.data_ptr<scalar_t>();
+  auto csr_data = crow_indices.accessor<index_t, 1>();
+  auto col_data = col_indices.accessor<index_t, 1>();
+  auto val_data = values.accessor<scalar_t, 1>();
   scalar_t* other_data = other.data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
   int64_t K = other.size(-1);
 
-  // directly parallel on `M` may lead to load imbalance,
-  // statically determine thread partition here to average payload
-  // for each thread.
-  int num_threads = at::get_num_threads();
-  std::vector<int64_t> thread_splits(num_threads + 1, M);
-
-  int64_t thread_averge_payload = std::max((int64_t)1, divup(nnz, num_threads));
-
-  thread_splits[0] = 0;
-  int64_t sum = 0;
-  int64_t t = 1;
-  for (const auto m : c10::irange(M)) {
-    int64_t row_start = csr_data[m];
-    int64_t row_end = csr_data[m + 1];
-    sum += row_end - row_start;
-    if (sum > t * thread_averge_payload) {
-      thread_splits[t] = m;
-      t++;
-    }
-  }
-  // need to restore the last index,
-  // due to rounding error when calculating `thread_averge_payload`.
-  thread_splits[num_threads] = M;
-
   using Vec = vec::Vectorized<scalar_t>;
-  at::parallel_for(0, num_threads, 1, [&](int64_t cbegin, int64_t cend) {
-    int tid = at::get_thread_num();
-    int64_t begin = thread_splits[tid];
-    int64_t end = thread_splits[tid + 1];
-
+  utils::parallel_sparse_csr(csr_data, M, nnz, [&](int64_t begin, int64_t end) {
     int64_t row_start, row_end, c;
     for (const auto m : c10::irange(begin, end)) {
       row_start = csr_data[m];
@@ -133,10 +83,10 @@ void spmm_reduce_kernel_impl(
       constexpr int64_t kVLEN = kVecSize * 4;
       constexpr int64_t CHUNK_SIZE = 16;
 
-      // reinit the output row for reduce type 'max' and 'min'
+      // reinit the output row for reduce type 'amax' and 'amin'
       int64_t count = row_end - row_start;
       if (count != 0) {
-        Reducer<scalar_t, reduce>::init(out_ptr, K);
+        init<scalar_t, reduce>(out_ptr, K, /*include_self*/false);
       }
 
       // blocking on rowwise to reduce write memory bandwidth
@@ -251,7 +201,7 @@ void spmm_reduce_arg_kernel_impl(
 
       int64_t count = row_end - row_start;
       if (count != 0) {
-        Reducer<scalar_t, reduce>::init(out_ptr, K);
+        init<scalar_t, reduce>(out_ptr, K, /*include_self*/false);
         for (const auto e : c10::irange(row_start, row_end)) {
           c = col_data[e];
           scalar_t val = val_data[e];

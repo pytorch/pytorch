@@ -986,7 +986,7 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
 def sample_inputs_sparse_spmm_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    reductions = ["sum", "mean", "max", "min"]
+    reductions = ["sum", "mean", "amax", "amin"]
     for m, k, reduce in product([5, 7], [3, 11], reductions):
         yield SampleInput(
             torch.eye(m, m)
