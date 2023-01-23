@@ -1181,7 +1181,6 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
         xfail('linalg.vecdot', ''),
-        xfail('masked.cumprod', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
