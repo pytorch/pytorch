@@ -62,9 +62,26 @@ output_filename = None
 
 CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
+    "DALLE2_pytorch",  # AttributeError: text_encodings
     "demucs",  # OOM
+    # all dynamic shapes errors for detectron variants
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "moco",  # Please convert all Tensors to FakeTensors first
+    "hf_BigBird",  # OOM
+    "tacotron2",  # AssertionError: Deduped args out of bounds
     # Huggingface
     "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -76,21 +93,15 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
-    "tacotron2",  # AssertionError: Deduped args out of bounds
     "vision_maskrcnn",
     # Huggingface
-    "AlbertForMaskedLM",  # OOM
-    "AlbertForQuestionAnswering",  # OOM
-    "BigBird",
-    "DebertaV2ForQuestionAnswering",  # OOM
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
-    "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
-    "XLNetLMHeadModel",  # OOM
-    "YituTechConvBert",
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
+    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
@@ -105,7 +116,6 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
 CI_SKIP_INDUCTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
-    "DALLE2_pytorch",
     "detectron2",
     "hf_T5",  # accuracy
     "hf_BigBird",  # accuracy
@@ -131,11 +141,13 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
+    "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
     "GoogleFnet",  # Eager model failed to run
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
@@ -1427,6 +1439,7 @@ class BenchmarkRunner:
             print(status)
         if self.args.timing:
             from torch._dynamo.utils import print_time_report
+
             print_time_report()
 
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
@@ -1449,6 +1462,9 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
+    )
+    parser.add_argument(
+        "--exclude-exact", action="append", help="filter benchmarks with exact match"
     )
     parser.add_argument(
         "--total-partitions",
@@ -1687,9 +1703,7 @@ def parse_args(args=None):
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
     )
-    parser.add_argument(
-        "--timing", action="store_true", help="Emits phase timing"
-    )
+    parser.add_argument("--timing", action="store_true", help="Emits phase timing")
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1810,6 +1824,7 @@ def run(runner, args, original_dir=None):
 
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+    args.exclude_exact = args.exclude_exact or []
 
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
@@ -1834,7 +1849,7 @@ def run(runner, args, original_dir=None):
                     - set(CI_SKIP_AOT_EAGER_TRAINING)
                 )
             else:
-                args.exclude = (
+                args.exclude_exact = (
                     CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
                     if args.training and args.dynamic_shapes
                     else CI_SKIP_AOT_EAGER_TRAINING
@@ -1842,7 +1857,7 @@ def run(runner, args, original_dir=None):
                     else CI_SKIP_AOT_EAGER_INFERENCE
                 )
         elif args.inductor:
-            args.exclude = (
+            args.exclude_exact = (
                 CI_SKIP_INDUCTOR_TRAINING
                 if args.training
                 else CI_SKIP_INDUCTOR_INFERENCE
