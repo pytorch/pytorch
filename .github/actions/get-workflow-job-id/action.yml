@@ -17,7 +17,7 @@ runs:
   steps:
     - name: Get jobid or fail
       shell: bash
-      timeout_minutes: 10
+      timeout-minutes: 10
       run: |
         set -eux
         GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
