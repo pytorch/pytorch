@@ -163,6 +163,29 @@ class Transformer(Module):
             mask = torch.isinf(mask)
         return mask
 
+    @staticmethod
+    def generate_padding_mask(unpadded_lengths: List, max_len: int, use_bool_type: bool = True):
+        r"""Generate a padding mask for the batch. The masked positions are filled with True, and
+        unmasked positions with False.
+            With use_bool_type = False, reverts to deprecated float usage: masked positions are filled
+        with float('-inf'), and unmasked positions with float(0.0).
+
+        Args:
+            unpadded_lengths: List of each sequence's length in the batch.
+            max_len: The length of sequences after padding.
+
+        """
+        batch_size = len(unpadded_lengths)
+        fill_value = float(-inf)
+
+        mask = torch.zeros(batch_size, max_len)
+        for i in range(batch_size):
+            mask[i, unpadded_lengths[i]:] = fill_value
+
+        if use_bool_type:
+            mask = torch.isinf(mask)
+        return mask
+
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
 
