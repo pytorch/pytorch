@@ -1354,18 +1354,32 @@ Tensor sparse_sparse_matmul_backward(
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
+  const auto mask_ones_like = [](const Tensor& t) -> Tensor {
+    return at::sparse_coo_tensor(
+        t._indices(),
+        at::ones({1}, t._values().options()).expand_as(t._values()),
+        t.sizes()
+    );
+  };
+
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return a_grad.mul(at::ones_like(a.coalesce()));
+    return a_grad.mul(mask_ones_like(a.coalesce()));
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return b_grad.mul(at::ones_like(b.coalesce()));
+  return b_grad.mul(mask_ones_like(b.coalesce()));
 }
 
 Tensor sparse_coo_constructor_backward(
     const Tensor& grad,
     const Tensor& result) {
-  const auto nonzero_values_grad = grad.mul(at::ones_like(result.coalesce())).coalesce();
+  const auto result_coalesced = result.coalesce();
+  const auto ones_like_result = at::sparse_coo_tensor(
+      result_coalesced.indices(),
+      at::ones({1}, result_coalesced.values().options()).expand_as(result_coalesced.values()),
+      result.sizes()
+  );
+  const auto nonzero_values_grad = grad.mul(ones_like_result).coalesce();
 
   // Short circuit on empty intersection
   if (nonzero_values_grad._nnz() == 0) {
