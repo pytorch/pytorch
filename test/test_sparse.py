@@ -1881,6 +1881,7 @@ class TestSparse(TestSparseBase):
         test_shape([3, 4], [1, 4], [4, 4, 4], [3, 4, 4])
         test_shape([3, 4, 0], [1, 4], [4, 4, 4, 0], [3, 4, 4, 0])
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @dtypes(torch.double, torch.cdouble)
     def test_add_noncontiguous(self, device, dtype):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
@@ -3457,8 +3458,11 @@ class TestSparse(TestSparseBase):
             c.backward(g)
 
             a_grad, b_grad = test_grad_dense(a, b, g)
-            self.assertEqual(a.grad, a_grad)
-            self.assertEqual(b.grad, b_grad)
+
+            # We convert grad to dense since dense and sparse mm
+            # implementations handle materialized zeroes differently.
+            self.assertEqual(a.grad.to_dense(), a_grad.to_dense())
+            self.assertEqual(b.grad.to_dense(), b_grad.to_dense())
 
         def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a, dtype, device, coalesced)
