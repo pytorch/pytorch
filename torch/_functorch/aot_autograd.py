@@ -522,6 +522,18 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         aliased_out.requires_grad_(True)
     return aliased_out
 
+def to_fun(t):
+    if isinstance(t, Tensor):
+        return torch._to_functional_tensor(t, mirror_autograd_meta=True)
+    else:
+        return t
+
+def from_fun(t):
+    if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t)
+
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -728,6 +740,24 @@ def run_functionalized_fw_and_collect_metadata(
     return inner
 
 
+def unpack_synthetic_bases(primals: List[Any], synthetic_base_info) -> List[Any]:
+    # This is only not None if our graph mutates a graph input that aliases another graph input.
+    if synthetic_base_info is None:
+        return primals
+
+    f_args_inner = []
+    for outer_idx_or_tuple in synthetic_base_info:
+        if isinstance(outer_idx_or_tuple, int):
+            f_args_inner.append(primals[outer_idx_or_tuple])
+        else:
+            outer_base_idx, view_tensor = outer_idx_or_tuple
+            outer_base = primals[outer_base_idx]
+            view_arg = gen_alias_from_base(
+                outer_base, view_tensor, view_tensor.requires_grad
+            )
+            f_args_inner.append(view_arg)
+    return f_args_inner
+
 # This creates a functionalized joint forwards-backwards function given both
 # the primals (to run forwards) and tangents (to run backwards).
 #
@@ -788,24 +818,6 @@ def create_joint_forward_backward_functionalized(
             return t.view(t.shape)
         return t
 
-    def unpack_synthetic_bases(primals: List[Any]) -> List[Any]:
-        # This is only not None if our graph mutates a graph input that aliases another graph input.
-        if synthetic_base_info is None:
-            return primals
-
-        f_args_inner = []
-        for outer_idx_or_tuple in synthetic_base_info:
-            if isinstance(outer_idx_or_tuple, int):
-                f_args_inner.append(primals[outer_idx_or_tuple])
-            else:
-                outer_base_idx, view_tensor = outer_idx_or_tuple
-                outer_base = primals[outer_base_idx]
-                view_arg = gen_alias_from_base(
-                    outer_base, view_tensor, view_tensor.requires_grad
-                )
-                f_args_inner.append(view_arg)
-        return f_args_inner
-
     def joint_forward_backward(
         primals: List[Any], tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
@@ -818,7 +830,7 @@ def create_joint_forward_backward_functionalized(
         # This is also where we handle the calling convention around synthetic bases.
         # We need to make sure that we convert any synthetic base arguments into views
         # *after* we do the cloning above, to preserve the view relationship.
-        primals_ = unpack_synthetic_bases(primals_no_input_mutations)
+        primals_ = unpack_synthetic_bases(primals_no_input_mutations, synthetic_base_info)
         assert len(meta.input_info) == len(primals_)
         outs = fn(*primals_)
 
@@ -910,18 +922,6 @@ def create_joint_forward_backward_functionalized(
         return fw_outs_to_return, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
         ]
-
-    def to_fun(t):
-        if isinstance(t, Tensor):
-            return torch._to_functional_tensor(t, mirror_autograd_meta=True)
-        else:
-            return t
-
-    def from_fun(t):
-        if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
-            return t
-        torch._sync(t)
-        return torch._from_functional_tensor(t)
 
     def functionalized_joint(
         primals: List[Any], tangents: List[Any]
@@ -1050,9 +1050,60 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
 
+def aot_dispatch_base_traced_fn(flat_fn, meta, synthetic_base_info, *flat_args_with_views_handled):
+    f_flat_args_with_views_handled = pytree.tree_map(to_fun, flat_args_with_views_handled)
+    torch._enable_functionalization(reapply_views=True)
+    try:
+        f_flat_args = unpack_synthetic_bases(f_flat_args_with_views_handled, synthetic_base_info)
+        f_outs = flat_fn(*f_flat_args)
+    finally:
+        torch._disable_functionalization()
+
+    mutated_inputs_to_return = [
+        x
+        for (i, x) in enumerate(f_flat_args)
+        if meta.input_info[i].mutates_data or meta.input_info[i].mutates_metadata
+    ]
+    all_outs = *mutated_inputs_to_return, *f_outs
+
+    return pytree.tree_map(from_fun, all_outs)
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    meta, _out = run_functionalized_fw_and_collect_metadata(flat_fn)(
+        *flat_args
+    )
+
+    _num_outputs = len(meta.output_info)
+    _num_mutated_data_inputs = len(
+        [x for x in meta.input_info if x.mutates_data]
+    )
+    _num_mutated_metadata_only_inputs = len(
+        [
+            x
+            for x in meta.input_info
+            if not x.mutates_data and x.mutates_metadata
+        ]
+    )
+    _num_mutated_inputs = _num_mutated_data_inputs + _num_mutated_metadata_only_inputs
+    _input_info = meta.input_info
+
+    flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
+        flat_args, _input_info
+    )
+    # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
+    # The cases that aot_dispatch_base doesn't need to handle include:
+    # - outputs that are aliases of graph intermediates
+    # - outputs that are aliases of graph inputs
+    # While cases that it does need to handle include:
+    # - input mutations (including when inputs are aliases of each other)
+    # - input metadata mutations
+    trace_fn = partial(aot_dispatch_base_traced_fn, flat_fn, meta, _synthetic_base_info)
+    with enable_python_dispatcher():
+        fw_module = make_fx(trace_fn, aot_config.decompositions)(*flat_args_with_views_handled)
+
+    fw_module.graph.eliminate_dead_code()
+    fw_module.recompile()
+
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
@@ -1065,7 +1116,41 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
     @wraps(compiled_fw)
     def new_fn(args):
-        fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
+        if _synthetic_base_info is not None:
+            new_inputs, metadata = merge_view_inputs(args, _input_info)
+            args_with_synthetic_bases = new_inputs
+        else:
+            args_with_synthetic_bases = args
+        all_outs = call_func_with_args(compiled_fw, args_with_synthetic_bases, disable_amp=disable_amp)
+
+        assert len(all_outs) == _num_mutated_inputs + _num_outputs
+
+        if _num_mutated_inputs > 0:
+            nonlocal meta
+            assert len(meta.mutated_inp_indices) == _num_mutated_inputs
+            updated_inputs = all_outs[: _num_mutated_inputs]
+            fw_outs = all_outs[_num_mutated_inputs :]
+            for i, inpt_idx in enumerate(meta.mutated_inp_indices):
+                meta = _input_info[inpt_idx]
+                original_inpt = args[inpt_idx]
+                updated_inpt = updated_inputs[i]
+                if meta.mutates_metadata:
+                    # Check for the case when an input has been resized.
+                    # Note: One important thing to check for is user code that calls inpt.storage().resize_().
+                    # We can't trace operations on storage into the graph, so we should get dynamo to graph break.
+                    if original_inpt._typed_storage().size() != updated_inpt._typed_storage().size():
+                        original_inpt.resize_(updated_inpt.size())
+                    # We need to grab the size/stride/storage_offset from the compiled forward,
+                    # and use that to mutate the metadata of the input
+                    original_inpt.as_strided_(
+                        updated_inpt.size(),
+                        updated_inpt.stride(),
+                        updated_inpt.storage_offset(),
+                    )
+                if meta.mutates_data:
+                    original_inpt.copy_(updated_inpt)
+        else:
+            fw_outs = all_outs
         return fw_outs
 
     new_fn._boxed_call = True
