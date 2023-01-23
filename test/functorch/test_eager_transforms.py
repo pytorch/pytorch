@@ -32,14 +32,20 @@ from functorch import (
     jvp, make_functional, make_functional_with_buffers,
     combine_state_for_ensemble, make_fx
 )
-from functorch._src.make_functional import (
+from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
+from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
+from torch._ops import PyOperator
+from torch._functorch.utils import enable_single_level_autograd_function
+import torch.autograd.forward_ad as fwAD
+from torch.func import functional_call, stack_module_state
 
 # NB: numpy is a testing dependency!
 import numpy as np
+
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 
 USE_TORCHVISION = False
 try:
@@ -141,6 +147,30 @@ class TestSliceArgnums(TestCase):
 
         res = _slice_argnums(args, (1, 0))
         self.assertEqual(res, (args[1], args[0]))
+
+def _get_weights_and_functional_call(net, mechanism):
+    if mechanism == "make_functional":
+        return make_functional(net)
+    else:
+        assert mechanism == "functional_call"
+        # this makes it so the function from make_functional and this call have the same signature
+
+        def net_func(weights, data):
+            return functional_call(net, weights, (data,))
+
+        return net_func, dict(net.named_parameters())
+
+def _get_weights_and_functional_call_with_buffers(net, mechanism):
+    if mechanism == "make_functional":
+        return make_functional_with_buffers(net)
+    else:
+        assert mechanism == "functional_call"
+
+        # this makes it so the function from make_functional and this call have the same signature
+        def net_func(weights, buffers, data):
+            return functional_call(net, (weights, buffers), (data,))
+
+        return net_func, dict(net.named_parameters()), dict(net.named_buffers())
 
 
 class TestGradTransform(TestCase):
@@ -976,6 +1006,411 @@ class TestGradTransform(TestCase):
         self.assertEqual(z, 2)
 
 
+class TestAutogradFunction(TestCase):
+    def test_set_materialize_grads(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x, y
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.set_materialize_grads(False)
+
+            @staticmethod
+            def backward(ctx, gx, gy):
+                self.assertIsNotNone(gx)
+                self.assertIsNone(gy)
+                return gx, gy
+
+        def f(y, x):
+            x, y = A.apply(x, y)
+            return x ** 2
+
+        x = torch.tensor(2., device=device)
+        y = torch.tensor(3., device=device)
+        # grad differentiates w.r.t. arg 0 by default
+        grad(f)(y, x)
+        grad(grad(f))(y, x)
+
+    def test_needs_input_grads(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x * y
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                return
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                self.assertTrue(ctx.needs_input_grad[0])
+                self.assertFalse(ctx.needs_input_grad[1])
+                return None, None
+
+        x = torch.tensor(2., device=device)
+        y = torch.tensor(3., device=device)
+        # grad differentiates w.r.t. arg 0 by default
+        grad(A.apply)(x, y)
+        grad(grad(A.apply))(x, y)
+
+    def _get_NumpyCubeNotComposable(self):
+        class NumpyCubeNotComposable(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                input_np = input.cpu().numpy()
+                return torch.tensor(input_np ** 3, device=input.device), input_np
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.input_np = output[1]
+                ctx.device = inputs[0].device
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad_output, grad_saved):
+                result_np = 3 * (ctx.input_np ** 2)
+                return torch.tensor(result_np, device=ctx.device)
+
+        return NumpyCubeNotComposable
+
+    def test_once_differentiable_autograd_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
+        def f(x):
+            y, _ = NumpyCubeNotComposable.apply(x)
+            return y
+
+        # regular autograd x vjp
+        x = torch.randn([], requires_grad=True, device=device)
+        grad_y = torch.randn_like(x, requires_grad=True)
+        _, vjp_fn = vjp(f, x)
+        gx, = vjp_fn(grad_y)
+
+        with self.assertRaisesRegex(RuntimeError, "marked with @once_differentiable"):
+            gx.backward()
+
+    # TODO: support torch.autograd.function.once_differentiable
+    # (or, if impossible, figure out how to raise a nice error)
+    # https://github.com/pytorch/pytorch/issues/90224
+    @unittest.expectedFailure
+    def test_once_differentiable_grad_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
+        # grad x vjp
+        x = torch.randn([], device=device)
+        grad_y = torch.randn_like(x)
+
+        def h(x, grad_y):
+            _, vjp_fn = vjp(f, x)
+            gx, = vjp_fn(grad_y)
+            return gx
+
+        grad(h, argnums=(0, 1))(x, grad_y)
+
+    def test_grad_fn_name(self, device):
+        names = []
+
+        class FooBar(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                return
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def f(x):
+            y = FooBar.apply(x)
+            names.append(type(y.grad_fn).__name__)
+            return y
+
+        x = torch.tensor(1.)
+        grad(f)(x)
+        self.assertEqual(names, ['FooBarGeneratedBackward'])
+
+
+class TestAutogradFunctionVmapAPI(TestCase):
+    def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
+        class NumpyCube(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(inputs, output[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'does not have vmap support'):
+            vmap(NumpyCube.apply)(x)
+
+    def test_has_vmap_staticmethod_and_has_generate_vmap_rule(self, device):
+        class NumpyCube(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                ctx.save_for_backward(input, outputs[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+            @staticmethod
+            def vmap(infos, in_dims, x):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and'):
+            vmap(NumpyCube.apply)(x)
+
+    def test_info_object(self, device):
+        batch_size = 10
+
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                self.assertEqual(info.batch_size, batch_size)
+                self.assertEqual(info.randomness, randomness)
+                return input, in_dims[0]
+
+        x = torch.randn(batch_size, 3, device=device)
+
+        for randomness in ('error', 'different', 'same'):
+            vmap(Id.apply, randomness=randomness)(x)
+
+    def test_in_dims_single_input(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                self.assertEqual(in_dims, (1,))
+                return input, in_dims[0]
+
+        B = 10
+        x = torch.randn(3, B, device=device)
+        vmap(Id.apply, in_dims=1)(x)
+        vmap(Id.apply, in_dims=(1,))(x)
+
+    def test_in_dims_multiple_inputs(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, x, y):
+                self.assertEqual(in_dims, (0, [0, 0]))
+                self.assertTrue(isinstance(in_dims, tuple))
+                self.assertTrue(isinstance(in_dims[1], list))
+                return (x, y), in_dims
+
+        x = torch.randn(2, device=device)
+        vmap(Id.apply)(x, [x, x])
+
+    def test_skips_empty_layer(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                raise RuntimeError("expected to not be called")
+
+        def f(x):
+            y = torch.tensor(1.)
+            y = Id.apply(y)
+            return x * 1
+
+        x = torch.randn(2, 3)
+        vmap(f)(x)
+
+    def test_none_returns(self, device):
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return torch.zeros(input.shape, device=input.device)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                assert in_dims == (0,)
+                return torch.zeros(input.shape[1:], device=input.device), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = vmap(Zeros.apply)(x)
+        self.assertEqual(y, torch.zeros_like(x))
+
+        class TwoZeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r, r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                assert in_dims == (0,)
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return (r, r), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        result = vmap(TwoZeros.apply)(x)
+
+        self.assertTrue(isinstance(result, tuple))
+        y, z = result
+        self.assertEqual(y, torch.zeros_like(x))
+        self.assertEqual(z, torch.zeros_like(x))
+
+    def test_should_have_two_returns(self, device):
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return r
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "to have two returns"):
+            result = vmap(Zeros.apply)(x)
+
+        class TwoZeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r, r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return r, r, 0, 0
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "to have two returns"):
+            result = vmap(Zeros.apply)(x)
+
+    def test_incompatible_out_dims_error_msg(self, device):
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return r
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return r, (None,)
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
+            result = vmap(Zeros.apply)(x)
+
+        class Zeros(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                r = torch.zeros(input.shape, device=input.device)
+                return [r]
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                r = torch.zeros(input.shape[1:], device=input.device)
+                return [r], (None,)
+
+        B = 2
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
+            result = vmap(Zeros.apply)(x)
+
+
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
@@ -1034,7 +1469,23 @@ class TestVmapOfGrad(TestCase):
         # TODO: Check if the rtol is a problem
         self.assertEqual(result, expected, atol=0, rtol=5e-4)
 
-    def test_per_sample_grads_embeddingnet(self, device):
+    def _compare_expected_and_result(self, expected, result, mechanism):
+        if mechanism == "make_functional":
+            expected = zip(*expected)
+            expected = tuple(torch.stack(shards) for shards in expected)
+            for r, e in zip(result, expected):
+                # TODO: Check if the rtol is a problem
+                self.assertEqual(r, e, atol=0, rtol=1e-3)
+        else:
+            assert mechanism == "functional_call"
+            expected = {k: tuple(d[k] for d in expected) for k, v in expected[0].items()}
+            expected = {k: torch.stack(shards) for k, shards in expected.items()}
+            for key in result:
+                # TODO: Check if the rtol is a problem
+                self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
+
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_per_sample_grads_embeddingnet(self, device, mechanism):
         class SampleNet(nn.Module):
             def __init__(self, vocab_size: int):
                 super().__init__()
@@ -1065,7 +1516,7 @@ class TestVmapOfGrad(TestCase):
         net = SampleNet(vocab_size).to(device=device)
         criterion = nn.CrossEntropyLoss()
 
-        net_func, weights = make_functional(net)
+        net_func, weights = _get_weights_and_functional_call(net, mechanism)
 
         def compute_loss(weights, data, target):
             output = net_func(weights, data)
@@ -1073,13 +1524,8 @@ class TestVmapOfGrad(TestCase):
             return result
 
         expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
-        expected = zip(*expected)
-        expected = tuple(torch.stack(shards) for shards in expected)
-
         result = vmap(partial(grad(compute_loss), weights))(data, targets)
-        for r, e in zip(result, expected):
-            # TODO: Check if the rtol is a problem
-            self.assertEqual(r, e, atol=0, rtol=1e-3)
+        self._compare_expected_and_result(expected, result, mechanism)
 
     def test_log_softmax(self, device):
         x = torch.randn(3, 5, device=device)
@@ -1606,6 +2052,66 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+
+        def f(x, y):
+            return (x.sin(), x + y), (x + 2, x.sum())
+
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
+            expected = jacrev(f, argnums=(0, 1))(x, y)
+            actual = jacrev(f, argnums=(0, 1),
+                            chunk_size=chunk_size,
+                            _preallocate_and_copy=_preallocate_and_copy)(x, y)
+            self.assertEqual(actual, expected)
+
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        chunk_size = 3
+
+        def f(x):
+            return (x.sin(), x), (x + 2, x.sum())
+
+        expected = vmap(jacrev(jacrev(f)))(x)
+        actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
+                             _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
+        self.assertEqual(actual, expected)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
+        # With chunk_size=1, we shouldn't `vmap` and hence not be limited
+        # by it's constraints.
+
+        x = torch.randn(3, device=device)
+        idx_1 = torch.tensor([0, ], device=device)
+        idx_2 = torch.tensor([0, 1], device=device)
+        chunk_size = 1
+
+        def f(x, idx):
+            # `take` doesn't work with vmap
+            # as it returns an output with dynamic shape.
+            return torch.take(x, idx)
+
+        for fn, idx in ((f, idx_1), (f, idx_2)):
+            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
+            actual = jacfn(x, idx)
+            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
+            self.assertEqual(actual, expected)
+
+            msg = r"vmap: .* is not possible because there exists a Tensor"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -1908,28 +2414,13 @@ class TestJvp(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
                 _ = jvp(lambda x: (x, [x, aux]), (x, ), (t, ), has_aux=True)
 
-    def test_fwd_grad_enabled(self, device):
-        # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = torch._C._functorch.get_fwd_grad_enabled()
-        self.assertTrue(enabled)
-
-        try:
-            torch._C._functorch.set_fwd_grad_enabled(False)
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-        finally:
-            torch._C._functorch.set_fwd_grad_enabled(True)
-
-        enabled = torch._C._functorch.get_fwd_grad_enabled()
-        self.assertTrue(enabled)
-
     def test_autograd_function_disables_fwd_grad(self, device):
         # Sanity check. We don't really assume this anywhere so
         # it's fine if this breaks one day.
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = torch._C._functorch.get_fwd_grad_enabled()
+                enabled = fwAD._is_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -1940,32 +2431,16 @@ class TestJvp(TestCase):
         x = torch.randn(3, requires_grad=True)
         MySquare.apply(x)
 
-    def test_enable_fwd_grad(self, device):
-        # Tests a private helper function
-        try:
-            torch._C._functorch.set_fwd_grad_enabled(False)
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-
-            with enable_fwd_grad():
-                enabled = torch._C._functorch.get_fwd_grad_enabled()
-                self.assertTrue(enabled)
-
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-        finally:
-            torch._C._functorch.set_fwd_grad_enabled(True)
-
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad(False):
+        with fwAD._set_fwd_grad_enabled(False):
             _, y = jvp(torch.sin, (x,), (t,))
         self.assertEqual(y, x.cos())
 
     def test_disable_fwd_grad_inside(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
@@ -1978,13 +2453,13 @@ class TestJvp(TestCase):
 
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             _, y = jvp(f, (x,), (t,))
 
         self.assertEqual(y, 2 * x)
@@ -2181,7 +2656,192 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(tangents[1], yt.movedim(2, 0))
 
 
+# Use for testing miscellaneous helper functions
+class TestHelpers(TestCase):
+    def test_CtxWithSavedTensors_error_if_name_collision(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_inner_ctx = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        class B(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_new_saved_tensors = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        out = A.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+        out = B.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+
+    def test_CtxWithSavedTensors_nesting(self, device):
+        CtxWithSavedTensors = torch._functorch.autograd_function.CtxWithSavedTensors
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+        z = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                ctx_y = CtxWithSavedTensors(ctx, (y,))
+                # Can't use self.assertEqual because that relies on TLS
+                # that is not available in multithread autograd
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
+
+                wrapped = CtxWithSavedTensors(ctx_y, (z,))
+
+                assert len(wrapped.saved_tensors) == 1
+                assert torch.allclose(wrapped.saved_tensors[0], z)
+
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
+
+                return gy * wrapped.saved_tensors[0]
+
+        out = A.apply(x)
+        out.backward()
+        self.assertEqual(x.grad, z)
+
+    def test_CtxWithSavedTensors_overrides_saved_tensors(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+                assert wrapped.saved_tensors == override
+                return gy
+
+        out = A.apply(x)
+        out.backward()
+
+    def test_CtxWithSavedTensors_passthrough(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, gz):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+
+                assert wrapped.needs_input_grad[0] == ctx.needs_input_grad[0]
+                assert wrapped.needs_input_grad[1] == ctx.needs_input_grad[1]
+                wrapped.foo = 'bar'
+                assert wrapped.foo == 'bar'
+                assert ctx.foo == 'bar'
+                return gz, gz
+
+        out = A.apply(x, y)
+        out.backward()
+
+    def test_reductify_leaf(self, device):
+        reductify_leaf = torch._functorch.autograd_function.reductify_leaf
+        B = 2
+
+        # grad_input None case
+        output = reductify_leaf(None, None, 0, B)
+        self.assertIsNone(output)
+        output = reductify_leaf(None, None, None, B)
+        self.assertIsNone(output)
+
+        # grad_input has bdim, input does not have bdim
+        grad_input = torch.randn([B, 3, 4], device=device)
+        output = reductify_leaf(grad_input, 0, None, B)
+        self.assertEqual(output, grad_input.sum(0))
+
+        grad_input = torch.randn([3, B, 4], device=device)
+        output = reductify_leaf(grad_input, 1, None, B, (3,))
+        self.assertEqual(output, grad_input.sum(1))
+
+        # grad_input does not have bdim, input has bdim
+        # This can happen if the user returns a fresh Tensor from the backward pass
+        # that is unrelated to the input
+        grad_input = torch.randn([3, 4], device=device)
+        output = reductify_leaf(grad_input, None, 1, B)
+        self.assertEqual(output, grad_input.view(3, 1, 4).expand(3, B, 4))
+
+        grad_input = torch.randn([3, 4], device=device)
+        output = reductify_leaf(grad_input, None, 1, B, (4,))
+        self.assertEqual(output, grad_input.view(3, 4, 1).expand(3, 4, B).sum(0))
+
+        # grad_input has bdim, input has bdim
+        grad_input = torch.randn([B, 3, 4], device=device)
+        output = reductify_leaf(grad_input, 0, 1, B)
+        self.assertEqual(output, grad_input.movedim(0, 1))
+
+        grad_input = torch.randn([3, 4, 5, B], device=device)
+        output = reductify_leaf(grad_input, 3, 0, B, (5,))
+        self.assertEqual(output, grad_input.movedim(-1, 2).sum(0).sum(0))
+
+
 class TestComposability(TestCase):
+    def test_deprecation_vmap(self, device):
+        x = torch.randn(3, device=device)
+
+        # functorch version of the API is deprecated
+        with self.assertWarnsRegex(UserWarning, "Please use torch.vmap"):
+            vmap(torch.sin)
+
+        # the non-functorch version is not deprecated
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            torch.vmap(torch.sin)
+
+    @parametrize('transform', [
+        'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_deprecation_transforms(self, device, transform):
+        api = getattr(functorch, transform)
+        new_api = getattr(torch.func, transform)
+
+        # functorch version of the API is deprecated
+        with self.assertWarnsRegex(UserWarning, f"Please use torch.func.{transform}"):
+            api(torch.sin)
+
+        # the non-functorch version is not deprecated
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            new_api(torch.sin)
+
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
         y = grad(grad(torch.sin))(x)
@@ -2391,6 +3051,26 @@ class TestComposability(TestCase):
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
+    def test_autograd_function_no_setup_context(self, device, transform):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, gy):
+                x, = ctx.saved_tensors
+                return gy * x.cos()
+
+        x = torch.randn(3, device=device)
+        transform = getattr(functorch, transform)
+        with self.assertRaisesRegex(RuntimeError, 'must override the setup_context'):
+            transform(MySin.apply)(x)
+
+    @parametrize('transform', [
+        'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
     def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
         def f(x):
             return torch.sin(x).sum()
@@ -2545,6 +3225,29 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
+    @parametrize('detach_params', [True, False])
+    def test_using_detach_functional_call(self, detach_params):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.register_buffer('buffer', torch.randn(3))
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + self.buffer
+                return x
+
+        def params_dict(mod):
+            named_params = mod.named_parameters()
+            return {k: v.detach() for k, v in named_params} if detach_params else dict(named_params)
+
+        mod = Foo()
+        x = torch.randn(3, 3)
+        d = (params_dict(mod), dict(mod.named_buffers()))
+        out = functional_call(mod, d, x)
+        self.assertEqual(out.grad_fn is None, detach_params)
+
     def test_parameter_tying_grad(self):
         class Foo(nn.Module):
             def __init__(self):
@@ -2610,7 +3313,8 @@ class TestMakeFunctional(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_correctness_mnist(self):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_correctness_mnist(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
@@ -2631,10 +3335,10 @@ class TestMakeFunctional(TestCase):
 
         x = torch.randn(64, 1, 32, 32)
         torch.manual_seed(301)
-        fnet, _ = make_functional(Net())
+        fnet, _ = _get_weights_and_functional_call(Net(), mechanism)
 
         torch.manual_seed(0)
-        _, params = make_functional(Net())
+        _, params = _get_weights_and_functional_call(Net(), mechanism)
         result = fnet(params, x)
 
         torch.manual_seed(0)
@@ -2669,7 +3373,53 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
-    def test_state_correctly_returned_after_forward(self):
+    def test_stack_module_state_smoke(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        _ = stack_module_state(models)
+
+    def test_stack_module_state_leaf(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        params, buffers = stack_module_state(models)
+        for param in params.values():
+            self.assertTrue(param.requires_grad)
+            self.assertTrue(param.is_leaf)
+
+    def test_stack_module_state_mismatch_error(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[0].weight.requires_grad_(False)
+        with self.assertRaisesRegex(RuntimeError, "same .requires_grad"):
+            params, buffers = stack_module_state(models)
+
+    def test_stack_module_state_error(self):
+        in_features = 2
+        out_features = 2
+
+        models = []
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* Expected at least one model"):
+            _ = stack_module_state(models)
+
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1].eval()
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* same training/eval mode."):
+            _ = stack_module_state(models)
+
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1] = torch.nn.Conv2d(3, 3, (3, 3))
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* models to be of the same class"):
+            _ = stack_module_state(models)
+
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2679,21 +3429,34 @@ class TestMakeFunctional(TestCase):
                 x = self.linear(x)
                 return x
 
+        def get_module_info(mod):
+            if mechanism == "make_functional":
+                return make_functional(mod)
+            else:
+                assert mechanism == "functional_call"
+                return mod, dict(mod.named_parameters())
+
         mod = Net()
-        func, params = make_functional(mod)
+        func_mod, params = get_module_info(mod)
 
         # state in func.names_map
-        old_state_linear_weight = func.stateless_model.linear.weight
-        old_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        old_state_linear_weight = mod.linear.weight
+        old_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(old_state_linear_weight)
         self.assertIsNotNone(old_state_linear_bias)
 
         x = torch.randn(4, 3)
-        func(params, x)
+        if mechanism == "make_functional":
+            func_mod(params, x)
+        else:
+            assert mechanism == "functional_call"
+            functional_call(func_mod, params, x)
 
-        new_state_linear_weight = func.stateless_model.linear.weight
-        new_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        new_state_linear_weight = mod.linear.weight
+        new_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(new_state_linear_weight)
         self.assertIsNotNone(new_state_linear_bias)
@@ -2702,7 +3465,15 @@ class TestMakeFunctional(TestCase):
         self.assertEqual(old_state_linear_bias, new_state_linear_bias)
 
 class TestExamplesCorrectness(TestCase):
-    def test_maml_regression(self, device):
+    def _update_params(self, params, grads, alpha, mechanism):
+        if mechanism == "make_functional":
+            return [(params[i] - alpha * grads[i]) for i in range(len(params))]
+        else:
+            assert mechanism == "functional_call"
+            return {k: params[k] - alpha * grads[k] for k in params}
+
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_maml_regression(self, device, mechanism):
         class ThreeLayerNet(nn.Module):
             def __init__(self):
                 super(ThreeLayerNet, self).__init__()
@@ -2724,7 +3495,7 @@ class TestExamplesCorrectness(TestCase):
         def mse_loss(x, y):
             return torch.mean((x - y) ** 2)
 
-        net, params = make_functional(ThreeLayerNet().to(device))
+        net, params = _get_weights_and_functional_call(ThreeLayerNet().to(device), mechanism)
         K = 20
         num_tasks = 4
         alpha = 0.1
@@ -2760,18 +3531,22 @@ class TestExamplesCorrectness(TestCase):
                 grads = grad(inner_loss)(params, x1, y1)
             else:
                 loss = inner_loss(params, x1, y1)
-                grads = torch.autograd.grad(loss, params, create_graph=True)
-            new_params = [(params[i] - alpha * grads[i]) for i in range(len(params))]
+                grad_params, spec = tree_flatten(params)
+                grads = torch.autograd.grad(loss, grad_params, create_graph=True)
+                grads = tree_unflatten(grads, spec)
+
+            new_params = self._update_params(params, grads, alpha, mechanism)
 
             v_f = net(new_params, x2)
             return mse_loss(v_f, y2)
 
         task = sample_tasks(num_tasks, K)
+        list_params = params if mechanism == "make_functional" else list(params.values())
 
         # Compute with vmap+grad
         inner_losses = vmap(partial(get_loss_for_task, True))(task[0], task[1], task[2], task[3])
         loss2 = sum(inner_losses) / len(inner_losses)
-        result_grads = torch.autograd.grad(loss2, params)
+        result_grads = torch.autograd.grad(loss2, list_params)
 
         # Compute without vmap+grad
         inner_losses = [
@@ -2779,11 +3554,12 @@ class TestExamplesCorrectness(TestCase):
             for i in range(num_tasks)
         ]
         loss2 = sum(inner_losses) / len(inner_losses)
-        expected_grads = torch.autograd.grad(loss2, params)
+        expected_grads = torch.autograd.grad(loss2, list_params)
 
         self.assertEqual(result_grads, expected_grads)
 
-    def test_maml_omniglot(self, device):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_maml_omniglot(self, device, mechanism):
         # TODO: there appears to be precision issues for float32
         dtype = torch.double
 
@@ -2811,7 +3587,7 @@ class TestExamplesCorrectness(TestCase):
             nn.Flatten(),
             nn.Linear(64, n_way)).to(device).to(dtype)
 
-        fnet, params, buffers = make_functional_with_buffers(net)
+        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(net, mechanism)
         net = (params, buffers, fnet)
 
         def loss_for_task(net, n_inner_iter, use_transform, x_spt, y_spt, x_qry, y_qry):
@@ -2829,8 +3605,11 @@ class TestExamplesCorrectness(TestCase):
                     grads = grad(compute_loss)(new_params, buffers, x_spt, y_spt)
                 else:
                     res = compute_loss(new_params, buffers, x_spt, y_spt)
-                    grads = torch.autograd.grad(res, new_params, create_graph=True)
-                new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
+                    grad_params, spec = tree_flatten(new_params)
+                    grads = torch.autograd.grad(res, grad_params, create_graph=True)
+                    grads = tree_unflatten(grads, spec)
+
+                new_params = self._update_params(new_params, grads, 1e-1, mechanism)
 
             qry_logits = fnet(new_params, buffers, x_qry)
             qry_loss = F.cross_entropy(qry_logits, y_qry)
@@ -2848,18 +3627,20 @@ class TestExamplesCorrectness(TestCase):
         # compute with vmap + grad
         compute_loss = partial(loss_for_task, net, n_inner_iter, True)
         qry_losses, _ = vmap(compute_loss)(x_spt, y_spt, x_qry, y_qry)
-        result_grads = torch.autograd.grad(qry_losses.sum(), params)
+        list_params = params if mechanism == "make_functional" else list(params.values())
+        result_grads = torch.autograd.grad(qry_losses.sum(), list_params)
 
         # compute without vmap + grad
         compute_loss = partial(loss_for_task, net, n_inner_iter, False)
         losses = [compute_loss(x_spt[i], y_spt[i], x_qry[i], y_qry[i])[0]
                   for i in range(num_tasks)]
-        expected_grads = torch.autograd.grad(sum(losses), params)
+        expected_grads = torch.autograd.grad(sum(losses), list_params)
 
         self.assertEqual(result_grads, expected_grads)
 
+    @parametrize('mechanism', ["make_functional", "functional_call"])
     @parametrize('originally_track_running_stats', [True, False])
-    def test_update_batch_norm(self, device, originally_track_running_stats):
+    def test_update_batch_norm(self, device, originally_track_running_stats, mechanism):
         dtype = torch.double
         inplace_relu = False
         classes = 5
@@ -2873,8 +3654,7 @@ class TestExamplesCorrectness(TestCase):
 
         replace_all_batch_norm_modules_(net)
         transformed_net = net
-        fnet, params, buffers = make_functional_with_buffers(transformed_net)
-        net = (params, buffers, fnet)
+        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
         criterion = nn.CrossEntropyLoss()
 
         def compute_loss(x, y, params, buffers):
@@ -2888,12 +3668,14 @@ class TestExamplesCorrectness(TestCase):
         result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
 
         # compute some per sample grads without vmap + grad
-        fnet, params, buffers = make_functional_with_buffers(transformed_net)
+        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
+        flat_params, spec = tree_flatten(params)
         expected_grads = [
-            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), params)
+            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), flat_params)
             for i in range(num_batches)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
+        expected_grads = tree_unflatten(expected_grads, spec)
 
         self.assertEqual(result_grads, expected_grads)
 
@@ -2964,7 +3746,8 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_ensemble_regression(self, device):
+    @parametrize('mechanism', ["make_functional", "functional_call"])
+    def test_ensemble_regression(self, device, mechanism):
         def make_spirals(n_samples, noise_std=0., rotations=1.):
             ts = torch.linspace(0, 1, n_samples)
             rs = ts ** 0.5
@@ -2997,7 +3780,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = make_functional(MLPClassifier().to(device))
+        func_model, weights = _get_weights_and_functional_call(MLPClassifier().to(device), mechanism)
 
         def train_step_fn(use_transform, weights, batch, targets, lr=0.2):
             def compute_loss(weights, batch, targets):
@@ -3009,27 +3792,25 @@ class TestExamplesCorrectness(TestCase):
                 grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
             else:
                 loss = compute_loss(weights, batch, targets)
-                grad_weights = torch.autograd.grad(loss, weights)
+                flat_weights, spec = tree_flatten(weights)
+                flat_grad_weights = torch.autograd.grad(loss, flat_weights)
+                grad_weights = tree_unflatten(flat_grad_weights, spec)
 
-            new_weights = []
-            with torch.no_grad():
-                for grad_weight, weight in zip(grad_weights, weights):
-                    new_weights.append(weight - grad_weight * lr)
-            # NB: return looks weird because torch.vmap must return Tensors
-            return (loss, *new_weights)
+            new_weights = self._update_params(weights, grad_weights, lr, mechanism)
+            return (loss, new_weights)
 
         def unpack(train_result):
-            return train_result[0], train_result[1:]
+            return train_result[0], train_result[1]
 
         def init_fn(num_models):
             models = tuple(MLPClassifier().to(device) for _ in range(num_models))
-            weights = tuple(make_functional(model)[1] for model in models)
-            weights = tuple(zip(*weights))
-            weights = tuple(torch.stack(shards).detach() for shards in weights)
-            return weights
+            if mechanism == "make_functional":
+                return combine_state_for_ensemble(models)[1]
+            else:
+                return stack_module_state(models)[0]
 
         def slice_weights(batched_weights, index):
-            return tuple(weight[index].detach().requires_grad_() for weight in batched_weights)
+            return tree_map(lambda weight: weight[index].detach().requires_grad_(), batched_weights)
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(partial(train_step_fn, True), in_dims=(0, None, None))
@@ -3039,7 +3820,12 @@ class TestExamplesCorrectness(TestCase):
         loss0, weights0 = unpack(train_step_fn(False, slice_weights(batched_weights, 0), points, labels))
         loss1, weights1 = unpack(train_step_fn(False, slice_weights(batched_weights, 1), points, labels))
         expected_loss = torch.stack([loss0, loss1])
+
+        weights0, spec0 = tree_flatten(weights0)
+        weights1, spec1 = tree_flatten(weights1)
+        assert spec0 == spec1
         expected_weights = tuple(torch.stack([w0, w1]) for w0, w1 in zip(weights0, weights1))
+        expected_weights = tree_unflatten(expected_weights, spec0)
 
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
@@ -3049,7 +3835,8 @@ class TestExamplesCorrectness(TestCase):
         subtest(nn.AlphaDropout, 'AlphaDropout'),
         subtest(nn.FeatureAlphaDropout, 'FeatureAlphaDropout'),
     ])
-    def test_find_learning_rate_ensembling(self, device, dropout_layer):
+    @parametrize('mechanism', ["make_functional", "functional_call"])
+    def test_find_learning_rate_ensembling(self, device, dropout_layer, mechanism):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
         # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
@@ -3076,7 +3863,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = make_functional(MLPClassifier().to(device))
+        func_model, weights = _get_weights_and_functional_call(MLPClassifier().to(device), mechanism)
 
         def train_step_fn(weights, batch, targets, lr):
             def compute_loss(weights, batch, targets):
@@ -3085,10 +3872,9 @@ class TestExamplesCorrectness(TestCase):
                 return loss
 
             grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
-            new_weights = []
-            with torch.no_grad():
-                for grad_weight, weight in zip(grad_weights, weights):
-                    new_weights.append(weight - grad_weight * lr)
+            new_weights = self._update_params(weights, grad_weights, lr, mechanism)
+            if mechanism != "make_functional":
+                new_weights = list(new_weights.values())
             # NB: return looks weird because torch.vmap must return Tensors
             return (loss, *new_weights)
 
@@ -3098,10 +3884,10 @@ class TestExamplesCorrectness(TestCase):
         def init_fn(num_models):
             og_model = MLPClassifier().to(device)
             models = tuple(copy.deepcopy(og_model) for _ in range(num_models))  # have same initialization
-            weights = tuple(make_functional(model)[1] for model in models)
-            weights = tuple(zip(*weights))
-            weights = tuple(torch.stack(shards).detach() for shards in weights)
-            return weights
+            if mechanism == "make_functional":
+                return combine_state_for_ensemble(models)[1]
+            else:
+                return stack_module_state(models)[0]
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None, 0), randomness="same")
@@ -3114,14 +3900,15 @@ class TestExamplesCorrectness(TestCase):
                             tuple(weight[1] for weight in result_weights))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_per_sample_grads(self, device):
+    @parametrize('mechanism', ["make_functional", "functional_call"])
+    def test_resnet18_per_sample_grads(self, device, mechanism):
         import torchvision.models as models
         model = models.__dict__['resnet18'](
             pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))
         ).to(device)
         criterion = nn.CrossEntropyLoss(reduction='sum')  # avoid cross batch reductions for for loop comparison
 
-        func_model, weights = make_functional(model)
+        func_model, weights = _get_weights_and_functional_call(model, mechanism)
 
         def compute_loss(weights, image, target):
             image = image.unsqueeze(0)
@@ -3136,11 +3923,13 @@ class TestExamplesCorrectness(TestCase):
 
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
+        flat_weights, spec = tree_flatten(weights)
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
+            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), flat_weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
+        expected_grads = tree_unflatten(expected_grads, spec)
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
@@ -3212,7 +4001,7 @@ class TestFunctionalize(TestCase):
             z = y2[0]
             z.add_(tmp)
             return y
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
 
     # See https://github.com/pytorch/functorch/issues/780
     def test_linear(self, device):
@@ -3335,6 +4124,7 @@ def forward(self, x_1) -> torch.Tensor:
     view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
+    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = None
     return view_copy_1
     """)
@@ -3378,6 +4168,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
     add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
     view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4]);  add_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return view_copy_2
     """)
 
@@ -3407,6 +4198,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return (view_copy_2, getitem)
     """)
 
@@ -3429,6 +4221,7 @@ def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
+    view_2 = torch.ops.aten.view.default(view_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = None
     return view_1
     """)
@@ -3514,6 +4307,129 @@ def forward(self, x_1):
     """)
 
 
+def construct_sum_pyop():
+    mysum = PyOperator("mysum")
+
+    @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
+    def mysum_batch_rule(interpreter, x, dim):
+        if not torch._C._functorch.is_batchedtensor(x):
+            with interpreter.lower():
+                x = x.view_as(x)  # unnecessary, just here to test the dispatch
+                return mysum(x, dim)
+
+        bdim = torch._C._functorch.maybe_get_bdim(x)
+        value = torch._C._functorch.get_unwrapped(x)
+
+        with interpreter.lower():
+            value = value.movedim(bdim, 0)
+            result = mysum(value, dim + 1)
+
+        return torch._C._functorch._add_batch_dim(result, 0, interpreter.level())
+
+    @mysum.py_impl(torch._C._functorch.TransformType.Grad)
+    def mysum_grad_rule(interpreter, x, dim):
+        level = interpreter.level()
+
+        class MySum(torch.autograd.function._SingleLevelFunction):
+            @staticmethod
+            def forward(ctx, x, dim):
+                ctx.x_shape = x.shape
+                ctx.dim = dim
+                x = torch._C._functorch._unwrap_for_grad(x, level)
+                with torch.enable_grad(), interpreter.lower():
+                    x = x.view_as(x)  # unnecessary, just here to test the dispatch
+                    y = mysum(x, dim)
+
+                y = torch._C._functorch._wrap_for_grad(y, level)
+                return y
+
+            @staticmethod
+            def backward(ctx, gy):
+                return gy.unsqueeze(ctx.dim).expand(ctx.x_shape), None
+
+        with enable_single_level_autograd_function():
+            return MySum.apply(x, dim)
+
+    @mysum.py_impl(torch._C.DispatchKey.AutogradCPU)
+    def mysum_autograd_cpu(x, dim):
+        return torch.sum(x, dim)
+
+    @mysum.py_impl(torch._C.DispatchKey.AutogradCUDA)
+    def mysum_autograd_cuda(x, dim):
+        return torch.sum(x, dim)
+
+    return mysum
+
+sum_pyop = construct_sum_pyop()
+
+class TestPyOperatorInteraction(TestCase):
+
+    def test_basic_sum(self, device):
+        x = torch.randn(2, 3, 4, device=device)
+        result = sum_pyop(x, 1)
+        self.assertEqual(result, torch.sum(x, 1))
+
+    def test_vmap_sum(self, device):
+        x = torch.randn(2, 3, 4, device=device)
+        result = vmap(sum_pyop, (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 1))
+
+        result = vmap(vmap(sum_pyop, (0, None)), (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 2))
+
+    def test_grad_sum(self, device):
+        x = torch.randn(3, device=device)
+        gx = grad(sum_pyop)(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
+    def test_grad_grad_sum(self, device):
+        x = torch.randn(3, requires_grad=True, device=device)
+
+        def f(x):
+            # higher order grad. Requires a non-linearity
+            return sum_pyop(x.sin(), 0)
+
+        def grad_f_sum(x):
+            return grad(f)(x).sum()
+
+        ggx = grad(grad_f_sum)(x)
+        self.assertEqual(ggx, -x.sin())
+
+    def test_vmap_grad_sum(self, device):
+        x = torch.randn(2, 3, device=device)
+        gx = vmap(grad(sum_pyop), (0, None))(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
+    def test_no_grad_outside_grad(self, device):
+        x = torch.randn(3, device=device, requires_grad=True)
+        with torch.no_grad():
+            y = grad(sum_pyop)(x, 0)
+        self.assertEqual(y, torch.ones_like(x))
+        self.assertFalse(y.requires_grad)
+
+    def test_no_grad_inside_grad(self, device):
+        def f(x):
+            with torch.no_grad():
+                shift = sum_pyop(x ** 2, 0)
+            return sum_pyop(x ** 2, 0) - shift
+
+        x = torch.randn(3, device=device)
+        y = grad(f)(x)
+        self.assertEqual(y, 2 * x)
+        y = grad(lambda x: grad(f)(x).sum())(x)
+        self.assertEqual(y, torch.full_like(x, 2))
+
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = grad(f)(x)
+        z, = torch.autograd.grad(y.sum(), x)
+        self.assertEqual(z, torch.full_like(x, 2))
+
+    def test_functional_call_multiple_dicts(self):
+        mod = nn.Linear(1, 1)
+        x = torch.randn((1, 1))
+        params = ({'weight': torch.zeros(1, 1)}, {'bias': torch.ones(1)})
+        functional_call(mod, params, x)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
@@ -3557,7 +4473,27 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
+    TestPyOperatorInteraction,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
     TestFunctionalize,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestAutogradFunction,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestAutogradFunctionVmapAPI,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestHelpers,
     globals(),
     only_for=only_for,
 )

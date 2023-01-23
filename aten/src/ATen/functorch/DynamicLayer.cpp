@@ -74,15 +74,6 @@ RandomnessType DynamicLayer::randomness() const {
   return VmapInterpreterPtr(&interpreter_).randomness();
 }
 
-// Maps level to life handle, see NOTE: [Life handles and lexically scoped transforms]
-// for details
-using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
-DynmetaData kDynMetaDataSingleton;
-
-static DynmetaData& getGlobalDynmetaData() {
-  return kDynMetaDataSingleton;
-}
-
 // functorch stores some TLS. Inside the TLS is the stack of transforms.
 // Unfortunately, since functorch isn't a part of libtorch, we have
 // a level of indirection. FuncTorchTLSBase is the interface that lives in libtorch,
@@ -92,7 +83,7 @@ static DynmetaData& getGlobalDynmetaData() {
 // this layer of indirection.
 class FuncTorchTLS : public FuncTorchTLSBase {
  public:
-  FuncTorchTLS() {}
+  FuncTorchTLS() = default;
 
   std::unique_ptr<FuncTorchTLSBase> deepcopy() const override {
     auto result = std::make_unique<FuncTorchTLS>();
@@ -100,10 +91,11 @@ class FuncTorchTLS : public FuncTorchTLSBase {
     return result;
   }
 
-  int64_t checkSupportsAutogradFunction() const override {
-    TORCH_CHECK(dynamicLayerStack.size() == 0,
-        "functorch functions (vmap, grad, vjp, etc.) currently do not support the use of autograd.Function. ",
-        "Please rewrite your function to not use autograd.Function while we work on fixing this");
+  int64_t checkSupportsSingleLevelAutogradFunction() const override {
+    TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() == 0 || getSingleLevelAutogradFunctionAllowed(),
+        "functorch functions (vmap, grad, vjp, etc.) incorrectly used with ",
+        "torch.autograd.function._SingleLevelFunction. ",
+        "This is not expected, please file a bug.");
     return 0;
   }
 
@@ -128,6 +120,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
 
   std::vector<DynamicLayer> dynamicLayerStack;
   bool allow_inplace_requires_grad_ = false;
+  bool allow_single_level_autograd_function_ = false;
 };
 
 static FuncTorchTLS* getRawFunctorchTLS() {
@@ -151,14 +144,30 @@ bool getInplaceRequiresGradAllowed() {
   return functorch_tls->allow_inplace_requires_grad_;
 }
 
+void setSingleLevelAutogradFunctionAllowed(bool allowed) {
+  auto* functorch_tls = getRawFunctorchTLS();
+  functorch_tls->allow_single_level_autograd_function_ = allowed;
+}
+
+bool getSingleLevelAutogradFunctionAllowed() {
+  auto* functorch_tls = getRawFunctorchTLS();
+  return functorch_tls->allow_single_level_autograd_function_;
+}
+
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
   return getRawFunctorchTLS()->dynamicLayerStack;
 }
 
-std::shared_ptr<bool> getLifeHandleForLevel(int64_t level) {
-  auto it = getGlobalDynmetaData().find(level);
-  TORCH_INTERNAL_ASSERT(it != kDynMetaDataSingleton.end(), "level should be alive");
-  return it->second;
+const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level) {
+  auto& dynamicLayerStack = dynamicLayerStackAccessor();
+  TORCH_INTERNAL_ASSERT(
+      (int64_t)dynamicLayerStack.size() >= level && level >= 1,
+      "If you're trying to construct a tensor with the current level (",
+      level,
+      ") then the interpreter for that level must be on the DynamicLayerStack ");
+
+  auto& dynamic_layer = dynamicLayerStack[level - 1];
+  return dynamic_layer.interpreter().is_alive_ptr();
 }
 
 optional<DynamicLayer> maybeCurrentDynamicLayer() {
@@ -198,12 +207,7 @@ void setDynamicLayerStack(const std::vector<DynamicLayer>& stack) {
   dynamicLayerStackAccessor() = stack;
 }
 
-bool areTransformsActive() {
-  const auto& data = getGlobalDynmetaData();
-  return !data.empty();
-}
-
-static DynamicLayer popDynamicLayer() {
+DynamicLayer popDynamicLayer() {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
   auto result = dynamicLayerStack.back();
@@ -221,7 +225,7 @@ static DynamicLayer popDynamicLayer() {
   return result;
 }
 
-static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
+int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   int64_t layerId = 1 + dynamicLayerStack.size();
   TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());
@@ -251,33 +255,32 @@ int64_t initAndPushDynamicLayer(
   DynamicLayer new_layer(transform_type, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   pushDynamicLayer(std::move(new_layer));
 
-  auto& data = getGlobalDynmetaData();
+  // NB: this function should be called while holding the GIL to avoid races
+  new_layer.interpreter().set_is_alive(true);
 
-  TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
   if (transform_type == TransformType::Jvp) {
     TORCH_INTERNAL_ASSERT(prev_fwd_grad_mode.has_value());
   }
-  data[layerId] = std::make_shared<bool>(true);
   return layerId;
 }
 
 DynamicLayer popDynamicLayerAndDeleteMetadata() {
   auto result = popDynamicLayer();
-  auto level = result.layerId();
 
-  // TODO: is this lock safe? No one else should be writing to the same bucket
-  auto& data = getGlobalDynmetaData();
-  auto it = data.find(level);
-  if (it == data.end()) {
-    return result;
-  }
-  // invalidate the thing
-  *(it->second) = false;
-  data.erase(level);
+  // NB: this function should be called while holding the GIL to avoid races
+  result.interpreter().set_is_alive(false);
   return result;
+}
+
+bool isDeadTensorWrapper(const Tensor& tensor) {
+  auto* wrapped = maybeGetTensorWrapper(tensor);
+  if (!wrapped) {
+    return false;
+  }
+  return !wrapped->is_alive();
 }
 
 Tensor unwrapIfDead(const Tensor& tensor) {

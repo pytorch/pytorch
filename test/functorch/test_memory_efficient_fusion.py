@@ -6,7 +6,7 @@ import torch.fx as fx
 from functorch import make_fx
 from torch.nn import functional as F
 from functorch.compile import memory_efficient_fusion
-from functorch._src.compile_utils import fx_graph_cse
+from torch._functorch.compile_utils import fx_graph_cse
 from torch.testing._internal.common_utils import TestCase, run_tests
 import inspect
 import random

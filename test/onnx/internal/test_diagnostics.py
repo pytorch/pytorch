@@ -195,9 +195,8 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             diagnostics.context.diagnose(self._sample_rule, sample_level)
 
     def test_diagnostics_records_python_call_stack(self):
-        diagnostic = diagnostics.ExportDiagnostic(
-            self._sample_rule, diagnostics.levels.NOTE
-        )
+        diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
+        # Do not break the above line, otherwise it will not work with Python-3.8+
         stack = diagnostic.python_call_stack
         assert stack is not None  # for mypy
         self.assertGreater(len(stack.frames), 0)
@@ -215,10 +214,11 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         assert stack is not None  # for mypy
         self.assertGreater(len(stack.frames), 0)
         frame_messages = [frame.location.message for frame in stack.frames]
+        # node missing onnx shape inference warning only comes from ToONNX (_jit_pass_onnx)
+        # after node-level shape type inference and processed symbolic_fn output type
         self.assertTrue(
             any(
-                isinstance(message, str)
-                and "torch::jit::ONNXShapeTypeInference" in message
+                isinstance(message, str) and "torch::jit::NodeToONNX" in message
                 for message in frame_messages
             )
         )

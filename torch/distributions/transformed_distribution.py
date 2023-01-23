@@ -57,26 +57,29 @@ class TransformedDistribution(Distribution):
         base_shape = base_distribution.batch_shape + base_distribution.event_shape
         base_event_dim = len(base_distribution.event_shape)
         transform = ComposeTransform(self.transforms)
-        domain_event_dim = transform.domain.event_dim
-        if len(base_shape) < domain_event_dim:
+        if len(base_shape) < transform.domain.event_dim:
             raise ValueError("base_distribution needs to have shape with size at least {}, but got {}."
-                             .format(domain_event_dim, base_shape))
-        shape = transform.forward_shape(base_shape)
-        expanded_base_shape = transform.inverse_shape(shape)
+                             .format(transform.domain.event_dim, base_shape))
+        forward_shape = transform.forward_shape(base_shape)
+        expanded_base_shape = transform.inverse_shape(forward_shape)
         if base_shape != expanded_base_shape:
             base_batch_shape = expanded_base_shape[:len(expanded_base_shape) - base_event_dim]
             base_distribution = base_distribution.expand(base_batch_shape)
-        reinterpreted_batch_ndims = domain_event_dim - base_event_dim
+        reinterpreted_batch_ndims = transform.domain.event_dim - base_event_dim
         if reinterpreted_batch_ndims > 0:
             base_distribution = Independent(base_distribution, reinterpreted_batch_ndims)
         self.base_dist = base_distribution
 
         # Compute shapes.
-        event_dim = transform.codomain.event_dim + max(base_event_dim - domain_event_dim, 0)
-        assert len(shape) >= event_dim
-        cut = len(shape) - event_dim
-        batch_shape = shape[:cut]
-        event_shape = shape[cut:]
+        transform_change_in_event_dim = transform.codomain.event_dim - transform.domain.event_dim
+        event_dim = max(
+            transform.codomain.event_dim,  # the transform is coupled
+            base_event_dim + transform_change_in_event_dim  # the base dist is coupled
+        )
+        assert len(forward_shape) >= event_dim
+        cut = len(forward_shape) - event_dim
+        batch_shape = forward_shape[:cut]
+        event_shape = forward_shape[cut:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

@@ -16,11 +16,23 @@ namespace ops {
 
 namespace packing {
 
-static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
+static api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
   if (v_dst.is_quantized()) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
-        return VK_KERNEL(nchw_to_image_quantized);
+        switch (v_dst.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return VK_KERNEL(nchw_to_image_uint8);
+          case c10::ScalarType::QInt8:
+            return VK_KERNEL(nchw_to_image_int8);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(nchw_to_image_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_dst.dtype());
+        }
       default:
         TORCH_CHECK(false, "No kernel available!");
       case api::StorageType::BUFFER:
@@ -39,11 +51,27 @@ static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
   }
 }
 
-static api::ShaderSource get_image_to_nchw_shader(const vTensor& v_src) {
+static api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
   if (v_src.is_quantized()) {
+    auto plane_size =
+        get_dim<Dim4D::Height>(v_src) * get_dim<Dim4D::Width>(v_src);
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
-        return VK_KERNEL(image_to_nchw_quantized);
+        switch (v_src.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                       : VK_KERNEL(image_to_nchw_quantized);
+          case c10::ScalarType::QInt8:
+            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                       : VK_KERNEL(image_to_nchw_quantized);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(image_to_nchw_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_src.dtype());
+        }
       default:
         TORCH_CHECK(false, "No kernel available!");
       case api::StorageType::BUFFER:
@@ -69,7 +97,7 @@ struct ToFromTextureParams final {
 
 void record_nchw_to_image_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
@@ -112,7 +140,7 @@ void record_nchw_to_image_op(
 
 void record_image_to_nchw_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
@@ -130,6 +158,20 @@ void record_image_to_nchw_op(
       api::utils::make_ivec3(v_src.extents()),
       plane_size,
   };
+
+  if (v_src.dtype() == c10::ScalarType::QUInt8 ||
+      v_src.dtype() == c10::ScalarType::QInt8) {
+    if (plane_size % 4 == 0) {
+      global_size.data[0u] = plane_size / 4;
+      global_size.data[1u] = 1;
+      local_size.data[0u] *= local_size.data[1u];
+      local_size.data[1u] = 1;
+    } else {
+      uint32_t numel = v_src.numel();
+      global_size = {api::utils::div_up(numel, uint32_t(4)), 1u, 1u};
+      local_size = {64u, 1u, 1u};
+    }
+  }
 
   api::UniformParamsBuffer params(context, block);
   context->submit_compute_job(
@@ -408,8 +450,7 @@ void pack_buffer_to_vtensor(
     packing::record_nchw_to_buffer_op(
         context, buffer, v_self, pipeline_barrier, VK_NULL_HANDLE);
   } else {
-    api::ShaderSource compute_shader =
-        packing::get_nchw_to_image_shader(v_self);
+    api::ShaderInfo compute_shader = packing::get_nchw_to_image_shader(v_self);
     packing::record_nchw_to_image_op(
         context,
         compute_shader,
@@ -436,8 +477,7 @@ void pack_vtensor_to_staging(
     packing::record_buffer_to_nchw_op(
         context, v_self, staging, pipeline_barrier, fence_handle);
   } else {
-    api::ShaderSource compute_shader =
-        packing::get_image_to_nchw_shader(v_self);
+    api::ShaderInfo compute_shader = packing::get_image_to_nchw_shader(v_self);
     packing::record_image_to_nchw_op(
         context,
         compute_shader,

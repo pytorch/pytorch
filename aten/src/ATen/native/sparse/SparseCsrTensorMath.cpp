@@ -73,6 +73,7 @@
 #include <ATen/ops/log1p.h>
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
@@ -121,7 +122,8 @@ namespace meta {
 
 TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
-  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
+  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
+              self.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -134,8 +136,10 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
  const bool out_int32,
  const bool transpose) {
   TORCH_CHECK(
-      crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
+    crow_indices.dim() == 1, "crow_indices is supposed to be a vector, but got ",
+    crow_indices.dim(), " dimensional tensor.");
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector, but got ",
+              col_indices.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
   set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
@@ -214,6 +218,92 @@ namespace native {
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
+
+Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
+  // // TODO: Use a specialized CSR kernel for performance if needed
+  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
+    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
+  }
+  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
+    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
+  }
+  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  Tensor t = t_.to_sparse();
+  Tensor src = src_.to_sparse();
+  Tensor tmp_result = t.mul(src);
+  auto r_sparse_csr = tmp_result.to_sparse_csr();
+  r.resize_as_sparse_(r_sparse_csr);
+  r.copy_(r_sparse_csr);
+  return r;
+}
+
+template <typename op_t>
+Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+  // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
+  const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
+  const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
+  Tensor compressed_indices, plain_indices;
+  std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
+  return at::native::_sparse_compressed_tensor_unsafe(
+      compressed_indices.clone(),
+      plain_indices.clone(),
+      result_values,
+      result_sizes,
+      result_values.scalar_type(),
+      sparse.layout(),
+      result_values.device());
+}
+
+template <typename op_t>
+Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+  // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
+  const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
+  if (sparse.sizes() != broadcasted_shape) {
+    TORCH_CHECK(false, op_name, "(): output with shape ", sparse.sizes(), " does not match ",
+        "the broadcast shape ", broadcasted_shape);
+  }
+  auto values = sparse.values();
+  // Safe to use squeeze here, we already know that scalar safely broadcasts.
+  op(values, scalar.squeeze());
+  return sparse;
+}
+
+Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
+  // Check if either of the arguments is a wrapped Scalar
+  if (self.layout() == kStrided && self.dim() == 0) {
+    return intersection_binary_op_with_wrapped_scalar(other, self, [](const Tensor& a, const Tensor& b) -> Tensor {
+        return a.mul(b);
+    });
+  }
+  if (other.layout() == kStrided && other.dim() == 0) {
+    return intersection_binary_op_with_wrapped_scalar(self, other, [](const Tensor& a, const Tensor& b) -> Tensor {
+        return a.mul(b);
+    });
+  }
+
+  if (self.is_sparse_csr() && other.layout() == kStrided) {
+    return mul_sparse_csr(self, other.sparse_mask(self));
+  }
+  if (self.layout() == kStrided && other.is_sparse_csr()) {
+    return mul_sparse_csr(self.sparse_mask(other), other);
+  }
+
+  auto commonDtype = at::result_type(self, other);
+  auto result_options = self.options().dtype(commonDtype);
+  // CSR is 2d!
+  Tensor result = at::empty({0, 0}, result_options);
+  return at::mul_out(result, self, other); // redispatch!
+}
+
+Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
+  if (other.layout() == kStrided && other.dim() == 0) {
+    return intersection_binary_op_with_wrapped_scalar_(self, other, "mul_", [](Tensor& a, const Tensor& b) -> Tensor& {
+        return a.mul_(b);
+    });
+  }
+  return at::mul_out(self, self, other); // redispatch!
+}
+
 
 namespace {
 
@@ -541,6 +631,13 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
   if (result.numel() == 0) {
+    // If result gets resized and is sparse compressed,
+    // it's compressed_indices tensor will contain junk values
+    // so the whole tensor is not a valid compressed tensor.
+    // To combat that, result needs to get zeroed out.
+    if (at::sparse_csr::is_sparse_compressed(result)) {
+      result.zero_();
+    }
     return result;
   }
 
@@ -640,22 +737,15 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  Tensor zero;
-  if (result.is_sparse_csr()) {
-    // TODO: replace with at::zeros when it's implemented for sparse csr
-    zero = at::empty({mat1.size(0), mat2.size(1)}, mat2.options());
-  } else {
-    zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
-  }
+  auto zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
     // Return sparse
-    // TODO: replace with at::zeros when it's implemented for sparse csr
     return at::addmm(
-        at::empty({mat1.size(0), mat2.size(1)}, mat2.options()),
+        at::zeros({mat1.size(0), mat2.size(1)}, mat2.options()),
         mat1,
         mat2,
         0.0,
@@ -774,10 +864,10 @@ void add_out_dense_sparse_csr_cpu(
     return;
   }
 
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
+  auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
+  auto src_crow_indices = src.crow_indices().reshape({-1, src.crow_indices().size(-1)});
+  auto src_col_indices = src.col_indices().reshape({-1, src.col_indices().size(-1)});
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
