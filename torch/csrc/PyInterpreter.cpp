@@ -102,7 +102,7 @@ struct ConcretePyInterpreterVTable final
     CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
-  void reset_backward_hooks(const TensorImpl* self) const override;
+  void reset_backward_hooks(const c10::TensorImpl* self) const override;
 
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
