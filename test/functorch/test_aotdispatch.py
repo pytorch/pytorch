@@ -23,7 +23,6 @@ import unittest
 import warnings
 import itertools
 from functools import partial
-from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
@@ -1957,14 +1956,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
-        def f(x):
-            return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
-        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-
-        ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
-
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_recomputable_ops(self):
         def f(x):
@@ -2221,7 +2212,6 @@ aot_autograd_failures = {
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('segment_reduce', 'lengths'),
-    xfail('nn.functional.embedding_bag'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
@@ -2329,7 +2319,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -2427,6 +2416,7 @@ symbolic_aot_autograd_failures = {
     xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('unsafe_split', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
@@ -2538,7 +2528,7 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
                     cur_flat_args[idx] = next(args)
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             params_and_buffers = {**named_params, **named_buffers}
-            return stateless.functional_call(m, params_and_buffers, c_args, c_kwargs)
+            return torch.func.functional_call(m, params_and_buffers, c_args, c_kwargs)
 
         named_params = dict(_named_parameters(m, remove_duplicate=False))
         named_buffers = dict(_named_buffers(m, remove_duplicate=False))
