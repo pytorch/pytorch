@@ -3016,10 +3016,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_if_cond_user_defined_object(self):
+        # obj.__bool__ is not existed
         class A(object):  # noqa: B903
             def __init__(self, x):
                 self.x = x
 
+        # obj.__bool__ is function
         class B(object):
             def __init__(self, x):
                 self.x = x
@@ -3027,6 +3029,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def __bool__(self):
                 return self.x > 0
 
+        # obj.__bool__ is non-function
         class C(object):
             def __init__(self, x):
                 self.x = x
@@ -3044,18 +3047,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         obj1 = A(0.5)
         obj2 = B(0.5)
         obj3 = B(-0.5)
-        for obj in [obj1, obj2, obj3, obj3, obj2]:
+        obj4 = C(0.5)
+        for obj in [obj1, obj2, obj3, obj4, obj3, obj2]:
             ref = fn(x, obj)
             res = opt_fn(x, obj)
             self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.frame_count, 3)
-
-        # Test if obj.__bool__ is not function
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
-        obj4 = C(0.5)
-        ref = fn(x, obj4)
-        res = opt_fn(x, obj4)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 4)
 
     def test_class_has_instancecheck_method(self):
         class A(object):
