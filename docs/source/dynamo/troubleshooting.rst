@@ -650,7 +650,7 @@ to detect bugs in our codegen or with a backend compiler.
 File an Issue
 ~~~~~~~~~~~~~
 
-If you experience problems with TorchDynamo, `file a github
+If you experience problems with TorchDynamo, `file a GitHub
 issue <https://github.com/pytorch/torchdynamo/issues>`__.
 
 Before filing an issue, read over the `README <../README.md>`__,
