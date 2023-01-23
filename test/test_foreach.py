@@ -222,6 +222,24 @@ class TestForeach(TestCase):
             inplace_ref(copied_inputs),
             self.assertEqual(copied_inputs, inputs)
 
+    def _test_unary(self, device, dtype, opinfo, N, is_fastpath):
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
+        inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
+        # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
+        if opinfo.name == "_foreach_abs" and dtype in complex_types():
+            is_fastpath = False
+        self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
+        self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
+
+        if opinfo.supports_autograd and dtype in floating_types():
+            tensors = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath, same_size=True)
+            tensors = [t.requires_grad_() for t in tensors]
+            ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
+
+            sum(op.func(tensors)).mean().backward()
+            sum([ref.func(t) for t in ref_tensors]).mean().backward()
+            self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
+
     @skipMeta
     @ops(foreach_unary_op_db)
     @parametrize("is_fastpath", (True, False))
