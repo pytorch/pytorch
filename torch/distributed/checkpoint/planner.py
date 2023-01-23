@@ -225,7 +225,7 @@ class SavePlanner(abc.ABC):
         self, write_item: WriteItem
     ) -> Union[torch.Tensor, io.BytesIO]:
         """
-        Lookup the object associated with ``write_item``in `state_dict` and apply any
+        Lookup the object associated with ``write_item`` in ``state_dict`` and apply any
         transformation (such as serialization) prior to the storage layer consuming it.
 
         Called on each rank multiple times, at least once per WriteItem in the final SavePlan.
@@ -237,7 +237,7 @@ class SavePlanner(abc.ABC):
         is called in order to reduce peak memory required by checkpointing.
 
         When returning tensors, they can be on any device or format, they can be views too.
-        It's the storage layer responsiblity to figure out how to save them.
+        It's the storage layer responsibility to figure out how to save them.
         """
         pass
 
