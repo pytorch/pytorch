@@ -1532,6 +1532,34 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         except OSError:
             pass
 
+    def test_init_process_group_for_all_backends(self):
+        for backend in dist.Backend.backend_list:
+            # skip is the backend is not available on the system
+            if backend == dist.Backend.UNDEFINED:
+                continue
+            elif backend == dist.Backend.MPI:
+                if not dist.is_mpi_available():
+                    continue
+            elif backend == dist.Backend.NCCL:
+                if not dist.is_nccl_available():
+                    continue
+            elif backend == dist.Backend.GLOO:
+                if not dist.is_gloo_available():
+                    continue
+            elif backend == dist.Backend.UCC:
+                if not dist.is_ucc_available():
+                    continue
+
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                dist.init_process_group(
+                    backend=backend,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store
+                )
+                dist.destroy_process_group()
+
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
         # correctly dispatched
