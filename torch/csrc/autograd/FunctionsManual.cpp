@@ -2189,7 +2189,7 @@ Tensor binary_cross_entropy_double_backward(
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) /
       (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  if (!areAnyTensorSubclassLike({std::move(gI), grad})) {
+  if (!areAnyTensorSubclassLike({gI, grad})) {
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -2218,7 +2218,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  if (!areAnyTensorSubclassLike({std::move(ggO), grad})) {
+  if (!areAnyTensorSubclassLike({ggO, grad})) {
     ggO *= grad;
   } else {
     ggO = ggO * grad;
@@ -4771,8 +4771,7 @@ Tensor embedding_dense_double_backward_symint(
   size.push_back(-1);
 
   if (padding_idx >= 0) {
-    gg_weight.masked_fill_(
-        (indices == std::move(padding_idx)).reshape({-1, 1}), 0);
+    gg_weight.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
   }
   return gg_weight.view(size);
 }
