@@ -21,10 +21,6 @@ bool ThreadLocalPythonObjects::contains(std::string key) {
   return py_objects.obj_dict_.count(key);
 }
 
-int64_t ThreadLocalPythonObjects::size() {
-  return py_objects.obj_dict_.size();
-}
-
 void ThreadLocalPythonObjects::set_state(const ThreadLocalPythonObjects& state) {
   py_objects = state;
 }
