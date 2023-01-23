@@ -358,13 +358,13 @@ def prune_conv2d_pool_flatten_linear(
             linear.in_features = linear.weight.shape[1]
 
 
-def prune_lstm_linear(
+def prune_lstm_output_linear(
     lstm: nn.LSTM, getitem: Callable, linear: nn.Linear
 ) -> None:
-    prune_lstm_layernorm_linear(lstm, getitem, None, linear)
+    prune_lstm_output_layernorm_linear(lstm, getitem, None, linear)
 
 
-def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: Optional[nn.LayerNorm], linear: nn.Linear) -> None:
+def prune_lstm_output_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: Optional[nn.LayerNorm], linear: nn.Linear) -> None:
     for i in range(lstm.num_layers):
         if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
             parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)

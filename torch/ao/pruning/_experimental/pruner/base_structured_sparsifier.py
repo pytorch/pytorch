@@ -20,8 +20,8 @@ from .prune_functions import (
     prune_conv2d_activation_pool_conv2d,
     prune_conv2d_pool_activation_conv2d,
     prune_conv2d_pool_flatten_linear,
-    prune_lstm_linear,
-    prune_lstm_layernorm_linear,
+    prune_lstm_output_linear,
+    prune_lstm_output_layernorm_linear,
 )
 
 
@@ -103,10 +103,13 @@ def _get_default_structured_pruning_patterns() -> Dict[
         # conv2d -> conv2d
         (nn.Conv2d, "output"): prune_conv2d,
         (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
-        # lstm -> getitem -> linear
-        (nn.LSTM, getitem, nn.Linear): prune_lstm_linear,
-        # lstm -> getitem -> layernorm -> linear
-        (nn.LSTM, getitem, nn.LayerNorm, nn.Linear): prune_lstm_layernorm_linear,
+        # TODO LSTM Structured pruning does not support returned state currently.
+        # Should find a way to explicitly match getitem(0) instead of getitem.
+        # This will also require changing the pruning function.
+        # lstm -> getitem(0) -> linear
+        (nn.LSTM, getitem, nn.Linear): prune_lstm_output_linear,
+        # lstm -> getitem(0) -> layernorm -> linear
+        (nn.LSTM, getitem, nn.LayerNorm, nn.Linear): prune_lstm_output_layernorm_linear,
     }
 
     for activation in chain(
