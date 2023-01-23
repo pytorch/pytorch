@@ -593,7 +593,6 @@ LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangu
 
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(logdet, logdet);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(symeig, symeig);
 LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
