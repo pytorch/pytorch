@@ -88,7 +88,7 @@ Tensor stack(const at::TensorList tensors, const int64_t dim) {
   std::vector<int64_t> output_sizes = {
       num_tensors, tensor.size(0), tensor.size(1)};
 
-  vTensor v_output{api::context(), output_sizes, tensor.options()};
+  vTensor v_output{api::context(), output_sizes, tensor.scalar_type()};
 
   return stack_feature(tensors, v_output);
 }

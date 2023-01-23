@@ -58,7 +58,8 @@ extensions = [
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
-    'sphinx_panels'
+    'sphinx_panels',
+    'myst_parser',
 ]
 
 # build the templated autosummary files
@@ -335,8 +336,6 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymInt",
-    "SymFloat",
 ]
 
 # The suffix(es) of source filenames.

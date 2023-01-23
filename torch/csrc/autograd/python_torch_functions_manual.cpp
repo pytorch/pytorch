@@ -1,6 +1,9 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/python_torch_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -194,50 +197,29 @@ static PyObject* THPVariable_nonzero(
 
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(
     sparse_compressed_tensor,
-    9,
-    ({"sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-      "sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+    10,
+    ({"sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)"}))
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(
     sparse_csr_tensor,
-    9,
-    ({"sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-      "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+    10,
+    ({"sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)"}))
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(
     sparse_csc_tensor,
-    9,
-    ({"sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-      "sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+    10,
+    ({"sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)"}))
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(
     sparse_bsr_tensor,
-    9,
-    ({"sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-      "sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+    10,
+    ({"sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)"}))
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(
     sparse_bsc_tensor,
-    9,
-    ({"sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-      "sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
-
-THPVARIABLE_SPARSE_COMPRESSED_CTOR(
-    _sparse_compressed_tensor_unsafe,
-    8,
-    ({"_sparse_compressed_tensor_unsafe(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)"}))
-THPVARIABLE_SPARSE_COMPRESSED_CTOR(
-    _sparse_csr_tensor_unsafe,
-    7,
-    ({"_sparse_csr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
-THPVARIABLE_SPARSE_COMPRESSED_CTOR(
-    _sparse_csc_tensor_unsafe,
-    7,
-    ({"_sparse_csc_tensor_unsafe(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
-THPVARIABLE_SPARSE_COMPRESSED_CTOR(
-    _sparse_bsr_tensor_unsafe,
-    7,
-    ({"_sparse_bsr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
-THPVARIABLE_SPARSE_COMPRESSED_CTOR(
-    _sparse_bsc_tensor_unsafe,
-    7,
-    ({"_sparse_bsc_tensor_unsafe(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
+    10,
+    ({"sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)"}))
 
 static PyObject* THPVariable_sparse_coo_tensor(
     PyObject* self,
@@ -245,12 +227,12 @@ static PyObject* THPVariable_sparse_coo_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-      "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
   });
 
-  ParsedArgs<6> parsed_args;
+  ParsedArgs<7> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(
@@ -258,30 +240,6 @@ static PyObject* THPVariable_sparse_coo_tensor(
   }
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
   return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(
-      torch::tensors::get_default_dispatch_key(),
-      torch::tensors::get_default_scalar_type(),
-      r));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable__sparse_coo_tensor_unsafe(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-      "_sparse_coo_tensor_unsafe(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
-
-  ParsedArgs<6> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.has_torch_function()) {
-    return handle_torch_function(
-        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
-  }
-  jit::tracer::warn(
-      "torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(
       torch::tensors::get_default_dispatch_key(),
       torch::tensors::get_default_scalar_type(),
       r));
@@ -405,12 +363,30 @@ static PyObject* THPVariable__to_functional_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
+      {"_to_functional_tensor(Tensor t, *, bool mirror_autograd_meta=False)"},
+      /*traceable=*/true);
 
-  ParsedArgs<1> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
+  auto mirror_autograd_meta = r.toBool(1);
   auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  if (mirror_autograd_meta) {
+    // Here, we unsafely set the grad function on the wrapper to be the same as
+    // the inner. We expect this grad_fn to NEVER be used. It's needed so that
+    // .is_leaf metadata is accurate on the wrapper
+    auto inner_autograd_meta = impl::get_autograd_meta(self_);
+    if (inner_autograd_meta) {
+      wrapped.set_requires_grad(self_.requires_grad());
+      if (wrapped.requires_grad()) {
+        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
+            new torch::autograd::Error(
+                "Cannot backprop through mirrored meta, file a bug in PyTorch"),
+            torch::autograd::deleteNode);
+        torch::autograd::set_history(wrapped, new_grad_fn);
+      }
+    }
+  }
   return wrap(wrapped);
   END_HANDLE_TH_ERRORS
 }
@@ -579,14 +555,6 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_sparse_coo_tensor_unsafe",
-     castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_sparse_compressed_tensor_unsafe",
-     castPyCFunctionWithKeywords(THPVariable__sparse_compressed_tensor_unsafe),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
     {"sparse_compressed_tensor",
      castPyCFunctionWithKeywords(THPVariable_sparse_compressed_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
@@ -605,22 +573,6 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"sparse_bsc_tensor",
      castPyCFunctionWithKeywords(THPVariable_sparse_bsc_tensor),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_sparse_csr_tensor_unsafe",
-     castPyCFunctionWithKeywords(THPVariable__sparse_csr_tensor_unsafe),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_sparse_csc_tensor_unsafe",
-     castPyCFunctionWithKeywords(THPVariable__sparse_csc_tensor_unsafe),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_sparse_bsr_tensor_unsafe",
-     castPyCFunctionWithKeywords(THPVariable__sparse_bsr_tensor_unsafe),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_sparse_bsc_tensor_unsafe",
-     castPyCFunctionWithKeywords(THPVariable__sparse_bsc_tensor_unsafe),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"tensor",
@@ -692,7 +644,7 @@ static PyObject* THPVariable_numel(
   }
 
   if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
+    return py::cast(r.tensor(0).sym_numel()).release().ptr();
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

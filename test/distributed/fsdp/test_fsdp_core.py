@@ -138,14 +138,10 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    # TODO (awgu): 2.0 fails tests
-    # @parametrize("norm_type", [2.0, None])
-    @parametrize("norm_type", [None])
     def test_nested_always_wrap_model(
         self,
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
-        norm_type: Optional[float],
     ):
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
@@ -154,19 +150,14 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            norm_type=norm_type,
         )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    # TODO (awgu): 2.0 fails tests
-    # @parametrize("norm_type", [2.0, None])
-    @parametrize("norm_type", [None])
     def test_transformer(
         self,
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
-        norm_type: Optional[float],
     ):
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
@@ -174,7 +165,6 @@ class TestParityWithDDP(FSDPTest):
             TransformerWithSharedParams,
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
-            norm_type=norm_type,
             sharding_strategy=sharding_strategy,
         )
 
@@ -228,14 +218,10 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    # TODO (awgu): 2.0 fails tests
-    # @parametrize("norm_type", [2.0, None])
-    @parametrize("norm_type", [None])
     def test_mixture_of_experts(
         self,
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
-        norm_type: Optional[float],
     ):
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
@@ -245,7 +231,6 @@ class TestParityWithDDP(FSDPTest):
             ref_init_fn=self._dummy_ddp_fn,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            norm_type=norm_type,
         )
 
     @skip_if_lt_x_gpu(2)

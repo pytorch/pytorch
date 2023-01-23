@@ -1,7 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//tools/rules:cu.bzl", "cu_library")
-load("@//third_party:substitution.bzl", "template_rule")
-load("@//tools/config:defs.bzl", "if_cuda")
+load("@pytorch//tools/rules:cu.bzl", "cu_library")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
+load("@pytorch//tools/config:defs.bzl", "if_cuda")
 
 template_rule(
     name = "gloo_config_cmake_macros",
@@ -75,8 +75,7 @@ cc_library(
         ]
     ) + if_cuda(glob(["gloo/cuda*.cc"])),
     copts = [
-        "-std=gnu++11",
-        "-std=c++11",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [":gloo_headers"] + if_cuda(

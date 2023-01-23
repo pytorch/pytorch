@@ -34,8 +34,7 @@ std::pair<TypePtr, bool> MergeInferredType(
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
-    TypePtr inferred_type,
-    bool set_constant_value_map = true);
+    TypePtr inferred_type);
 
 // Update graph input types with dynamic axes info.
 // Axes that are marked as dynamic will be assigned as dynamic ShapeSymbol.
@@ -80,9 +79,11 @@ TORCH_API void ONNXShapeTypeInference(
 std::pair<bool, bool> AreInputsReliableOrStatic(Node* n);
 void UpdateReliable(
     torch::jit::Value* output,
-    const std::pair<bool, bool>& input_reliable);
+    const std::pair<bool, bool>& input_reliable,
+    bool no_type_warning = false);
 
 void UpdateReliable(torch::jit::Node* n);
+void UpdateShapeConstantIfReliable(torch::jit::Value* output);
 
 } // namespace jit
 } // namespace torch

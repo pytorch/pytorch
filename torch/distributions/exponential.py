@@ -57,10 +57,6 @@ class Exponential(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        if torch._C._get_tracing_state():
-            # [JIT WORKAROUND] lack of support for ._exponential()
-            u = torch.rand(shape, dtype=self.rate.dtype, device=self.rate.device)
-            return -(-u).log1p() / self.rate
         return self.rate.new(shape).exponential_() / self.rate
 
     def log_prob(self, value):
@@ -74,7 +70,7 @@ class Exponential(ExponentialFamily):
         return 1 - torch.exp(-self.rate * value)
 
     def icdf(self, value):
-        return -torch.log(1 - value) / self.rate
+        return -torch.log1p(-value) / self.rate
 
     def entropy(self):
         return 1.0 - torch.log(self.rate)

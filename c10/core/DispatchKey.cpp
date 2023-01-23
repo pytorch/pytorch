@@ -29,6 +29,8 @@ const char* toString(BackendComponent t) {
       return "HPUBit";
     case BackendComponent::VEBit:
       return "VEBit";
+    case BackendComponent::MTIABit:
+      return "MTIA";
     case BackendComponent::PrivateUse1Bit:
       return "PrivateUse1Bit";
     case BackendComponent::PrivateUse2Bit:
@@ -77,6 +79,8 @@ const char* toString(DispatchKey t) {
       return "MPS";
     case DispatchKey::HPU:
       return "HPU";
+    case DispatchKey::MTIA:
+      return "MTIA";
 
     case DispatchKey::Quantized:
       return "Quantized";
@@ -189,6 +193,8 @@ const char* toString(DispatchKey t) {
       return "CompositeExplicitAutograd";
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return "CompositeExplicitAutogradNonFunctional";
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return "FuncTorchBatchedDecomposition";
 
       // Per-backend dispatch keys
 
@@ -301,6 +307,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"IPU", c10::DispatchKey::IPU},
       {"HPU", c10::DispatchKey::HPU},
       {"Lazy", c10::DispatchKey::Lazy},
+      {"MTIA", c10::DispatchKey::MTIA},
       {"NestedTensor", c10::DispatchKey::NestedTensor},
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
@@ -341,6 +348,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::CompositeExplicitAutograd},
       {"CompositeExplicitAutogradNonFunctional",
        c10::DispatchKey::CompositeExplicitAutogradNonFunctional},
+      {"FuncTorchBatchedDecomposition",
+       c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);

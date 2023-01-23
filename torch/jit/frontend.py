@@ -614,7 +614,7 @@ class StmtBuilder(Builder):
         else:
             raise NotSupportedError(
                 find_before(ctx, rhs.range().start, '=', offsets=(-1, 0)),
-                "unsupported kind of augumented assignment: " + op.__name__)
+                "unsupported kind of augmented assignment: " + op.__name__)
         return AugAssign(lhs, op_token, rhs)
 
     @staticmethod
