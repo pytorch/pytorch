@@ -27,11 +27,17 @@ import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
+from torch._dynamo.memory_profiler import (
+    add_series,
+    clear_state,
+    MemoryProfileDispatchMode,
+    save_graph,
+)
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs
+from torch._dynamo.utils import clone_inputs, get_debug_dir
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
@@ -1303,6 +1309,12 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
+
+                if self.args.profile_memory:
+                    with MemoryProfileDispatchMode():
+                        fn(model, example_inputs)
+                        add_series(mode)
+                        clear_state()
             except Exception as e:
                 log.exception(f"Failed for {mode} {e}")
                 return sys.exit(-1)
@@ -1333,6 +1345,11 @@ class BenchmarkRunner:
             #     f"dynamo: {dynamo_peak_mem:.2f} GB, "
             #     f"ratio: {compression_ratio:.2f}"
             # )
+            if self.args.profile_memory:
+                log_path = get_debug_dir()
+                if not os.path.exists(log_path):
+                    os.makedirs(log_path)
+                save_graph(os.path.join(log_path, f"memory_history_{name}.png"))
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1712,6 +1729,11 @@ def parse_args(args=None):
         help="""Whether to collect outputs for training. Set this to true if we
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
+    )
+    parser.add_argument(
+        "--profile-memory",
+        action="store_true",
+        help="Collect memory consumption history and plot in a png file",
     )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
 
