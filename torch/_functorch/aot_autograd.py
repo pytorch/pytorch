@@ -1074,17 +1074,9 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     )
 
     _num_outputs = len(meta.output_info)
-    _num_mutated_data_inputs = len(
-        [x for x in meta.input_info if x.mutates_data]
+    _num_mutated_inputs = len(
+        [x for x in meta.input_info if x.mutates_data or x.mutates_metadata]
     )
-    _num_mutated_metadata_only_inputs = len(
-        [
-            x
-            for x in meta.input_info
-            if not x.mutates_data and x.mutates_metadata
-        ]
-    )
-    _num_mutated_inputs = _num_mutated_data_inputs + _num_mutated_metadata_only_inputs
     _input_info = meta.input_info
 
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(

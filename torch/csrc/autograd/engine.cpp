@@ -757,8 +757,8 @@ static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.tensor_pre_hooks()) {
     inputs = (*hook)(inputs);
   }
-  for (const auto& hook : fn.retains_grad_hooks()) {
-    inputs = (*hook)(inputs);
+  for (const auto& pair : fn.retains_grad_hooks()) {
+    inputs = (*pair.second)(inputs);
   }
   return inputs;
 }

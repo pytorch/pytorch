@@ -66,11 +66,11 @@ jobs:
       build-environment: linux-focal-py3.7-gcc7-pch
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  linux-focal-py3_7-clang7-asan-build:
-    name: linux-focal-py3.7-clang7-asan
+  linux-focal-py3_9-clang7-asan-build:
+    name: linux-focal-py3.9-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3.7-clang7-asan
+      build-environment: linux-focal-py3.9-clang7-asan
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
       test-matrix: |
         { include: [
@@ -82,20 +82,20 @@ jobs:
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3_7-clang7-asan-test:
-    name: linux-focal-py3.7-clang7-asan
+  linux-focal-py3_9-clang7-asan-test:
+    name: linux-focal-py3.9-clang7-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_7-clang7-asan-build
+    needs: linux-focal-py3_9-clang7-asan-build
     with:
-      build-environment: linux-focal-py3.7-clang7-asan
-      docker-image: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
 
-  linux-focal-py3_7-clang10-onnx-build:
-    name: linux-focal-py3.7-clang10-onnx
+  linux-focal-py3_8-clang10-onnx-build:
+    name: linux-focal-py3.8-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3.7-clang10-onnx
+      build-environment: linux-focal-py3.8-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
       test-matrix: |
         { include: [
@@ -103,14 +103,14 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3_7-clang10-onnx-test:
-    name: linux-focal-py3.7-clang10-onnx
+  linux-focal-py3_8-clang10-onnx-test:
+    name: linux-focal-py3.8-clang10-onnx
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_7-clang10-onnx-build
+    needs: linux-focal-py3_8-clang10-onnx-build
     with:
-      build-environment: linux-focal-py3.7-clang10-onnx
-      docker-image: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.8-clang10-onnx
+      docker-image: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.test-matrix }}
 
   linux-bionic-py3_7-clang9-build:
     name: linux-bionic-py3.7-clang9
