@@ -2752,7 +2752,10 @@ def upsample_bicubic2d_vec(
         assert scale_factors is not None
         output_size = cast(
             Tuple[int, int],
-            tuple(sym_int(sym_float(w) * scale) for w, scale in zip(a.shape[2:], scale_factors)),
+            tuple(
+                sym_int(sym_float(w) * scale)
+                for w, scale in zip(a.shape[2:], scale_factors)
+            ),
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
