@@ -15,6 +15,8 @@ from .base import typestr, VariableTracker
 
 
 def wrap_bound_arg(tx, val, options, source=None):
+    from torch import device
+
     # Source propagation is best effort since not every object we encounter has a source to begin with.
     assert (
         "source" not in options
@@ -47,7 +49,7 @@ def wrap_bound_arg(tx, val, options, source=None):
         return variables.EnumVariable(val, source=source, **options)
     elif isinstance(val, (type, abc.ABCMeta)):
         return variables.UserDefinedClassVariable(val, source=source, **options)
-    elif istensor(val):
+    elif istensor(val) or isinstance(val, device):
         from torch._dynamo.variables.builder import VariableBuilder
 
         return VariableBuilder(tx, source=source, **options)(val)
