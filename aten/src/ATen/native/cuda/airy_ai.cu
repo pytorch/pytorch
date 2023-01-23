@@ -18,26 +18,25 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at {
-    namespace native {
-        namespace {
-            const char airy_ai_name[] = "airy_ai_forward";
+namespace at::native {
+namespace {
+const char airy_ai_name[] = "airy_ai_forward";
 
-            void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
+void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
-                    jitted_gpu_kernel<airy_ai_name, scalar_t, scalar_t, 1>(iterator, airy_ai_string);
-                });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
+        jitted_gpu_kernel<airy_ai_name, scalar_t, scalar_t, 1>(iterator, airy_ai_string);
+    });
 #else
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
-                    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-                        return airy_ai_forward(a);
-                    });
-                });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
+        gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return airy_ai_forward(a);
+        });
+    });
 #endif // AT_USE_JITERATOR()
-            }
-        }
+}
 
-        REGISTER_DISPATCH(special_airy_ai_stub, &airy_ai_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // anonymous namespace
+
+REGISTER_DISPATCH(special_airy_ai_stub, &airy_ai_kernel_cuda);
+} // namespace at::native

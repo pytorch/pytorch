@@ -266,7 +266,6 @@ option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
@@ -530,6 +529,16 @@ if(MSVC)
     string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
   endforeach(flag_var)
 
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS)
+    # https://github.com/pytorch/pytorch/issues/91933: Don't set the manifest filename
+    # explicitly helps fix the linker error when linking torch_python.dll. The manifest
+    # file would still be there in the correct format torch_python.dll.manifest
+    if(${flag_var} MATCHES "/MANIFESTFILE:.*\\.manifest")
+      string(REGEX REPLACE "/MANIFESTFILE:.*\\.manifest" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
   # Try harder
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 
@@ -746,9 +755,6 @@ if(USE_VULKAN)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
   endif()
 
-  if(USE_VULKAN_SHADERC_RUNTIME)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -799,6 +805,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)

@@ -808,26 +808,33 @@ Tensor logcumsumexp_backward(
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_TYPES_AND(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
         auto grad_min = at::empty_like(grad);
-        grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
-        auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
-        auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
-
         auto reverse_logcumsumexp = [dim](auto x) {
           return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
         };
 
-        auto output_pos =
-            (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
-        auto output_neg =
-            (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+        if (!at::is_complex(grad)) {
+          grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
+          auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
+          auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
 
-        return output_pos - output_neg;
+          auto output_pos =
+              (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+          auto output_neg =
+              (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+          return output_pos - output_neg;
+        } else {
+          // no trick separating the positive and negative required
+          auto log_grad = grad.conj().log();
+          auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
+          return output.conj();
+        }
       });
 }
 
@@ -863,15 +870,25 @@ Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
 
 Tensor unsqueeze_to(
     const Tensor& self,
+    IntArrayRef dims,
+    c10::SymIntArrayRef sym_sizes) {
+  const auto ndim = sym_sizes.size();
+  auto mask = at::dim_list_to_bitset(dims, ndim);
+
+  Tensor result = self;
+  for (const auto d : c10::irange(ndim)) {
+    if (mask.test(d) && sym_sizes[d] == 1) {
+      result = result.unsqueeze(d);
+    }
+  }
+  return result;
+}
+
+Tensor unsqueeze_to(
+    const Tensor& self,
     int64_t dim,
     c10::SymIntArrayRef sym_sizes) {
-  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
-  // in NumPy it's not an error to unsqueeze a scalar, but we still need to
-  // avoided unsqueezing in the backward.
-  if (sym_sizes.size() > 0 && sym_sizes[dim] == 1) {
-    return self.unsqueeze(dim);
-  }
-  return self;
+  return unsqueeze_to(self, IntArrayRef{dim}, sym_sizes);
 }
 
 std::vector<Tensor> cat_tensors_backward(
@@ -1955,7 +1972,12 @@ Tensor binary_cross_entropy_target_backward(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction) {
-  auto grad_target = (1. - self).log_().sub_(self.log());
+  auto grad_target = [&] {
+    if (self.is_mps()) {
+      return self.neg().log1p_().sub_(self.log());
+    }
+    return at::logit(self).neg_();
+  }();
   if (!areAnyTensorSubclassLike({grad})) {
     grad_target.mul_(grad);
   } else {
@@ -6311,8 +6333,16 @@ Tensor logsumexp_jvp(
     bool keepdim) {
   // NB: for simplicitly, we recompute some values that can be reused from
   // forward
-  auto self_p_exp = (self_p - at::amax(self_p, dim, true))
-                        .exp(); // Use the exp-normalize trick
+  auto self_p_exp = [&self_p, &dim]() {
+    if (self_p.numel() > 0) {
+      return (self_p - at::amax(self_p, dim, true))
+          .exp(); // Use the exp-normalize trick
+    } else {
+      // amax fails if numel() == 0, in which case it doesn't matter anyway
+      return self_p.exp();
+    }
+  }();
+
   auto sumexp_p = self_p_exp.sum(dim, keepdim);
 
   // NB: it's OK for logsumexp_jvp to be reused for formulas like

@@ -12,12 +12,10 @@
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool register_flatbuffer_all() {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

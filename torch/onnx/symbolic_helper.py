@@ -1665,7 +1665,7 @@ def args_have_same_dtype(args):
 # TODO(justinchuby): Delete these setters, users should set the vars directly.
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "remove its usage and avoid setting internal variables directly",
 )
 def _set_opset_version(opset_version: int):
@@ -1674,7 +1674,7 @@ def _set_opset_version(opset_version: int):
 
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "remove its usage and avoid setting internal variables directly",
 )
 def _set_operator_export_type(operator_export_type):
@@ -1685,7 +1685,7 @@ def _set_operator_export_type(operator_export_type):
 # onnx_shape_inference = True by default.
 @_deprecation.deprecated(
     "1.13",
-    "1.14",
+    "2.0",
     "remove its usage and avoid setting internal variables directly",
 )
 def _set_onnx_shape_inference(onnx_shape_inference: bool):

@@ -13,8 +13,7 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
@@ -114,5 +113,4 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at:;native
