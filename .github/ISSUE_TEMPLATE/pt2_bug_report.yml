@@ -40,10 +40,22 @@ body:
         env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
 
         import torch
-        ... 
+        ...
 
         # torch version: 1.13.....
 
         class Repro(torch.nn.Module)
     validations:
       required: false
+  - type: textarea
+    attributes:
+      label: Versions
+      description: |
+        Please run the following and paste the output below.
+        ```sh
+        wget https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py
+        # For security purposes, please check the contents of collect_env.py before running it.
+        python collect_env.py
+        ```
+    validations:
+      required: true
