@@ -364,11 +364,18 @@ def prune_lstm_output_linear(
     prune_lstm_output_layernorm_linear(lstm, getitem, None, linear)
 
 
-def prune_lstm_output_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: Optional[nn.LayerNorm], linear: nn.Linear) -> None:
+def prune_lstm_output_layernorm_linear(
+    lstm: nn.LSTM,
+    getitem: Callable,
+    layernorm: Optional[nn.LayerNorm],
+    linear: nn.Linear,
+) -> None:
     for i in range(lstm.num_layers):
         if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
             parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
-            weight_parameterizations = cast(ParametrizationList, parametrization_dict[f"weight_ih_l{i}"])
+            weight_parameterizations = cast(
+                ParametrizationList, parametrization_dict[f"weight_ih_l{i}"]
+            )
             mask = weight_parameterizations[0].mask
 
             with torch.no_grad():
@@ -388,7 +395,9 @@ def prune_lstm_output_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layerno
 
         if parametrize.is_parametrized(lstm, f"weight_hh_l{i}"):
             parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
-            weight_parameterizations = cast(ParametrizationList, parametrization_dict[f"weight_hh_l{i}"])
+            weight_parameterizations = cast(
+                ParametrizationList, parametrization_dict[f"weight_hh_l{i}"]
+            )
             mask = weight_parameterizations[0].mask
 
             with torch.no_grad():
@@ -438,7 +447,7 @@ def prune_lstm_output_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layerno
 
                     # if layernorm module, prune weight and bias
                     if layernorm is not None:
-                        layernorm.normalized_shape = (linear.in_features, )
+                        layernorm.normalized_shape = (linear.in_features,)
                         layernorm.weight = nn.Parameter(layernorm.weight[M_ho])
                         layernorm.bias = nn.Parameter(layernorm.bias[M_ho])
 
