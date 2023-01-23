@@ -4434,6 +4434,76 @@ class TestSparseAny(TestCase):
             torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 
+    def test_two_four_sparse(self):
+        # TODO: This definitely cannot land.
+        def make_tensor(a, b):
+           return torch.randn(a, b) / 10
+        
+        
+        def random_mask_choice(i=None):
+           import random
+           choices = [
+               [1, 1, 0, 0],
+               [1, 0, 1, 0],
+               [1, 0, 0, 1],
+               [0, 1, 1, 0],
+               [0, 1, 0, 1],
+               [0, 0, 1, 1]
+           ]
+           if i is None:
+              i = random.randint(0, len(choices) - 1)
+           return choices[i]
+        
+        
+        def run_test(m, n, k):
+        
+           a = make_tensor(m, k)
+           b = make_tensor(k, n)
+           a = a.half().cuda()
+           b = b.half().cuda()
+        
+           c0_results = []
+           c1_results = []
+           for meta_choice in (list(range(6)) + [None]):
+               print("m, n, k, meta_choice: ", m, n, k, meta_choice)
+        
+               mask_entries = []
+               for i in range(m * (k // 4)):
+                  mask_entries += random_mask_choice(meta_choice)
+               mask = torch.tensor(mask_entries, dtype=torch.bool).view(m, k)
+               mask = mask.cuda()
+        
+               a_sparse = a.masked_select(mask).view(m, k // 2)
+               a_dense = a.masked_fill(~mask, 0)
+        
+               c1 = torch.mm(a_dense, b)
+        
+               meta = torch._cusparselt_create_meta(mask.cpu())
+        
+               meta = meta.cuda()
+        
+               # print("meta0")
+               # print(meta)
+               c0 = torch._cusparselt_linear(a_sparse, b, meta)
+               torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
+        
+               # meta = meta.transpose(0, 1).reshape(-1).view(meta.size(0), meta.size(1))
+               # c0 = torch._cusparselt_linear(a_sparse, b, meta)
+               # torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
+        
+               # sparse_t = benchmark_torch_function_in_microseconds(torch._cusparselt_linear, a_sparse, b, meta)
+               # dense_t = benchmark_torch_function_in_microseconds(torch.mm, a, b)
+        
+               # print(f"sparse_t: {sparse_t:.0f}us dense_t: {dense_t:.0f}us speedup: {dense_t/sparse_t:.2f}x")
+        
+        
+        for (m, n, k) in itertools.product(range(8), range(8), range(8)):
+           m = (m + 1) * 32
+           n = (n + 1) * 32
+           k = (k + 2) * 32
+           run_test(m, n, k)
+
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
 
