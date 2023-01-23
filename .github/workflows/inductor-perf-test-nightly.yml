@@ -6,6 +6,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/inductor-perf-test-nightly.yml
+  push:
+    tags:
+      - ciflow/inductor-perf-test-nightly/*
   workflow_dispatch:
 
 concurrency:

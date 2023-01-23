@@ -2509,6 +2509,7 @@ else:
         for inp in (x, x2d):
             actual = inp.logcumsumexp(axis)
             expected = logcumsumexp(inp, axis)
+            print(actual, expected)
             self.assertEqual(expected, actual)
 
         # Check that out is actually inplace
