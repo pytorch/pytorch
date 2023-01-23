@@ -1,8 +1,9 @@
-from .export import export_without_kwargs, _ONNX_FRIENDLY_DECOMPOSITION_TABLE, _export, export
+from .export import export_without_kwargs, _ONNX_FRIENDLY_DECOMPOSITION_TABLE, _export, export, export_without_parameters_and_buffers
 
 __all__ = [
     "export_without_kwargs",
     "_export",
     "_ONNX_FRIENDLY_DECOMPOSITION_TABLE",
     "export",
+    "export_without_parameters_and_buffers",
 ]

@@ -403,7 +403,7 @@ def get_innermost_fake_tensor_mode():
     # Recursive FakeTensorMode's easily leads to runtime error.
     assert number_of_fake_tensor_modes <= 1
     # Return the innermost FakeTensorMode found. Otherwise, reture None.
-    return fake_tensor_mode 
+    return fake_tensor_mode
 
 
 def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
@@ -569,3 +569,138 @@ def export_without_kwargs(
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
+
+
+def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
+    """
+    This function move all placeholder nodes to the front of the graph node list.
+    In torch.fx.Graph, placehoder is a special assignment node. If it's not
+    executed in the beginning, it could overwrite values computed by upstream
+    nodes.
+    """
+
+    graph = graph_module.graph
+    placeholders = []
+    first_not_placeholder = None
+    for node in graph.nodes:
+        if node.op == "placeholder":
+            placeholders.append(node)
+        if first_not_placeholder is None and node.op != "placeholder":
+            first_not_placeholder = node
+    if first_not_placeholder is None:
+        return
+    for placeholder in placeholders:
+        first_not_placeholder.prepend(placeholder)
+
+
+def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
+    """
+    Replace get_attr with placeholder.
+    """
+    graph = graph_module.graph
+    replaced_attrs = []
+    for node in graph.nodes:
+        if node.op == "get_attr":
+            replaced_attr = None
+            try:
+                replaced_attr = graph_module.get_parameter(node.target)
+            except:
+                replaced_attr = graph_module.get_buffer(node.target)
+
+            # Reassign op type so that get_attr node becomes placeholder node.
+            node.op = "placeholder"
+            # The target name in placeholder must be a valid Python identifier.
+            # Thus, we replace, e.g., "module.submodule.weight" with
+            # "module_submodule_weight".
+            node.target = node.target.replace(".", "_")
+            # Default value is None. This is needed as long as the "graph_module"
+            # has optional inputs. Assume the original forward signature is
+            #  def forward(self, x, y=None)
+            # and the replaced get_attr node has target "z". Then, the modified
+            # signature should be
+            #  def forward(self, x, y=None, z=None)
+            # Without the following line, the signature will be
+            #  def forward(self, x, y=None, z)
+            # , which is not valid Python code.
+            node.args = (None,)
+
+            replaced_attrs.append(replaced_attr)
+
+    return replaced_attrs
+
+
+def export_without_parameters_and_buffers(
+    module: Union[torch.nn.Module, Callable],
+    *args,
+    decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
+    use_binary_format: bool = True,
+    opset_version: int = None,
+    # kwargs are the keyword arguments to call "module"; that is,
+    # module(*args, **kwargs) must run.
+    **kwargs,
+):
+    """
+    This function export the input "module" into a stateless ONNX model.
+    All parameters and buffer in "module" will be inputs of the generated
+    ONNX model.
+    """
+    if opset_version is None:
+        opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+    if isinstance(module, torch.nn.Module):
+        signature = inspect.signature(module.forward)
+    else:
+        signature = inspect.signature(module)
+
+    # We hope the input kwargs will be mapped to bound.args after binding.
+    # If not, we will raise an error.
+    bound = signature.bind(*args, **kwargs)
+    bound.apply_defaults()
+    # After apply_defaults, all non keyword-only arguments are in bound.args.
+    # Because below code do not support keyword-word arguments, bound.kwargs
+    # must be empty.
+    assert len(bound.kwargs) == 0, bound.kwargs
+
+    # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
+    # Example content of concrete_args:
+    #  concrete_args["x"] = torch.fx.PH
+    #  concrete_args["b"] = 1
+    # where "x" and "b" are argument names in "signature".
+    concrete_args = {}
+    for param_name, param_value in bound.arguments.items():
+        if isinstance(param_value, torch.Tensor):
+            # param_value can be, e.g., a real tensor or a fake tensor.
+            # param_value is treated as substitable tensor symbol (aka placeholder).
+            concrete_args[param_name] = torch.fx.PH
+        else:
+            concrete_args[param_name] = param_value
+
+    graph_module = torch.fx.symbolic_trace(module, concrete_args=concrete_args)
+
+    # Make sure all placeholder nodes are executed before get_attr nodes.
+    # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
+    # Basically, we want
+    #  ModeoProto.graph.input =
+    #   [input_0, input_1, ..., input_n, weight_0, weight_1, ..., weight_m]
+    # and we don't want
+    #  ModeoProto.graph.input =
+    #   [input_0, weight_0, input_1, weight_1, ..., input_n, weight_0, weight_1, ..., weight_m]
+    _move_placeholder_to_front(graph_module)
+    # To save memory, move get_attr to input so that the generated model doesn't
+    # have weigh tensors. "replaced_attrs" are the list of replaced weight tensors.
+    replaced_attrs = _replace_get_attr_with_placeholder(graph_module)
+    # Move all newly created placeholder nodes to the front of the graph.
+    _move_placeholder_to_front(graph_module)
+    # Finalize the graph editting. This new graph_module is stateless now (i.e., contains no
+    # parameters and buffers). To call it, run
+    #  graph_module(*bound.args, *replaced_attrs)
+    # Note that the original module (contains parameters and buffers) is called by
+    #  module(*bound.args)
+    graph_module.recompile()
+
+    return _export(
+        graph_module,
+        opset_version,
+        *bound.args,
+        *replaced_attrs,
+        decomposition_table=decomposition_table,
+        use_binary_format=use_binary_format), graph_module, bound.args, replaced_attrs
