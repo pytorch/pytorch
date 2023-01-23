@@ -52,10 +52,6 @@ def aot_autograd(**kwargs):
                 log.debug("TorchDynamo unable to remove mutation")
                 use_fallback = True
 
-        # NB: no clone here on example inputs
-        if not is_aot_autograd_safe_to_run(gm, example_inputs):
-            use_fallback = True
-
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
             counters["aot_autograd"]["not_ok"] += 1
@@ -83,34 +79,6 @@ def aot_autograd(**kwargs):
             raise
 
     return compiler_fn
-
-
-def is_aot_autograd_safe_to_run(gm, example_inputs):
-    """
-    There are some known issues with Aot Autograd. This is a workaround to catch
-    such cases, and fallback to eager. We should fix these quickly.
-
-    Issues
-    1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
-    2) LSTM - https://github.com/pytorch/functorch/issues/586
-    3) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
-    """
-
-    def raise_or_warn(reason):
-        msg = f"Unable to use Aot Autograd because of presence of {reason}"
-        if config.raise_on_unsafe_aot_autograd:
-            raise NotImplementedError(msg)
-        else:
-            log.warning(msg)
-        return False
-
-    # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
-    for submod in gm.modules():
-        if submod.__class__.__name__ == "LSTM":
-            return raise_or_warn("LSTM")
-
-    # 2) Mutation in the graphs are now always handled by AOT Autograd.
-    return True
 
 
 DEBUG = False
@@ -363,6 +331,14 @@ def cudagraphs(model, inputs):
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 
+aot_torchxla_trivial = aot_autograd(
+    fw_compiler=BACKENDS["torchxla_trivial"],
+)
+
+aot_torchxla_trace_once = aot_autograd(
+    fw_compiler=BACKENDS["torchxla_trace_once"],
+)
+
 
 def create_aot_backends():
     """
@@ -399,3 +375,6 @@ def create_aot_backends():
     # aot_inductor_debug just replaces the inductor compiler with nop to help
     # isolate inductor vs aot_eager errors
     BACKENDS["aot_inductor_debug"] = aot_inductor_debug
+
+    BACKENDS["aot_torchxla_trivial"] = aot_torchxla_trivial
+    BACKENDS["aot_torchxla_trace_once"] = aot_torchxla_trace_once

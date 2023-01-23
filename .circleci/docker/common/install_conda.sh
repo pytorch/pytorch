@@ -42,8 +42,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   pushd /tmp
   wget -q "${BASE_URL}/${CONDA_FILE}"
-  chmod +x "${CONDA_FILE}"
-  as_jenkins ./"${CONDA_FILE}" -b -f -p "/opt/conda"
+  # NB: Manually invoke bash per https://github.com/conda/conda/issues/10431
+  as_jenkins bash "${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
 
   # NB: Don't do this, rely on the rpath to get it right
@@ -61,21 +61,21 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python
     # This should be called as
     #   conda_install pkg1 pkg2 ... [-c channel]
-    as_jenkins conda install -q -y python="$ANACONDA_PYTHON_VERSION" $*
+    as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
   }
 
   pip_install() {
-    as_jenkins pip install --progress-bar off $*
+    as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi future six"
+  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools six"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0

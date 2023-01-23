@@ -98,13 +98,17 @@ If your network needs full float32 precision for both matrix multiplications and
 
 For more information see :ref:`TensorFloat32<tf32_on_ampere>`.
 
-Reduced Precision Reduction for FP16 GEMMs
-------------------------------------------
+Reduced Precision Reduction for FP16  and BF16 GEMMs
+----------------------------------------------------
 Half-precision GEMM operations are typically done with intermediate accumulations (reduction) in single-precision for numerical accuracy and improved resilience to overflow. For performance, certain GPU architectures, especially more recent ones, allow a few truncations of the intermediate accumulation results to the reduced precision (e.g., half-precision). This change is often benign from the perspective of model convergence, though it may lead to unexpected results (e.g., ``inf`` values when the final result should be be representable in half-precision).
 If reduced-precision reductions are problematic, they can be turned off with
 ``torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False``
 
-For more information see :ref:`allow_fp16_reduced_precision_reduction<fp16reducedprecision>`
+A similar flag exists for BF16 GEMM operations and is turned off by default. If BF16
+reduced-precision reductions are problematic, they can be turned off with
+``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False``
+
+For more information see :ref:`allow_fp16_reduced_precision_reduction<fp16reducedprecision>` and :ref:`allow_bf16_reduced_precision_reduction<bf16reducedprecision>`
 
 .. _fp16_on_mi200:
 

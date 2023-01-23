@@ -14,6 +14,7 @@ from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
 from .base import VariableTracker
 from .functions import (
+    NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrappedUserFunctionVariable,
@@ -67,15 +68,16 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn = self.const_getattr(self, name)
+        source = None if self.source is None else AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif isinstance(inner_fn, types.FunctionType):
-            return variables.UserFunctionVariable(inner_fn, **options).call_function(
-                tx, [self.objvar] + args, kwargs
-            )
+            return variables.UserFunctionVariable(
+                inner_fn, source=source, **options
+            ).call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, **options
+                inner_fn.__func__, self.objvar, source=source, **options
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -85,6 +87,63 @@ class UnknownVariable(VariableTracker):
     """
     It could be anything!
     """
+
+
+class ComptimeVariable(VariableTracker):
+    """
+    This variable is special, it lets you execute arbitrary code at
+    Dynamo compile time
+    """
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError("comptime is special form")
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from ..comptime import comptime
+
+        # To support the comptime.print_graph convenience accessors
+        from .functions import UserFunctionVariable
+
+        return UserFunctionVariable(
+            getattr(comptime, name), source=AttrSource(self.source, name)
+        )
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from ..comptime import ComptimeContext
+
+        # TODO: support an expression form as well
+
+        assert not kwargs
+        assert len(args) == 1
+        fn = args[0]
+        if isinstance(fn, UserFunctionVariable):
+            fn.get_function()(ComptimeContext(tx))
+        elif isinstance(fn, NestedUserFunctionVariable):
+            # We have to manually bind the freevars ourselves
+            code = fn.get_code()
+            assert not fn.closure, (
+                "comptime function must not have free variables, "
+                f"but these variables were free: {code.co_freevars}"
+            )
+            func = types.FunctionType(
+                code,
+                fn.f_globals,
+                fn.fn_name.as_python_constant(),
+                tuple(fn.defaults.items) if fn.defaults else None,
+                # We could automatically promote free variables into
+                # ComptimeVar but this is confusing if you access
+                # a free variable that we actually DO have the runtime
+                # value for
+                # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
+                tuple(),
+            )
+            func(ComptimeContext(tx))
+        else:
+            raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
+
+        return variables.ConstantVariable(None)
 
 
 class ClosureVariable(UnknownVariable):
@@ -303,32 +362,22 @@ class GradModeVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(target_values, kwargs):
-        values = target_values
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        assert "device_type" in kwargs
-        values.append(kwargs["device_type"])
-        del kwargs["device_type"]
+        bound_args = inspect.signature(torch.autocast).bind(*target_values, **kwargs)
+        bound_args.apply_defaults()
+        target_values = []
+        kwargs.clear()
 
-        if "dtype" in kwargs:
-            values.append(kwargs["dtype"])
-            del kwargs["dtype"]
-        else:
-            values.append(variables.ConstantVariable(None))
-
-        if "enabled" in kwargs:
-            values.append(kwargs["enabled"])
-            del kwargs["enabled"]
-        else:
-            values.append(variables.ConstantVariable(True))
-
-        if "cache_enabled" in kwargs:
-            values.append(kwargs["cache_enabled"])
-            del kwargs["cache_enabled"]
-        else:
-            values.append(variables.ConstantVariable(None))
+        for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+            if isinstance(bound_args.arguments[key], VariableTracker):
+                target_values.append(bound_args.arguments[key])
+            else:
+                target_values.append(
+                    variables.ConstantVariable(bound_args.arguments[key])
+                )
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
@@ -463,6 +512,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
+        options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, **options).call_function(
@@ -479,7 +529,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_function(self, tx, args, kwargs):
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return AutogradFunctionVariable(self.fn_cls, **options)
+        return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
 
 class BlackHoleVariable(VariableTracker):
@@ -496,6 +546,16 @@ class BlackHoleVariable(VariableTracker):
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
+
+
+class AutogradFunctionContextVariable(VariableTracker):
+    """
+    A autograd.function context used after graph break in forward.
+    Any call method on this context object will be graph break.
+    The is different from BlackHoleVariable which is only used in inference mode.
+    """
+
+    pass
 
 
 class LambdaVariable(VariableTracker):
@@ -567,7 +627,7 @@ class GetAttrVariable(VariableTracker):
             options = VariableTracker.propagate(self, new_args, new_kwargs.values())
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 if isinstance(args[0], TorchVariable):
                     return wrap_fx_proxy(
                         tx=tx,

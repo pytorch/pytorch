@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import itertools
 import logging
@@ -194,19 +193,34 @@ class KernelArgs:
     @staticmethod
     def _lookup(prefix, odict, name):
         assert isinstance(name, (str, sympy.Symbol))
-        name = str(name)
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = collections.OrderedDict()
-        self.output_buffers = collections.OrderedDict()
-        self.inplace_buffers = collections.OrderedDict()
-        self.sizevars = sizevars or collections.OrderedDict()
+        self.input_buffers = dict()
+        self.output_buffers = dict()
+        self.inplace_buffers = dict()
+        self.sizevars = sizevars or dict()
+
+    def __repr__(self):
+        return "KernelArgs({})".format(
+            ", ".join(
+                map(
+                    repr,
+                    [
+                        self.input_buffers,
+                        self.output_buffers,
+                        self.inplace_buffers,
+                        self.sizevars,
+                    ],
+                )
+            )
+        )
 
     def input(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
@@ -217,7 +231,8 @@ class KernelArgs:
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
             return self.inplace_buffers[name].inner_name
@@ -323,8 +338,8 @@ class KernelArgs:
             precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
-            call_args.append(outer)
-            precompile_args.append(SizeArg(inner, sympy_symbol(outer)))
+            call_args.append(str(outer))
+            precompile_args.append(SizeArg(inner, outer))
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
@@ -363,7 +378,7 @@ class CSEVariable:
     def __eq__(self, other) -> bool:
         return type(other) == type(self) and other.name == self.name
 
-    def update_on_args(self, args, kwargs):
+    def update_on_args(self, name, args, kwargs):
         pass
 
 
@@ -388,6 +403,7 @@ class CSE:
         iter_buffers=None,
         store_cache=None,
         reduction_cache=None,
+        varname_map=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
@@ -397,7 +413,7 @@ class CSE:
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
         self.invalidated_stores = set()
-        self.varname_map = {}
+        self.varname_map = varname_map or {}
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
@@ -407,27 +423,51 @@ class CSE:
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
+        # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
         return CSE(
-            self.prefix,
-            self.suffix,
-            self.name_prefix,
-            self.iter_buffer_ids,
-            self.store_cache,
+            prefix=self.prefix,
+            suffix=self.suffix,
+            name_prefix=self.name_prefix,
+            iter_buffers=self.iter_buffer_ids,
+            store_cache=self.store_cache,
+            varname_map=self.varname_map,
         )
 
     def generate(
-        self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True
+        self,
+        buffer: IndentedBuffer,
+        expr: typing.Union[str, CSEVariable],
+        write=True,
+        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
-        if expr not in self.cache:
+        cache_key = expr
+        if append_broadcast:
+            assert isinstance(append_broadcast, str)
+            cache_key = expr + append_broadcast
+        if cache_key not in self.cache:
             var = self.newvar()
-            self.cache[expr] = var
+            self.cache[cache_key] = var
             if write:
-                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
-                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
-        return self.cache[expr]
+                if V.kernel.current_node:
+                    V.kernel.current_node.codegen_originating_info(
+                        buffer, only_once=True
+                    )
+                if append_broadcast:
+                    var_suffix = "_load"
+                else:
+                    var_suffix = ""
+                buffer.writeline(
+                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
+                )
+                if append_broadcast:
+                    buffer.writeline(
+                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
+                    )
+
+        return self.cache[cache_key]
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
@@ -514,13 +554,15 @@ class Kernel(CodeGen):
 
     def __enter__(self):
         class CSEProxy:
+            self.name = "CSEProxy"
+
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
                     csevar = self.cse.generate(
                         self.compute, getattr(parent_handler, name)(*args, **kwargs)
                     )
-                    csevar.update_on_args(args, kwargs)
+                    csevar.update_on_args(name, args, kwargs)
                     return csevar
 
                 return inner
@@ -547,8 +589,9 @@ class Kernel(CodeGen):
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                    if self.current_node:
+                        for other_name in self.current_node.get_mutations():
+                            self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
@@ -566,7 +609,8 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        V.graph.scheduler.remove_kernel_local_buffers()
+        if V.graph.scheduler:
+            V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:

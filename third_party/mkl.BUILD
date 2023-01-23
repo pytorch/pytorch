@@ -13,7 +13,7 @@ cc_library(
         "libmkl_vml_avx512.so",
         "libmkl_vml_def.so",
     ] + select({
-        "@//tools/config:thread_sanitizer": [],
+        "@pytorch//tools/config:thread_sanitizer": [],
         "//conditions:default": ["libmkl_tbb_thread.so"],
     }),
     visibility = ["//visibility:public"],

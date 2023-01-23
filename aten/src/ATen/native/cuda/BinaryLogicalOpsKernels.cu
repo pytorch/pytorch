@@ -9,7 +9,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 const char logical_and_name[] = "logical_and_kernel";
 void logical_and_kernel_cuda(TensorIterator& iter) {
@@ -125,4 +125,4 @@ REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
 
 
-}} // namespace at::native
+} // namespace at::native

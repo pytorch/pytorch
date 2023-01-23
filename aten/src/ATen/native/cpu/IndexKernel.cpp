@@ -15,7 +15,7 @@
 #include <c10/util/irange.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -185,7 +185,7 @@ void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
@@ -244,7 +244,7 @@ void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cpu", [&] {
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
@@ -587,11 +587,33 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       auto iter_dtype = iter.dtype();
       // Ignoring half and bfloat16 as cpu_hflip_vec is slower than cpu_kernel_vec
       if (isIntegralType(iter_dtype, true) || iter_dtype == kDouble || iter_dtype == kFloat) {
-        AT_DISPATCH_ALL_TYPES_AND(kBool,
-            iter_dtype, "hflip_cpu", [&iter] {
-              cpu_hflip_vec<scalar_t>(iter);
-        });
-        return;
+        // Replace AT_DISPATCH_ALL_TYPES_AND by manual if/else due to internal test failures:
+        // - "dtype 'Float' not selected for kernel tag hflip_cpu"
+        // - "dtype 'Long' not selected for kernel tag hflip_cpu"
+        //
+        // AT_DISPATCH_ALL_TYPES_AND(kBool,
+        //     iter_dtype, "hflip_cpu", [&iter] {
+        //       cpu_hflip_vec<scalar_t>(iter);
+        // });
+
+        if (iter_dtype == kByte) {
+          return cpu_hflip_vec<uint8_t>(iter);
+        } else if (iter_dtype == kChar) {
+          return cpu_hflip_vec<int8_t>(iter);
+        } else if (iter_dtype == kInt) {
+          return cpu_hflip_vec<int32_t>(iter);
+        } else if (iter_dtype == kLong) {
+          return cpu_hflip_vec<int64_t>(iter);
+        } else if (iter_dtype == kShort) {
+          return cpu_hflip_vec<int16_t>(iter);
+        } else if (iter_dtype == kBool) {
+          return cpu_hflip_vec<bool>(iter);
+        } else if (iter_dtype == kFloat) {
+          return cpu_hflip_vec<float>(iter);
+        } else if (iter_dtype == kDouble) {
+          return cpu_hflip_vec<double>(iter);
+        }
+
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
     } else if (iter.has_contiguous_first_dim()) {
@@ -625,4 +647,4 @@ REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
 REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
-}} // namespace at::native
+} // namespace at::native

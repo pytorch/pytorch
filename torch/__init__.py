@@ -9,6 +9,7 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import math
 import os
 import sys
 import platform
@@ -34,6 +35,7 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
+    'set_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -48,7 +50,8 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile',
+    'SymBool', 'sym_not',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
 ]
 
 ################################################################################
@@ -258,15 +261,17 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __sym_max__(self, other):
+        raise AssertionError("type stub not overridden")
+
+    def __sym_min__(self, other):
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return str(self.node)
-
-    # For BC; direct access of node is OK too
-    def get_pyobj(self):
-        return self.node
 
 class SymFloat:
     """
@@ -302,12 +307,123 @@ class SymFloat:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __sym_max__(self, other):
+        raise AssertionError("type stub not overridden")
+
+    def __sym_min__(self, other):
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
-    # For BC; direct access of node is OK too
-    def get_pyobj(self):
-        return self.node
+class SymBool:
+    """
+    Like an bool (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+
+    Unlike regular bools, regular boolean operators will force extra guards instead
+    of symbolically evaluate.  Use the bitwise operators instead to handle this.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    def __and__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __or__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    # We very carefully define __sym_not__, and not a number of other
+    # plausible alternatives:
+    #
+    #   - We do not override __not__ because this is not a real magic
+    #     method; you cannot override the meaning of the not builtin in
+    #     Python.  We use the name 'sym_not' to clarify that in user code you
+    #     cannot use the builtin not or operator.not_ or operator.__not__ and
+    #     hit this magic method; you must use our custom sym_not operator.
+    #
+    #   - We do not override the __invert__ method because SymBool is
+    #     meant to be usable in situations where bool is expected.  However,
+    #     bitwise negation ~a does the wrong thing with booleans (because
+    #     bool is a subclass of int, so ~1 = -2 which is not falseish.)
+    #     This would be a giant footgun, so we get around it by defining
+    #     our own operator.  Note that bitwise and/or do the right thing,
+    #     so we reuse the conventional operators there for readability.
+    #
+    def __sym_not__(self) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __repr__(self):
+        return self.node.str()
+
+def sym_not(a):
+    r""" SymInt-aware utility for logical negation.
+
+    Args:
+        a (SymBool or bool): Object to negate
+    """
+    if hasattr(a, '__sym_not__'):
+        return a.__sym_not__()
+    return not a
+
+def sym_float(a):
+    r""" SymInt-aware utility for float casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
+    """
+    if isinstance(a, SymFloat):
+        return a
+    elif hasattr(a, '__sym_float__'):
+        return a.__sym_float__()
+    return py_float(a)  # type: ignore[operator]
+
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def _sym_floor(x):
+    return math.floor(x)  # type: ignore[type]
+
+def _sym_ceil(x):
+    return math.ceil(x)  # type: ignore[type]
+
+def sym_int(a):
+    r""" SymInt-aware utility for int casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
+    """
+    if isinstance(a, SymInt):
+        return a
+    elif isinstance(a, SymFloat):
+        return _sym_floor(a) if a > 0 else _sym_ceil(a)
+    return py_int(a)  # type: ignore[operator]
+
+def sym_max(a, b):
+    """ SymInt-aware utility for max()."""
+    if isinstance(a, (SymInt, SymFloat)):
+        return a.__sym_max__(b)
+    elif isinstance(b, (SymInt, SymFloat)):
+        return b.__sym_max__(a)
+    return builtins.max(a, b)  # type: ignore[operator]
+
+def sym_min(a, b):
+    """ SymInt-aware utility for max()."""
+    if isinstance(a, (SymInt, SymFloat)):
+        return a.__sym_min__(b)
+    elif isinstance(b, (SymInt, SymFloat)):
+        return b.__sym_min__(a)
+    return builtins.min(a, b)  # type: ignore[operator]
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
@@ -340,7 +456,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunction', 'Generator']:
+                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
@@ -393,7 +509,7 @@ def is_tensor(obj):
         obj (Object): Object to test
     Example::
 
-        >>> x=torch.tensor([1,2,3])
+        >>> x = torch.tensor([1, 2, 3])
         >>> torch.is_tensor(x)
         True
 
@@ -408,6 +524,56 @@ def is_storage(obj):
         obj (Object): Object to test
     """
     return type(obj) in _storage_classes
+
+
+_GLOBAL_DEVICE_CONTEXT = None
+
+def set_default_device(device):
+    """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
+    does not affect factory function calls which are called with an explicit
+    ``device`` argument.  Factory calls will be performed as if they
+    were passed ``device`` as an argument.
+
+    To only temporarily change the default device instead of setting it
+    globally, use ``with torch.device(device):`` instead.
+
+    The default device is initially ``cpu``.  If you set the default tensor
+    device to another device (e.g., ``cuda``) without a device index, tensors
+    will be allocated on whatever the current device for the device type,
+    even after :func:`torch.cuda.set_device` is called.
+
+    .. warning::
+
+        This function imposes a slight performance cost on every Python
+        call to the torch API (not just factory functions).  If this
+        is causing problems for you, please comment on
+        https://github.com/pytorch/pytorch/issues/92701
+
+    Args:
+        device (device or string): the device to set as default
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires cuda, changes global state")
+        >>> torch.tensor([1.2, 3]).device
+        device(type='cpu')
+        >>> torch.set_default_device('cuda')  # current device is 0
+        >>> torch.tensor([1.2, 3]).device
+        device(type='cuda', index=0)
+        >>> torch.set_default_device('cuda:1')
+        >>> torch.tensor([1.2, 3]).device
+        device(type='cuda', index=1)
+
+    """
+    global _GLOBAL_DEVICE_CONTEXT
+    if _GLOBAL_DEVICE_CONTEXT is not None:
+        _GLOBAL_DEVICE_CONTEXT.__exit__(None, None, None)
+    if device is None:
+        _GLOBAL_DEVICE_CONTEXT = None
+        return
+    from torch.utils._device import DeviceContext
+    _GLOBAL_DEVICE_CONTEXT = DeviceContext(device)
+    _GLOBAL_DEVICE_CONTEXT.__enter__()
 
 
 def set_default_tensor_type(t):
@@ -593,10 +759,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
@@ -966,6 +1132,11 @@ def manager_path():
 
 from torch.amp import autocast
 
+# Initializing the extension shadows the built-in python float / int classes;
+# store them for later use by SymInt / SymFloat.
+py_float = float
+py_int = int
+
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
 del manager_path
@@ -1116,8 +1287,6 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap as vmap
-
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
@@ -1140,11 +1309,13 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 
 class _TorchCompileInductorWrapper:
+    compiler_name = "inductor"
+
     def __init__(self, mode, passes):
         from torch._dynamo.eval_frame import lookup_backend
         from torch._inductor.config import InductorConfigContext
 
-        self.compile_fn = lookup_backend("inductor")
+        self.compile_fn = lookup_backend(self.compiler_name)
         self.cm = InductorConfigContext(mode if mode is not None else passes)
         self._torchdynamo_orig_callable = self.compile_fn
 
@@ -1243,3 +1414,17 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+from torch import func as func
+from torch.func import vmap
+
+# The function _sparse_coo_tensor_unsafe is removed from PyTorch
+# Python API (v. 1.13), here we temporarily provide its replacement
+# with a deprecation warning.
+# TODO: remove the function for PyTorch v 1.15.
+def _sparse_coo_tensor_unsafe(*args, **kwargs):
+    import warnings
+    warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
+                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
+    kwargs['check_invariants'] = False
+    return torch.sparse_coo_tensor(*args, **kwargs)

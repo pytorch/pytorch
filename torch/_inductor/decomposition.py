@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.linspace,
+        aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -35,6 +37,11 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
+        aten.ones_like,
+        aten.zeros_like,
+        aten.zeros,
+        aten.ones,
+        aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -43,16 +50,24 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
+        aten.upsample_bilinear2d,
         aten.hardswish,
+        aten.hardswish_,
         aten.hardswish_backward,
         aten.hardtanh,
+        aten.hardtanh_,
         aten.hardtanh_backward,
         aten.im2col,
+        aten.index_select,
         aten.index_add,
         aten.index_add_,
-        aten.index_select,
+        aten.index_copy,
+        aten.index_copy_,
+        aten.index_fill,
+        aten.index_fill_,
         aten.l1_loss,
         aten.leaky_relu,
+        aten.leaky_relu_,
         aten.leaky_relu_backward,
         aten.linalg_vector_norm,
         aten.logit,
@@ -60,6 +75,8 @@ decompositions = get_decompositions(
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
+        aten.masked_fill,
+        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
@@ -76,17 +93,18 @@ decompositions = get_decompositions(
         aten.native_layer_norm_backward,
         aten.new_empty,
         aten.new_full,
+        aten.new_zeros,
         aten.new_ones,
         aten.nll_loss_backward,
         aten.nll_loss_forward,
         aten.norm,
-        aten.reflection_pad2d_backward,
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
         aten.sgn,
         aten.sigmoid_backward,
         aten.silu,
+        aten.silu_,
         aten.silu_backward,
         aten.slice_backward,
         aten._softmax,
@@ -105,9 +123,9 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
         aten.bucketize,
+        aten.zero_,
+        aten.zero,
     ]
 )
 
@@ -126,11 +144,6 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
     return x
-
-
-@register_decomposition([aten.tanh])
-def tanh(x):
-    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
@@ -168,14 +181,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
@@ -419,19 +424,6 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill])
-def masked_fill(value, mask, other):
-    if isinstance(other, numbers.Number):
-        other = torch.tensor(other, dtype=value.dtype, device=value.device)
-    assert other.numel() == 1 and other.ndim == 0
-    if other.device != value.device and other.numel() == 1:
-        other = other.to(value.device)
-    if other.dtype != value.dtype:
-        # TODO: error out on improper complex conversions
-        other = other.to(value.dtype)
-    return torch.where(mask, other, value)
-
-
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
@@ -473,31 +465,6 @@ def copy(self, src, non_blocking=False):
         return intermediate
 
 
-@register_decomposition(aten.hardswish_)
-def hardswish_(x):
-    return x.copy_(aten.hardswish(x))
-
-
-@register_decomposition(aten.hardtanh_)
-def hardtanh_(x, min_val=-1, max_val=1):
-    return x.copy_(aten.hardtanh(x, min_val, max_val))
-
-
-@register_decomposition(aten.leaky_relu_)
-def leaky_relu_(x, negative_slope=0.01):
-    return x.copy_(aten.leaky_relu(x, negative_slope))
-
-
-@register_decomposition(aten.silu_)
-def silu_(x):
-    return x.copy_(aten.silu(x))
-
-
-@register_decomposition(aten.masked_fill_)
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
-
-
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
@@ -519,17 +486,6 @@ def lift(self):
     return self
 
 
-@register_decomposition([aten.fill.Scalar])
-def fill_scalar(self, value):
-    return torch.full_like(self, value)
-
-
-@register_decomposition([aten.fill.Tensor])
-def fill_tensor(self, value: Tensor):
-    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
-    return torch.full_like(self, value.item())
-
-
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
@@ -547,7 +503,9 @@ Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
-extra_random_decomps = get_decompositions([aten.native_dropout])
+extra_random_decomps = get_decompositions(
+    [aten.native_dropout, aten.exponential, aten.exponential_, aten.uniform_]
+)
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
 )

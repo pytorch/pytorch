@@ -213,7 +213,7 @@ struct C10_API DeviceGuardImplInterface {
 // examples are CPU and Meta.
 template <DeviceType D>
 struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
-  NoOpDeviceGuardImpl() {}
+  NoOpDeviceGuardImpl() = default;
   DeviceType type() const override {
     return D;
   }
