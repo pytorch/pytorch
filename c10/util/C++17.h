@@ -11,6 +11,22 @@
 #include <type_traits>
 #include <utility>
 
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+    __GNUC__ < 5
+#error \
+    "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+#endif
+
+#if defined(__clang__) && __clang_major__ < 4
+#error \
+    "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
+#endif
+
+#if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201402L)) || \
+    (!defined(_MSC_VER) && __cplusplus < 201402L)
+#error You need C++14 to compile PyTorch
+#endif
+
 #if defined(_WIN32) && (defined(min) || defined(max))
 #error Macro clash with min and max -- define NOMINMAX when compiling your program on Windows
 #endif
@@ -338,6 +354,7 @@ template <bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(
     ThenCallback&& thenCallback,
     ElseCallback&& elseCallback) {
+#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -359,10 +376,17 @@ decltype(auto) if_constexpr(
       return static_cast<ElseCallback&&>(elseCallback)();
     }
   }
+#else
+  // C++14 implementation of if constexpr
+  return detail::_if_constexpr<Condition>::call(
+      static_cast<ThenCallback&&>(thenCallback),
+      static_cast<ElseCallback&&>(elseCallback));
+#endif
 }
 
 template <bool Condition, class ThenCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
+#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -377,6 +401,11 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
       return static_cast<ThenCallback&&>(thenCallback)();
     }
   }
+#else
+  // C++14 implementation of if constexpr
+  return if_constexpr<Condition>(
+      static_cast<ThenCallback&&>(thenCallback), [](auto) {});
+#endif
 }
 
 // GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's
@@ -421,6 +450,16 @@ struct to_string_<T, void_t<decltype(std::to_string(std::declval<T>()))>>
 template <class T>
 inline std::string to_string(T value) {
   return detail::to_string_<T>::call(value);
+}
+
+template <class T>
+constexpr const T& min(const T& a, const T& b) {
+  return (b < a) ? b : a;
+}
+
+template <class T>
+constexpr const T& max(const T& a, const T& b) {
+  return (a < b) ? b : a;
 }
 
 } // namespace guts

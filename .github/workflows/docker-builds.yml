@@ -33,7 +33,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
           - docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-py3.7-clang9
