@@ -1,12 +1,12 @@
 # Import generic wrappers
 import numpy as np
 import onnx
-import onnxruntime
+import onnxruntime  # type: ignore[import]
 import torch
 import torch._dynamo
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.onnx._internal import fx as fx_onnx
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 
 model_name = "sshleifer/tiny-gpt2"
@@ -65,5 +65,4 @@ def test_one(graph_module, onnx_model, bound_args, replaced_attrs):
 
 
 for i in range(10):
-    print(f"Test {i}")
     test_one(graph_module, onnx_model, bound_args, replaced_attrs)

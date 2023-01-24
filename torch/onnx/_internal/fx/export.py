@@ -5,6 +5,7 @@ import operator
 from typing import Callable, Dict, Optional, Tuple, Union
 
 import onnx
+
 import torch
 import torch._C
 import torch._decomp
@@ -438,6 +439,7 @@ def _export(
         # Use default decomposition table.
         decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
     # Apply decomposition table to the input graph.
+    # Make sure the feed-in "module" is stateless.
     decomposed_module = proxy_tensor.make_fx(
         module,
         decomposition_table=decomposition_table,
@@ -588,7 +590,7 @@ def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
     replaced_attrs = []
     for node in graph.nodes:
         if node.op == "get_attr":
-            replaced_attr = None
+            replaced_attr: Optional[torch.Tensor] = None
             # get_attr could retrieve either parameter or buffer, so
             # we need to try both.
             try:
@@ -651,7 +653,7 @@ def export_without_parameters_and_buffers(
 
     # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
     # Example content of concrete_args:
-    #  concrete_args["x"] = torch.fx.PH
+    #  concrete_args["x"] = torch.fx._symbolic_trace.PH
     #  concrete_args["b"] = 1
     # where "x" and "b" are argument names in "signature".
     concrete_args = {}
@@ -659,7 +661,7 @@ def export_without_parameters_and_buffers(
         if isinstance(param_value, torch.Tensor):
             # param_value can be, e.g., a real tensor or a fake tensor.
             # param_value is treated as substitable tensor symbol (aka placeholder).
-            concrete_args[param_name] = torch.fx.PH
+            concrete_args[param_name] = torch.fx._symbolic_trace.PH
         else:
             concrete_args[param_name] = param_value
 
