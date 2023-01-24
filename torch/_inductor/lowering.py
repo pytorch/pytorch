@@ -28,8 +28,8 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    FloorDiv,
     IndexingConstant,
-    IndexingDiv,
     PermuteView,
     Pointwise,
     Reduction,
@@ -1399,7 +1399,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = ir.IndexingDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = ir.FloorDiv(sympy.expand(end - start), sympy.expand(step))
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -1410,7 +1410,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
 
         idx_dim = ops.index_expr(idx[dim], torch.int32)
         src_idx = list(idx)
-        src_idx[dim] = ir.IndexingDiv(idx[dim] - start, step)
+        src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
 
         mask = []
         if start != 0:
@@ -2505,12 +2505,12 @@ def constant_boundary_condition_2d(x, fill_value, padding):
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
-    x_out = ir.IndexingDiv(
+    x_out = ir.FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
 
     if ceil_mode:
-        x_alt = ir.IndexingDiv(
+        x_alt = ir.FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
 
@@ -2694,13 +2694,13 @@ def max_pool2d_with_indices_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -2841,10 +2841,10 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     def start_index(index, out_dim, inp_dim):
-        return ir.IndexingDiv((index * inp_dim), out_dim)
+        return ir.FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
-        return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+        return ir.FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -3122,13 +3122,13 @@ def avg_pool2d_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -3691,7 +3691,7 @@ def op_sub(a, b):
 
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
-    return IndexingDiv(a, b)
+    return FloorDiv(a, b)
 
 
 @register_lowering(operator.truediv)

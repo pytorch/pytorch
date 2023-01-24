@@ -255,9 +255,9 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, IndexingDiv, ModularIndexing
+    from .ir import CleanDiv, FloorDiv, ModularIndexing
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 

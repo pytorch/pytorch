@@ -269,6 +269,12 @@ if HAS_SYMPY:
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
+            if isinstance(base, sympy.Add):
+                for a in base.args:
+                    gcd = sympy.gcd(a, divisor)
+                    if gcd == divisor:
+                        return FloorDiv(base - a, divisor) + a / gcd
+
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(

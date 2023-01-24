@@ -69,7 +69,7 @@ class ExprPrinter(Printer):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_CleanDiv(self, expr):
-        return self._print_IndexingDiv(expr)
+        return self._print_FloorDiv(expr)
 
 
 class OpOverrides:

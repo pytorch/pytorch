@@ -179,7 +179,7 @@ class CppPrinter(ExprPrinter):
             x = f"({x} / {div})"
         return f"{x} % {mod}"
 
-    def _print_IndexingDiv(self, expr):
+    def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
@@ -1688,7 +1688,7 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
+            main_loop_range = ir.FloorDiv(self.size, sympy_factor)
             main_loop = LoopLevel(self.var, main_loop_range)
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
