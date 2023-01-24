@@ -1305,25 +1305,26 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             # rank's `optim`
             ret_state_dict = _rekey_sharded_optim_state_dict(
                 sharded_osd,
-                model,
-                optim,
-                optim_input,
-                using_optim_input,
+                model=model,
+                optim=optim,
+                optim_input=optim_input,
+                using_optim_input=using_optim_input,
+                is_named_optimizer=is_named_optimizer,
             )
         else:
             sharded_osd = _flatten_optim_state_dict(
                 optim_state_dict,
-                model,
-                True,
-                use_orig_params,
+                model=model,
+                shard_state=True,
+                use_orig_params=use_orig_params,
             )
             ret_state_dict = _rekey_sharded_optim_state_dict(
                 sharded_osd,
-                model,
-                optim,
-                optim_input,
-                using_optim_input,
-                is_named_optimizer,
+                model=model,
+                optim=optim,
+                optim_input=optim_input,
+                using_optim_input=using_optim_input,
+                is_named_optimizer=is_named_optimizer,
             )
         return ret_state_dict
 
