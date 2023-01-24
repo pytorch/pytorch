@@ -87,10 +87,6 @@
 #endif
 #endif
 
-#if defined(USE_MPS)
-#include <ATen/mps/MPSDevice.h>
-#endif
-
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
@@ -1219,6 +1215,10 @@ void initIttBindings(PyObject* module);
 } // namespace torch
 #endif
 
+#ifdef USE_MPS
+PyMethodDef* MPSModule_methods();
+#endif
+
 namespace torch {
 void initVerboseBindings(PyObject* module);
 } // namespace torch
@@ -1273,6 +1273,9 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
+#endif
+#ifdef USE_MPS
+  THPUtils_addPyMethodDefs(methods, MPSModule_methods());
 #endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
@@ -1593,15 +1596,6 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
-  py_module.def("_is_mps_available", []() { return at::hasMPS(); });
-  py_module.def("_is_mps_on_macos_13_or_newer", []() {
-#ifdef USE_MPS
-    return at::mps::is_macos_13_or_newer();
-#else
-    return false;
-#endif
-  });
-
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 

@@ -28,12 +28,20 @@ struct TORCH_API MPSHooksInterface {
     return false;
   }
 
+  virtual bool isOnMacOS13orNewer() const {
+    return false;
+  }
+
   virtual const Generator& getDefaultMPSGenerator() const {
     AT_ERROR("Cannot get default MPS generator without MPS backend.");
   }
 
   virtual Allocator* getMPSDeviceAllocator() const {
     AT_ERROR("MPSDeviceAllocator requires MPS.");
+  }
+
+  virtual void deviceSynchronize() const {
+    TORCH_CHECK(false, "Cannot synchronize MPS device without MPS backend. ");
   }
 };
 
