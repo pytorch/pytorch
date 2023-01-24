@@ -44,7 +44,7 @@ from torch.distributed.utils import (
 )
 
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
+from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, MixedPrecision
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -4682,6 +4682,79 @@ class DistributedTest:
                     list(rank0_model.b.parameters()), list(m.b.parameters())
                 )
                 self.assertEqual(rank0_model.a.bias, m.a.bias)
+
+        def test_ddp_native_mixed_precision(self):
+            # Not supported with replicated tensor.
+            # TODO: ignored param tests, param that doesn't require grad tests
+            from torch.nn.parallel._replicated_tensor_ddp_utils import (
+                _set_ddp_with_replicated_tensor
+            )
+            _set_ddp_with_replicated_tensor(False)
+            rank = self.rank
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+            torch.cuda.set_device(rank)
+            inp = torch.randn(10, 1)
+
+            mp_config = MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+            )
+
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.m = torch.nn.Linear(1, 5)
+                    self.register_buffer('buffer', torch.randn(1, 2))
+
+                def forward(self_, x):
+                    params = self_.m.parameters()
+                    for p in params:
+                        self.assertEqual(mp_config.param_dtype, p.dtype)
+
+                    self.assertEqual(self_.buffer.dtype, mp_config.buffer_dtype)
+
+                    self.assertEqual(mp_config.param_dtype, x.dtype)
+                    return self_.m(x)
+
+            m = MyModel()
+
+            net = torch.nn.parallel.DistributedDataParallel(
+                m.to(rank),
+                device_ids=[rank],
+                mixed_precision=mp_config,
+                gradient_as_bucket_view=True,
+            )
+            # Each param should have an mp_param in the lower precision, and
+            # an fp_param in the higher precision.
+            for p in net.parameters():
+                self.assertEqual(mp_config.param_dtype, p._mp_param.dtype)
+                self.assertEqual(torch.float32, p._fp_param.dtype)
+
+            for i in range(6):
+                loss = net(inp).sum()
+                loss.backward()
+                # TODO: (rohan-varma) enhance test by patching allreduce and
+                # ensuring comm happens in the lowered precision
+                # TODO (rohan-varma): tests for only setting the reduce_dtype
+                # TODO (rohan-varma): tests for setting reduce_dtype is different
+                # TODO (rohan-varma): add a test for buffers
+                # than param dtype
+                # Verify gradients are synchronized across ranks
+                for param in net.parameters():
+                    self.assertEqual(torch.float32, param.dtype)
+                    assert param.grad is not None
+                    tensor_list = [torch.zeros_like(param.grad) for _ in range(dist.get_world_size(net.process_group))]
+                    dist.all_gather(tensor_list, param.grad)
+                    g, rest = tensor_list[0], tensor_list[1:]
+                    self.assertEqual(g.dtype, torch.float32)
+                    for g_ in rest:
+                        self.assertEqual(g_.dtype, torch.float32)
+                        self.assertEqual(g, g_)
+                    # print(f"rank {rank} it {i} grad {param.grad} dtype {param.grad.dtype} param dtype {param.dtype}")
+                net.zero_grad()
+            print('-- done with ackward --')
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank

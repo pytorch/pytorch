@@ -525,7 +525,7 @@ def _root_pre_forward(
     _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
 
     # Prepares the forward inputs by moving them to ``compute_device``
-    # TODO: Do not use the side stream for tensor copies for now; investigate
+    # TODO (rohan-varma): Do not use the side stream for tensor copies for now; investigate
     # the perf with/without it.
     args_tuple, kwargs_tuple = _to_kwargs(
         args, kwargs, state.compute_device.index, False
@@ -539,14 +539,13 @@ def _root_pre_forward(
         args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
-
 def _cast_forward_inputs(
     input_dtype: Optional[torch.dtype],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[Any, Any]:
     """
-    Prepares the forward inputs by casting them to ``input_dtype`` if it is not ``None``.
+    Prepares the forward inputs by casting them to ``input_dtype``if it is not ``None``.
     """
     # TODO: For mixed precision, cast to reduced-precision in a single `to()` call.
     if input_dtype is not None:

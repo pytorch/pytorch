@@ -34,6 +34,77 @@ class _OptimizerHookState(object):
                 f"{_FUNCTIONAL_OPTIM_STEP_METHOD_NAME}."
             )
 
+# TODO (rohan-varma): Unify the below hooks once DDP MP + optimizer overlap
+# is enabled to work together.
+@dataclass
+class _AllreduceUpcastHookState:
+    ddp_inst: Any # TODO (rohan-varma): make weakref
+    reducer_weakref: dist.Reducer
+    process_group: dist.ProcessGroup
+    upcast_stream: torch.cuda.Stream
+    wait_for_stream_enqueued: bool
+    div: bool
+    upcast_params_and_grads: bool
+
+def _reducer_allreduce_and_upcast_hook(
+    hook_state: _AllreduceUpcastHookState, bucket: dist.GradBucket
+) -> torch.futures.Future[torch.Tensor]:
+    reducer_weakref = hook_state.reducer_weakref
+    process_group = hook_state.process_group
+    gradient_is_bucket_view = hook_state.ddp_inst.gradient_as_bucket_view
+   # print(f"RV: it {hook_state.ddp_inst.num_iterations}")
+   # print("calling allreduce")
+   # print(f"RV: gradient buffer dtype {buf.dtype}")
+    # Cast bucket if different than param_dtype.
+    if (hook_state.ddp_inst.mixed_precision.param_dtype != hook_state.ddp_inst.mixed_precision.reduce_dtype):
+        # Cast bucket tensor to reduce_dtype
+        bucket.set_buffer(bucket.buffer().to(hook_state.ddp_inst.mixed_precision.reduce_dtype))
+    fut = reducer_weakref()._run_allreduce_hook(bucket)
+    ret_fut = torch.futures.Future()
+    stream = hook_state.upcast_stream
+    with torch.cuda.stream(stream):
+        #print("in stream")
+        fut.wait()
+        if hook_state.div:
+            bucket.buffer().div_(process_group.size())
+        ret_fut.set_result(bucket.buffer())
+
+        if hook_state.upcast_params_and_grads:
+            #print("upcasting")
+            params, grads = bucket.parameters(), bucket.gradients()
+            for p, g in zip(params, grads):
+                #print(f"RV: before upcast reduced types: {p.dtype} {g.dtype}")
+                # Remove the hook in preparation for next iteration
+                p.data = p._fp_param
+                if not gradient_is_bucket_view:
+                    g.data = g.data.to(p.data.dtype)
+                    p.grad = g
+                else:
+                    p.grad.data = p.grad.to(p.data.dtype)
+                #print(f"type after upcast {p.data.dtype} {p.grad.data.dtype}")
+
+    # enqueue a callback to wait for this stream at end of backward
+    def wait_for_stream_cb():
+        torch.cuda.current_stream().wait_stream(stream)
+        # reset for next backward pass
+        hook_state.wait_for_stream_enqueued = False
+        for p in hook_state.ddp_inst.module.parameters():
+            if hasattr(p, '_hook_state'):
+                p._hook_state[1].remove()
+        # TODO: rohan-varma put this in post-backward
+        # for p in self.module.parameters():
+        #     if hasattr(p, '_hook_state'):
+        #         print("removing hook")
+        #         p._hook_state[1].remove()
+
+    if not hook_state.wait_for_stream_enqueued:
+        Variable._execution_engine.queue_callback(
+            wait_for_stream_cb
+        )
+        # mark that the callback is enqueued
+        hook_state.wait_for_stream_enqueued = True
+
+    return ret_fut
 
 @dataclass
 class _OptimInBackwardHookState:
@@ -69,6 +140,7 @@ def _apply_optim_in_backward_hook(
             bucket.buffer().div_(process_group.size())
             model_params = bucket.parameters()
             grads = bucket.gradients()
+            # TODO (rohan-varma): upcast as needed for DDP mixed precision.
             for p, g in zip(model_params, grads):
                 if hasattr(p, '_in_backward_optimizers'):
                     # Note: need to set grad to the bucket's grad, because

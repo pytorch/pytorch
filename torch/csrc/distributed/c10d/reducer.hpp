@@ -67,6 +67,8 @@ class TORCH_API Reducer {
   // all live on the same device and have the same dimensionality.
   void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
+  void autograd_hook(size_t index);
+
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
@@ -246,8 +248,6 @@ class TORCH_API Reducer {
   void mark_variable_ready_sparse(size_t variable_index);
 
   void mark_variable_ready(size_t variable_index);
-
-  void autograd_hook(size_t index);
 
   void mark_bucket_ready(size_t bucket_index);
 

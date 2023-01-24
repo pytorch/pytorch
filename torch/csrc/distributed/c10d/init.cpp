@@ -499,6 +499,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
+        "_autograd_hook",
+        [](::c10d::Reducer& reducer, int index) -> void {
+            reducer.autograd_hook(index);
+        }, py::call_guard<py::gil_scoped_release>())
+      .def(
           "set_logger",
           [](::c10d::Reducer& reducer,
              const std::shared_ptr<::c10d::Logger> logger) {
