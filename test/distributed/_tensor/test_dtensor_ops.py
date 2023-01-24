@@ -481,7 +481,6 @@ dtensor_fails = {
     xfail("stft"),
     xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("symeig"),
     xfail("t"),
     xfail("take_along_dim"),
     xfail("take"),
