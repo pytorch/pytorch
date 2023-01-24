@@ -5181,6 +5181,7 @@ def exponential(self, rate=1, generator=None):
     assert generator is None
     utils.check(
         not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
         lambda: f"exponential not implemented for {self.dtype}",
     )
