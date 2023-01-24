@@ -34,20 +34,37 @@ std::deque<std::deque<TensorView*>> tvChains(
   return tv_chains;
 }
 
-bool rejectScheduleForTorchGather(
-    TorchGatherOp* torch_gather,
+bool rejectScheduleFusionInputRequirement(
+    Expr* expr,
     ScheduleHeuristic schedule_stragety) {
-  if (!torch_gather->input(0)->isFusionInput()) {
+  if (!expr->input(0)->isFusionInput()) {
     scheduler_debug_utils::canScheduleRejectReason(
         schedule_stragety,
-        "First input of TorchGatherOp must be fusion input.");
+        "First input of ",
+        expr->getOpString(),
+        " must be fusion input.");
     return true;
   }
-  if (torch_gather->input(0)->uses().size() > 1) {
+  if (expr->input(0)->uses().size() > 1) {
     scheduler_debug_utils::canScheduleRejectReason(
         schedule_stragety,
-        "First input of TorchGatherOp can only be used by TorchGatherOp");
+        "First input of ",
+        expr->getOpString(),
+        " can only be used by ",
+        expr->getOpString());
     return true;
+  }
+  return false;
+}
+
+bool rejectScheduleForSelectLikeOps(
+    Fusion* fusion,
+    ScheduleHeuristic schedule_strategy) {
+  for (auto expr : fusion->exprs()) {
+    if (expr->isOneOf<SelectOp, IndexSelectOp, TorchGatherOp>() &&
+        rejectScheduleFusionInputRequirement(expr, schedule_strategy)) {
+      return true;
+    }
   }
   return false;
 }
@@ -1184,6 +1201,11 @@ class NoOpScheduler : public SchedulerEntry {
       }
     }
 
+    // Check that inputs of all select/gather-like ops are fusion inputs
+    if (rejectScheduleForSelectLikeOps(fusion, ScheduleHeuristic::NoOp)) {
+      return false;
+    }
+
     // We have verified that all iterdomains on all output tv's are trivial
     // reductions,
     //  broadcasts or zero-sized. Therefore accepting this fusion for NoOp
@@ -1234,42 +1256,9 @@ class ReductionScheduler : public SchedulerEntry {
       return false;
     }
 
-    // Check that inputs of all select ops are fusion inputs
-    // TODO(feiwen): To add some routines to handle both SelectOp and
-    // IndexSelectOp
-    for (auto select : ir_utils::getSelectOps(fusion)) {
-      if (!select->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Reduction,
-            "Inputs of SelectOp must be fusion input.");
-        return false;
-      }
-      if (select->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Reduction,
-            "Inputs of SelectOp can only be used by SelectOp");
-        return false;
-      }
-    }
-    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
-      if (!idx_sel->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Reduction,
-            "First input of IndexSelectOp must be fusion input.");
-        return false;
-      }
-      if (idx_sel->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Reduction,
-            "First input of IndexSelectOp can only be used by IndexSelectOp");
-        return false;
-      }
-    }
-    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
-      if (rejectScheduleForTorchGather(
-              torch_gather, ScheduleHeuristic::Reduction)) {
-        return false;
-      }
+    // Check that inputs of all select/gather-like ops are fusion inputs
+    if (rejectScheduleForSelectLikeOps(fusion, ScheduleHeuristic::Reduction)) {
+      return false;
     }
 
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
@@ -1423,20 +1412,12 @@ class TransposeScheduler : public SchedulerEntry {
       return false;
     }
 
-    // Check that inputs of all select ops are fusion inputs
+    // Check that inputs of all select/gather-like ops are fusion inputs
+    if (rejectScheduleForSelectLikeOps(fusion, ScheduleHeuristic::Transpose)) {
+      return false;
+    }
+
     for (auto select : ir_utils::getSelectOps(fusion)) {
-      if (!select->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Transpose,
-            "Inputs of SelectOp must be fusion input.");
-        return false;
-      }
-      if (select->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Transpose,
-            "Inputs of SelectOp can only be used by SelectOp");
-        return false;
-      }
       auto root = TensorDomain::noReductions(
           select->input(0)->as<TensorView>()->getMaybeRFactorDomain());
       if (select->getSelectAxis() == root[root.size() - 1]) {
@@ -1447,20 +1428,7 @@ class TransposeScheduler : public SchedulerEntry {
         return false;
       }
     }
-
     for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
-      if (!idx_sel->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Transpose,
-            "First inputs of IndexSelectOp must be fusion input.");
-        return false;
-      }
-      if (idx_sel->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Transpose,
-            "First inputs of IndexSelectOp can only be used by SelectOp");
-        return false;
-      }
       auto root = TensorDomain::noReductions(
           idx_sel->input(0)->as<TensorView>()->getMaybeRFactorDomain());
       if (idx_sel->getSelectAxis() == root[root.size() - 1]) {
@@ -1471,12 +1439,7 @@ class TransposeScheduler : public SchedulerEntry {
         return false;
       }
     }
-
     for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
-      if (rejectScheduleForTorchGather(
-              torch_gather, ScheduleHeuristic::Transpose)) {
-        return false;
-      }
       auto root = TensorDomain::noReductions(
           torch_gather->input(0)->as<TensorView>()->getMaybeRFactorDomain());
       if (torch_gather->dim() == (int)root.size() - 1) {
@@ -1564,42 +1527,9 @@ class PointWiseScheduler : public SchedulerEntry {
       return false;
     }
 
-    // Check that inputs of all select ops are fusion inputs
-    for (auto select : ir_utils::getSelectOps(fusion)) {
-      if (!select->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::PointWise,
-            "Inputs of SelectOp must be fusion input.");
-        return false;
-      }
-      if (select->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::PointWise,
-            "Inputs of SelectOp can only be used by SelectOp");
-        return false;
-      }
-    }
-
-    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
-      if (!idx_sel->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::PointWise,
-            "First input of IndexSelectOp must be fusion input.");
-        return false;
-      }
-      if (idx_sel->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::PointWise,
-            "First input of IndexSelectOp can only be used by IndexSelectOp");
-        return false;
-      }
-    }
-
-    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
-      if (rejectScheduleForTorchGather(
-              torch_gather, ScheduleHeuristic::PointWise)) {
-        return false;
-      }
+    // Check that inputs of all select/gather-like ops are fusion inputs
+    if (rejectScheduleForSelectLikeOps(fusion, ScheduleHeuristic::PointWise)) {
+      return false;
     }
 
     if (ir_utils::getViewOps(fusion).size() > 0) {
@@ -1687,42 +1617,9 @@ class PersistentKernelScheduler : public SchedulerEntry {
       return false;
     }
 
-    // Check that inputs of all select ops are fusion inputs
-    for (auto select : ir_utils::getSelectOps(fusion)) {
-      if (!select->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Persistent,
-            "Inputs of SelectOp must be fusion input.");
-        return false;
-      }
-      if (select->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Persistent,
-            "Inputs of SelectOp can only be used by SelectOp");
-        return false;
-      }
-    }
-
-    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
-      if (!idx_sel->input(0)->isFusionInput()) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Persistent,
-            "First input of IndexSelectOp must be fusion input.");
-        return false;
-      }
-      if (idx_sel->input(0)->uses().size() > 1) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Persistent,
-            "First input of IndexSelectOp can only be used by IndexSelectOp");
-        return false;
-      }
-    }
-
-    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
-      if (rejectScheduleForTorchGather(
-              torch_gather, ScheduleHeuristic::Persistent)) {
-        return false;
-      }
+    // Check that inputs of all select/gather-like ops are fusion inputs
+    if (rejectScheduleForSelectLikeOps(fusion, ScheduleHeuristic::Persistent)) {
+      return false;
     }
 
     if (hasNonUniqueBcast(fusion)) {

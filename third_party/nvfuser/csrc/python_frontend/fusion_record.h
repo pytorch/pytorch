@@ -1340,7 +1340,7 @@ struct IndexSelectOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "index_select",
+            "ops.index_select",
             RecordType::IndexSelectOp),
         dim_(dim) {}
   virtual ~IndexSelectOpRecord() = default;
@@ -1356,6 +1356,14 @@ struct IndexSelectOpRecord : RecordFunctor {
 
     Nvf::Val* output = Nvf::index_select(arg1, dim_, arg3);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  void print(std::ostream& os, bool close_function = true) const final {
+    RecordFunctor::print(os, false);
+    os << ", dim=" << dim_;
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:

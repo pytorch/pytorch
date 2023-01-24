@@ -628,5 +628,25 @@ class TestNvFuserFrontend(TestCase):
         eager_out = torch.gather(inputs[0] + inputs[1], 0, inputs[2])
         self.assertEqual(eager_out, nvf_out[0])
 
+    def test_index_select(self):
+        inputs = [
+            torch.randn(8, 16, device='cuda'),
+            torch.randn(8, 16, device='cuda'),
+            torch.randint(0, 8, (6,), device="cuda").to(dtype=torch.long)
+        ]
+
+        def fusion_func(fd: FusionDefinition) :
+            t0 = fd.define_tensor(2)
+            t1 = fd.define_tensor(2)
+            t2 = fd.define_tensor(1, DataType.Int)
+            t3 = fd.ops.add(t0, t1)
+            t4 = fd.ops.index_select(t3, t2, 0)
+            fd.add_output(t4)
+
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        eager_out = torch.index_select(inputs[0] + inputs[1], 0, inputs[2])
+        self.assertEqual(eager_out, nvf_out[0])
+
 if __name__ == '__main__':
     run_tests()

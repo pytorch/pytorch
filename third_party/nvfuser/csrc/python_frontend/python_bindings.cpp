@@ -1354,8 +1354,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       "index_select",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,
-         int64_t dim,
-         nvfuser::Tensor index) -> nvfuser::Tensor {
+         nvfuser::Tensor index,
+         int64_t dim) -> nvfuser::Tensor {
         FUSER_PERF_SCOPE("Operators.index_select");
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor(arg.dims);
@@ -1376,7 +1376,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       "gather",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg1,
-         nvfuser::Tensor arg3,
+         nvfuser::Tensor index,
          int64_t dim) -> nvfuser::Tensor {
         FUSER_PERF_SCOPE("Operators.gather");
         nvfuser::FusionDefinition* fd = self.fusion_definition;
@@ -1384,14 +1384,14 @@ void initNvFuserPythonBindings(PyObject* module) {
         fd->defineRecord(new nvfuser::TorchGatherOpRecord(
             {
                 fd->recordingState(arg1()),
-                fd->recordingState(arg3()),
+                fd->recordingState(index()),
             },
             {fd->recordingState(output())},
             dim));
         return output;
       },
       py::arg("arg1"),
-      py::arg("arg3"),
+      py::arg("index"),
       py::arg("dim"),
       py::return_value_policy::reference);
   nvf_ops.def(
