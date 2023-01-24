@@ -1,0 +1,10 @@
+- aten::_convolution
+- aten::add.Tensor
+- aten::addmm
+- aten::batch_norm
+- aten::dropout
+- aten::hardtanh_
+- aten::mean.dim
+- aten::t
+- prim::Constant
+- prim::ListConstruct

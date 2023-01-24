@@ -1,0 +1,23 @@
+python_library(
+    name = "torchgen",
+    srcs = glob(
+        ["**/*.py"],
+    ),
+    base_module = "torchgen",
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third_party:pyyaml",
+        "//third_party:typing-extensions",
+    ],
+)
+
+python_binary(
+    name = "gen",
+    main_module = "torchgen.gen",
+    visibility = [
+        "PUBLIC",
+    ],
+    deps = [
+        ":torchgen",
+    ],
+)
