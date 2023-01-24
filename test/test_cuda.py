@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unittest
 import warnings
+import subprocess
 from random import randint
 
 import torch
@@ -3333,6 +3334,38 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_error(self):
+        # We need to run this test in a separate thread as the error we trigger
+        # puts the cuda context in a bad state
+        script = """
+import torch
+
+g = torch.cuda.CUDAGraph()
+try:
+    g.capture_begin()
+except RuntimeError as e:
+    if "CUDA graphs must be captured on a non-default stream." in str(e):
+        exit(0)
+    else:
+        exit(1)
+exit(2)
+"""
+        try:
+            a = subprocess.check_output(
+                [sys.executable, '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),)
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                self.assertTrue(False, "Error raise by starting capture without a stream is not the expected one")
+            elif e.returncode == 2:
+                self.assertTrue(False, "Error raised by starting capture without a stream was not caught")
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
