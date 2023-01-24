@@ -279,6 +279,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
+    "exponential": {f16, f32, f64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
