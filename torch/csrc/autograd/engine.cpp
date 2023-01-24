@@ -44,6 +44,7 @@
 #include <thread>
 #include <typeinfo>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace autograd {
@@ -1211,10 +1212,11 @@ auto Engine::execute(
         input_stream,
         opt_next_stream);
 
-    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
+    execute_with_graph_task(
+        graph_task, std::move(graph_root), std::move(input_buffer));
   } else {
     execute_with_graph_task(
-        graph_task, graph_root, InputBuffer(variable_list()));
+        graph_task, std::move(graph_root), InputBuffer(variable_list()));
   }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
