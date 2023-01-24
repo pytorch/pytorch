@@ -442,10 +442,12 @@ class Module:
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
         if self.call_super_init is False and bool(kwargs):
-            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'".format(type(self).__name__, next(iter(kwargs))))
+            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'"
+                            "".format(type(self).__name__, next(iter(kwargs))))
 
         if self.call_super_init is False and bool(args):
-            raise TypeError("{}.__init__() takes 1 positional argument but {} were given".format(type(self).__name__, len(args) + 1))
+            raise TypeError("{}.__init__() takes 1 positional argument but {} were"
+                            " given".format(type(self).__name__, len(args) + 1))
 
         """
         Calls super().__setattr__('a', a) instead of the typical self.a = a
