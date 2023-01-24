@@ -7,7 +7,7 @@
 #define USE_CUSOLVER_64_BIT
 #endif
 
-#ifdef CUDART_VERSION
+#if defined(CUDART_VERSION) || defined(ROCM_VERSION) && ROCM_VERSION >= 50300
 
 namespace at {
 namespace cuda {

@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
+    setLinalgBackendsToDefaultFinally,
     dtype_abbrs
 )
 from torch.testing._internal.common_device_type import (
@@ -1097,6 +1098,7 @@ class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
+    @setLinalgBackendsToDefaultFinally
     @ops(op_db)
     def test_meta_outplace(self, device, dtype, op):
         # run the OpInfo sample inputs, cross-referencing them with the
@@ -1115,6 +1117,7 @@ class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
+    @setLinalgBackendsToDefaultFinally
     @ops(op_db)
     def test_meta_inplace(self, device, dtype, op):
         func = op.get_inplace()

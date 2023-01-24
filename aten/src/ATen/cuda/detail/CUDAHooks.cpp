@@ -162,6 +162,14 @@ bool CUDAHooks::hasROCM() const {
   return AT_ROCM_ENABLED();
 }
 
+bool CUDAHooks::hasHIPSOLVER() const {
+#if AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
+  return true;
+#else
+  return false;
+#endif
+}
+
 #if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());

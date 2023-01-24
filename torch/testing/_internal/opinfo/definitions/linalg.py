@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoLapack,
     skipCUDAIf,
     skipCUDAIfNoCusolver,
+    skipCUDAIfNoCusolverAndNoHipsolver,
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
     skipCUDAIfRocm,
@@ -1408,7 +1409,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         sample_inputs_func=sample_inputs_householder_product,
         decorators=[
-            skipCUDAIfNoCusolver,
+            skipCUDAIfNoCusolverAndNoHipsolver,
             skipCPUIfNoLapack,
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
