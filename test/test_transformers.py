@@ -1459,6 +1459,24 @@ class TestSDPA(NNTestCase):
                 _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
+    def test_incompatible_mask(self):
+        def ones_tensor(*shape):
+            return torch.ones(shape, dtype=torch.float32)
+        S, L, E, H = 1, 2, 4, 1
+        qkv = ones_tensor(S, L, E)
+
+        mha = nn.MultiheadAttention(E, H)
+        mha.in_proj_weight = Parameter(torch.ones((E * 3, E)))
+        mha.out_proj.weight = Parameter(torch.ones((E, E)))
+        qkv = qkv.to(float)
+        kpm = ones_tensor(S, L) * float("-inf")
+        am = ones_tensor(L, L).to(bool)
+
+        def func():
+            return mha(qkv, qkv, qkv, need_weights=False, key_padding_mask=kpm, attn_mask=am)
+
+        self.assertRaises(RuntimeError, func)
+
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
