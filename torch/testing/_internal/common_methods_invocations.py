@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version)
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -7587,15 +7587,14 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
-    for qkv_shapes, is_causal, need_attn_weights, dropout_p in product(
-            qkv_shapes, [True, False], [True, False], [0.0, 0.5]):
+    for qkv_shapes, is_causal, dropout_p in product(
+            qkv_shapes, [True, False], [0.0, 0.5]):
         shape_q, shape_kv = qkv_shapes
         yield SampleInput(
             make(shape_q),
             make(shape_kv),
             make(shape_kv),
             is_causal=is_causal,
-            need_attn_weights=need_attn_weights,
             dropout_p=dropout_p
         )
 
@@ -8905,7 +8904,7 @@ op_db: List[OpInfo] = [
            # trigger addmm being decomposed by a jit pass.
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -8923,8 +8922,7 @@ op_db: List[OpInfo] = [
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -8946,7 +8944,7 @@ op_db: List[OpInfo] = [
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                           torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_addmv),
@@ -8957,7 +8955,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
+                                                       if SM53OrLater or TEST_WITH_ROCM else []),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -8993,7 +8991,7 @@ op_db: List[OpInfo] = [
     OpInfo('baddbmm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if CUDA11OrLater or TEST_WITH_ROCM else []),
+                                           torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
                                                     *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
                                                     torch.complex64, torch.complex128),
@@ -9019,8 +9017,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
@@ -9035,8 +9032,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9052,7 +9048,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
+                                                       if SM53OrLater or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
@@ -9066,8 +9062,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9075,8 +9070,7 @@ op_db: List[OpInfo] = [
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, *[torch.bfloat16]
-                                                           if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9622,8 +9616,7 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True),
     OpInfo('corrcoef',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half,
-                                                  *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_corrcoef,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9697,10 +9690,8 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('cov',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half,
-                                                  *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16]
-                                                           if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cov,
            error_inputs_func=error_inputs_cov,
            supports_out=False,
@@ -10619,8 +10610,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
            # Needs to construct a 2nx2n matrix by copy_ ing into it
@@ -10641,7 +10631,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
+                                                       if SM53OrLater or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -11490,7 +11480,7 @@ op_db: List[OpInfo] = [
            aliases=('conv_transpose1d',),
            dtypes=floating_and_complex_types_and(torch.int64),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11534,7 +11524,7 @@ op_db: List[OpInfo] = [
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
            dtypes=floating_and_complex_types_and(torch.int64),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            # Runs very slowly on slow-gradcheck for complex.
            gradcheck_fast_mode=True,
@@ -11582,7 +11572,7 @@ op_db: List[OpInfo] = [
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose3d),
            dtypes=floating_and_complex_types_and(torch.int64),
            dtypesIfCUDA=floating_and_complex_types_and(
-               torch.float16, torch.chalf, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+               torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11638,7 +11628,7 @@ op_db: List[OpInfo] = [
            aten_name='conv1d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       torch.bfloat16),
            sample_inputs_func=sample_inputs_conv1d,
            error_inputs_func=error_inputs_conv1d,
            supports_forward_ad=True,
@@ -11679,7 +11669,7 @@ op_db: List[OpInfo] = [
            aten_name='conv2d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_conv2d),
            error_inputs_func=error_inputs_conv2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12345,10 +12335,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linear,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
-                                                       if (CUDA11OrLater or TEST_WITH_ROCM) else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
-                                                                if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            # linear calls mm under the hood which is nondeterministic on CUDA
            # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12369,7 +12357,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bilinear,
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
+                                           *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
@@ -12535,11 +12523,9 @@ op_db: List[OpInfo] = [
             ), ],
     ),
     OpInfo(
-        'nn.functional._scaled_dot_product_attention',
+        'nn.functional.scaled_dot_product_attention',
         op=lambda *args, **kwargs:
-               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs)
-               if kwargs['need_attn_weights'] else
-               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs)[0],
+               wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12561,9 +12547,11 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # No meta function
+            # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
-            DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
+            DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
+            # TODO skip this for now since we can't skip on runtime arch support
+            DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
@@ -13090,8 +13078,7 @@ op_db: List[OpInfo] = [
                    autodiff_nonfusible_nodes=["aten::relu6"]),
     OpInfo('mm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
-                                                       if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13728,7 +13715,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
+                                                       if SM53OrLater or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -14239,11 +14226,10 @@ op_db: List[OpInfo] = [
            # TODO(@heitorschueroff) update SampleInput to handle such cases
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16]
-                                                                if ((SM60OrLater and CUDA11OrLater)
-                                                                or TEST_WITH_ROCM) else []),
+                                                                if (SM60OrLater or
+                                                                    TEST_WITH_ROCM) else []),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15987,8 +15973,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_kron),
     OpInfo('inner',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
-                                                       if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15998,8 +15983,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
-                                                       if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
