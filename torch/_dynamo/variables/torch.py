@@ -478,7 +478,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 **options,
             )
 
-            if "out" in kwargs and kwargs["out"].as_python_constant():
+            if "out" in kwargs and not (
+                isinstance(kwargs["out"], ConstantVariable)
+                and not kwargs["out"].as_python_constant()
+            ):
                 # out variants of torch operators like torch.sort and
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
