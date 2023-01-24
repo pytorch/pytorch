@@ -2475,6 +2475,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_tan(self):
+        def fn(x):
+            return aten.tan(x) + 2, aten.tan(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_tanh(self):
         def fn(x):
             return aten.tanh(x) + 2, aten.tanh(x + 1)
