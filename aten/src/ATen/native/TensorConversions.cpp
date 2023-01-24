@@ -339,7 +339,7 @@ Tensor _to_copy(
   // at::empty also does not work here because there is no proper at::empty support for quantized tensors
   // as it would return a quantized tensor with an UnknownQuantizer
   auto r = self.is_quantized() ? at::empty_like(self, memory_format)
-                               : at::empty(self.sizes(),
+                               : at::empty_symint(self.sym_sizes(),
                                  options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;

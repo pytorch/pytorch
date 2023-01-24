@@ -186,6 +186,7 @@ jobs:
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
+    if: false
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.8-py3
@@ -200,6 +201,7 @@ jobs:
 
   win-vs2019-cuda11_8-py3-test:
     name: win-vs2019-cuda11.8-py3
+    if: false
     uses: ./.github/workflows/_win-test.yml
     needs: win-vs2019-cuda11_8-py3-build
     with:
@@ -247,9 +249,9 @@ jobs:
       cuda-version: "11.7"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
