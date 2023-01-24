@@ -117,7 +117,7 @@ TESTS = discover_tests(
         'package',  # executed by test_package.py
         'quantization',  # executed by test_quantization.py
         'autograd',  # executed by test_autograd.py
-    ] +  (["inductor", "dynamo"] if sys.version_info >= (3, 11) else []),
+    ] + (["inductor", "dynamo"] if sys.version_info >= (3, 11) else []),
     blocklisted_tests=[
         'test_bundled_images',
         'test_cpp_extensions_aot',
