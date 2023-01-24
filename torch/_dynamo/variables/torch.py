@@ -11,6 +11,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
+from torch._dynamo.variables import DynamicShapeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -768,7 +769,9 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
+            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+                type(args[0])
+            )  # predicate
             assert isinstance(
                 args[1], (UserFunctionVariable, NestedUserFunctionVariable)
             ), str(
