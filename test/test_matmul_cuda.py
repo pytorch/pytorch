@@ -101,6 +101,18 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
     @onlyCUDA
+    def test_cublas_addmm_alignment(self):
+        dtype = torch.half
+        device = 'cuda'
+        A = torch.rand((5120 * 2560 + 1), requires_grad=True, dtype=dtype, device=device)
+        A = A[1:].reshape(5120, 2560)
+        # check that heuristic does not fail on 2-byte alignment
+        X = torch.rand((26, 1, 2560), requires_grad=True, dtype=dtype, device=device)
+        B = torch.rand((5120), requires_grad=True, dtype=dtype, device=device)
+        out = torch.nn.functional.linear(X, A, B)
+        self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
+
+    @onlyCUDA
     @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
