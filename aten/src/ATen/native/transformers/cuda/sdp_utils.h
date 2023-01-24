@@ -27,7 +27,6 @@ struct sdp_params {
   const at::Tensor& value;
   bool has_attn_mask;
   double dropout;
-  bool need_attn_weights;
   bool is_causal;
 };
 
@@ -98,18 +97,6 @@ inline bool check_tensor_dtype(
   return true;
 }
 
-inline bool check_for_attn_weights(sdp_params params, bool debug) {
-  // This can be returned form flash attention but care is needed
-  // to convert from flash_attn format to attn_weights
-  if (params.need_attn_weights) {
-    if (debug) {
-      TORCH_WARN("Both fused kernels do not support need_attn_weights=True.");
-    }
-    return false;
-  }
-  return true;
-}
-
 inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   if (params.dropout != 0.0) {
     if (debug) {
@@ -121,10 +108,22 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
 }
 
 inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;
   }
-  const at::Tensor& sizes = at::native::get_nested_tensor_impl(params.query)->get_nested_size_tensor();
+  // we are only checking query but should probably check all of them
+  const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  auto num_head_dims = nt_q_tensor_impl->opt_size(1);
+  if (!num_head_dims.has_value() ) {
+    // num_head_dims is ragged
+    if (debug) {
+      TORCH_WARN("Memory efficient attention does not support ragged num_head_dims");
+    }
+    return false;
+  }
+
   auto* sizes_ptr = sizes.data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
@@ -133,7 +132,7 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN("Flash Attention does not support sequence_length <= 1");
+        TORCH_WARN("Memory efficient attention does not support sequence_length <= 1");
       }
       return false;
     }
@@ -370,11 +369,10 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
       check_runtime_disabled_flash,
       check_requires_grad,
       check_tensor_shapes,
-      check_for_attn_weights,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
@@ -406,11 +404,10 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 10> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
-      check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
