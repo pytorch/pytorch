@@ -124,7 +124,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
     int64_t n = self.numel();
     bool contig = self.is_contiguous();
 
-    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "exponential_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "exponential_cpu", [&] {
       at::Tensor tmp_tensor;
       constexpr bool is_df = std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value;
       if (is_df && contig) {
