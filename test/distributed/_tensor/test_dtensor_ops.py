@@ -154,6 +154,7 @@ dtensor_fails = {
     xfail("einsum"),
     xfail("empty"),
     xfail("empty_like"),
+    xfail("exponential"),
     xfail("eye"),
     xfail("fft.fft2"),
     xfail("fft.fft"),
