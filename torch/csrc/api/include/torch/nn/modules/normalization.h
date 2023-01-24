@@ -28,12 +28,11 @@ namespace nn {
 /// LayerNorm model(LayerNormOptions({2,
 /// 2}).elementwise_affine(false).eps(2e-5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
  public:
   LayerNormImpl(std::vector<int64_t> normalized_shape)
       : LayerNormImpl(LayerNormOptions(normalized_shape)) {}
-  explicit LayerNormImpl(const LayerNormOptions& options_);
+  explicit LayerNormImpl(LayerNormOptions options_);
 
   void reset() override;
 

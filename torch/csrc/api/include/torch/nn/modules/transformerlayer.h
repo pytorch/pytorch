@@ -33,7 +33,6 @@ namespace nn {
 /// TransformerEncoderLayer encoderLayer(TransformerEncoderLayerOptions(512,
 /// 8).dropout(0.1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerEncoderLayerImpl
     : public Cloneable<TransformerEncoderLayerImpl> {
  public:
@@ -41,7 +40,7 @@ class TORCH_API TransformerEncoderLayerImpl
       : TransformerEncoderLayerImpl(
             TransformerEncoderLayerOptions(d_model, nhead)) {}
   explicit TransformerEncoderLayerImpl(
-      const TransformerEncoderLayerOptions& options_);
+      TransformerEncoderLayerOptions options_);
 
   Tensor forward(
       const Tensor& src,
@@ -110,7 +109,6 @@ TORCH_MODULE(TransformerEncoderLayer);
 /// TransformerDecoderLayer model(TransformerDecoderLayerOptions(512,
 /// 8).dropout(0.2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerDecoderLayerImpl
     : public Cloneable<TransformerDecoderLayerImpl> {
  public:
@@ -118,7 +116,7 @@ class TORCH_API TransformerDecoderLayerImpl
       : TransformerDecoderLayerImpl(
             TransformerDecoderLayerOptions(d_model, nhead)) {}
   explicit TransformerDecoderLayerImpl(
-      const TransformerDecoderLayerOptions& options_);
+      TransformerDecoderLayerOptions options_);
 
   void reset() override;
 
