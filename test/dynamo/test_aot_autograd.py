@@ -311,6 +311,65 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
+    def test_double_backward_errors(self):
+        # Remove this test after we get double backward to actually work
+        for grad_output in (torch.tensor(1.0, requires_grad=True), None):
+            # See @once_differentiable docs for why there are two different errors
+            x = torch.tensor(1.0, requires_grad=True)
+            err = "torch.compile with aot_autograd does not currently support double backward"
+
+            # The following cases should be equivalent:
+
+            # (1) double backward entirely inside compiled function
+            def f1(x):
+                y = x.sin().exp()
+                (gx,) = torch.autograd.grad(
+                    y, x, create_graph=True, grad_outputs=grad_output
+                )
+                gx.backward()
+                return gx
+
+            compiled_f1 = torch.compile(backend="aot_eager")(f1)
+            f1(x)
+            with self.assertRaisesRegex(RuntimeError, err):
+                compiled_f1(x)
+
+            # (2) the second half of double backward outside compiled function
+            def f2(x):
+                y = x.sin().exp()
+                (gx,) = torch.autograd.grad(
+                    y, x, create_graph=True, grad_outputs=grad_output
+                )
+                return gx
+
+            compiled_f2 = torch.compile(backend="aot_eager")(f2)
+            gx = compiled_f2(x)
+            with self.assertRaisesRegex(RuntimeError, err):
+                gx.backward()
+
+            # (3) double backward entirely outside compiled function
+            def f3(x):
+                y = x.sin().exp()
+                return y
+
+            compiled_f3 = torch.compile(backend="aot_eager")(f3)
+            y = compiled_f3(x)
+            (gx,) = torch.autograd.grad(
+                y, x, create_graph=True, grad_outputs=grad_output
+            )
+            with self.assertRaisesRegex(RuntimeError, err):
+                gx.backward()
+
+        # create_graph=False
+        def f4(x):
+            y = x.sin().exp()
+            return y
+
+        compiled_f4 = torch.compile(backend="aot_eager")(f4)
+        x = torch.tensor(1.0, requires_grad=True)
+        y = compiled_f4(x)
+        (gx,) = torch.autograd.grad(y, x, create_graph=False, grad_outputs=grad_output)
+
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles(self):
         class F(torch.nn.Module):
