@@ -317,9 +317,8 @@ test_inductor_benchmark() {
   # Check training with --amp
   test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
 
-  # Check training with symbolic shapes (not actually inductor)
-  test_single_dynamo_benchmark "dynamic_aot_eager_training" "$@" \
-    --backend aot_eager --dynamic-shapes --training
+  # Check inference with --dynamic-shapes
+  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes
 }
 
 test_inductor_benchmark_perf() {
