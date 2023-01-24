@@ -4,7 +4,10 @@ import torch
 import torch.fx
 
 from .. import config, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import (
+    create_instruction,
+    create_call_function,
+)
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import namedtuple_fields, proxy_args_kwargs
@@ -137,9 +140,9 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.append_output(codegen.create_load_python_module(range, push_null=True))
         codegen.foreach(self.items)
-        return [create_instruction("CALL_FUNCTION", 3)]
+        return create_call_function(3)
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -335,8 +338,7 @@ class SizeVariable(TupleVariable):
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+        ] + create_call_function(1)
         return build_torch_size
 
     def unpack_var_sequence(self, tx):
@@ -417,8 +419,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.foreach(self.items)
         return [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+        ] + create_call_function(1)
 
     def var_getattr(self, tx, name):
         fields = namedtuple_fields(self.tuple_cls)

@@ -18,7 +18,7 @@ class Instruction:
 
     opcode: int
     opname: str
-    arg: int
+    arg: Optional[int]
     argval: Any
     offset: Optional[int] = None
     starts_line: Optional[int] = None
@@ -56,6 +56,71 @@ def create_instruction(name, arg=None, argval=_NotProvided, target=None):
         opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
 
+# Python 3.11 remaps
+def create_jump_absolute(target):
+    if sys.version_info >= (3, 11):
+        return create_instruction("JUMP_FORWARD", target=target)
+    return create_instruction("JUMP_ABSOLUTE", target=target)
+
+def create_pop_jump_if_true(target):
+    if sys.version_info >= (3, 11):
+        return create_instruction("POP_JUMP_FORWARD_IF_TRUE", target=target)
+    return create_instruction("POP_JUMP_IF_TRUE", target=target)
+
+def create_load_global(name, arg, push_null):
+    if sys.version_info >= (3, 11):
+        arg = (arg << 1) + push_null
+    return create_instruction(
+        "LOAD_GLOBAL", arg, name
+    )
+
+def create_dup_top():
+    if sys.version_info >= (3, 11):
+        return create_instruction("COPY", 1)
+    return create_instruction("DUP_TOP")
+
+def create_rot_n(n):
+    if n <= 1:
+        return []
+    if sys.version_info >= (3, 11):
+        return [create_instruction("SWAP", i) for i in range(n, 1, -1)]
+    if n <= 4:
+        return [create_instruction(
+            "ROT_" + ["TWO", "THREE", "FOUR"][n-2]
+        )]
+    return [create_instruction("ROT_N", n)]
+
+def create_call_function(nargs, push_null=True):
+    if sys.version_info >= (3, 11):
+        output = []
+        if push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            output.extend(create_rot_n(nargs + 2))
+        output.append(create_instruction("PRECALL", nargs))
+        output.append(create_instruction("CALL", nargs))
+        return output
+    return [create_instruction("CALL_FUNCTION", nargs)]
+
+def create_call_method(nargs):
+    output = [create_instruction("CALL_METHOD", nargs)]
+    if sys.version_info >= (3, 11):
+        output = [create_instruction("PRECALL", nargs)] + output
+    return output
+
+def create_pop_block():
+    if sys.version_info >= (3, 11):
+        return create_instruction("NOP")
+    return create_instruction("POP_BLOCK")
+
+def create_setup_with(*kwargs):
+    if sys.version_info >= (3, 11):
+        return create_instruction("BEFORE_WITH", **kwargs)
+    return create_instruction("SETUP_WITH", **kwargs)
+
+def cell_and_freevars_offset(code, i):
+    if sys.version_info >= (3, 11):
+        return i + code.co_nlocals
+    return i
 
 def lnotab_writer(lineno, byteno=0):
     """
@@ -114,7 +179,7 @@ def linetable_writer(first_lineno):
     return linetable, update, end
 
 
-def assemble(instructions: List[dis.Instruction], firstlineno):
+def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
     if sys.version_info < (3, 10):
@@ -127,6 +192,9 @@ def assemble(instructions: List[dis.Instruction], firstlineno):
             update_lineno(inst.starts_line, len(code))
         arg = inst.arg or 0
         code.extend((inst.opcode, arg & 0xFF))
+        if sys.version_info >= (3, 11):
+            for _ in range(instruction_size(inst) // 2 - 1):
+                code.extend((0, 0))
 
     if sys.version_info >= (3, 10):
         end(len(code))
@@ -178,6 +246,8 @@ def devirtualize_jumps(instructions):
                     inst.arg = int(
                         (target.offset - inst.offset - instruction_size(inst)) / 2
                     )
+                if "BACKWARD" in inst.opname:
+                    inst.arg = -inst.arg
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
@@ -204,18 +274,22 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
         output.append(inst)
         if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
             nexti = instructions[idx + 1]
-            if nexti.opname == "CALL_FUNCTION" and nexti.arg == 0:
+            if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
                 assert "__class__" in cell_and_free
                 output.append(
                     create_instruction(
-                        "LOAD_DEREF", cell_and_free.index("__class__"), "__class__"
+                        "LOAD_DEREF", cell_and_freevars_offset(
+                            cell_and_free.index("__class__")
+                        ), "__class__"
                     )
                 )
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
                     output.append(
                         create_instruction(
-                            "LOAD_DEREF", cell_and_free.index(first_var), first_var
+                            "LOAD_DEREF", cell_and_freevars_offset(
+                                code, cell_and_free.index(first_var)
+                            ), first_var
                         )
                     )
                 else:
@@ -258,8 +332,25 @@ def fix_extended_args(instructions: List[Instruction]):
     instructions[:] = output
     return added
 
+# from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
+# TODO maybe use the actual object instead, interface from eval_frame.c?
+_PYOPCODE_CACHES = {
+    "BINARY_SUBSCR": 4,
+    "STORE_SUBSCR": 1,
+    "UNPACK_SEQUENCE": 1,
+    "STORE_ATTR": 4,
+    "LOAD_ATTR": 4,
+    "COMPARE_OP": 2,
+    "LOAD_GLOBAL": 5,
+    "BINARY_OP": 1,
+    "LOAD_METHOD": 10,
+    "PRECALL": 1,
+    "CALL": 4,
+}
 
 def instruction_size(inst):
+    if sys.version_info >= (3, 11):
+        return 2 * (_PYOPCODE_CACHES.get(dis.opname[inst.opcode], 0) + 1)
     return 2
 
 
@@ -303,13 +394,26 @@ def fix_vars(instructions: List[Instruction], code_options):
     varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     for i in range(len(instructions)):
+        if instructions[i].arg is None:
+            continue
+        if instructions[i].opname == "LOAD_GLOBAL" and sys.version_info >= (3, 11):
+            shift = 1
+            push_null = instructions[i].arg % 2
+        else:
+            shift = 0
+            push_null = 0
         if instructions[i].opcode in HAS_LOCAL:
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             instructions[i].arg = names[instructions[i].argval]
+        instructions[i].arg = (instructions[i].arg << shift) + push_null
+
 
 
 def transform_code_object(code, transformations, safe=False):
+    # Python 3.11 changes to code keys are not fully documented.
+    # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
+    # for new format.
     keys = [
         "co_argcount",
         "co_posonlyargcount",  # python 3.8+
@@ -323,8 +427,10 @@ def transform_code_object(code, transformations, safe=False):
         "co_varnames",
         "co_filename",
         "co_name",
+        "co_qualname",  # python 3.11+
         "co_firstlineno",
         "co_lnotab",  # changed to "co_linetable" if python 3.10+
+        "co_exceptiontable",  # python 3.11+
         "co_freevars",
         "co_cellvars",
     ]
@@ -332,6 +438,9 @@ def transform_code_object(code, transformations, safe=False):
         keys.pop(1)
     if sys.version_info >= (3, 10):
         keys = list(map(lambda x: x.replace("co_lnotab", "co_linetable"), keys))
+    if sys.version_info < (3, 11):
+        keys.remove("co_qualname")
+        keys.remove("co_exceptiontable")
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -371,7 +480,8 @@ def cleaned_instructions(code, safe=False):
     virtualize_jumps(instructions)
     strip_extended_args(instructions)
     if not safe:
-        remove_load_call_method(instructions)
+        if sys.version_info < (3, 11):
+            remove_load_call_method(instructions)
         explicit_super(code, instructions)
     return instructions
 

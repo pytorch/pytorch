@@ -7,7 +7,14 @@ from typing import List
 
 import torch.nn
 
-from .bytecode_transformation import create_instruction, Instruction
+from .bytecode_transformation import (
+    create_instruction,
+    create_call_function,
+    create_dup_top,
+    create_load_global,
+    create_rot_n,
+    Instruction,
+)
 from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, istype, rot_n_helper
@@ -55,6 +62,12 @@ class PyCodegen(object):
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
 
+    def cell_and_freevars_offset(self, i):
+        if sys.version_info >= (3, 11):
+            return i + self.code_options["co_nlocals"]
+        return i
+
+
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
 
@@ -72,7 +85,7 @@ class PyCodegen(object):
         graph_outputs = self.graph_outputs
 
         if self.top_of_stack is value:
-            output.append(create_instruction("DUP_TOP"))
+            output.append(create_dup_top())
             return
 
         if allow_cache:
@@ -118,12 +131,8 @@ class PyCodegen(object):
             output.append(create_instruction("BINARY_SUBSCR"))
 
             if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
-                output.extend(
-                    [
-                        self.create_load_attr("item"),
-                        create_instruction("CALL_FUNCTION", 0),
-                    ]
-                )
+                output.append(self.create_load_attr("item"))
+                output.extend(create_call_function(0))
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:
@@ -141,7 +150,7 @@ class PyCodegen(object):
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
-                self._output.append(create_instruction("DUP_TOP"))
+                self._output.append(create_dup_top())
                 self.add_cache(value)
 
         self.top_of_stack = value
@@ -157,7 +166,7 @@ class PyCodegen(object):
         for i in items:
             self(i)
 
-    def setup_globally_cached(self, name, value):
+    def setup_globally_cached(self, name, value, push_null=False):
         """Store value in a new global"""
         name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         f_globals = self.tx.f_globals
@@ -165,7 +174,7 @@ class PyCodegen(object):
             assert id(f_globals[name]) == id(value)
         else:
             f_globals[name] = value
-        return [self.create_load_global(name, add=True)]
+        return [self.create_load_global(name, add=True, push_null=push_null)]
 
     def clear_tos(self):
         self.top_of_stack = None
@@ -186,7 +195,9 @@ class PyCodegen(object):
     def create_load(self, name):
         if name in self.cell_and_freevars():
             return create_instruction(
-                "LOAD_DEREF", self.cell_and_freevars().index(name), name
+                "LOAD_DEREF", self.cell_and_freevars_offset(
+                    self.cell_and_freevars().index(name)
+                ), name
             )
         assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction(
@@ -196,26 +207,29 @@ class PyCodegen(object):
     def create_load_closure(self, name):
         assert name in self.cell_and_freevars()
         return create_instruction(
-            "LOAD_CLOSURE", self.cell_and_freevars().index(name), name
+            "LOAD_CLOSURE", self.cell_and_freevars_offset(
+                self.cell_and_freevars().index(name)
+            ), name
         )
 
     def create_store(self, name):
         if name in self.cell_and_freevars():
             return create_instruction(
-                "STORE_DEREF", self.cell_and_freevars().index(name), name
+                "STORE_DEREF", self.cell_and_freevars_offset(
+                    self.cell_and_freevars().index(name)
+                ), name
             )
         assert name in self.code_options["co_varnames"]
         return create_instruction(
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
         )
 
-    def create_load_global(self, name, add=False):
+    def create_load_global(self, name, add=False, push_null=False):
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
-        return create_instruction(
-            "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
-        )
+        arg = self.code_options["co_names"].index(name)
+        return create_load_global(name, arg, push_null)
 
     def create_load_const(self, value):
         assert is_safe_constant(value), f"unsafe constant {value}"
@@ -252,28 +266,28 @@ class PyCodegen(object):
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
 
-    def load_function_name(self, fn_name, num_on_stack=0):
+    def load_function_name(self, fn_name, num_on_stack=0, push_null=False):
         """Load the global fn_name on the stack num_on_stack down"""
-        return [self.create_load_global(fn_name, add=True)] + self.rot_n(
-            num_on_stack + 1
+        output = []
+        if push_null and sys.version_info >= (3, 11):
+            output.extend([create_instruction("PUSH_NULL")] + self.rot_n(num_on_stack + 1))
+        output.extend(
+            [self.create_load_global(fn_name, add=True, push_null=False)] + self.rot_n(num_on_stack + 1)
         )
+        return output
 
     def rot_n(self, n):
         if n == 0 or n == 1:
             return []
-        elif n == 2:
-            return [create_instruction("ROT_TWO")]
-        elif n == 3:
-            return [create_instruction("ROT_THREE")]
-        elif n == 4 and sys.version_info >= (3, 8):
-            return [create_instruction("ROT_FOUR")]
-        elif sys.version_info >= (3, 10):
-            return [create_instruction("ROT_N", n)]
+        elif sys.version_info >= (3, 10) or (
+            sys.version_info >= (3, 8) and n <= 4
+        ) or n <= 3:
+            return create_rot_n(n)
         else:
             return [
                 create_instruction("BUILD_TUPLE", n),
-                self._create_load_const(rot_n_helper(n)),
-                create_instruction("ROT_TWO"),
+            ] + self._create_load_const(rot_n_helper(n)) + \
+                create_rot_n(2) + [
                 create_instruction("CALL_FUNCTION_EX", 0),
                 create_instruction("UNPACK_SEQUENCE", n),
             ]
@@ -288,52 +302,51 @@ class PyCodegen(object):
             assert var in self.cell_and_freevars()
             output.append(
                 create_instruction(
-                    "LOAD_CLOSURE", self.cell_and_freevars().index(var), var
+                    "LOAD_CLOSURE", self.cell_and_freevars_offset(
+                        self.cell_and_freevars().index(var)
+                    ), var
                 )
             )
         output.append(create_instruction("BUILD_TUPLE", len(freevars)))
         output.append(self.create_load_const(code))
-        output.append(self.create_load_const(fn_name))
+        if sys.version_info < (3, 11):
+            output.append(self.create_load_const(fn_name))
         output.append(create_instruction("MAKE_FUNCTION", 0x08))
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
-    def create_load_python_module(self, mod):
+    def create_load_python_module(self, mod, push_null=False):
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
         root_globals = self.tx.output.root_globals
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if root_globals.get(name, None) is mod:
-            return self.create_load_global(name, add=True)
+            return self.create_load_global(name, add=True, push_null=push_null)
         mangled_name = f"___module_{name}_{id(mod)}"
         if mangled_name not in root_globals:
             self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, add=True)
+        return self.create_load_global(mangled_name, add=True, push_null=push_null)
 
     def make_call_generated_code(self, fn_name: str) -> List[Instruction]:
         """Call the generated code function stored in fn_name"""
-        self.extend_output(self.load_function_name(fn_name))
+        self.extend_output(self.load_function_name(fn_name, push_null=True))
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
             if arg.is_unspecialized:
                 self.extend_output(
                     [
-                        self.create_load_python_module(torch),
+                        self.create_load_python_module(torch, push_null=True),
                         self.create_load_attr("tensor"),
                     ]
                 )
                 self.extend_output(arg.load(self))
-                self.extend_output(
-                    [
-                        create_instruction("CALL_FUNCTION", 1),
-                    ]
-                )
+                self.extend_output(create_call_function(1, push_null=False))
             else:
                 self.extend_output(arg.load(self))
 
-        self.append_output(create_instruction("CALL_FUNCTION", len(graphargs)))
+        self.extend_output(create_call_function(len(graphargs), push_null=False))
 
     def load_import_from(self, module_name, object_name):
         self.extend_output(
@@ -347,3 +360,13 @@ class PyCodegen(object):
             return self.create_load_const(None)
         else:
             return create_instruction("BEGIN_FINALLY")
+
+    def create_call_function_kw(self, nargs, kw_names, push_null=True):
+        if sys.version_info >= (3, 11):
+            return [
+                create_instruction("KW_NAMES", self.get_const_index(self.code_options, kw_names))
+            ] + create_call_function(nargs, push_null=push_null)
+        return [
+            self.create_load_const(kw_names),
+            create_instruction("CALL_FUNCTION_KW", nargs),
+        ]

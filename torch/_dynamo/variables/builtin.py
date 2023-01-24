@@ -161,7 +161,7 @@ class BuiltinVariable(VariableTracker):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        return [codegen.create_load_global(name, add=True)]
+        return [codegen.create_load_global(name, add=True, push_null=False)]
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)

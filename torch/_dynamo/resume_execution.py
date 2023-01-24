@@ -6,6 +6,12 @@ from typing import Any, Dict, List
 
 from .bytecode_transformation import (
     create_instruction,
+    create_call_function,
+    create_dup_top,
+    create_jump_absolute,
+    create_pop_jump_if_true,
+    create_pop_block,
+    create_setup_with,
     Instruction,
     transform_code_object,
 )
@@ -59,19 +65,17 @@ class ReenterWith:
             cleanup_complete_jump_target = create_instruction("NOP")
 
             cleanup[:] = [
-                create_instruction("POP_BLOCK"),
+                create_pop_block(),
                 create_instruction(
                     "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
                 ),
-                create_instruction("DUP_TOP"),
-                create_instruction("DUP_TOP"),
-                create_instruction("CALL_FUNCTION", 3),
+                create_dup_top(),
+                create_dup_top()
+            ] + create_call_function(3) + [
                 create_instruction("POP_TOP"),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
                 with_except_start,
-                create_instruction(
-                    "POP_JUMP_IF_TRUE", target=pop_top_after_with_except_start
-                ),
+                create_pop_jump_if_true(pop_top_after_with_except_start),
                 create_instruction("RERAISE"),
                 pop_top_after_with_except_start,
                 create_instruction("POP_TOP"),
@@ -81,9 +85,8 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ] + cleanup
 
-            return [
-                create_instruction("CALL_FUNCTION", 0),
-                create_instruction("SETUP_WITH", target=with_except_start),
+            return create_call_function(0) + [
+                create_setup_with(target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
 
@@ -162,7 +165,7 @@ class ContinueExecutionCache:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
 
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
+            prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno
             # remove starts_line for any instructions before the graph break instruction

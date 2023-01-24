@@ -436,9 +436,9 @@ def optimize(
             + f"{config.dynamo_import}.optimize() will do nothing"
         )
         return _NullDecorator()
-    if sys.version_info >= (3, 11):
+    if sys.version_info >= (3, 12):
         warnings.warn(
-            "Python 3.11+ not yet supported, "
+            "Python 3.12+ not yet supported, "
             f"{config.dynamo_import}.optimize() will do nothing"
         )
         return _NullDecorator()
