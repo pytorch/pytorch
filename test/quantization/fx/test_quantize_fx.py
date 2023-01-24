@@ -156,6 +156,7 @@ from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
     LinearBnLeakyReluModel,
+    LinearTanhModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
@@ -405,6 +406,46 @@ class TestFuseFx(QuantizationTestCase):
                 m,
                 expected_node_list=expected_nodes,
                 expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_linear_tanh_for_onednn_backend(self):
+        # linear - tanh is fused for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        expected_nodes = [
+            ns.call_module(nni.LinearTanh),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.Linear): 0,
+            ns.call_module(nn.Tanh): 0,
+        }
+
+        # test eval mode
+        m = LinearTanhModel().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m,
+                    backend_config=get_onednn_backend_config())
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+    def test_linear_tanh_not_fused_by_default(self):
+        # Make sure linear - tanh is not fused by default
+        # test eval mode
+        m = LinearTanhModel().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m)
+        expected_nodes = [
+            ns.call_module(nn.Linear),
+            ns.call_module(nn.Tanh),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.LinearTanh): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
 
     def test_fuse_convtranspose_bn_eval(self):
 
@@ -1578,28 +1619,29 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.linear = nn.Linear(9, 3)
 
             def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
+                x = self.conv(x)
+                x = x.reshape((1, -1))
+                x = self.linear(x)
                 return x
 
         m = M().eval()
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        example_inputs = (torch.randn(1, 1, 1, 1),)
+        example_inputs = (torch.randn(1, 1, 3, 3),)
         m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         m(*example_inputs)
         m = convert_fx(m)
         m(*example_inputs)
-        # first conv is quantized, second conv is not quantized
+        # conv is quantized, linear is not quantized
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_module(nnq.Conv2d),
             ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
@@ -2850,6 +2892,89 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x0):
                 x1 = self.custom(x0)
                 x2 = self.linear(x0)
+                return x1 + x2
+
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                "static": {
+                    CustomModule: ObservedCustomModule
+                }
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                "static": {
+                    ObservedCustomModule: StaticQuantCustomModule
+                }
+            }
+        }
+        m = M().eval()
+        example_inputs = (torch.randn(3, 3),)
+        m = prepare_fx(
+            m,
+            {"": default_qconfig},
+            example_inputs=example_inputs,
+            prepare_custom_config=prepare_custom_config_dict)
+        # make sure it works
+        m = convert_fx(
+            m,
+            convert_custom_config=convert_custom_config_dict)
+        # make sure it runs
+        m(*example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_custom_module_class_input_has_duplicate_nodes(self):
+        """ Tests that the flow still works when the graph has
+        multiple nodes with the same custom module target.
+        """
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                observed = cls(float_module.linear)
+                observed.qconfig = float_module.qconfig
+                return observed
+
+        class StaticQuantCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.linear.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Linear.from_float(observed_module.linear))
+                return quantized
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom = CustomModule()
+
+            def forward(self, x0):
+                x1 = self.custom(x0)
+                x2 = self.custom(x0)
                 return x1 + x2
 
         prepare_custom_config_dict = {
@@ -5619,6 +5744,32 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def _test_linear_activation_fusion_lowering_helper(
+            self, module, example_inputs, qconfig_mapping,
+            backend_config, fused_module, root_module, activation_module):
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method("dequantize"): 1,
+            ns.call_module(fused_module): 1,
+            ns.call_module(root_module): 0,
+            ns.call_module(activation_module): 0,
+        }
+        node_occurrence_ref = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2,
+        }
+        m = module.eval()
+        m = prepare_fx(m, qconfig_mapping,
+                       example_inputs=example_inputs,
+                       backend_config=backend_config)
+        m_copy = copy.deepcopy(m)
+        m = convert_fx(m, backend_config=backend_config)
+        m_ref = convert_to_reference_fx(m_copy)
+
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+        m(*example_inputs)
+
     @skipIfNoONEDNN
     def test_linear_leaky_relu_lowering(self):
         """ Test fusion and lowering of Linear - (bn -) LeakyReLU
@@ -5626,32 +5777,35 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
-        node_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_method("dequantize"): 1,
-            ns.call_module(nniq.LinearLeakyReLU): 1,
-            ns.call_module(nn.Linear): 0,
-            ns.call_module(nn.LeakyReLU): 0,
-        }
-        node_occurrence_ref = {
-            ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 2,
-        }
         with override_quantized_engine('onednn'):
             for with_bn in [True, False]:
-                # test eval mode
-                m = LinearBnLeakyReluModel(with_bn).eval()
-                example_x = m.get_example_inputs()
-                m = prepare_fx(m, qconfig_mapping,
-                               example_inputs=example_x,
-                               backend_config=get_onednn_backend_config())
-                m_copy = copy.deepcopy(m)
-                m = convert_fx(m, backend_config=get_onednn_backend_config())
-                m_ref = convert_to_reference_fx(m_copy)
+                m = LinearBnLeakyReluModel(with_bn)
+                self._test_linear_activation_fusion_lowering_helper(
+                    m,
+                    m.get_example_inputs(),
+                    qconfig_mapping,
+                    get_onednn_backend_config(),
+                    nniq.LinearLeakyReLU,
+                    nn.Linear,
+                    nn.LeakyReLU)
 
-                self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-                self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
-                m(*example_x)
+    @skipIfNoONEDNN
+    def test_linear_tanh_lowering(self):
+        """ Test fusion and lowering of Linear - Tanh
+            by FX. For onednn backedn only.
+        """
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        qconfig_mapping = get_default_qconfig_mapping('onednn')
+        with override_quantized_engine('onednn'):
+            m = LinearTanhModel()
+            self._test_linear_activation_fusion_lowering_helper(
+                m,
+                m.get_example_inputs(),
+                qconfig_mapping,
+                get_onednn_backend_config(),
+                nniq.LinearTanh,
+                nn.Linear,
+                nn.Tanh)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -7755,8 +7909,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         if torch.backends.quantized.engine not in ('fbgemm', 'qnnpack'):
             return
         qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
-        module_type_strs = ['LSTM']
-        module_types = [torch.nn.LSTM]
+        module_type_strs = ['LSTM', 'GRU']
+        module_types = [torch.nn.LSTM, torch.nn.GRU]
         niter = 10
         sample_input = torch.tensor([[100, -155],
                                      [-155, 100],

@@ -39,6 +39,15 @@ def my_custom_function(x):
     return x + 1
 
 
+class MyPickledModule(torch.nn.Module):
+    def __init__(self, z):
+        super().__init__()
+        self.z = z
+
+    def forward(self, x, y):
+        return x * x * x + y + self.z
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -2376,6 +2385,29 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         a = opt_fn(torch.tensor(False), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([1.25, 1.25]), a))
 
+    def test_map_side_effects(self):
+        from functorch.experimental.control_flow import map
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.tensor(1)
+
+            def forward(self, xs):
+                def body(x):
+                    self.w += 1
+                    return x
+
+                return map(body, xs)
+
+        mod = Module()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Graph state change detected",
+        ):
+            opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
+            opt_fn(torch.randn(3, 2))
+
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
 
@@ -2711,6 +2743,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(
                 torch.allclose(opt_model(torch.ones(2, 3)), torch.tensor([2.0]))
             )
+
+    def test_autograd_function_has_graph_break(self):
+        x = torch.randn(10)
+        for model in [Module5(), Module6()]:
+            torch._dynamo.reset()
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_model = torch._dynamo.optimize(cnts)(model)
+            for _ in range(3):
+                ref = model(x)
+                res = opt_model(x)
+                self.assertTrue(torch.allclose(ref, res))
+            self.assertEqual(cnts.frame_count, 2)
 
     def test_object_classmethod(self):
         class C:
@@ -3240,6 +3284,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_builder_for_class_with_metaclass(self):
+        class ExampleMeta(type):
+            pass
+
+        class MyClass(metaclass=ExampleMeta):
+            pass
+
+        def fn(x, y):
+            if isinstance(y, MyClass):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand([4, 4])
+        y = MyClass()
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_torch_package_working_with_trace(self):
+        # from torch._dynamo.test_case import run_tests
+
+        inputs = [torch.randn([2, 2]), torch.randn([2, 2])]
+
+        optimized_model = torch._dynamo.optimize(backend="eager")(
+            MyPickledModule(torch.randn([2, 2]))
+        )
+        from torch import package
+
+        path = "/tmp/MyPickledModule.pt"
+        package_name = "MyPickledModule"
+        resource_name = "MyPickledModule.pkl"
+
+        model = MyPickledModule(torch.randn([2, 2]))
+
+        with package.PackageExporter(path) as exp:
+            exp.extern("**")
+            exp.save_pickle(package_name, resource_name, model)
+
+        imp = package.PackageImporter(path)
+        loaded_model = imp.load_pickle(package_name, resource_name)
+
+        optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
@@ -3260,6 +3349,22 @@ class CustomFunc2(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output
+
+
+class CustomFunc3(torch.autograd.Function):
+    # Test there is graph break in forward function
+    @staticmethod
+    def forward(ctx, foo):
+        result = foo + foo
+        torch._dynamo.graph_break()
+        result = result + foo
+        ctx.save_for_backward(result)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (result,) = ctx.saved_tensors
+        return grad_output * math.sqrt(result.numel())
 
 
 class Module1(torch.nn.Module):
@@ -3291,6 +3396,23 @@ class Module4(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.fn = CustomFunc2.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
+
+
+class Module5(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc3().apply(foo)
+
+
+class Module6(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc3.apply
 
     def forward(self, foo):
         return self.fn(foo)

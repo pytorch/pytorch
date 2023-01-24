@@ -72,10 +72,11 @@ static void warnFallback(const c10::FunctionSchema& schema) {
   }
   TORCH_WARN("There is a performance drop because we have not yet implemented ",
              "the batching rule for ", schema.operator_name(), ". ",
-             "We've moved development of vmap to to functorch "
-             "(https://github.com/pytorch/functorch), please try functorch.vmap "
-             "instead and/or file ",
-             " an issue on GitHub so that we can prioritize its implementation.");
+             "You are using the legacy vmap prototype (torch._vmap_internals.vmap). ",
+             "If you are using torch.autograd.functional.{jacobian, hessian} ",
+             "or torch._vmap_internals.vmap: please switch to using ",
+             "torch.func.{jacrev, jacfwd, hessian} and/or torch.vmap instead ",
+             "for better operator coverage and performance improvements .");
 }
 
 // The general flow of the algorithm is as follows.

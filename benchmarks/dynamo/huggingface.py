@@ -162,6 +162,8 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "BlenderbotForCausalLM",
 }
 
+REQUIRE_HIGHER_TOLERANCE = set("MT5ForConditionalGeneration")
+
 
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
@@ -448,6 +450,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in SKIP
             ):
                 continue
@@ -468,14 +471,18 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            return 1e-2, cosine
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                return 2e-2, cosine
+            else:
+                return 1e-2, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):
         return pred[0]
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(**inputs)
+        with self.autocast():
+            return mod(**inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)

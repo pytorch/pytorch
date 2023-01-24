@@ -115,6 +115,7 @@ class Linear(WeightedQuantizedModule):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> m = nn.quantized.Linear(20, 30)
         >>> input = torch.randn(128, 20)
         >>> # xdoctest: +SKIP

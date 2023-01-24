@@ -22,6 +22,9 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+
+from torch.utils._mode_utils import no_dispatch
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
 class FakeTensorTest(TestCase):
@@ -345,7 +348,7 @@ class FakeTensorTest(TestCase):
         mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
         for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
             with context():
-                inps = (
+                inps1 = [
                     torch.randn([92, 8, 2048]).cuda(),
                     torch.randn([8192, 2048]).cuda(),
                     torch.randn([8192, 2048]).cuda(),
@@ -366,13 +369,17 @@ class FakeTensorTest(TestCase):
                     torch.randn([167837696]).cuda(),
                     torch.randn([4, 8, 2048]).cuda(),
                     torch.randn([4, 8, 2048]).cuda(),
-                )
-                out = fn(*inps)
-                self.assertIs(out[4], inps[-3])
-                for ten in out:
-                    if i == 1:
-                        self.assertTrue(isinstance(ten, FakeTensor))
-                    self.assertEqual(ten.device.type, 'cuda')
+                ]
+                inps2 = inps1
+                inps2[len(inps2) - 1] = None  # argument `cx` can be None
+
+                for inps in [inps1, inps2]:
+                    out = fn(*inps)
+                    self.assertIs(out[4], inps[-3])
+                    for ten in out:
+                        if i == 1:
+                            self.assertTrue(isinstance(ten, FakeTensor))
+                        self.assertEqual(ten.device.type, 'cuda')
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_lstm(self):
@@ -730,11 +737,55 @@ class FakeTensorOperatorInvariants(TestCase):
             # error
             sparse2 = sparse.new(indices, values, extra)
 
+    def test_tensor_new(self):
+        with FakeTensorMode():
+            x = torch.Tensor([1, 2, 3])
+        self.assertIsInstance(x, FakeTensor)
+
     def test_like_ops(self):
         for schema in self.get_all_aten_schemas():
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
+
+    # at::_embedding_bag has no op info,
+    # and returns extra tensors that at::embedding bag throws away
+    def test_embedding_bag_private(self):
+        args = [
+            torch.ones(6, 1),
+            torch.ones(6, dtype=torch.int64),
+            torch.arange(2, dtype=torch.int64),
+            False,
+            2,  # mode = max
+        ]
+
+        ref_out = torch.ops.aten._embedding_bag(*args)
+        with FakeTensorMode() as m:
+            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+            meta_out = torch.ops.aten._embedding_bag(*meta_args)
+
+        self.assertEqual(len(ref_out), len(meta_out))
+        for ref_o, meta_o in zip(ref_out, meta_out):
+            self.assertEqual(ref_o.size(), meta_o.size())
+
+
+    def test_no_dispatch_with_like_function(self):
+        class CountingMode(TorchDispatchMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.count += 1
+                return func(*args, **kwargs)
+
+        with FakeTensorMode():
+            x = torch.randn(2)
+            with CountingMode() as mode:
+                with no_dispatch():
+                    torch.zeros_like(x)
+
+        self.assertEqual(mode.count, 0)
+
 
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):

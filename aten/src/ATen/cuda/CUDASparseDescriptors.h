@@ -143,9 +143,9 @@ class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
 class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
     : public CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {};
 
-#endif //AT_USE_HIPSPARSE_GENERIC_52_API() || (AT_USE_CUSPARSE_GENERIC_API() || AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS())
+//AT_USE_HIPSPARSE_GENERIC_52_API() || (AT_USE_CUSPARSE_GENERIC_API() && AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS())
 
-#if AT_USE_CUSPARSE_CONST_DESCRIPTORS()
+#elif AT_USE_CUSPARSE_CONST_DESCRIPTORS()
   class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
       : public ConstCuSparseDescriptor<
             cusparseDnMatDescr,
@@ -175,7 +175,6 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
  public:
   explicit CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset = -1);
 
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
   std::tuple<int64_t, int64_t, int64_t> get_size() {
     int64_t rows, cols, nnz;
     TORCH_CUDASPARSE_CHECK(cusparseSpMatGetSize(
@@ -200,7 +199,6 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
         col_indices.data_ptr(),
         values.data_ptr()));
   }
-#endif
 
 #if AT_USE_CUSPARSE_GENERIC_SPSV()
   void set_mat_fill_mode(bool upper) {
@@ -249,7 +247,7 @@ class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
 };
 #endif
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50200) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
+#if (defined(USE_ROCM) && ROCM_VERSION >= 50200) || !defined(USE_ROCM)
 class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     : public CuSparseDescriptor<cusparseSpGEMMDescr, &cusparseSpGEMM_destroyDescr> {
  public:

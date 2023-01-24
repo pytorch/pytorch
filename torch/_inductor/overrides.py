@@ -18,6 +18,7 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
 
 from . import config
+from .fx_utils import matches_module_function_pattern
 
 from .mkldnn import mkldnn_fuse_fx
 
@@ -55,6 +56,7 @@ def replace_fx(gm: torch.fx.GraphModule):
                     )
                 )
             gm.graph.erase_node(node)
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -85,34 +87,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # do mkldnn fusion(conv(linear)+unary(binary)
     gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
-
-
-# check the pattern: (nn.module, F.function) matched.
-def matches_module_function_pattern(pattern, node, modules):
-    if len(node.args) == 0:
-        return False
-    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
-        node, torch.fx.Node
-    ):
-        return False
-    # the first node is call_module
-    if node.args[0].op != "call_module":
-        return False
-    if not isinstance(node.args[0].target, str):
-        return False
-    if node.args[0].target not in modules:
-        return False
-    if type(modules[node.args[0].target]) is not pattern[0]:
-        return False
-    # the second node is call_function
-    if node.op != "call_function":
-        return False
-    if node.target != pattern[1]:
-        return False
-    # make sure node.args[0] output is only used by current node.
-    if len(node.args[0].users) > 1:
-        return False
-    return True
 
 
 def fetch_attr(target: str, mod):
@@ -174,7 +148,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     for pattern in module_function_patterns:
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
@@ -212,7 +186,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
 
     return gm
@@ -356,9 +330,11 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                         linear_transpose, args=(input, weight, bias)
                     )
                     node.replace_all_uses_with(fused_node)
+                    module.graph.erase_node(node)
+                    if len(input_node.users) == 0:
+                        module.graph.erase_node(input_node)
 
     module.graph.lint()
-    module.graph.eliminate_dead_code()
     module.recompile()
     return module
 
@@ -397,9 +373,11 @@ def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                         transpose_linear, args=(input, weight, bias)
                     )
                     node.replace_all_uses_with(fused_node)
+                    module.graph.erase_node(node)
+                    if len(input_node.users) == 0:
+                        module.graph.erase_node(input_node)
 
     module.graph.lint()
-    module.graph.eliminate_dead_code()
     module.recompile()
     return module
 
@@ -410,33 +388,47 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
             node.target == torch.bmm or node.target == torch.matmul
         ):
             normalized = NormalizedMatmulNode(node)
-            A = normalized.get_input()
-            B = normalized.get_other()
+            input_A_node = normalized.get_input()
+            input_B_node = normalized.get_other()
+            input_A = input_A_node
+            input_B = input_B_node
             Atrans = Btrans = False
-            if A.op == "call_method" and A.target == "permute" and check_permute(A):
+            if (
+                input_A_node.op == "call_method"
+                and input_A_node.target == "permute"
+                and check_permute(input_A_node)
+            ):
                 Atrans = True
-                if len(A.args) > 0:
-                    A = A.args[0]
+                if len(input_A_node.args) > 0:
+                    input_A = input_A_node.args[0]
                 else:
-                    A = A.kwargs["input"]
+                    input_A = input_A_node.kwargs["input"]
 
-            if B.op == "call_method" and B.target == "permute" and check_permute(B):
+            if (
+                input_B_node.op == "call_method"
+                and input_B_node.target == "permute"
+                and check_permute(input_B_node)
+            ):
                 Btrans = True
-                if len(B.args) > 0:
-                    B = B.args[0]
+                if len(input_B_node.args) > 0:
+                    input_B = input_B_node.args[0]
                 else:
-                    B = B.kwargs["input"]
+                    input_B = input_B_node.kwargs["input"]
 
             if Atrans or Btrans:
                 with module.graph.inserting_before(node):
                     fused_node = module.graph.call_function(
                         transpose_matmul,
-                        args=(A, B, Atrans, Btrans),
+                        args=(input_A, input_B, Atrans, Btrans),
                     )
                 node.replace_all_uses_with(fused_node)
+                module.graph.erase_node(node)
+                if Atrans and len(input_A_node.users) == 0:
+                    module.graph.erase_node(input_A_node)
+                if Btrans and len(input_B_node.users) == 0:
+                    module.graph.erase_node(input_B_node)
 
     module.graph.lint()
-    module.graph.eliminate_dead_code()
     module.recompile()
     return module
 

@@ -20,7 +20,6 @@ from typing import (
     Union,
 )
 
-import sympy
 from typing_extensions import Protocol
 
 import torch.nn
@@ -41,7 +40,7 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source
+from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -49,6 +48,7 @@ from .utils import (
     clone_inputs,
     count_calls,
     counters,
+    dynamo_timed,
     format_graph_tabular,
     same,
 )
@@ -58,7 +58,6 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
     TensorVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 
@@ -202,6 +201,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv() if config.dynamic_shapes else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if config.dynamic_shapes:
+            # Register a SHAPE_ENV guard to make sure we setup shape guards
+            # that show up in ShapeEnv
+            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
@@ -237,10 +241,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.should_exit = False
         self.random_values_var = None
         self.initial_random_state = ()
-        self.unspec_variable_map: Dict[
-            str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
-        ] = {}
-        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
+        self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -364,16 +365,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
 
     def register_attr_or_module(
-        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+        self,
+        target: Union[torch.nn.Module, torch.Tensor, Any],
+        *names,
+        **options,
     ):
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options.get("source", None)
+        assert "source" in options
+        source = options["source"]
         if isinstance(target, torch.Tensor):
-            if source:
+            if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
@@ -398,7 +403,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
-            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
@@ -512,10 +516,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(
-                    v, (UnspecializedNumpyVariable, UnspecializedPythonVariable)
-                )
-                for v in stack_values
+                not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
@@ -582,12 +583,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
 
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-            self.real_value_cache.clear()
+        # free a bit of memory
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+        self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
@@ -625,6 +625,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
+    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         try:
             name = (
@@ -757,6 +758,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
+        self.side_effects.keepalive = []
 
     def create_proxy(
         self,
@@ -779,6 +781,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
+
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())
@@ -786,10 +791,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-
-        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
-        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
-        rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
+        rv.node.stack_trace = " | ".join(msgs)
 
         return rv
 

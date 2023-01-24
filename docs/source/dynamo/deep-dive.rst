@@ -48,7 +48,11 @@ If you want to understand better what TorchDynamo is doing, you can set:
 
 .. code-block:: python
 
-   torchdynamo.config.debug = True
+   import torch._dynamo.config
+   import logging
+
+   torch._dynamo.config.log_level = logging.INFO
+   torch._dynamo.config.output_code = True
 
 This code triggers useful (but spammy) printouts.
 

@@ -875,11 +875,16 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_);
-    return allreduce_hook.runHook(grad_bucket);
+    return run_allreduce_hook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
   }
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
+    GradBucket& grad_bucket) {
+  _AllReduceBySumCommHook allreduce_hook(process_group_);
+  return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
@@ -1441,10 +1446,18 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      RECORD_FUNCTION(
-          "torch.distributed.ddp.reducer::copy_bucket_to_grad",
-          std::vector<c10::IValue>({variable}));
-      copy_bucket_to_grad(variable, bucket, intra_bucket_index, global_unused);
+      if (set_grads_to_none_) {
+        runGradCallbackForVariable(variable, [&](auto& grad) {
+          grad.reset();
+          return true;
+        });
+      } else {
+        RECORD_FUNCTION(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad",
+            std::vector<c10::IValue>({variable}));
+        copy_bucket_to_grad(
+            variable, bucket, intra_bucket_index, global_unused);
+      }
     } else {
       const auto& bucket_view_out = bucket.bucket_views_out[intra_bucket_index];
       auto& bucket_view_in = bucket.bucket_views_in[intra_bucket_index];
@@ -1455,6 +1468,10 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
+        if (set_grads_to_none_) {
+          grad.reset();
+          return true;
+        }
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
           // If grad is globally used but locally unused, let grad point to
@@ -1690,7 +1707,7 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -1769,6 +1786,10 @@ void Reducer::register_builtin_comm_hook(
       TORCH_WARN_ONCE(
           "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
   }
+}
+
+void Reducer::set_grads_to_none(bool set_to_none) {
+  set_grads_to_none_ = set_to_none;
 }
 
 void Reducer::ensure_prior_reduction_finished() {

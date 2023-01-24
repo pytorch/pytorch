@@ -317,7 +317,14 @@ Node* CloneNodeToGraph(
           }
           case ::c10::prim::PackPadded: {
             auto input = n_graph->addInput();
-            input->copyMetadata(v_n->input(0));
+            if (v == v_n->output(0)) {
+              // Only the first output requires this workaround.
+              // In `peephole` pass, user nodes are modified to consume the
+              // input instead.
+              input->copyMetadata(v_n->input(0));
+            } else {
+              input->copyMetadata(v);
+            }
             return input;
           }
           default: {
@@ -2054,10 +2061,8 @@ void ONNXShapeTypeInference(
         const char shape_err[] = "ShapeInferenceError";
         // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
         const char type_err[] = "TypeInferenceError";
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        if ((strstr(ex.what(), shape_err) == NULL) &&
-            // NOLINTNEXTLINE(modernize-use-nullptr)
-            (strstr(ex.what(), type_err) == NULL)) {
+        if ((strstr(ex.what(), shape_err) == nullptr) &&
+            (strstr(ex.what(), type_err) == nullptr)) {
           throw;
         }
       }
@@ -2140,7 +2145,7 @@ void ONNXSetDynamicInputShape(
   std::map<std::string, ::c10::ShapeSymbol> name_to_sym;
 
   for (const auto i : c10::irange(input_names.size())) {
-    auto input_name = input_names[i];
+    const auto& input_name = input_names[i];
     if (dynamic_axes.find(input_name) != dynamic_axes.end()) {
       auto axes_names = dynamic_axes.find(input_name)->second;
       TORCH_INTERNAL_ASSERT(i < graph->inputs().size());

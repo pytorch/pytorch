@@ -5,7 +5,7 @@ namespace c10d {
 ProcessGroupRoundRobin::ProcessGroupRoundRobin(
     int rank,
     int size,
-    std::vector<c10::intrusive_ptr<Backend>> processGroups)
+    std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups)
     : ProcessGroup(rank, size), processGroups_(std::move(processGroups)) {
   TORCH_WARN(
       "ProcessGroupRoundRobin is deprecated and scheduled to be removed after this current release (1.13). ",
@@ -18,7 +18,7 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
   iterator_ = processGroups_.begin();
 }
 
-ProcessGroupRoundRobin::~ProcessGroupRoundRobin() {}
+ProcessGroupRoundRobin::~ProcessGroupRoundRobin() = default;
 
 c10::intrusive_ptr<Work> ProcessGroupRoundRobin::broadcast(
     std::vector<at::Tensor>& tensors,
@@ -114,7 +114,7 @@ c10::intrusive_ptr<Work> ProcessGroupRoundRobin::barrier(
   TORCH_CHECK(false, "ProcessGroupRoundRobin does not support barrier");
 };
 
-const c10::intrusive_ptr<Backend>& ProcessGroupRoundRobin::next() {
+const c10::intrusive_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
   auto& processGroup = *iterator_;
   iterator_++;
   if (iterator_ == processGroups_.end()) {

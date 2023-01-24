@@ -4,22 +4,9 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-if [ -z "${CI}" ]; then
-  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
-fi
-
-export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
-
-# Test PyTorch
-if [ -z "${CI}" ]; then
-  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
-fi
-
-# Download torch binaries in the test jobs
-if [ -z "${CI}" ]; then
-  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
-  7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
+if [[ -n "$CONDA_ENV" ]]; then
+  # Use binaries under conda environment
+  export PATH="$CONDA_ENV/bin":$PATH
 fi
 
 # Test that OpenMP is enabled for non-arm64 build
@@ -95,13 +82,26 @@ test_libtorch() {
   fi
 }
 
+print_cmake_info() {
+  CMAKE_EXEC=$(which cmake)
+  echo "$CMAKE_EXEC"
+
+  CONDA_INSTALLATION_DIR=$(dirname "$CMAKE_EXEC")
+  # Print all libraries under cmake rpath for debugging
+  ls -la "$CONDA_INSTALLATION_DIR/../lib"
+
+  export CMAKE_EXEC
+}
+
 test_custom_backend() {
+  print_cmake_info
+
   echo "Testing custom backends"
   pushd test/custom_backend
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
   make VERBOSE=1
   popd
 
@@ -116,13 +116,15 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
+  print_cmake_info
+
   echo "Testing custom script operators"
   pushd test/custom_operator
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
   make VERBOSE=1
   popd
 
@@ -136,13 +138,15 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
+  print_cmake_info
+
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
   make VERBOSE=1
   popd
 

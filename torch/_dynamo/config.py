@@ -71,9 +71,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
-# Run the FX graph as it is created to get better type information
-dynamic_propagation = True
-
 # run FX normalization passes in optimizer
 normalize_ir = False
 
@@ -183,6 +180,9 @@ inductor_import = dynamo_import.replace("dynamo", "inductor")
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
+
+# Disables graph breaking on rnn. YMMV with backends.
+allow_rnn = False
 
 # root folder of the project
 if "torch." in dynamo_import:
