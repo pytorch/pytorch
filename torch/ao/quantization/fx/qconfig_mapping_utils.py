@@ -26,7 +26,6 @@ from torch.nn.intrinsic import _FusedModule
 from ..utils import (
     _parent_name,
     get_qconfig_dtypes,
-    get_combined_dict
 )
 from ..qconfig_mapping import (
     _OBJECT_TYPE_DICT_KEY,
@@ -34,10 +33,6 @@ from ..qconfig_mapping import (
     _MODULE_NAME_REGEX_DICT_KEY,
     QConfigMapping,
 )
-from ..quantization_mappings import (
-    get_default_qat_module_mappings,
-)
-
 
 __all__: List[str] = []
 
