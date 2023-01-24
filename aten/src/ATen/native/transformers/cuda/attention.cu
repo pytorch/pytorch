@@ -729,8 +729,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
   Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  Tensor attention, log_sumexp;
-  std::tie(attention, log_sumexp) =
+  Tensor attention, log_sumexp, rng_state;
+  std::tie(attention, log_sumexp, rng_state) =
       at::_flash_attention_forward(
           query_reshaped,
           key_reshaped,
@@ -807,7 +807,7 @@ bool _chunk_grad_outputs_efficient_attention(
 }
 
 
-std::tuple<Tensor, Tensor> _flash_attention_forward(
+std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -827,9 +827,9 @@ std::tuple<Tensor, Tensor> _flash_attention_forward(
   constexpr int num_splits{0};
   auto softmax_scale = std::pow(query.size(-1), -0.5);
   at::Tensor output = at::empty_like(query);
-  Tensor logsumexp, softmax;
+  Tensor logsumexp, rng_state;
 
-  logsumexp = fmha::mha_fwd(
+  std::tie(logsumexp, rng_state) = fmha::mha_fwd(
       query,
       key,
       value,
@@ -844,10 +844,10 @@ std::tuple<Tensor, Tensor> _flash_attention_forward(
       is_causal,
       num_splits,
       c10::nullopt);
-  return std::make_tuple(output, logsumexp);
+  return std::make_tuple(output, logsumexp, rng_state);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor(), Tensor());
+  return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(

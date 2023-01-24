@@ -191,8 +191,10 @@ void run_fmha_fwd(Launch_params<FMHA_fprop_params> &launch_params) {
         run_fmha_fwd_hdim128(launch_params);
     }
 }
-
-at::Tensor
+// out will get populated the output attention
+// First return value is softmax_logsumexp
+// Second return value is the random generator state
+std::tuple<at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -311,15 +313,18 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     // We use a custom RNG that increases the offset by batch_size * nheads * 32.
     int64_t counter_offset = launch_params.params.b * launch_params.params.h * 32;
 
+    // We want to checkpoint and save the RNG state for backward if dropout
+    at::Tensor generator_state;
     if( is_dropout ) {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
+        generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
         launch_params.params.philox_args = gen->philox_cuda_state(counter_offset);
     }
 
     run_fmha_fwd(launch_params);
 
-    return softmax_lse;
+    return {softmax_lse, generator_state};
 }
 
 void run_fmha_bwd(FMHA_dgrad_params &params, cudaStream_t stream, const bool configure) {

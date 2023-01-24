@@ -13811,10 +13811,15 @@
   dispatch:
     CUDA: _chunk_grad_outputs_efficient_attention
 # Returns ouput, softmax_logsumexp, softmax
-- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> (Tensor, Tensor)
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
+
+- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _flash_attention_backward
 
 # Returns ouput, logsumexp if compute_logsumexp
 - func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)

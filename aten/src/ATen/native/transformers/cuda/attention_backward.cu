@@ -12,6 +12,7 @@
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
+#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
 #endif
 
 #define ASSIGN_CHECK_OVERFLOW(A, B)                                            \
@@ -67,6 +68,63 @@
 namespace at {
 
 namespace native {
+
+std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal) {
+#if defined(USE_FLASH_ATTENTION)
+  /*
+  num_splits determines how much to parallelize over the seqlen_q dimension
+  num_splits=0 means
+  it will be set by an internal heuristic. We're exposing num_splits mostly for
+  benchmarking. We will hard code it to 0 for now
+  */
+  constexpr int num_splits{0};
+  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  //  CUDA code assumes that dout is contiguous
+  auto contiguous_grad_out = grad_out.contiguous();
+  Tensor dq = at::empty_like(query);
+  Tensor dk = at::empty_like(key);
+  Tensor dv = at::empty_like(value);
+  //  The kernel computes irregadless we will drop for this functions return
+  Tensor grad_softmax;
+  std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
+          contiguous_grad_out,
+          query,
+          key,
+          value,
+          out,
+          logsumexp,
+          dq,
+          dk,
+          dv,
+          cumulative_sequence_length_q,
+          cumulative_sequence_length_k,
+          max_seqlen_batch_q,
+          max_seqlen_batch_k,
+          dropout_p,
+          softmax_scale,
+          false, /*zero_tensors = false for all calls here*/
+          is_causal,
+          num_splits,
+          c10::nullopt /*gen_*/
+  );
+  return std::make_tuple(dq, dk, dv);
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return std::make_tuple(Tensor(), Tensor(), Tensor());
+}
+
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& grad_out_,
