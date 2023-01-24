@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
@@ -31,7 +32,7 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
+from .utils import gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -66,10 +67,8 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
-        stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
-        ]
+        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
+        stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
@@ -120,6 +119,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
+        self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.warning(f"Using FallbackKernel: {name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -165,7 +171,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -175,10 +181,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            if not isinstance(
-                buffer,
-                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
-            ):
+            if not getattr(buffer, "cpp_kernel", False):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -248,8 +251,17 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if config.static_weight_shapes and (
-            len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
+        # todo(chilli): We can remove the last check once we turn buffers into
+        # static shape tensors. That's a hack to workaround Inductor believing
+        # the buffer should be static but us passing in a fake tensor with
+        # symbolic shapes.
+        if (
+            config.static_weight_shapes
+            and (
+                len(self.graph_inputs) < self.num_static_inputs
+                or not config.dynamic_shapes
+            )
+            and not example._has_symbolic_sizes_strides
         ):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
@@ -296,6 +308,7 @@ class GraphLowering(torch.fx.Interpreter):
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
+                log.exception("Error from lowering")
                 raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
@@ -471,6 +484,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
+        assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
@@ -516,7 +530,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 

@@ -101,6 +101,14 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
 def snapshot_fake(val):
     return val.detach()
 
+def unwrap_proxy(proxy_mode, e):
+    if isinstance(e, torch.Tensor):
+        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
+    elif isinstance(e, (torch.SymInt, torch.SymFloat)):
+        return get_proxy_slot(e.node, proxy_mode.tracer, e, lambda e: e())
+    else:
+        return e
+
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
 # (most notably autograd, but also vmap, functorch transforms, etc).  This means

@@ -1791,48 +1791,30 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
-  // Don't fold in this case, as we would have to call mm on the transposed tensor, the result
-  // would be contiguous, and then we would need to transpose it and call contiguous on it, thus
-  // having to copy the tensor
-  if (tensor1.dim() == 2) {
-    return false;
-  }
-
-  // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
-  // to bmm. We want to make sure we can do so without incurring in any extra copy
-  const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
-
-  // We order the tensors. t1 will be the larger tensor
-  // We can always transpose tensor2 as the dimensions are always >= 1 (precondition from matmul)
-  // and tensor1_larger iff tensor2.dim() > tensor1.dim(9
-  const auto t1 = tensor1_larger ? MaybeOwned<Tensor>::borrowed(tensor1)
-                                 : MaybeOwned<Tensor>::owned(tensor2.mT());
-  const int64_t dim_t1 = t1->dim();
-  const auto dim_t2 = tensor1_larger ? tensor2.dim()
-                                     : tensor1.dim();
-
-  // Just fold for dim_t1 >= 3 and (dim_t2 == 1 || dim_t2 == 2)
-  if (!(dim_t1 >= 3 && dim_t2 <= 2)) {
-    return false;
-  }
-
-  // Can always fold if the tensor is empty
-  // This serves as a precondition for the code below
-  if (t1->numel() == 0) {
-    return true;
-  }
-
-  // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
-  // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
-  const auto t1_shape = t1->sizes();
-  const auto t1_strides = t1->strides();
-  for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
-    if (t1_strides[i] != t1_strides[i+1] * t1_shape[i+1]) {
+bool should_fold(const Tensor& tensor1, const int64_t dim_tensor2) {
+  const auto dim_tensor1 = tensor1.dim();
+  if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+    const auto t1_sizes_ptr = tensor1.sizes().cbegin();
+    const auto t1_strides = tensor1.strides();
+    if (dim_tensor1 == 3 && dim_tensor2 == 2 &&
+        t1_strides.back() != 1 &&
+        t1_strides.front() == t1_sizes_ptr[1] * t1_sizes_ptr[2]) {
+      // First dim is slowest moving, and then the following two dims are
+      // transposed. This can happen for example by permute(0, 2, 1).
+      // First 2 dims could be folded to use mm but would require permutation
+      // with actual data movement, which can be instead handled by BMM with each
+      // GEMM transposed.
+      // This can be generalized to a tensor with dim X + Y + Z where X, Y, and Z
+      // dims are contiguous, Y dims and Z dims are transposed, and X, Y, Z > 0.
+      // For example, this can happen by permute(0, 1, 5, 2, 3, 4), where X = 2,
+      // Y = 3, and Z = 1.
       return false;
+    } else {
+      return true;
     }
+  } else {
+    return false;
   }
-  return true;
 }
 
 /*
@@ -1862,7 +1844,9 @@ Tensor _matmul_impl(
               "both arguments to matmul need to be at least 1D, but they are ",
               dim_tensor1, "D and ", dim_tensor2, "D");
 
+
   const bool has_out = out.defined();
+
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
@@ -1872,11 +1856,10 @@ Tensor _matmul_impl(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold(tensor1, tensor2)) {
+  } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
-    // and we can fold the larger tensor t1 into a matrix as t1.view(-1, t1.size(-1)) without copying
-    // and if dim_tensor2 > dim_tensor1, then dim_tensor1 == 1
+    // and some condition on the strides is fulfilled
 
     // optimization: use mm instead of bmm by folding the batch of the larger tensor
     // into its leading matrix dimension
@@ -1902,33 +1885,41 @@ Tensor _matmul_impl(
     if (t2_is_matrix) {
       output_shape.push_back(t2->sizes()[1]);
     }
-    const auto t1_folded = t1->view({folded_dim1, sizes_1.back()});
+    const auto t1_folded = t1->reshape({folded_dim1, sizes_1.back()});
     if (!has_out) {
       if (t2_is_matrix) {
-        // should_fold gives this invariant. See the discussion there for the why
-        TORCH_INTERNAL_ASSERT(!transpose);
-        return at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        // FIXME This path always does an unnecessary copy when transpose == true as the returned
+        // result from BLAS is already C-transposed
+        const auto output = at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        return transpose ? output.mT().contiguous() : output;
       } else {
         return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
       }
     } else {
-      // See the !has_out branch for an explanation
-      TORCH_INTERNAL_ASSERT(!(transpose && t2_is_matrix));
-
       // Resize output into the correct shape
-      at::native::resize_output(out, output_shape);
+      const auto transpose_out = transpose && t2_is_matrix;
+      if (transpose_out) {
+        // Swap last two elements of output_shape
+        std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
+        at::native::resize_output(out, output_shape);
+        std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
+      } else {
+        at::native::resize_output(out, output_shape);
+      }
+      const auto out_ = transpose_out ? c10::MaybeOwned<Tensor>::owned(out.mT())
+                                      : c10::MaybeOwned<Tensor>::borrowed(out);
 
       // We then reshape the output to the expected shape and call mm/mv
       // and transpose back if necessary
-      auto reshaped_out = t2_is_matrix ? out.reshape({folded_dim1, t2->sizes().back()})
-                                       : out.reshape({folded_dim1});
+      auto reshaped_out = t2_is_matrix ? out_->reshape({folded_dim1, t2->sizes().back()})
+                                       : out_->reshape({folded_dim1});
       if (t2_is_matrix) {
         at::mm_out(reshaped_out, t1_folded, *t2);
       } else {
         at::mv_out(reshaped_out, t1_folded, *t2);
       }
       if (!reshaped_out.is_alias_of(out)) {
-        out.copy_(reshaped_out);
+        out_->copy_(reshaped_out.view_as(*out_));
       }
       return out;
     }
@@ -1937,38 +1928,28 @@ Tensor _matmul_impl(
     // We track m1 vs m2 separately even though they must match for nicer error messages
     const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
     const int64_t m1 = tensor1.sizes().back();
-    auto batch_tensor1 = tensor1.sizes().slice(0, std::max<int64_t>(dim_tensor1 - 2, 0LL));
-    const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().front();
+    const IntArrayRef batch_tensor1(tensor1.sizes().data(),
+                                    std::max<int64_t>(dim_tensor1 - 2, 0LL));
+    const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().back();
     const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
-    auto batch_tensor2 = tensor2.sizes().slice(0, std::max<int64_t>(dim_tensor2 - 2, 0LL));
+    const IntArrayRef batch_tensor2(tensor2.sizes().data(),
+                                    std::max<int64_t>(dim_tensor2 - 2, 0LL));
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
-    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
-    // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
                                                              ret.append({n, m1});
                                                              return ret; }();
+    const auto tensor2_expand_size = [&output_shape, m2, p]{ DimVector ret(output_shape);
+                                                             ret.append({m2, p});
+                                                             return ret; }();
+
+    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
+
+    // flatten expanded batches
     const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
                                          .reshape({expand_batch_product, n, m1});
-    // We need to treat the dim_tensor2 == 1 case separately as broadcasting would not convert
-    // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
-    auto vector_rhs = dim_tensor2 == 1;
-    const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      DimVector ret(output_shape);
-      if (vector_rhs) {
-        ret.push_back(m2);
-      } else {
-        ret.append({m2, p});
-      }
-      return ret;
-    }();
-    auto tensor2_expanded = tensor2.expand(tensor2_expand_size);
-    if (vector_rhs) {
-      tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2}).unsqueeze(2);
-    } else {
-      tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2, p});
-    }
-
+    const auto tensor2_expanded = tensor2.expand(tensor2_expand_size)
+                                         .reshape({expand_batch_product, m2, p});
     if (dim_tensor1 > 1) {
       output_shape.push_back(n);
     }
@@ -1977,18 +1958,11 @@ Tensor _matmul_impl(
     }
 
     if (!has_out) {
-      if (vector_rhs) {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
-      } else {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
-      }
+      return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
     } else {
       at::native::resize_output(out, output_shape);
       auto reshaped_out = out.reshape({expand_batch_product, n, p});
       at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
-      if (vector_rhs) {
-        reshaped_out = reshaped_out.squeeze(-1);
-      }
       if (!reshaped_out.is_alias_of(out)) {
         out.copy_(reshaped_out.view_as(out));
       }
