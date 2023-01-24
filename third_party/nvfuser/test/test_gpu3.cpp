@@ -7272,6 +7272,86 @@ TEST_F(NVFuserTest, FusionRepro2241_CUDA) {
       fec.fusion(), cg_outputs, {t6, t15, t20}, {t7}, __LINE__, __FILE__);
 }
 
+// https://github.com/csarofeen/pytorch/issues/2321
+TEST_F(
+    NVFuserTest,
+    FusionPersistentBufferProjectionAfterWelfordTranslate_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+  const float kEps = 1e-5;
+  Double* eps_ptr = IrBuilder::create<Double>(kEps);
+
+  DataType dtype = DataType::Half;
+  constexpr int64_t dim0 = 2048;
+  constexpr int64_t dim1 = 10240;
+  std::vector<int64_t> input_shape{dim0, dim1};
+  std::vector<int64_t> norm_shape{dim1};
+  auto input_half = makeContigTensor(2, dtype);
+  auto weight_half = makeContigTensor(1, dtype);
+  auto bias_half = makeContigTensor(1, dtype);
+  fusion.addInput(input_half);
+  fusion.addInput(weight_half);
+  fusion.addInput(bias_half);
+  auto input = castOp(DataType::Float, input_half);
+  auto weight = castOp(DataType::Float, weight_half);
+  auto bias = castOp(DataType::Float, bias_half);
+  auto result = layer_norm(input, norm_shape, weight, bias, eps_ptr);
+  auto result_output = castOp(dtype, result.output);
+  fusion.addOutput(result_output);
+  fusion.addOutput(result.mean);
+  fusion.addOutput(result.invstd);
+
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn(input_shape, options);
+  c10::optional<at::Tensor> aten_weight = at::randn({input_shape[1]}, options);
+  c10::optional<at::Tensor> aten_bias = at::randn({input_shape[1]}, options);
+  auto aten_outputs = at::native_layer_norm(
+      aten_input, norm_shape, aten_weight, aten_bias, kEps);
+
+  // welford translate
+  KernelArgumentHolder runtime_inputs =
+      KernelArgumentHolder::createKernelArgumentHolder(
+          {aten_input, aten_weight, aten_bias});
+  bool isTranslated =
+      SegmentCandidateFinder::TranslateWelfordInFusion(&fusion, runtime_inputs);
+  TORCH_INTERNAL_ASSERT(isTranslated);
+
+  // persistent buffer should be projected to input
+  auto persistent_buffer_info = scheduler_utils::persistentBuffers(&fusion);
+  TORCH_CHECK(
+      persistent_buffer_info.projectable_persistent_buffers.size() == 1,
+      "should have only one projectable_persistent_buffer!");
+  TORCH_CHECK(
+      persistent_buffer_info.projectable_buffer_inputs.size() == 1,
+      "should have only one projectable_buffer_inputs!");
+  TORCH_CHECK(
+      persistent_buffer_info.projectable_buffer_inputs[0] == input_half,
+      "persistent buffer should be projected to input!");
+
+  // Check reduction axis is same for all reductions
+  // Generate Launch Parameters
+  auto reduction_params =
+      getPersistentHeuristics(&fusion, {aten_input, aten_weight, aten_bias});
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs =
+      fec.runFusionWithInputs({aten_input, aten_weight, aten_bias});
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {aten_input, aten_weight, aten_bias},
+      {std::get<0>(aten_outputs),
+       std::get<1>(aten_outputs),
+       std::get<2>(aten_outputs)},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

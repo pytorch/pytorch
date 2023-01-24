@@ -2009,6 +2009,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   //  equivalent to a welford operation.
   auto x_sum = sum(in_val, red_axes);
   IrBuilder::create<BinaryOp>(BinaryOpType::Div, out_avg, x_sum, num_features);
+
   // welford.avg may be broadcast. Reuse it if found.
   TensorView* x_avg_bcast = nullptr;
   for (auto& use_expr : out_avg->uses()) {
@@ -2020,28 +2021,10 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
       }
     }
   }
-
-  // x_mean_sub may already exist. Reuse it if found.
-  TensorView* x_mean_sub = nullptr;
-  if (x_avg_bcast != nullptr) {
-    for (auto& use_expr : x_avg_bcast->uses()) {
-      if (auto bop = dynamic_cast<BinaryOp*>(use_expr)) {
-        if (bop->getBinaryOpType() == BinaryOpType::Sub) {
-          if (bop->lhs() == in_val && bop->rhs() == x_avg_bcast) {
-            x_mean_sub = bop->out()->as<TensorView>();
-          }
-        }
-      }
-    }
-  }
-
   if (x_avg_bcast == nullptr) {
     x_avg_bcast = broadcast(out_avg, broadcast_mask);
   }
-
-  if (x_mean_sub == nullptr) {
-    x_mean_sub = sub(in_val, x_avg_bcast);
-  }
+  TensorView* x_mean_sub = sub(in_val, x_avg_bcast);
 
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
   IrBuilder::create<ReductionOp>(
