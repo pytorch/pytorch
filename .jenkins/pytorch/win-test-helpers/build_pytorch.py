@@ -69,7 +69,7 @@ os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation
 
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
-subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
 
 # test vars
 os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
