@@ -11,7 +11,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSpecType,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor.prop import ShardingPropagator
+from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -21,16 +21,6 @@ If _ENABLE_FALLBACK set to False, dispatch will fail when an op doesn't
 have a sharding rule registered.
 """
 _ENABLE_FALLBACK = False
-
-
-"""
-Print information on ops input shape and sharding for debugging purposes.
-"""
-_DEBUG_VERBOSE = False
-
-
-def unwrap_schema(e: object) -> object:
-    return e._spec if isinstance(e, dtensor.DTensor) else e
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
@@ -116,59 +106,31 @@ def operator_dispatch(
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
         return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
 
-    # STEP 0. See if threre're user defined custom aten operator
+    # STEP 0. See if there's a user defined custom aten operator
     # implementations. Custom operators take the highest priority
     if custom_dispatch_ops is not None and str(op_call) in custom_dispatch_ops:
         # dispatch to user defined custom distributed tensor ops
         return custom_dispatch_ops[str(op_call)](*args, **kwargs)
 
     # unwrap the args/kwargs schema
-    args_schema = tree_map(unwrap_schema, args)
-    kwargs_schema = tree_map(unwrap_schema, kwargs)
-
-    op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
-
-    if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
-        print(f"OpSchema({op_schema})")
-        local_shapes = tree_map(
-            lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
-            args,
-        )
-        print(f"    local shapes: {local_shapes}")
+    op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
     output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
-    needs_redistribute = False
-    target_schema = op_schema
 
-    if output_sharding.output_spec is None:
-        if output_sharding.schema_suggestions is None:
-            raise RuntimeError(
-                f"Sharding propagation failed on op {op_call}!"
-                f"Input schema: {op_schema}."
-                f"Failed reason: {output_sharding.failed_reason}"
-            )
-        else:
-            needs_redistribute = True
-            # we do auto redistribute on inputs if necessary
-            # to get an eligble input, which we will pick a
-            # target schema base on the redistribute cost.
-            # For now we simply pick the first suggestion.
-            # TODO: implement full auto distribute with a
-            # simple cost estimation model
-            target_schema = output_sharding.schema_suggestions[0]
-            # run sharding propagation again with target schema
-            output_sharding = sharding_propagator.propagate_op_sharding(
-                op_call, target_schema
-            )
+    # if the schema suggestion from sharding prop is not the same instance as the
+    # input op_schema, it indicates a reshard, we need to redistribute the input
+    # tensors before calling the local op
+    needs_redistribute = output_sharding.schema_suggestions[0] is not op_schema
+    suggested_input_schema = output_sharding.schema_suggestions[0]
 
     local_tensor_args = pack_args_kwargs_with_local_tensor(
         args,
-        target_schema.args_schema,
+        suggested_input_schema.args_schema,
         redistribute_with_schema=needs_redistribute,
     )
     local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
         kwargs,
-        target_schema.kwargs_schema,
+        suggested_input_schema.kwargs_schema,
         redistribute_with_schema=needs_redistribute,
     )
 
@@ -177,12 +139,12 @@ def operator_dispatch(
     local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
     local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
-    if target_schema.is_inplace:
+    if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
         self._spec = cast(DTensorSpec, output_sharding.output_spec)
         return self
-    elif target_schema.is_out_variant:
+    elif suggested_input_schema.is_out_variant:
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
             (output_sharding.output_spec,)
@@ -191,7 +153,7 @@ def operator_dispatch(
         )
         out_dts = []
         spec_idx = 0
-        for arg in target_schema.func_schema.arguments:
+        for arg in suggested_input_schema.func_schema.arguments:
             if arg.is_out:
                 out_dt = cast(dtensor.DTensor, kwargs[arg.name])
                 out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])
