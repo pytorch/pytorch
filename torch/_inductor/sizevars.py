@@ -116,7 +116,7 @@ class SizeVarAllocator(object):
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
         """
-        from .ir import IndexingDiv, ModularIndexing
+        from .ir import FloorDiv, ModularIndexing
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
@@ -137,7 +137,7 @@ class SizeVarAllocator(object):
             return base
 
         def visit_indexing_div(base, divisor):
-            return IndexingDiv(remove_zero_terms(base, divisor), divisor)
+            return FloorDiv(remove_zero_terms(base, divisor), divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
@@ -157,7 +157,7 @@ class SizeVarAllocator(object):
             else:
                 base_s = base
             if self.maybe_guard_lt(base_s, modulus * divisor):
-                return IndexingDiv(base, divisor)
+                return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
         if expr.has(ModularIndexing):
@@ -170,9 +170,9 @@ class SizeVarAllocator(object):
                 visit_modular_indexing,
             )
 
-        if expr.has(IndexingDiv):
+        if expr.has(FloorDiv):
             expr = expr.replace(
-                IndexingDiv(
+                FloorDiv(
                     sympy.Wild("base"),
                     sympy.Wild("divisor"),
                 ),
@@ -498,13 +498,13 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
     becomes
     ModularIndexing(i0, 1, 128)
-    ModularIndexing(i0, 1, 32) + 32 * IndexingDiv(i0, 32)
+    ModularIndexing(i0, 1, 32) + 32 * FloorDiv(i0, 32)
     becomes i0
 
 
     This type of pattern can come from view operations
     """
-    from .ir import IndexingDiv, ModularIndexing
+    from .ir import FloorDiv, ModularIndexing
 
     assert isinstance(expr, sympy.Add)
 
@@ -536,14 +536,14 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
         if m1:
             for term2 in expr.args:
                 m2 = term2.match(
-                    m1[scale] * m1[mod1] * IndexingDiv(m1[base], m1[divisor] * m1[mod1])
+                    m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
                 )
                 if m2 is not None:  # in case of success we get an empty dict here
                     expr = join_dimensions(
                         expr
                         - term1
                         - term2
-                        + m1[scale] * IndexingDiv(m1[base], m1[divisor])
+                        + m1[scale] * FloorDiv(m1[base], m1[divisor])
                     )
                     return expr
     return expr
@@ -571,7 +571,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
-    simplify ir.ModularIndexing/ir.IndexingDiv.
+    simplify ir.ModularIndexing/ir.FloorDiv.
     """
 
     def __init__(self, inner, var_ranges: VarRanges):
