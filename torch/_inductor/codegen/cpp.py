@@ -182,7 +182,7 @@ class CppPrinter(ExprPrinter):
             x = f"({x} / {div})"
         return f"{x} % {mod}"
 
-    def _print_IndexingDiv(self, expr):
+    def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
@@ -1326,7 +1326,7 @@ class CppVecKernelChecker(CppVecKernel):
     def is_supported_cmp(self, node: torch.fx.Node):
         def get_node_dtype(node):
             if type(node) == torch.fx.Node:
-                return None if "dtype" not in node.meta else node.meta["dtype"]
+                return node.meta.get("dtype", None)
             else:
                 return None
 
@@ -1942,7 +1942,7 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
+            main_loop_range = ir.FloorDiv(self.size, sympy_factor)
             main_loop = LoopLevel(self.var, main_loop_range)
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
