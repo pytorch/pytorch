@@ -268,6 +268,12 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
                 .set_root_module(embedding_op)
                 .set_reference_quantized_module(ref_embedding_op)
                 ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+        # config for functional embedding
+        embedding_op_configs.append(
+            BackendPatternConfig(torch.nn.functional.embedding)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                ._set_input_type_to_index({"weight": 1}))
     return embedding_op_configs
 
 # =====================
