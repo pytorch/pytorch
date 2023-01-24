@@ -91,6 +91,10 @@ print_cmake_info() {
   ls -la "$CONDA_INSTALLATION_DIR/../lib"
 
   export CMAKE_EXEC
+  # Explicitly add conda env lib folder to cmake rpath to address the flaky issue
+  # where cmake dependencies couldn't be found. This seems to point to how conda
+  # links $CMAKE_EXEC to its package cache when cloning a new environment
+  install_name_tool -add_rpath @executable_path/../lib "${CMAKE_EXEC}" || true
 }
 
 test_custom_backend() {
