@@ -447,11 +447,11 @@ void initFuncTorchBindings(PyObject* module) {
       "get_inplace_requires_grad_allowed",
       &at::functorch::getInplaceRequiresGradAllowed);
   m.def(
-      "set_autograd_function_allowed",
-      &at::functorch::setAutogradFunctionAllowed);
+      "set_single_level_autograd_function_allowed",
+      &at::functorch::setSingleLevelAutogradFunctionAllowed);
   m.def(
-      "get_autograd_function_allowed",
-      &at::functorch::getAutogradFunctionAllowed);
+      "get_single_level_autograd_function_allowed",
+      &at::functorch::getSingleLevelAutogradFunctionAllowed);
   m.def("unwrap_if_dead", &unwrapIfDead);
   m.def("is_dead_tensor_wrapper", &isDeadTensorWrapper);
   m.def("dlevel", &dlevel, "dlevel");
@@ -519,6 +519,13 @@ void initFuncTorchBindings(PyObject* module) {
       .def("level", &VmapInterpreterPtr::level)
       .def("batchSize", &VmapInterpreterPtr::batchSize)
       .def("randomness", &VmapInterpreterPtr::randomness);
+  py::class_<FunctionalizeInterpreterPtr>(m, "CFunctionalizeInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &FunctionalizeInterpreterPtr::key)
+      .def("level", &FunctionalizeInterpreterPtr::level)
+      .def(
+          "functionalizeAddBackViews",
+          &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
 }
 
 } // namespace impl

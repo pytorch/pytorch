@@ -32,6 +32,8 @@ namespace functorch {
 // write batching rules for operators whenever possible.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
+void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+
 // The vmap fallback emits a warning by default, but it may be disabled if
 // the user finds it to be too annoying.
 TORCH_API bool isVmapFallbackWarningEnabled();

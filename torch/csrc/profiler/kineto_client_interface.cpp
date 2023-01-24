@@ -46,6 +46,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
+  // NOLINTNEXTLINE(modernize-use-override)
   void set_withstack(bool withStack) override {
     withStack_ = withStack;
   }

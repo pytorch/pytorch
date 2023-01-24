@@ -239,7 +239,8 @@ def _common_unshard_post_state_dict_hook(
             buffers.append(state_dict[fqn])
     if buffers:
         mixed_precision_enabled_for_buffers = (
-            fsdp_state._mixed_precision_enabled_for_buffers() if not _is_composable(fsdp_state)
+            fsdp_state._mixed_precision_enabled_for_buffers()
+            if not _is_composable(fsdp_state)
             else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
         if mixed_precision_enabled_for_buffers:
@@ -306,10 +307,8 @@ def _full_post_state_dict_hook(
         if clean_key.startswith(clean_prefix):
             clean_key = clean_key[len(clean_prefix) :]
 
-        # Clone non-ignored parameters before exiting the `_unshard_params()` context.
-        if clean_key not in fsdp_state._ignored_param_names and not getattr(
-            state_dict[fqn], "_has_been_cloned", False
-        ):
+        # Clone parameters before exiting the `_unshard_params()` context.
+        if not getattr(state_dict[fqn], "_has_been_cloned", False):
             try:
                 state_dict[fqn] = state_dict[fqn].clone().detach()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]

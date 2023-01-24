@@ -8,6 +8,7 @@ from torch.distributions.utils import broadcast_all, lazy_property
 
 __all__ = ['VonMises']
 
+
 def _eval_poly(y, coef):
     coef = list(coef)
     result = coef.pop()
@@ -77,7 +78,7 @@ class VonMises(Distribution):
     Example::
         >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = VonMises(torch.tensor([1.0]), torch.tensor([1.0]))
-        >>> m.sample() # von Mises distributed with loc=1 and concentration=1
+        >>> m.sample()  # von Mises distributed with loc=1 and concentration=1
         tensor([1.9777])
 
     :param torch.Tensor loc: an angle in radians.

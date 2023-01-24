@@ -170,7 +170,6 @@ class Backend(object):
     NCCL = "nccl"
     UCC = "ucc"
     MPI = "mpi"
-    TCP = "tcp"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
@@ -183,13 +182,7 @@ class Backend(object):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value == Backend.TCP:
-            raise ValueError(
-                "TCP backend has been deprecated. Please use "
-                "Gloo or MPI backend for collective operations "
-                "on CPU tensors."
-            )
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
+        if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
             value = name.lower()
         return value
 
@@ -1244,7 +1237,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             return pg.recv([tensor], group_src_rank, tag)
 
 
-def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
+def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
 
@@ -1276,7 +1269,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group.send([tensor], group_dst_rank, tag).wait()
 
 
-def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
+def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
 
@@ -1947,6 +1940,7 @@ def _tensor_to_object(tensor, tensor_size):
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
 
+
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
     # Gate PG wrapper check on Gloo availability.
@@ -1960,6 +1954,7 @@ def _check_for_nccl_backend(group):
         is_nccl_available() and
         pg.name() == Backend.NCCL
     )
+
 
 @exception_handler
 def all_gather_object(object_list, obj, group=None):
@@ -3067,7 +3062,7 @@ def all_to_all_single(
         >>> scatter_list = list(input.chunk(world_size))
         >>> gather_list  = list(output.chunk(world_size))
         >>> for i in range(world_size):
-        >>>   dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
+        >>>     dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
 
         >>> # Another example with uneven split
         >>> input
@@ -3186,7 +3181,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         >>> scatter_list = input
         >>> gather_list  = output
         >>> for i in range(world_size):
-        >>>   dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
+        >>>     dist.scatter(gather_list[i], scatter_list if i == rank else [], src=i)
 
         >>> input
         tensor([0, 1, 2, 3, 4, 5])                                       # Rank 0
