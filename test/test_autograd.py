@@ -4482,14 +4482,6 @@ Done""")
 
                 out.backward()
 
-    # TODO: update these tests to use the linalg module and move to test_linalg.py
-    @skipIfNoLapack
-    def test_symeig_no_eigenvectors(self):
-        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
-        w, v = torch.symeig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
-            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
-
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):
@@ -10599,6 +10591,33 @@ class TestAutogradMultipleDispatch(TestCase):
 
         TestFn.apply(inp, None).sum().backward()
         self.assertFalse(threads_eq)
+
+    @onlyCUDA
+    def test_backward_tls_stash(self):
+
+        local = threading.local()
+        local.my_obj = {}
+        local.my_obj[10] = 10
+        test_self = self
+        torch._C._stash_obj_in_tls("my_obj", local.my_obj)
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x, self):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                test_self.assertTrue(torch._C._is_key_in_tls("my_obj"))
+                test_self.assertTrue(torch._C._get_obj_in_tls("my_obj")[10] == 10)
+                torch._C._get_obj_in_tls("my_obj")[10] = 5
+                return gO, None
+
+        inp = torch.rand(10, device="cuda", requires_grad=True)
+
+        TestFn.apply(inp, None).sum().backward()
+        self.assertEqual(local.my_obj[10], 5)
+
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
