@@ -121,13 +121,16 @@ def _retrieve_or_wrap_scalar_as_constant(
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.int64))
     elif isinstance(ts_value, list) and all(isinstance(val, float) for val in ts_value):
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
-    elif isinstance(ts_value, list) and all(isinstance(val, torch.fx.Node) for val in ts_value):
+    elif isinstance(ts_value, list) and all(
+        isinstance(val, torch.fx.Node) for val in ts_value
+    ):
         # A list of torch.fx.Node's (aka ts_value) should be mapped to a list of TorchScript values
         # in TorchScript graph.
         ts_list = [fx_name_to_ts_value[val.name] for val in ts_value]
         ts_value = g.op("prim::ListConstruct", *ts_list)
     elif isinstance(ts_value, torch.dtype):
         from torch.onnx import _type_utils
+
         ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
     else:
         raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
@@ -459,7 +462,11 @@ def _export(
         decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
     # Apply decomposition table to the input graph.
     decomposed_module = proxy_tensor.make_fx(
-        module, decomposition_table=decomposition_table, tracing_mode="fake", _allow_non_fake_inputs=True)(*args)
+        module,
+        decomposition_table=decomposition_table,
+        tracing_mode="fake",
+        _allow_non_fake_inputs=True,
+    )(*args)
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
@@ -630,7 +637,7 @@ def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
 
 
 def export_without_parameters_and_buffers(
-    module: Union[torch.nn.Module, Callable],
+    module: torch.fx.GraphModule,
     *args,
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
     use_binary_format: bool = True,
@@ -639,11 +646,6 @@ def export_without_parameters_and_buffers(
     # module(*args, **kwargs) must run.
     **kwargs,
 ):
-    """
-    This function export the input "module" into a stateless ONNX model.
-    All parameters and buffer in "module" will be inputs of the generated
-    ONNX model.
-    """
     if opset_version is None:
         opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
     if isinstance(module, torch.nn.Module):
@@ -674,7 +676,9 @@ def export_without_parameters_and_buffers(
         else:
             concrete_args[param_name] = param_value
 
-    graph_module = torch.fx.symbolic_trace(module, concrete_args=concrete_args)
+    graph_module = torch.fx.symbolic_trace(
+        module, concrete_args=concrete_args, expand_submodule_call_into_operators=True
+    )
 
     # Make sure all placeholder nodes are executed before get_attr nodes.
     # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
@@ -690,17 +694,19 @@ def export_without_parameters_and_buffers(
     replaced_attrs = _replace_get_attr_with_placeholder(graph_module)
     # Move all newly created placeholder nodes to the front of the graph.
     _move_placeholder_to_front(graph_module)
-    # Finalize the graph editting. This new graph_module is stateless now (i.e., contains no
-    # parameters and buffers). To call it, run
-    #  graph_module(*bound.args, *replaced_attrs)
-    # Note that the original module (contains parameters and buffers) is called by
-    #  module(*bound.args)
+    # Finalize the graph editting.
     graph_module.recompile()
 
-    return _export(
+    return (
+        _export(
+            graph_module,
+            opset_version,
+            *bound.args,
+            *replaced_attrs,
+            decomposition_table=decomposition_table,
+            use_binary_format=use_binary_format,
+        ),
         graph_module,
-        opset_version,
-        *bound.args,
-        *replaced_attrs,
-        decomposition_table=decomposition_table,
-        use_binary_format=use_binary_format), graph_module, bound.args, replaced_attrs
+        bound.args,
+        replaced_attrs,
+    )

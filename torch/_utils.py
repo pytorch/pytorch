@@ -146,6 +146,7 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.utils._mode_utils import no_dispatch
     from torch.utils._python_dispatch import _get_current_dispatch_mode
+
     mode = _get_current_dispatch_mode()
     if isinstance(mode, FakeTensorMode):
         # Create a real tensor and then convert it to FakeTensor.
@@ -154,7 +155,9 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 
         with no_dispatch():
             # First construct a tensor with the correct dtype/device.
-            t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+            t = torch.tensor(
+                [], dtype=storage.dtype, device=storage._untyped_storage.device
+            )
             # Set storage (i.e., content) of the newly created tensor.
             t.set_(storage._untyped_storage, storage_offset, size, stride)
         return mode.from_tensor(t)

@@ -206,6 +206,7 @@ class Tracer(TracerBase):
         autowrap_modules: Tuple[ModuleType] = (math,),
         autowrap_functions: Tuple[Callable, ...] = (),
         param_shapes_constant: bool = False,
+        expand_submodule_call_into_operators: bool = False,
     ) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
@@ -231,6 +232,11 @@ class Tracer(TracerBase):
                 will be evaluated directly, rather than returning a new Proxy value
                 for an attribute access. Backward compatibility for this parameter
                 is guaranteed.
+
+            expand_submodule_call_into_operators (bool): If this flag is true,
+                calling forward function of nn.Module will not be recorded as a
+                call_module node; instead, the call will be expanded into a series
+                call_function nodes.
         """
 
         super().__init__()
@@ -250,6 +256,8 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+        self.expand_submodule_call_into_operators = expand_submodule_call_into_operators
+
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -429,13 +437,14 @@ class Tracer(TracerBase):
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
         """
-        #module_qualified_name = self.path_of_module(m)
-        #if not self.is_leaf_module(m, module_qualified_name):
-        #    return forward(*args, **kwargs)
-        #return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        module_qualified_name = self.path_of_module(m)
+        # Expand all submodules if expand_submodule_call_into_operators is True.
+        # Or just expand non-leaf modules.
+        if self.expand_submodule_call_into_operators or not self.is_leaf_module(m, module_qualified_name):
+            # Calling into forward can expand sub-modules into ops in the traced graph.
+            return forward(*args, **kwargs)
+        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
 
-        # Calling into forward can expand sub-modules into ops in the traced graph.
-        return forward(*args, **kwargs)
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
@@ -1021,6 +1030,7 @@ def wrap(fn_or_name: Union[str, Callable]):
 def symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
     concrete_args: Optional[Dict[str, Any]] = None,
+    expand_submodule_call_into_operators: bool = False,
 ) -> GraphModule:
     """
     Symbolic tracing API
@@ -1065,6 +1075,10 @@ def symbolic_trace(
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
         concrete_args (Optional[Dict[str, any]]): Inputs to be partially specialized
+        expand_submodule_call_into_operators (bool): If True, expand submodule calls into the
+            underying operators (i.e., call_function nodes). This will eliminate call_module
+            nodes in the traced graph. If False, calling submodule will be recorded as
+            call_module nodes in the traced graph.
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
@@ -1099,7 +1113,7 @@ def symbolic_trace(
         orig_fns.add(orig)
 
     try:
-        tracer = Tracer()
+        tracer = Tracer(expand_submodule_call_into_operators=expand_submodule_call_into_operators)
         graph = tracer.trace(root, concrete_args)
         name = (
             root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
@@ -1107,7 +1121,7 @@ def symbolic_trace(
         return GraphModule(tracer.root, graph, name)
     finally:
         for name, (_, orig) in patched_torch_methods.items():
-            setattr(torch, name, orig)    
+            setattr(torch, name, orig)
 
 
 @wrap
