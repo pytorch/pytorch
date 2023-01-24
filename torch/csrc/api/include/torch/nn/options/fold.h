@@ -64,7 +64,6 @@ using FoldFuncOptions = FoldOptions;
 /// ```
 struct TORCH_API UnfoldOptions {
   UnfoldOptions(ExpandingArray<2> kernel_size)
-      // NOLINTNEXTLINE(performance-move-const-arg)
       : kernel_size_(std::move(kernel_size)) {}
 
   /// the size of the sliding blocks
