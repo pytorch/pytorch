@@ -50,7 +50,6 @@ from common_utils import (
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._functorch.named_members_polyfill import _named_buffers, _named_parameters
 
 USE_TORCHVISION = False
 try:
@@ -2528,8 +2527,8 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
             params_and_buffers = {**named_params, **named_buffers}
             return torch.func.functional_call(m, params_and_buffers, c_args, c_kwargs)
 
-        named_params = dict(_named_parameters(m, remove_duplicate=False))
-        named_buffers = dict(_named_buffers(m, remove_duplicate=False))
+        named_params = dict(m.named_parameters(remove_duplicate=False))
+        named_buffers = dict(m.named_buffers(remove_duplicate=False))
         num_params_buffers = len(named_params) + len(named_buffers)
         compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers)
         params_buffers_args = [named_params, named_buffers, args]

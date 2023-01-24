@@ -146,18 +146,25 @@ if sys.platform == 'win32':
 
 
 def _preload_cuda_deps():
-    """ Preloads cudnn/cublas deps if they could not be found otherwise """
+    """Preloads cudnn/cublas deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
+    cublas_path = None
+    cudnn_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
-            continue
-        break
+        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
+        if os.path.exists(candidate_cublas_path) and not cublas_path:
+            cublas_path = candidate_cublas_path
+        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
+        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
+            cudnn_path = candidate_cudnn_path
+        if cublas_path and cudnn_path:
+            break
+    if not cublas_path or not cudnn_path:
+        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
 
     ctypes.CDLL(cublas_path)
     ctypes.CDLL(cudnn_path)
