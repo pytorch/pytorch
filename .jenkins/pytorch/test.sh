@@ -814,6 +814,10 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_smoke() {
+  time python test/run_test.py --include test_fx test_jit --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -938,6 +942,9 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
+elif [[ "${TEST_CONFIG}" == *smoke* ]]; then
+  # TODO: Delete me once we get more 3.11 testing
+  test_smoke
 else
   install_torchvision
   install_triton
