@@ -5298,7 +5298,11 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
                 )
             else:
                 setattr(
-                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
+                    other_cls,
+                    f"{name}_{suffix}",
+                    unittest.skipIf(
+                        TEST_WITH_ASAN and suffix == "cuda", "Skipped under ASAN"
+                    )(lambda self, value=value: value(self)),
                 )
 
 
