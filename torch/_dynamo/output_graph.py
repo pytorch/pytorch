@@ -756,6 +756,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
+        self.side_effects.keepalive = []
 
     def create_proxy(
         self,
@@ -777,6 +778,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

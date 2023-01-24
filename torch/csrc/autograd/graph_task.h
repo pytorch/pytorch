@@ -67,6 +67,42 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
         virtual ~GradCaptureHook() = default;
         virtual at::Tensor operator()(const at::Tensor& grad) = 0;
       };
+      // NOTE [Deprecated capture hooks]
+      //
+      // The current status of capture hooks is that we continue to support
+      // the single usage of it by distributed in the dist_engine. If anyone
+      // else needs to use it for other purposes, they should file an issue.
+      //
+      // Capture hooks were originally created because there did not exist
+      // any way to register pre/post hooks to grad_fn in a way such that it
+      // would still be executed even if that is the grad_fn of a Tensor
+      // passed as input= of .grad. As far as I know, only dist_engine uses
+      // this hook.
+      //
+      // However, there are other alternatives today like tensor hooks that can
+      // replace the usage that originally motivated its creation. Also,
+      // Captures hooks are an outlier in terms of the types of hook that
+      // autograd offers in how it is registered and behaves, e.g. it is a hook
+      // registered not to the graph, but to a particular graph_task! This makes
+      // it a burden to maintain.
+      //
+      // It would be very nice to clean up/do a migration from pre/post
+      // hooks used in distributed to use tensor hooks, but for now we just
+      // mark this method as deprecated to prevent additional usage.
+      //
+      // If you still think you really need to capture hooks, please file an
+      // issue (and tag autograd).
+      const std::vector<std::unique_ptr<GradCaptureHook>>&
+      DO_NOT_USE_DEPRECATED_get_capture_hooks() const {
+        return hooks_;
+      }
+      // See NOTE [deprecated capture hooks]
+      void DO_NOT_USE_DEPRECATED_register_capture_hook(
+          std::unique_ptr<GradCaptureHook> hook) {
+        hooks_.push_back(std::move(hook));
+      }
+
+     private:
       // The hooks will be called one by one in the order as they were added.
       // The input grad of a hook will be the output of its preceding hook. The
       // first hook will take the captured grad as the input. The output of the
