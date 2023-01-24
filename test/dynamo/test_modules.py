@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 from copy import deepcopy
+import types
 from unittest.mock import patch
 
 import torch
@@ -1124,6 +1125,27 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_module_patch(self):
+        class ModulePatch1(torch.nn.Module):
+            pass
+        
+        class ModulePatch2(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        mod = ModulePatch1()
+        mod.forward = types.MethodType(ModulePatch2.forward, mod)
+
+        def fn(x):
+            return mod(x)
+
+        self.assertTrue(
+            torch.allclose(
+                torch._dynamo.optimize("eager", nopython=True)(fn)(torch.ones(10)),
+                torch.zeros(1),
+            )
+        )
 
 
 if __name__ == "__main__":
