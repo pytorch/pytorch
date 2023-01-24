@@ -15,6 +15,7 @@ import sys
 import time
 import warnings
 from contextlib import contextmanager
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -60,7 +61,16 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
-CI_SKIP_AOT_EAGER_INFERENCE = [
+
+class CI(NamedTuple):
+    backend: str  # aot_eager or inductor
+    training: bool
+    dynamic: bool = False
+
+
+CI_SKIP = collections.defaultdict(list)
+
+CI_SKIP[CI("aot_eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
     "demucs",  # OOM
@@ -82,8 +92,8 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
 
-CI_SKIP_AOT_EAGER_TRAINING = [
-    *CI_SKIP_AOT_EAGER_INFERENCE,
+CI_SKIP[CI("aot_eager", training=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
@@ -94,6 +104,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "tacotron2",  # AssertionError: Deduped args out of bounds
     "vision_maskrcnn",
     # Huggingface
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -101,17 +112,18 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "convit_base",  # fp64_OOM
     "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
-CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
-    *CI_SKIP_AOT_EAGER_TRAINING,
+CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=True)],
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "twins_pcpvt_base",  # timeout
 ]
 
-CI_SKIP_INDUCTOR_INFERENCE = [
-    *CI_SKIP_AOT_EAGER_INFERENCE,
+CI_SKIP[CI("inductor", training=False)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
     # TorchBench
     "detectron2",
     "hf_T5",  # accuracy
@@ -133,16 +145,18 @@ CI_SKIP_INDUCTOR_INFERENCE = [
     "ghostnet_100",  # Accuracy
 ]
 
-CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_INDUCTOR_INFERENCE,
+CI_SKIP[CI("inductor", training=True)] = [
+    *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
+    "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
     "GoogleFnet",  # Eager model failed to run
+    "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
@@ -259,10 +273,19 @@ def print_summary(filename):
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
+    if "tag" in data.columns:
+        for tag in data.tag.unique():
+            print(f"\nSummary for tag={tag}:")
+            print_summary_table(data[data.tag == tag])
+    else:
+        print_summary_table(data)
+
+
+def print_summary_table(data):
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
-            if col in ("dev", "name", "batch_size"):
+            if col in ("dev", "name", "batch_size", "tag"):
                 continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
@@ -272,13 +295,16 @@ def print_summary(filename):
                 print(col.ljust(width), f"mean={data[col].mean():.1f} seconds")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.1f}x")
+            elif col in ("accuracy"):
+                pass_rate = (data[col] == "pass").mean()
+                print(col.ljust(width), f"pass_rate={100*pass_rate:.1f}%")
             else:
                 cdata = data[col].clip(1)
                 print(
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
                 )
-        except Exception:
+        except Exception as e:
             pass
 
 
@@ -542,16 +568,15 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    headers = ("dev", "name", "batch_size", "speedup", "abs_latency")
-    row = [
-        current_device,
-        current_name,
-        current_batch_size,
-        float(speedup),
-        median[1] * 1000,
-    ]
+    first_headers = ["dev", "name", "batch_size"]
+    first_fields = [current_device, current_name, current_batch_size]
+    if "tag" in kwargs:
+        first_headers.append("tag")
+        first_fields.append(kwargs["tag"])
+    headers = first_headers + ["speedup", "abs_latency"]
+    row = first_fields + [float(speedup), median[1] * 1000]
     if "compilation_latency" in kwargs:
-        headers = headers + ("compilation_latency", "compression_ratio")
+        headers += ["compilation_latency", "compression_ratio"]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
 
@@ -566,8 +591,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     ), f"expected output_filename to be a .csv, but got {output_filename}"
     output_csv(
         output_filename[:-4] + "_compilation_metrics.csv",
-        ["dev", "name", "batch_size"] + headers,
-        [current_device, current_name, current_batch_size] + data,
+        first_headers + headers,
+        first_fields + data,
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -1137,7 +1162,9 @@ class BenchmarkRunner:
         )
         return start, end
 
-    def check_accuracy(self, name, model, example_inputs, optimize_ctx, experiment):
+    def check_accuracy(
+        self, name, model, example_inputs, optimize_ctx, experiment, tag
+    ):
         """
         Checks accuracy.
         1) Collect the outputs with fp64 datatype. This is useful for error checking.
@@ -1152,11 +1179,14 @@ class BenchmarkRunner:
                 if accuracy_status in ("pass", "eager_variation", "fail_accuracy"):
                     accuracy_status = "pass"
 
-            output_csv(
-                output_filename,
-                ("dev", "name", "batch_size", "accuracy"),
-                [current_device, current_name, current_batch_size, accuracy_status],
-            )
+            headers = ["dev", "name", "batch_size", "accuracy"]
+            fields = [current_device, current_name, current_batch_size, accuracy_status]
+
+            if tag is not None:
+                headers.insert(3, "tag")
+                fields.insert(3, tag)
+
+            output_csv(output_filename, headers, fields)
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
@@ -1269,7 +1299,7 @@ class BenchmarkRunner:
         return record_status(accuracy_status)
 
     def run_performance_test(
-        self, name, model, example_inputs, optimize_ctx, experiment
+        self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         def warmup(fn, model, example_inputs, mode, niters=5):
             peak_mem = 0
@@ -1299,6 +1329,8 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
+            if tag is not None:
+                experiment_kwargs["tag"] = tag
             results = []
 
             eager_latency, eager_peak_mem = warmup(
@@ -1352,45 +1384,39 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        diff=False,
+        explain,
+        comparison_branch=None,
         branch=None,
     ):
         assert branch is None, "Branch set during top level flow."
         import git
 
-        repo = git.Repo(
-            "../torch._dynamo"
-        )  # Hack assumption of torchbenchmark positioning
+        repo = git.Repo()
         curr_branch = repo.active_branch.name
-        if curr_branch != "main":
-            if repo.is_dirty():
-                raise RuntimeError(
-                    "--diff_main called on dirty branch. Commit, stash, or reset."
-                )
+        if curr_branch != comparison_branch:
             # Run current
             try:
                 self.run_one_model(
                     name,
                     model,
-                    self.model_iter_fn,
                     example_inputs,
                     optimize_ctx,
                     experiment,
-                    diff=False,
+                    explain=explain,
                     branch=curr_branch,
+                    tag=curr_branch,
                 )
-                # Swap to main
-                repo.git.checkout("main")
-                # Run main
+                # Run comparison branch
+                repo.git.checkout(comparison_branch)
                 self.run_one_model(
                     name,
                     model,
-                    self.model_iter_fn,
                     example_inputs,
                     optimize_ctx,
                     experiment,
-                    diff=False,
-                    branch="main",
+                    explain=explain,
+                    branch=comparison_branch,
+                    tag=comparison_branch,
                 )
             finally:
                 # Swap back
@@ -1398,7 +1424,7 @@ class BenchmarkRunner:
             return
         else:
             raise RuntimeError(
-                "--diff_main called on main branch, what are you diffing?"
+                f"--diff-branch: current branch is same as {comparison_branch} branch, what are you diffing?"
             )
 
     def run_one_model(
@@ -1408,30 +1434,44 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        diff=False,
+        comparison_branch=None,
         branch=None,
         explain=False,
+        tag=None,
     ):
-        if diff:
+        if comparison_branch is not None:
             self.compare_branches(
-                name, model, example_inputs, optimize_ctx, experiment, diff, branch
+                name,
+                model,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+                comparison_branch=comparison_branch,
+                explain=explain,
             )
-        elif branch:
-            print("RUNNING ON BRANCH:", branch)
+            return
         mode = "train" if self.args.training else "eval"
-        print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
+        msg = f"{current_device:4} {mode:5} {current_name:34} "
+        if branch:
+            msg += f" {branch:26}"
+        print(msg, end=" ", flush=True)
         start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if self.args.accuracy:
             status = self.check_accuracy(
-                name, model, example_inputs, optimize_ctx, experiment
+                name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
         elif self.args.performance:
             status = self.run_performance_test(
-                name, model, example_inputs, optimize_ctx, experiment
+                name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+        if self.args.timing:
+            from torch._dynamo.utils import print_time_report
+
+            print_time_report()
+
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if explain:
@@ -1452,6 +1492,9 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
+    )
+    parser.add_argument(
+        "--exclude-exact", action="append", help="filter benchmarks with exact match"
     )
     parser.add_argument(
         "--total-partitions",
@@ -1651,9 +1694,7 @@ def parse_args(args=None):
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
     parser.add_argument(
-        "--diff_main",
-        action="store_true",
-        help="Delta this branch against main. In the future, we may add support for picking the branch.",
+        "--diff-branch", default=None, help="Delta current branch against given branch."
     )
 
     parser.add_argument(
@@ -1689,6 +1730,13 @@ def parse_args(args=None):
         help="""Whether to collect outputs for training. Set this to true if we
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
+    )
+    parser.add_argument("--timing", action="store_true", help="Emits phase timing")
+
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Print n/k models message between each model run.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -1795,7 +1843,20 @@ def parse_args(args=None):
 
 
 def main(runner, original_dir=None):
+    if original_dir:
+        os.chdir(original_dir)
     args = parse_args()
+
+    if args.diff_branch:
+        import git
+
+        # We do this here so we error out earlier if there's an issue
+        repo = git.Repo()
+        if repo.is_dirty():
+            raise RuntimeError(
+                "--diff-branch called on dirty branch. Commit, stash, or reset."
+            )
+
     with maybe_init_distributed(
         (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
@@ -1810,7 +1871,11 @@ def run(runner, args, original_dir=None):
 
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+    args.exclude_exact = args.exclude_exact or []
 
+    if args.inductor:
+        assert args.backend is None
+        args.backend = "inductor"
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
@@ -1826,27 +1891,18 @@ def run(runner, args, original_dir=None):
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
-        if args.backend == "aot_eager":
-            if args.dynamic_ci_skips_only:
-                assert args.training and args.dynamic_shapes
-                args.filter = list(
-                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
-                    - set(CI_SKIP_AOT_EAGER_TRAINING)
-                )
-            else:
-                args.exclude = (
-                    CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
-                    if args.training and args.dynamic_shapes
-                    else CI_SKIP_AOT_EAGER_TRAINING
-                    if args.training
-                    else CI_SKIP_AOT_EAGER_INFERENCE
-                )
-        elif args.inductor:
-            args.exclude = (
-                CI_SKIP_INDUCTOR_TRAINING
-                if args.training
-                else CI_SKIP_INDUCTOR_INFERENCE
+        if args.dynamic_ci_skips_only:
+            # Test only the incremental set of jobs whose skipped was
+            # caused solely by turning on dynamic shapes
+            assert args.dynamic_shapes
+            ci = functools.partial(CI, args.backend, training=args.training)
+            args.filter = list(
+                set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
+        else:
+            args.exclude_exact = CI_SKIP[
+                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
+            ]
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
@@ -2211,7 +2267,7 @@ def run(runner, args, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                diff=args.diff_main,
+                comparison_branch=args.diff_branch,
                 explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
@@ -2231,9 +2287,13 @@ def run(runner, args, original_dir=None):
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
-        for name in runner.iter_model_names(args):
+        model_names = list(runner.iter_model_names(args))
+        nmodels = len(model_names)
+        for i, name in enumerate(model_names):
             current_name = name
             placeholder_batch_size = 0
+            if args.progress:
+                print(f"Running model {i+1}/{nmodels}", flush=True)
 
             def write_csv():
                 for device in args.devices:
