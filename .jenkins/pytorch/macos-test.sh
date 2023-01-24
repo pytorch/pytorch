@@ -89,8 +89,6 @@ print_cmake_info() {
   CONDA_INSTALLATION_DIR=$(dirname "$CMAKE_EXEC")
   # Print all libraries under cmake rpath for debugging
   ls -la "$CONDA_INSTALLATION_DIR/../lib"
-
-  export CMAKE_EXEC
 }
 
 test_custom_backend() {
@@ -101,7 +99,7 @@ test_custom_backend() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -124,7 +122,7 @@ test_custom_script_ops() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -146,7 +144,7 @@ test_jit_hooks() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
