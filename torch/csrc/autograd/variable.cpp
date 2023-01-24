@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -121,7 +122,7 @@ ViewInfo ViewInfo::chain(
     };
   }
 
-  return ViewInfo(base_, view_func);
+  return ViewInfo(base_, std::move(view_func));
 }
 
 namespace {
@@ -582,7 +583,7 @@ void VariableHooks::_backward(
   std::vector<torch::autograd::Variable> input_vars(
       inputs.begin(), inputs.end());
   torch::autograd::backward(
-      {self}, {_gradient}, keep_graph, create_graph, input_vars);
+      {self}, {std::move(_gradient)}, keep_graph, create_graph, input_vars);
 }
 
 void VariableHooks::requires_grad_(

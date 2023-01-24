@@ -32,6 +32,7 @@
 
 #include <set>
 #include <unordered_set>
+#include <utility>
 
 namespace {
 
@@ -300,6 +301,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     return activities;
   });
 
+  m.def("_unsafe_decrement_version_counter", [](at::Tensor t) {
+    torch::autograd::increment_version::version_counter(t);
+  });
+
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
       .def(py::init<bool, bool>());
@@ -368,10 +373,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
   py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
       .def(py::init<bool>());
+  py::class_<DisableAutocast>(std::move(_C_m), "_DisableAutocast")
+      .def(py::init<>());
   py::class_<ViewReplayEnabled>(_C_m, "_ViewReplayEnabled")
       .def(py::init<bool>());
-  py::class_<DisableAutocast>(_C_m, "_DisableAutocast").def(py::init<>());
-  py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
+  py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
             false,
