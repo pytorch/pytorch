@@ -37,7 +37,7 @@ PackBMatrix::PackBMatrix(
   output_channels_ = output_channels;
   packed_weights_ =
       malloc(n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
-  if (packed_weights_ == NULL) {
+  if (packed_weights_ == nullptr) {
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for packed weights",
         n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
