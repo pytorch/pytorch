@@ -9,10 +9,11 @@ import threading
 from typing import List
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 
 from .. import config
 from ..ir import ReductionHint, TileHint
-from ..utils import conditional_product, dynamo_utils, has_triton
+from ..utils import conditional_product, has_triton
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -139,7 +140,7 @@ class CachingAutotuner(KernelInterface):
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides
@@ -565,28 +566,31 @@ def conv_heuristics():
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
-    def get_grid_dim(numel, block_name, block):
-        if numel is None:
-            return 1
-        label = block_name[0]
-        if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
-                f"({label.lower()}numel=={numel}, {block_name}={block})."
-            )
-        max_block = config.triton.max_block[label]
-        max_block_str = f'config.triton.max_block["{label}"]'
-        assert max_block % block == 0, (
-            f"TritonKernel.indexing assumes {block_name} divides {max_block_str}."
-            f"({block_name}={block}, {max_block_str}={max_block})."
-        )
-        return cdiv(numel, block)
+    if ynumel and znumel:
 
-    def grid_fn(meta):
-        return (
-            get_grid_dim(xnumel, "XBLOCK", meta.get("XBLOCK", None)),
-            get_grid_dim(ynumel, "YBLOCK", meta.get("YBLOCK", None)),
-            get_grid_dim(znumel, "ZBLOCK", meta.get("ZBLOCK", None)),
-        )
+        def grid_fn(meta):
+            return (
+                cdiv(xnumel, meta["XBLOCK"]),
+                cdiv(ynumel, meta["YBLOCK"]),
+                cdiv(znumel, meta["ZBLOCK"]),
+            )
+
+    elif ynumel:
+
+        def grid_fn(meta):
+            return (
+                cdiv(xnumel, meta["XBLOCK"]),
+                cdiv(ynumel, meta["YBLOCK"]),
+                1,
+            )
+
+    else:
+
+        def grid_fn(meta):
+            return (
+                cdiv(xnumel, meta["XBLOCK"]),
+                1,
+                1,
+            )
 
     return grid_fn
