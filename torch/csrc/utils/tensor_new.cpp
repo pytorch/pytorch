@@ -1603,10 +1603,39 @@ Tensor asarray(
   }
 
 #ifdef USE_NUMPY
-  // Check whether 'obj' is a NumPy Array
-  if (is_numpy_available() && PyArray_Check(obj)) {
-    tensor = tensor_from_numpy(obj, /*warn_if_not_writeable=*/false);
-    should_warn_numpy_not_writable = !PyArray_ISWRITEABLE((PyArrayObject*)obj);
+  if (is_numpy_available()) {
+    // Check whether 'obj' is a NumPy Array or Scalar.
+    bool is_numpy_array = PyArray_Check(obj);
+    bool is_numpy_scalar = PyArray_CheckScalar(obj);
+
+    if (is_numpy_array || is_numpy_scalar) {
+      THPObjectPtr ptr;
+      auto arr = obj;
+
+      if (is_numpy_scalar) {
+        TORCH_CHECK(
+            !force_alias,
+            "can't alias NumPy scalars. ",
+            "Either remove copy=False or transform it in a ndarray. ")
+
+        ptr = PyArray_FromScalar(obj, nullptr);
+        arr = ptr.get();
+      }
+
+      tensor = tensor_from_numpy(arr, /*warn_if_not_writeable=*/false);
+      should_warn_numpy_not_writable =
+          !PyArray_ISWRITEABLE((PyArrayObject*)arr);
+
+      if (is_numpy_scalar) {
+        // Uses a newly cloned storage, instead of the shared one.
+        // The THPObjectPtr will delete the previous storage in the
+        // end of the previous scope.
+        tensor = tensor.clone();
+
+        // No need to clone again, later.
+        force_copy = false;
+      }
+    }
   }
 #endif
 
