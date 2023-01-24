@@ -16,7 +16,7 @@ from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater, CUDA11OrLater)
+    (SM53OrLater, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
@@ -39,7 +39,7 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
-) or (not IS_WINDOWS and CUDA11OrLater)
+) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
@@ -1922,11 +1922,9 @@ class TestSparse(TestSparseBase):
                 [17, 18, 19, 20],
             ], dtype=dtype, device=device)
             exp_v = torch.tensor([7, 14, 3, 20], dtype=dtype, device=device)
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse().sparse_mask(x)
+            res = dense.sparse_mask(x)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4]), dtype=dtype, device=device)
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
             i = self.index_tensor([
                 [1, 3, 0, 4],
@@ -1936,11 +1934,9 @@ class TestSparse(TestSparseBase):
             x = self.sparse_tensor(i, v, torch.Size([5, 4, 0])).coalesce()
             dense = torch.empty([5, 4, 0], dtype=dtype, device=device)
             exp_v = torch.empty([4, 0], dtype=dtype, device=device)
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
+            res = dense.sparse_mask(x)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 0]), dtype=dtype, device=device)
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
         _test_sparse_mask_fixed()
 
@@ -1973,12 +1969,10 @@ class TestSparse(TestSparseBase):
                 [[13, 5], [14, 1], [15, 1], [16, 6]],
                 [[17, 7], [18, 2], [19, 7], [20, 1]],
             ])
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
+            res = dense.sparse_mask(x)
             exp_v = torch.tensor([[7, 9], [14, 1], [3, 3], [20, 1]])
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2]))
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
             i = self.index_tensor([
                 [1, 3, 0, 4],
@@ -1987,12 +1981,10 @@ class TestSparse(TestSparseBase):
             v = torch.empty(4, 2, 0)
             x = self.sparse_tensor(i, v, torch.Size([5, 4, 2, 0])).coalesce()
             dense = torch.empty(5, 4, 2, 0)
-            res_dense_lhs = dense.sparse_mask(x)
-            res_sparse_lhs = dense.to_sparse(2).sparse_mask(x)
+            res = dense.sparse_mask(x)
             exp_v = torch.empty(4, 2, 0)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2, 0]))
-            self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res.coalesce(), expected.coalesce())
 
         _test_sparse_mask_hybrid_fixed()
 
@@ -3427,9 +3419,9 @@ class TestSparse(TestSparseBase):
     @skipIfRocm
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if CUDA11OrLater and SM53OrLater else [],
-                                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
-                                      *[torch.complex64] if CUDA11OrLater else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater else [],
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      torch.complex64,
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})

@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 
 using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal);
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal);
 
 DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub);
 
