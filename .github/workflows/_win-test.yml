@@ -89,21 +89,10 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      - name: Setup conda
-        shell: bash
-        run: |
-          # Windows conda is baked into the AMI at this location
-          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
-
-          {
-            echo "CONDA_RUN=${CONDA} run --no-capture-output";
-            echo "CONDA_BUILD=${CONDA} run conda-build";
-            echo "CONDA_INSTALL=${CONDA} install";
-          } >> "${GITHUB_ENV}"
-
       - name: Start monitoring script
         id: monitor-script
         shell: bash
+        continue-on-error: true
         run: |
           # Windows conda doesn't have python3 binary, only python, but it's python3
           ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
@@ -144,7 +133,7 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          TORCH_CUDA_ARCH_LIST: "8.6"
+          TORCH_CUDA_ARCH_LIST: "7.0"
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |

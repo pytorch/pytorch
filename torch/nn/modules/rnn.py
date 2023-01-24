@@ -240,7 +240,7 @@ class RNNBase(Module):
 
     def _weights_have_changed(self):
         # Returns True if the weight tensors have changed since the last forward pass.
-        # This is the case when used with stateless.functional_call(), for example.
+        # This is the case when used with torch.func.functional_call(), for example.
         weights_changed = False
         for ref, name in zip(self._flat_weight_refs, self._flat_weights_names):
             weight = getattr(self, name) if hasattr(self, name) else None
