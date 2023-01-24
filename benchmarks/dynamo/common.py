@@ -166,11 +166,14 @@ CI_SKIP[CI("inductor", training=True)] = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
-
 # Skips for dynamic=True
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # cannot determine truth value of Relational
+    # timm_models
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
 ]
@@ -1934,6 +1937,7 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
+        torch._inductor.config.dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True

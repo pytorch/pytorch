@@ -80,7 +80,8 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 set DISTUTILS_USE_SDK=1
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
-if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=7.0
+:: The latest Windows CUDA test is running on AWS G5 runner with A10G GPU
+if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=8.6
 
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
