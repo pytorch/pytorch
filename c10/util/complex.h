@@ -254,7 +254,7 @@ struct alignas(sizeof(T) * 2) complex {
     U bi = rhs.imag();
     // not using std::abs because it is not a constexpr and
     // can cause an error in windows
-    #ifdef (_MSC_VER)
+    #ifdef _MSC_VER
       auto abs_br = br < 0 ? -br : br;
       auto abs_bi = bi < 0 ? -bi : bi;
     #else
