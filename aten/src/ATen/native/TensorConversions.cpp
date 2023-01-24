@@ -1152,7 +1152,7 @@ Tensor sparse_compressed_to_flipped(
   // To CSC/BSC inputs these indices will appear "transposed".
   const auto is_transposed_indices = layout == at::kSparseCsc || layout == at::kSparseBsc;
   const auto coo_indices_2d_transposed = [&]() -> Tensor {
-    const auto coo_indices_2d = _convert_indices_from_csr_to_coo(
+    auto coo_indices_2d = _convert_indices_from_csr_to_coo(
         compressed_indices_2d,
         plain_indices_2d,
         is_out_int32,
