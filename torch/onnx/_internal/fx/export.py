@@ -4,7 +4,6 @@ import itertools
 import operator
 from typing import Callable, Dict, Optional, Tuple, Union
 
-import onnx
 import onnxscript
 from onnxscript import evaluator
 from onnxscript.function_libs.torch_aten import graph_building, ops
@@ -253,8 +252,8 @@ def _wrap_fx_args_as_ts_args(root, node, fx_name_to_onnxscipt_tensor):
 def _export_fx_to_ts(fx_module_with_metadata, opset_version):
 
     # Initialize the ONNX graph
-    torchscript_graph = graph_building.TorchScriptGraph()
-    torchscript_evaluator = graph_building.TorchScriptEvaluator(torchscript_graph)
+    onnxscript_graph = graph_building.TorchScriptGraph()
+    tracer = graph_building.TorchScriptTracingEvaluator(onnxscript_graph)
 
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
@@ -277,7 +276,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
         # print(f"Export {node}, {node.target}:")
         if node.op == "placeholder":
             # Input of graph.
-            output = torchscript_graph.add_input(
+            output = onnxscript_graph.add_input(
                 input_name=node.name, input_value=node.meta["val"]
             )
             assert (
@@ -304,7 +303,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 onnx_args = _wrap_fx_args_as_ts_args(
                     fx_module_with_metadata, node, fx_name_to_onnxscipt_tensor
                 )
-                with evaluator.default_as(torchscript_evaluator):
+                with evaluator.default_as(tracer):
                     output: Union[
                         graph_building.TorchScriptTensor,
                         Tuple[graph_building.TorchScriptTensor],
@@ -357,7 +356,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_tensor[
                     node.args[0].name
                 ]
-                torchscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
+                onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
             else:
                 # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
                 # tensor, etc), we flatten the collection and register each element as output.
@@ -367,7 +366,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                         arg, torch.fx.Node
                     ), f"ts_output must be a torch.fx.Node, not {type(arg)}"
                     onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_tensor[arg.name]
-                    torchscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
+                    onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
         elif node.op == "call_method":
             # TODO(wechi): Support call_method.
             raise RuntimeError("call_method is not supported yet.")
@@ -388,7 +387,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     )
                 current_attr = getattr(current_attr, sub_attr_name)
 
-            output = torchscript_graph.add_input(
+            output = onnxscript_graph.add_input(
                 input_name=node.name, input_value=current_attr
             )
             assert (
@@ -402,8 +401,10 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
             # TODO(wechi): Support get_attr, call_module, call_method.
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
 
-    torch._C._jit_pass_onnx_scalar_type_analysis(
-        torchscript_graph.graph, lowprecision_cast=True, opset_version=opset_version
+    onnxscript_graph.apply(
+        torch._C._jit_pass_onnx_scalar_type_analysis,
+        lowprecision_cast=True,
+        opset_version=opset_version,
     )
 
     # When replace aten with onnx ops, the node-level shape type inference uses
@@ -412,11 +413,13 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     # TODO(titaiwang): If onnx shape type inference is intended to be deprecated in converter.
     # node-level shape type inference should be also deprecated as well in g.op
     if ONNX_GLOBALS.onnx_shape_inference:
-        torch._C._jit_pass_onnx_graph_shape_type_inference(
-            torchscript_graph.graph, params_dict={}, opset_version=opset_version
+        onnxscript_graph.apply(
+            torch._C._jit_pass_onnx_graph_shape_type_inference,
+            params_dict={},
+            opset_version=opset_version,
         )
 
-    return torchscript_graph, ts_name_to_real_tensor
+    return onnxscript_graph, ts_name_to_real_tensor
 
 
 def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
@@ -470,16 +473,15 @@ def _export(
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
-    torchscript_graph, ts_initializers = _export_fx_to_ts(
+    onnxscript_graph, ts_initializers = _export_fx_to_ts(
         decomposed_module, opset_version
     )
     # Export TorchScript graph to ONNX ModelProto.
-    onnx_model = torchscript_graph.to_model_proto(ts_initializers, opset_version)
+    onnx_model = onnxscript_graph.to_model_proto(ts_initializers, opset_version)
     if use_binary_format:
         # Return ModelProto in binary format.
-        return onnx_model
-    # Return ModelProto in readable format (printable).
-    model_proto = onnx.ModelProto.FromString(onnx_model)
+        return onnx_model.SerializeToString()
+    # Return ModelProto
     return model_proto
 
 
