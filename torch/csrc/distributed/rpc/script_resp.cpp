@@ -5,13 +5,11 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-#include <utility>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-ScriptResp::ScriptResp(at::IValue&& value) : value_(std::move(value)) {}
+ScriptResp::ScriptResp(at::IValue&& value) : value_(value) {}
 
 const at::IValue& ScriptResp::value() {
   return value_;
