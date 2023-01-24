@@ -1,3 +1,7 @@
+import sys
+if sys.version_info >= (3, 11):
+    raise RuntimeError("torch._dynamo does not work on Python-3.11+ yet")
+
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .convert_frame import replay
 from .eval_frame import (
