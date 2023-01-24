@@ -294,6 +294,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._is_all_true,
+        Tensor._is_any_true,
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
     }

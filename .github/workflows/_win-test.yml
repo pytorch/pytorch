@@ -58,11 +58,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
-      - name: Enable git symlinks on Windows
-        shell: bash
-        run: |
-          git config --global core.symlinks true
-
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
@@ -77,6 +72,12 @@ jobs:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
               call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
               set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+
+      # Duplicated in win-build because this MUST go before a checkout
+      - name: Enable git symlinks on Windows
+        shell: bash
+        run: |
+          git config --global core.symlinks true
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
