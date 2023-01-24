@@ -873,16 +873,19 @@ def arange(g: jit_utils.GraphContext, *args):
         return dtype
 
     if len(args) == 2 and all(map(lambda val: isinstance(val, int), args)):
-        # aten::arange(Scalar end, ScalarType dtype)
+        # aten::arange(Scalar start, Scalar end)
         dtype = torch.int64
+        # Start index.
         start = g.op(
             "Constant",
             value_t=torch.tensor(args[0], dtype=dtype),
         )
+        # End (exclusive) index.
         end = g.op(
             "Constant",
             value_t=torch.tensor(args[1], dtype=dtype),
         )
+        # Step size from start to end indexes.
         delta_default = g.op(
             "Constant",
             value_t=torch.tensor(1, dtype=dtype),
