@@ -821,7 +821,7 @@ endif()
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   if(USE_MPS)
     enable_language(OBJC OBJCXX)
     foreach(input_filename ${Caffe2_MPS_SRCS})
