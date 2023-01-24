@@ -5,7 +5,6 @@ import operator
 from typing import Callable, Dict, Optional, Tuple, Union
 
 import onnx
-
 import torch
 import torch._C
 import torch._decomp
@@ -390,36 +389,13 @@ def _ts_graph_to_onnx_model_in_protobuf(
     return proto
 
 
-def get_innermost_fake_tensor_mode():
-    """
-    This function inspects Pytorch's mode stack found by
-    _get_current_dispatch_mode_stack(...) and return the innermost
-    FakeTensorMode (or None if no FakeTensorMode is found).
-    It also ensures the uniqueness of FakeTensorMode in that mode stack.
-    """
-    number_of_fake_tensor_modes = 0
-    # The innermost FakeTensorMode.
-    fake_tensor_mode = None
-    for mode in torch.utils._python_dispatch._get_current_dispatch_mode_stack():
-        if isinstance(mode, fake_tensor.FakeTensorMode):
-            number_of_fake_tensor_modes += 1
-            fake_tensor_mode = mode
-    # Recursive FakeTensorMode's easily leads to runtime error.
-    assert number_of_fake_tensor_modes <= 1
-    # Return the innermost FakeTensorMode found. Otherwise, reture None.
-    return fake_tensor_mode
-
-
-def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
+def _shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
     # Use this FakeTensorMode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor
     # 2. run FakeTensorProp
     # If (1) and (2) are done with difference FakeTensorMode's, undefined behavior may
     # happen.
-    fake_tensor_mode = get_innermost_fake_tensor_mode()
-    if fake_tensor_mode is None:
-        # Create a temporary FakeTensorMode for FakeTensorProp.
-        fake_tensor_mode = fake_tensor.FakeTensorMode()
+    fake_tensor_mode = fake_tensor.FakeTensorMode()
 
     def to_fake_tensor(x):
         if isinstance(x, torch.Tensor) and not isinstance(x, fake_tensor.FakeTensor):
@@ -469,7 +445,10 @@ def _export(
         _allow_non_fake_inputs=True,
     )(*args)
 
-    decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
+    # Run FakeTensorProp on decomposed_module.
+    # Symbolic output of the i-th node can be accessed via
+    # decomposed_module.graph.nodes[i].meta["val"]
+    decomposed_module = _shape_inference_with_fake_tensor(decomposed_module, *args)
 
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
