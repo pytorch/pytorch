@@ -11,6 +11,7 @@ import torch._C
 import torch._decomp
 import torch._dynamo
 import torch._ops
+import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
@@ -609,9 +610,16 @@ def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
     for node in graph.nodes:
         if node.op == "get_attr":
             replaced_attr = None
+            # get_attr could retrieve either parameter or buffer, so
+            # we need to try both.
             try:
                 replaced_attr = graph_module.get_parameter(node.target)
-            except:
+            except AttributeError:
+                # It's possible that model author use buffer instead of
+                # parameter to store trainable weights. In this case,
+                # 1. get_parameter will throw something like
+                #    AttributeError: `bias` is not an nn.Parameter.
+                # 2. get_buffer should work.
                 replaced_attr = graph_module.get_buffer(node.target)
 
             # Reassign op type so that get_attr node becomes placeholder node.

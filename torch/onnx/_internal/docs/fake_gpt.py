@@ -1,4 +1,7 @@
 # Import generic wrappers
+import numpy as np
+import onnx
+import onnxruntime
 import torch
 import torch._dynamo
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -40,12 +43,8 @@ def test_one(graph_module, onnx_model, bound_args, replaced_attrs):
         pth_args.append(real_t)
     pth_out = graph_module(*pth_args)
 
-    import numpy as np
-    import onnx
-    import onnxruntime as ort
-
     onnx.save(onnx_model, "model_tiny_gpt.onnx")
-    ort_sess = ort.InferenceSession(
+    ort_sess = onnxruntime.InferenceSession(
         "model_tiny_gpt.onnx",
         providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
