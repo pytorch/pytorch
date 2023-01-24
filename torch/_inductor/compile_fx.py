@@ -13,10 +13,7 @@ import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.optimizations.normalize import normalize_ir
-from torch._dynamo.optimizations.training import (
-    aot_autograd,
-    is_aot_autograd_safe_to_run,
-)
+from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
@@ -25,7 +22,7 @@ from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -90,7 +87,7 @@ def _warn_tf32_disabled():
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         warnings.warn(
-            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
 
@@ -199,10 +196,16 @@ def clone_preserve_strides(x):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
+    def is_aligned(storage_offset, dtype):
+        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
+
     check_inputs = [
         i
         for i in range(len(inputs))
-        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        if (
+            i not in static_input_idxs
+            or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
+        )
         and inputs[i].device.type == "cuda"
     ]
 
@@ -363,10 +366,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
 ):
     """Main entrypoint to a compile given FX graph"""
-
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
-        log.warning("Aot Autograd is not safe to run, so falling back to eager")
-        return model_
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
