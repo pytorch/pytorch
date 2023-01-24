@@ -228,6 +228,16 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.exp()"
 
     @staticmethod
+    def exp2(x):
+        return f"{x}.exp2()"
+
+    @staticmethod
+    def expm1(x):
+        # decompose for a better performance
+        vec_one = f"decltype({x})(1)"
+        return f"{x}.exp() - {vec_one}"
+
+    @staticmethod
     def erf(x):
         return f"{x}.erf()"
 
@@ -401,10 +411,6 @@ class CppVecOverrides(OpOverrides):
         return f"({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"{x}.expm1()"
-
-    @staticmethod
     def log1p(x):
         return f"{x}.log1p()"
 
@@ -423,10 +429,9 @@ class CppVecOverrides(OpOverrides):
             code.writeline(
                 f"auto {var} = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());"
             )
-        elif isinstance(other, float):
-            code.writeline(f"auto {var} = at::vec::Vectorized<float>({other});")
         else:
             code.writeline(f"auto {var} = at::vec::Vectorized<float>({other!r});")
+
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
             zero_val = "at::vec::Vectorized<float>(0)"
@@ -472,6 +477,14 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def exp2(x):
+        return f"std::exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def erf(x):
         return f"std::erf({x})"
 
@@ -486,10 +499,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"std::log1p({x})"
-
-    @staticmethod
-    def expm1(x):
-        return f"std::expm1({x})"
 
     @staticmethod
     def tanh(x):
@@ -573,6 +582,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if dtype in (torch.float16, torch.bfloat16):
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
+
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -1232,19 +1246,24 @@ class CppVecKernelChecker(CppVecKernel):
     def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
         load_type = V.graph.get_dtype(name)
         if load_type == torch.bool:
-            user_nodes = set([_node.target for _node in users.keys()])
-            return user_nodes == set(["where", "masked"])
+            return all(user.target in ("where", "masked") for user in users.keys())
         elif load_type == torch.uint8:
             """
             If the load value is torch.uint8, then we only support the loaded
             value is as the mask.
             """
-            user_nodes = set([_node.target for _node in users.keys()])
-            if not user_nodes == set(["to_dtype"]):
+            if not all(
+                user.target == "to_dtype" and user.args[-1] == torch.bool
+                for user in users.keys()
+            ):
                 return False
-            for _node in users.keys():
-                assert len(_node.args)
-                if _node.args[-1] != torch.bool:
+
+            for to_dtype_node in users.keys():
+                assert to_dtype_node.target == "to_dtype"
+                if not all(
+                    user.target in ("where", "masked")
+                    for user in to_dtype_node.users.keys()
+                ):
                     return False
             return True
         else:
@@ -1463,6 +1482,8 @@ class CppVecKernelChecker(CppVecKernel):
                 i32_iinfo = numpy.iinfo(numpy.int32)
                 if (
                     dtype == torch.int64
+                    and max_expr.is_number
+                    and min_expr.is_number
                     and max_expr <= i32_iinfo.max
                     and min_expr >= i32_iinfo.min
                 ):
@@ -1958,10 +1979,12 @@ class LoopLevel:
 
     def clone(self):
         loop = copy(self)
+        loop.inner = []
         if self.inner:
-            for idx, inner_loop in enumerate(self.inner):
-                loop.inner[idx] = inner_loop.clone()
-                loop.inner[idx].parent = loop
+            for inner_loop in self.inner:
+                inner_loop_clone = inner_loop.clone()
+                inner_loop_clone.parent = loop
+                loop.inner.append(inner_loop_clone)
         loop.kernel = deepcopy(self.kernel)
         return loop
 

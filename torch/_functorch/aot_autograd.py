@@ -26,7 +26,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
-from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
@@ -483,9 +482,19 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
     if target_meta_tensor._base is not None:
         # The base that we want to replay our view off of might have a different shape than the view's original base.
         b = target_meta_tensor._base
-        reshaped_base_tensor = aliased_base_tensor.as_strided(
-            b.size(), b.stride(), b.storage_offset()
-        )
+        abt = aliased_base_tensor
+        # Don't unnecessarily call as_strided if nothing changed; as_strided's
+        # backward is poorly implemented and slow
+        if abt is not b and (
+            abt.size() != b.size() or
+            abt.stride() != b.stride() or
+            abt.storage_offset() != b.storage_offset()
+        ):
+            reshaped_base_tensor = aliased_base_tensor.as_strided(
+                b.size(), b.stride(), b.storage_offset()
+            )
+        else:
+            reshaped_base_tensor = aliased_base_tensor
         out = target_meta_tensor._view_func(reshaped_base_tensor)
         if out is not None:
             out.requires_grad_(target_requires_grad)
@@ -1042,7 +1051,7 @@ class AOTConfig:
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
-        log.debug("====== Forward (only) graph {aot_config.aot_id} ======")
+        log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1662,8 +1671,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
         if config.debug_graphs:
-            log.debug("====== Forward graph {aot_config.aot_id} ======")
+            log.debug(f"====== Forward graph {aot_config.aot_id} ======")
             log.debug(fw_module.print_readable(print_output=False))
+            log.debug(f"====== Backward graph {aot_config.aot_id} ======")
+            log.debug(bw_module.print_readable(print_output=False))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -2328,10 +2339,10 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
-        return stateless.functional_call(mod, params_and_buffers, args, kwargs)
+        return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
-    named_params = dict(_named_parameters(mod, remove_duplicate=False))
-    named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
+    named_params = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
         functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
@@ -2395,8 +2406,8 @@ def aot_module_simplified(
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
-        **dict(_named_parameters(mod, remove_duplicate=False)),
-        **dict(_named_buffers(mod, remove_duplicate=False)),
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
     }
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
