@@ -91,7 +91,7 @@ def load_state_dict(
     def local_step():
         assert planner is not None
         metadata = storage_reader.read_metadata()
-        planner.init(state_dict, metadata, distW.is_coordinator)
+        planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
         storage_reader.init(metadata, distW.is_coordinator)
 
         local_plan = planner.create_local_plan()
