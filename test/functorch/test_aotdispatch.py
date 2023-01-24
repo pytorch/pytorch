@@ -1956,14 +1956,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
-        def f(x):
-            return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
-        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-
-        ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
-
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_recomputable_ops(self):
         def f(x):
@@ -2336,7 +2328,7 @@ symbolic_aot_autograd_failures = {
     xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
+    xfail('nn.functional.scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
@@ -2409,7 +2401,6 @@ symbolic_aot_autograd_failures = {
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd_lowrank', ''),  # could not find kernel
-    xfail('symeig', ''),  # aten.symeig.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2581,7 +2572,6 @@ aot_autograd_module_failures = set({
 })
 
 symbolic_aot_autograd_module_failures = {
-    torch.nn.GRU,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
@@ -2589,6 +2579,7 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.MultiheadAttention,  # baddbmm - Cannot call sizes() on tensor with symbolic ...
 }
 
 

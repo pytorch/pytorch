@@ -1619,28 +1619,29 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.linear = nn.Linear(9, 3)
 
             def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
+                x = self.conv(x)
+                x = x.reshape((1, -1))
+                x = self.linear(x)
                 return x
 
         m = M().eval()
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        example_inputs = (torch.randn(1, 1, 1, 1),)
+        example_inputs = (torch.randn(1, 1, 3, 3),)
         m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         m(*example_inputs)
         m = convert_fx(m)
         m(*example_inputs)
-        # first conv is quantized, second conv is not quantized
+        # conv is quantized, linear is not quantized
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_module(nnq.Conv2d),
             ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
@@ -8518,17 +8519,20 @@ class TestQuantizeFxModels(QuantizationTestCase):
                     return x
 
             qengine = torch.backends.quantized.engine
-            qconfig_dict = {"": get_default_qat_qconfig(qengine),
-                            "object_type": [(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)]}
+            qconfig_dict = QConfigMapping() \
+                .set_global(get_default_qat_qconfig(qengine)) \
+                .set_object_type(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)
 
             train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
             eval_output = [[torch.randint(0, 10, (12, 1))]]
 
             model = EmbeddingBagLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
+            print("after prepare:", prepared_fx_model)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
                                      qconfig_mapping=qconfig_dict)
+            print("quant model:", quant_model)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.

@@ -1467,7 +1467,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         _qat_swap_modules(model, module_to_qat_module)
-        _update_qconfig_for_qat(qconfig_mapping, {})
+        _update_qconfig_for_qat(qconfig_mapping, backend_config)
 
     # mapping from fully qualified module name to module instance
     # for example,
