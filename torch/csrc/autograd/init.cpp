@@ -301,6 +301,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     return activities;
   });
 
+  m.def("_unsafe_decrement_version_counter", [](at::Tensor t) {
+    torch::autograd::increment_version::version_counter(t);
+  });
+
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
       .def(py::init<bool, bool>());

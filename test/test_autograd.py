@@ -3736,6 +3736,16 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         out = f(x)
         self.assertTrue("AsStridedBackward" in str(out.grad_fn))
 
+    def test_unsafe_decrement_version_counter(self):
+        x = torch.ones(2, requires_grad=True)
+        x.add_(1)
+        self.assertEqual(1, x._version)
+        torch.autograd._unsafe_decrement_version_counter(x)
+        self.assertEqual(0, x._version)
+        with self.assertRaisesRegex(RuntimeError, "Cannot decrement"):
+            torch.autograd._unsafe_decrement_version_counter(x)
+
+
     def test_current_node(self):
         pr = []
 
