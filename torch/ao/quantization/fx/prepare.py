@@ -128,6 +128,7 @@ def _get_dtype_and_is_dynamic(obs_or_fq_ctr: Optional[Callable]) -> Tuple[Option
     """ Given a constructor for observer or fake quant module, returns
     a Tuple of dtype and is_dynamic
     """
+    # TODO: instead of instantiating the instance, we can use inspect to get the default args
     if obs_or_fq_ctr is None:
         return None, False
     else:
@@ -166,9 +167,7 @@ def _is_input_arg_dtype_supported_by_backend(
         )
     elif is_weight:
         # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
-        weight_obs_or_fq_ctr = None
-        if "weight_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
-            weight_obs_or_fq_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"]
+        weight_obs_or_fq_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", None)
         qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
         backend_config_weight_dtype = dtype_config.weight_dtype
         dtype_matches = qconfig_weight_dtype == backend_config_weight_dtype
@@ -177,9 +176,7 @@ def _is_input_arg_dtype_supported_by_backend(
         return backend_config_weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
     else:  # bias
         # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
-        bias_obs_or_fq_ctr = None
-        if "bias_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
-            bias_obs_or_fq_ctr = node.meta["target_dtype_info"]["bias_obs_or_fq_ctr"]
+        bias_obs_or_fq_ctr = node.meta["target_dtype_info"].get("bias_obs_or_fq_ctr", None)
         qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
         backend_config_bias_dtype = dtype_config.bias_dtype
         return backend_config_bias_dtype is None or qconfig_bias_dtype == backend_config_bias_dtype
@@ -491,15 +488,11 @@ def _get_arg_target_dtype_as_input_to_node(
         if node.target in NON_QUANTIZABLE_WEIGHT_OPS:
             return None
         else:
-            weight_obs_or_fq_ctr = None
-            if "weight_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
-                weight_obs_or_fq_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"]
+            weight_obs_or_fq_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", None)
             qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
             return qconfig_weight_dtype
     else:
-        bias_obs_or_fq_ctr = None
-        if "bias_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
-            bias_obs_or_fq_ctr = node.meta["target_dtype_info"]["bias_obs_or_fq_ctr"]
+        bias_obs_or_fq_ctr = node.meta["target_dtype_info"].get("bias_obs_or_fq_ctr", None)
         qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
         return qconfig_bias_dtype
 
