@@ -5,10 +5,12 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAMathCompat.h>
 
+#include <c10/core/TensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
@@ -99,6 +101,17 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   Tensor dv = at::empty_like(value);
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
+
+  c10::intrusive_ptr<c10::TensorImpl> current_rng_state;
+  if (dropout_p > 0.0){
+        // See Note [Acquire lock when using random generators]
+        auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        current_rng_state = gen->get_state();
+        c10::TensorImpl* rng_state_value_impl = rng_state.unsafeGetTensorImpl();
+        gen -> set_state(*rng_state_value_impl);
+  }
+
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
           contiguous_grad_out,
           query,
@@ -120,6 +133,12 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           num_splits,
           c10::nullopt /*gen_*/
   );
+  if (dropout_p > 0.0){
+        // See Note [Acquire lock when using random generators]
+        auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        gen -> set_state(*current_rng_state);
+  }
   return std::make_tuple(dq, dk, dv);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
