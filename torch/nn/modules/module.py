@@ -440,6 +440,13 @@ class Module:
         """
         torch._C._log_api_usage_once("python.nn_module")
 
+        # Backward compatibility: no args used to be allowed when call_super_init=False
+        if self.call_super_init is False and bool(kwargs):
+            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'".format(type(self).__name__, next(iter(kwargs))))
+
+        if self.call_super_init is False and bool(args):
+            raise TypeError("{}.__init__() takes 1 positional argument but {} were given".format(type(self).__name__, len(args) + 1))
+
         """
         Calls super().__setattr__('a', a) instead of the typical self.a = a
         to avoid Module.__setattr__ overhead. Module's __setattr__ has special
