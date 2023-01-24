@@ -6,11 +6,13 @@ import itertools
 import types
 from typing import Dict, List
 
+import torch
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import istensor, make_cell
+from ..utils import istensor, istype, make_cell
 from .base import typestr, VariableTracker
 
 
@@ -39,7 +41,9 @@ def wrap_bound_arg(tx, val, options, source=None):
             **options,
         )
 
-    if variables.ConstantVariable.is_literal(val):
+    if variables.ConstantVariable.is_literal(val) or istype(
+        val, (torch.Size, torch.device, torch.dtype)
+    ):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
         return variables.UserFunctionVariable(val, source=source, **options)
