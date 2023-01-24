@@ -3596,6 +3596,11 @@ register_pointwise(
 )
 
 register_pointwise(
+    aten.tan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
     aten.tanh,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
