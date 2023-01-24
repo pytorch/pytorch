@@ -73,7 +73,8 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
         # argument name. Downstream, if someone converts that positional argument to a keyword
         # argument, the name mismatch will break things, so here we're going to normalize the
         # name to "input"
-        name = arg.name if arg.name != 'self' else 'input'
+        # In a similar vein, rename `from` to `from_` as former is Python keyword.
+        name = arg.name if arg.name not in ('self', 'from') else ('input' if arg.name == 'self' else 'from_')
         kind = inspect.Parameter.KEYWORD_ONLY if arg.kwarg_only else inspect.Parameter.POSITIONAL_OR_KEYWORD
         parameters.append(inspect.Parameter(name=name, kind=kind, default=default, annotation=arg_type))
     return_types = [_torchscript_type_to_python_type(ret.type) for ret in ts_schema.returns]
