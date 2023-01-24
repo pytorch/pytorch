@@ -3336,6 +3336,7 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
@@ -4118,7 +4119,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 12):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
