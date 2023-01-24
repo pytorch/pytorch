@@ -18,12 +18,12 @@ using WatchKeyCallback =
 
 class TORCH_API Store : public torch::CustomClassHolder {
  public:
-  static constexpr std::chrono::milliseconds kDefaultTimeout =
+  static constexpr std::chrono::milliseconds c10d_kDefaultTimeout =
       std::chrono::seconds(300);
   static constexpr std::chrono::milliseconds kNoTimeout =
       std::chrono::milliseconds::zero();
 
-  Store() : timeout_(kDefaultTimeout) {}
+  Store() : timeout_(c10d_kDefaultTimeout) {}
 
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}

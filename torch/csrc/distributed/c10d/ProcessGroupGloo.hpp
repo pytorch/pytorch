@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <gloo/rendezvous/store.h>
 #include <gloo/algorithm.h>
 #include <gloo/common/error.h>
 #include <gloo/context.h>
@@ -125,7 +124,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     void wait(const std::vector<std::string>& keys) override {
-      store_->wait(keys, Store::kDefaultTimeout);
+      store_->wait(keys, c10d::Store::c10d_kDefaultTimeout);
     }
 
     void wait(

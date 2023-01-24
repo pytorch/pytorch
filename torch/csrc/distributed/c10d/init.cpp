@@ -1135,7 +1135,7 @@ Example::
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
-              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
+              std::chrono::milliseconds(::c10d::Store::c10d_kDefaultTimeout),
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false)
       .def_property_readonly(

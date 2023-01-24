@@ -29,7 +29,7 @@ struct TCPStoreOptions {
   bool isServer = false;
   c10::optional<std::size_t> numWorkers = c10::nullopt;
   bool waitWorkers = true;
-  std::chrono::milliseconds timeout = Store::kDefaultTimeout;
+  std::chrono::milliseconds timeout = Store::c10d_kDefaultTimeout;
 
   // A boolean value indicating whether multiple store instances can be
   // initialized with the same host:port pair.
@@ -45,7 +45,7 @@ class TORCH_API TCPStore : public Store {
       std::uint16_t masterPort,
       c10::optional<int> numWorkers = c10::nullopt,
       bool isServer = false,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout,
+      const std::chrono::milliseconds& timeout = c10d_kDefaultTimeout,
       bool waitWorkers = true);
 
   virtual ~TCPStore();
