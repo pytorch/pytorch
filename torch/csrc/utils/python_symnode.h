@@ -35,13 +35,27 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   c10::SymNode wrap_int(int64_t num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_int")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
   c10::SymNode wrap_float(double num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_float")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
+  }
+
+  c10::SymNode wrap_bool(bool num) override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("wrap_bool")(num);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
+  }
+
+  c10::SymNode is_non_overlapping_and_dense(
+      c10::ArrayRef<c10::SymNode> sizes,
+      c10::ArrayRef<c10::SymNode> strides) override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("is_non_overlapping_and_dense")(sizes, strides);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
   bool bool_() override {
@@ -59,6 +73,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_float")().is(py::handle(Py_True));
   }
 
+  bool is_bool() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("is_bool")().is(py::handle(Py_True));
+  }
+
   int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
@@ -67,6 +86,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   double guard_float(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_float")(file, line).cast<double>();
+  }
+
+  bool guard_bool(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_bool")(file, line).cast<bool>();
   }
 
   int64_t int_() override {
@@ -125,6 +149,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__, other);
   }
 
+  c10::SymNode ne(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
   c10::SymNode gt(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
@@ -146,6 +174,18 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
   c10::SymNode sym_max(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode sym_and(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode sym_or(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode sym_not() override {
+    return dispatch_common_(__func__);
   }
 
   c10::SymNode ceil() override {

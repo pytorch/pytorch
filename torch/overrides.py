@@ -183,6 +183,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_int,
         torch.sym_max,
         torch.sym_min,
+        torch.sym_not,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -199,6 +200,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        torch.nn.functional._canonical_mask,
+        torch.nn.functional._none_or_dtype,
         # Doesn't actually take or return tensor arguments
         torch.nn.init.calculate_gain,
         # These are deprecated; don't test them
@@ -292,6 +295,8 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj_physical,
         Tensor._neg_view,
         Tensor._is_zerotensor,
+        Tensor._is_all_true,
+        Tensor._is_any_true,
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
     }
@@ -856,6 +861,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
         torch.nn.functional.mish: lambda input, inplace=False: -1,
+        torch.nn.functional.scaled_dot_product_attention: lambda query, key, value, attn_mask=None, dropout_p=0.0: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean', beta=1.: -1,
         torch.nn.functional.huber_loss: lambda input, target, reduction='mean', delta=1.: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,

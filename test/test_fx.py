@@ -19,6 +19,7 @@ import types
 import warnings
 import unittest
 from math import sqrt
+from functorch.experimental import control_flow
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -311,6 +312,18 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    def test_control_flow_tracing(self):
+        def true(x, y):
+            return x + y
+
+        def false(x, y):
+            return x - y
+
+        def f(x, y):
+            x = control_flow.cond(x[0] == 0, true, false, [x, y])
+
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
+            _ = symbolic_trace(f)
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -1699,8 +1712,8 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(m)
 
         mod_stack = {}
-        expected_stack = [('sub_mod', str(type(m.sub_mod))),
-                          ('sub_mod.conv_mod', str(type(m.sub_mod.conv_mod)))]
+        expected_stack = [('sub_mod', type(m.sub_mod)),
+                          ('sub_mod.conv_mod', type(m.sub_mod.conv_mod))]
         for node in gm.graph.nodes:
             mod_stack = node.meta.get('nn_module_stack', {})
             if mod_stack:
@@ -3942,6 +3955,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,
         "threshold_": BUILT_IN_FUNC,
