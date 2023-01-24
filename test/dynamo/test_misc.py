@@ -3021,7 +3021,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def __init__(self, x):
                 self.x = x
 
-        # obj.__bool__ is function
+        # obj.__bool__ is function and returns bool type
         class B(object):
             def __init__(self, x):
                 self.x = x
@@ -3053,6 +3053,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, obj)
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 4)
+
+    def test_if_cond_user_defined_object2(self):
+        # obj.__bool__ is function and returns non-bool type
+        class MyObj(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __bool__(self):
+                self.x = 1
+                return self.x
+
+        def fn(a, obj):
+            if not obj:
+                return a + obj.x
+            else:
+                return a - obj.x
+
+        x = torch.rand(4)
+        obj = MyObj(0.5)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        try:
+            opt_fn(x, obj)
+            self.assertFalse(True)
+        except TypeError as e:
+            self.assertIn("__bool__ should return bool, returned int", str(e))
 
     def test_class_has_instancecheck_method(self):
         class A(object):
