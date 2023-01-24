@@ -24,6 +24,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -215,48 +216,11 @@ class ModularIndexing(sympy.Function):
             if len(new_terms) != len(base.args) and all_positive:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
-        if isinstance(base, IndexingDiv):
+        if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
 
-class IndexingDiv(sympy.Function):
-    """
-    a // b used in indexing where we need to be careful about simplification.
-    We don't use sympy.FloorDiv to bypass some simplification rules.
-    """
-
-    nargs = (2,)
-    precedence = 50  # precedence of mul  # noqa: F811
-
-    def _sympystr(self, printer):
-        base = printer.parenthesize(self.args[0], self.precedence)
-        divisor = printer.parenthesize(self.args[1], self.precedence)
-        return f"{base}//{divisor}"
-
-    @classmethod
-    def eval(cls, base, divisor):
-        if base == 0:
-            return sympy.Integer(0)
-        if divisor == 1:
-            return base
-        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-            return base // divisor
-        if isinstance(base, IndexingDiv):
-            return IndexingDiv(base.args[0], base.args[1] * divisor)
-
-        if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return IndexingDiv(base - a, divisor) + a / gcd
-        gcd = sympy.gcd(base, divisor)
-        if gcd != 1:
-            return IndexingDiv(
-                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-            )
-
-
-class CleanDiv(IndexingDiv):
+class CleanDiv(FloorDiv):
     """
     Div where we can assume no rounding.
     This is to enable future optimizations.
@@ -274,7 +238,7 @@ class CeilDiv(sympy.Function):
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
         else:
-            return IndexingDiv(base + (divisor - 1), divisor)
+            return FloorDiv(base + (divisor - 1), divisor)
 
 
 def get_device_type(x):
@@ -942,7 +906,7 @@ class Reduction(Loops):
             need_mask = True
 
         split = sympy.Integer(split)
-        block_size = IndexingDiv(reduction_numel + (split - 1), split)
+        block_size = FloorDiv(reduction_numel + (split - 1), split)
 
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
 
@@ -1530,7 +1494,7 @@ class SliceView(View):
             sizevars.guard_equals(end, new_size[dim])
             return x
 
-        new_size[dim] = IndexingDiv(end - start + (step - 1), step)
+        new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
         if is_storage_and_layout(x):
             # Fast path
