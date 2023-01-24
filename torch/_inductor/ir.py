@@ -3384,8 +3384,8 @@ def _prepare_convolution_fusion_create(
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
-        output.size(),
-        output_stride,
+        convert_shape_to_inductor(output.size()),
+        convert_shape_to_inductor(output_stride),
     )
     constant_args = [padding, stride, dilation, groups]
 
