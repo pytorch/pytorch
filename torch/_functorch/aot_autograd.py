@@ -26,7 +26,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
-from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
@@ -2342,8 +2341,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
-    named_params = dict(_named_parameters(mod, remove_duplicate=False))
-    named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
+    named_params = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
         functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
@@ -2407,8 +2406,8 @@ def aot_module_simplified(
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
-        **dict(_named_parameters(mod, remove_duplicate=False)),
-        **dict(_named_buffers(mod, remove_duplicate=False)),
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
     }
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
