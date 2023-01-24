@@ -158,42 +158,41 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
 
 void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
+    const std::shared_ptr<torch::autograd::Node>& old_fn,
     const std::shared_ptr<torch::autograd::Node>& new_fn) {
   // This function is called whenever the grad_fn of the tensor is
   // changed. We assume here that new_fn does not yet have hooks of
-  // its own
+  // its own.
   //
   // This function does two things:
-  const auto& meta = impl::get_autograd_meta(self);
-  TORCH_INTERNAL_ASSERT(meta);
-  TORCH_INTERNAL_ASSERT(new_fn);
   // (1) reset the list when grad_fn is updated, so new hooks don't
   //     get erroneously registered to the old grad_fn.
   //     Note that the old cpp_hooks_list_ is still kept alive by the
   //     old grad_fn so hooks registered to the older version of the tensor
   //     will continue to be active.
+  // (2) If there is a retains_grad hook registered, move that from the
+  //     old cpp_hooks_list_ to the new one
+  const auto& meta = impl::get_autograd_meta(self);
+  TORCH_INTERNAL_ASSERT(meta);
+  TORCH_INTERNAL_ASSERT(new_fn);
   meta->cpp_hooks_list_ = nullptr;
   const c10::impl::PyInterpreter* interp =
       self.unsafeGetTensorImpl()->pyobj_slot()->pyobj_interpreter();
   if (interp) {
     (*interp)->reset_backward_hooks(self.unsafeGetTensorImpl());
   }
-  // (2) If there is a retains_grad hook registered, move that from the
-  //     old cpp_hooks_list_ to the new one
   if (self.retains_grad()) {
-    auto new_list = std::make_shared<hooks_list>();
-    new_list->push_back(std::move((*meta->retains_grad_hooks_list_)[0]));
-    (*meta->retains_grad_hooks_list_)[0] = nullptr;
-    meta->retains_grad_hooks_list_ = new_list;
-    std::unique_ptr<FunctionPreHook> hook_ptr =
-        std::make_unique<CppFunctionTensorPreHook>(
-            meta->retains_grad_hooks_list_, self.output_nr());
-    new_fn->add_retains_grad_hook(std::move(hook_ptr));
+    TORCH_INTERNAL_ASSERT(old_fn);
+    auto out = old_fn->pop_retains_grad_hook(self.output_nr());
+    TORCH_INTERNAL_ASSERT(out != nullptr);
+    new_fn->add_retains_grad_hook(std::move(out), self.output_nr());
   }
 }
 
 void rebase_history(const Variable& self, Edge gradient_edge) {
   TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
+  const auto& meta = impl::get_autograd_meta(self);
+  auto old_fn = meta != nullptr ? meta->grad_fn_ : nullptr;
   auto diff_view_meta = get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
@@ -221,35 +220,24 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
   torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
-      self, self.grad_fn());
+      self, old_fn, self.grad_fn());
 }
 
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
   const auto& fn = self.grad_fn();
-  if (is_retains_grad_hook) {
-    std::shared_ptr<hooks_list>& list =
-        materialize_autograd_meta(self)->retains_grad_hooks_list_;
-    // NOLINTNEXTLINE(modernize-make-shared)
-    list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr{
-        new CppFunctionTensorPreHook(list, self.output_nr())};
-    TORCH_INTERNAL_ASSERT(fn, "Expect grad_fn to be defined for retains_grad");
-    fn->add_retains_grad_hook(std::move(hook_ptr));
-  } else {
-    std::shared_ptr<hooks_list>& list =
-        materialize_autograd_meta(self)->cpp_hooks_list_;
-    // NOLINTNEXTLINE(modernize-make-shared)
-    list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr{
-        new CppFunctionTensorPreHook(list, self.output_nr())};
-    // NB: we could potentially only update hooks_ if !fn, but it shouldn't
-    // matter
-    //     and this was the way before, so we keep it like this for now.
-    clear_hooks(self);
-    add_hook(self, std::make_unique<CppFunctionTensorPreHook>(list, 0));
-    if (fn) {
-      fn->add_tensor_pre_hook(std::move(hook_ptr));
-    }
+  std::shared_ptr<hooks_list>& list =
+      materialize_autograd_meta(self)->cpp_hooks_list_;
+  // NOLINTNEXTLINE(modernize-make-shared)
+  list.reset(new hooks_list());
+  std::unique_ptr<FunctionPreHook> hook_ptr{
+      new CppFunctionTensorPreHook(list, self.output_nr())};
+  // NB: we could potentially only update hooks_ if !fn, but it shouldn't
+  // matter
+  //     and this was the way before, so we keep it like this for now.
+  clear_hooks(self);
+  add_hook(self, std::make_unique<CppFunctionTensorPreHook>(list, 0));
+  if (fn) {
+    fn->add_tensor_pre_hook(std::move(hook_ptr));
   }
 }
 
@@ -529,24 +517,6 @@ int64_t VariableHooks::_version(const at::TensorBase& self) const {
   return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-unsigned register_retains_grad_hook(
-    const at::TensorBase& self,
-    std::function<at::TensorBase(const at::TensorBase&)> hook) {
-  TORCH_CHECK(
-      self.requires_grad(),
-      "cannot retain grad on a variable that "
-      "doesn't require gradient");
-  // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto& list =
-      torch::autograd::impl::get_autograd_meta(self)->retains_grad_hooks_list_;
-  if (!list) {
-    torch::autograd::impl::create_cpp_hook(self, /*is_retains_grad_hook=*/true);
-  }
-  unsigned idx = list->size();
-  list->push_back(hook);
-  return idx;
-}
-
 void VariableHooks::retain_grad(const at::TensorBase& self) const {
   TORCH_CHECK(
       self.requires_grad(),
@@ -583,7 +553,10 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
     return at::TensorBase{};
   };
 
-  register_retains_grad_hook(self, retain_grad_hook);
+  const auto& fn = self.grad_fn();
+  std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionSingleTensorPreHook(
+      std::move(retain_grad_hook), self.output_nr())};
+  fn->add_retains_grad_hook(std::move(hook_ptr), self.output_nr());
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
 
@@ -674,6 +647,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       return diff_view_meta->grad_fn_;
     }
     auto current_version = self._version();
+    auto old_fn = diff_view_meta->grad_fn_;
     if (diff_view_meta->get_attr_version() != current_version) {
       // This is an indirect rebase_history due to another view or the base
       // being modified inplace
@@ -735,7 +709,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       diff_view_meta->set_attr_version(current_version);
 
       torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
-          self, diff_view_meta->grad_fn_);
+          self, old_fn, diff_view_meta->grad_fn_);
     }
     return diff_view_meta->grad_fn_;
   }
