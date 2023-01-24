@@ -1764,7 +1764,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
-#if defined(USE_CUSOLVER)
+#if defined(USE_CUSOLVER) || defined(USE_HIPSOLVER)
   return orgqr_helper_cusolver(result, tau); // cusolver
 #else
   TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
@@ -1775,7 +1775,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 REGISTER_CUDA_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
-#if defined(USE_CUSOLVER)
+#if defined(USE_CUSOLVER) || defined(USE_HIPSOLVER)
   ormqr_cusolver(input, tau, other, left, transpose);
 #else
   TORCH_CHECK(false,
@@ -2176,12 +2176,29 @@ void svd_magma(const Tensor& A,
                    .mT();
   // U, S, Vh, info are the right size and strides, but are on GPU
   // We copy them into CPU in pinned_memory
-  const auto empty_like_cpu = [](const Tensor& t) {
-    return at::empty_like(t, t.options().device(kCPU).pinned_memory(true));
+  const auto empty_like_cpu = [](const Tensor& t, bool make_contiguous = false) {
+    if (!make_contiguous) {
+      return at::empty_like(t,
+                            t.options()
+                            .device(kCPU)
+                            .pinned_memory(true));
+    } else {
+      return at::empty_like(t.mT(),
+                            t.options()
+                            .device(kCPU)
+                            .memory_format(at::MemoryFormat::Contiguous)
+                            .pinned_memory(true)).mT();
+    }
   };
   auto U_ = compute_uv ? empty_like_cpu(U) : Tensor{};
   auto S_ = empty_like_cpu(S);
+#ifdef USE_HIPSOLVER
+  // However, on ROCM platform, Vh is not guaranteed to have correct storage
+  // order, so processing similar to A matrix is essential
+  auto Vh_ = compute_uv ? empty_like_cpu(Vh, true) : Tensor{};
+#else
   auto Vh_ = compute_uv ? empty_like_cpu(Vh) : Tensor{};
+#endif
   auto info_ = empty_like_cpu(info);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda", [&] {
@@ -2207,9 +2224,23 @@ void svd_kernel(const Tensor& A,
                 const Tensor& S,
                 const Tensor& Vh,
                 const Tensor& info) {
-#ifdef USE_CUSOLVER
+#if defined(USE_CUSOLVER) || defined(USE_HIPSOLVER)
   // We always use cuSOLVER unless the user has specified they want to use MAGMA
-  if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma) {
+  bool use_magma = at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma;
+#ifdef USE_HIPSOLVER
+  // However for current hipSOLVER, MAGMA is preferred for larger matrices due to
+  // performance. Here are a few performance numbers on MI200, ROCM 5.3.22000:
+  //    Size       MAGMA     hipSOLVER
+  //  100x100      0.127s      0.428s
+  //  200x200      0.113s      3.35s
+  //  300x300      0.111s      10.9s
+  //  400x400      0.126s      25.9s
+  //  500x500      0.146s      > 10 minutes, have to kill with SIGTERM
+  //
+  // TODO: Fix this when hipSOLVER has better performance numbers
+  use_magma = use_magma || (A.size(-1) >= 50 && A.size(-2) >= 50);
+#endif
+  if (use_magma) {
     svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
   } else {
     // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
