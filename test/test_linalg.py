@@ -161,13 +161,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
             a.eig()
 
-    def test_symeig_removed_error(self, device):
-        a = make_tensor(5, 5, device=device, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
-            torch.symeig(a)
-        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
-            a.symeig()
-
     def test_lstsq_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
@@ -5102,7 +5095,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(E.shape, batches + (k,))
                 self.assertEqual(V.shape, batches + (m, k))
                 self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec, rtol=0)
-                e = torch.linalg.eigvalsh(A)
+                e = torch.symeig(A)[0]
                 e_smallest = e[..., :k]
                 self.assertEqual(E, e_smallest)
 
@@ -6978,6 +6971,98 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(Ax, b.expand_as(Ax))
 
         run_test((1, 1), (1, 1, 1025))
+
+    @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_symeig(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def run_test(dims, eigenvectors, upper):
+            x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+            else:
+                real_dtype = dtype
+            oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
+            outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
+            torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
+
+            if eigenvectors:
+                outv_ = outv.cpu().numpy()
+                x_recon = np.matmul(np.matmul(outv_, torch.diag_embed(oute.to(dtype)).cpu().numpy()),
+                                    outv_.swapaxes(-2, -1).conj())
+                self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+            else:
+                eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
+                self.assertEqual(eigvals, oute, msg='Eigenvalues mismatch')
+                self.assertEqual(torch.empty(0, device=device, dtype=dtype), outv, msg='Eigenvector matrix not empty')
+
+            rese, resv = x.symeig(eigenvectors=eigenvectors, upper=upper)
+            self.assertEqual(rese, oute, msg="outputs of symeig and symeig with out don't match")
+            self.assertEqual(resv, outv, msg="outputs of symeig and symeig with out don't match")
+
+            # test non-contiguous
+            x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
+            n_dim = len(dims) + 1
+            # Reverse the batch dimensions and the matrix dimensions and then concat them
+            x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
+            assert not x.is_contiguous(), "x is intentionally non-contiguous"
+            rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
+            if eigenvectors:
+                resv_ = resv.cpu().numpy()
+                x_recon = np.matmul(np.matmul(resv_, torch.diag_embed(rese.to(dtype)).cpu().numpy()),
+                                    resv_.swapaxes(-2, -1).conj())
+                self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+            else:
+                eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
+                self.assertEqual(eigvals, rese, msg='Eigenvalues mismatch')
+                self.assertEqual(torch.empty(0, device=device, dtype=dtype), resv, msg='Eigenvector matrix not empty')
+
+        batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
+        for batch_dims, eigenvectors, upper in itertools.product(batch_dims_set, (True, False), (True, False)):
+            run_test((5,) + batch_dims, eigenvectors, upper)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_symeig_out_errors_and_warnings(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = random_hermitian_matrix(3, dtype=dtype, device=device)
+        real_dtype = a.real.dtype if dtype.is_complex else dtype
+        out_w = torch.empty(7, 7, dtype=real_dtype, device=device)
+        out_v = torch.empty(7, 7, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.symeig(a, out=(out_w, out_v))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should be safely castable
+        out_w = torch.empty(0, dtype=real_dtype, device=device)
+        out_v = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvectors with dtype Int"):
+            torch.symeig(a, out=(out_w, out_v))
+
+        out_w = torch.empty(0, dtype=torch.int, device=device)
+        out_v = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
+            torch.symeig(a, out=(out_w, out_v))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_v = torch.empty(0, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.symeig(a, out=(out_w, out_v))
+            out_w = torch.empty(0, device=device, dtype=dtype)
+            out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.symeig(a, out=(out_w, out_v))
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack

@@ -1314,7 +1314,6 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
-from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"

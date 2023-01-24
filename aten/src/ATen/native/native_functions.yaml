@@ -8690,6 +8690,22 @@
 - func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
   python_module: linalg
 
+- func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  dispatch:
+    CompositeExplicitAutograd: symeig_out
+
+- func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
+  variants: method, function
+  dispatch:
+    CompositeExplicitAutograd: symeig
+
+- func: _symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: _symeig_helper_cpu
+    CUDA: _symeig_helper_cuda
+  autogen: _symeig_helper.out
+
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)

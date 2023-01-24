@@ -662,11 +662,6 @@ class Tensor(torch._C._TensorBase):
 
         return eig(self, eigenvectors=eigenvectors)
 
-    def symeig(self, eigenvectors=False):
-        from ._linalg_utils import _symeig
-
-        return _symeig(self, eigenvectors=eigenvectors)
-
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa

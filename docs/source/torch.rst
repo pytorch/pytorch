@@ -589,6 +589,7 @@ BLAS and LAPACK Operations
     svd
     svd_lowrank
     pca_lowrank
+    symeig
     lobpcg
     trapz
     trapezoid
