@@ -123,7 +123,6 @@ pointwise_ops = [
     aten.conj_physical.default,
     aten.conj_physical.out,
     aten.conj_physical_.default,
-    aten.constant_.default,
     aten.copysign.Scalar,
     aten.copysign.Scalar_out,
     aten.copysign.Tensor,
@@ -404,4 +403,3 @@ def _register_non_deterministic_op(op):
 _register_non_deterministic_op(aten.native_dropout.default)
 _register_non_deterministic_op(aten.uniform_.default)
 _register_non_deterministic_op(aten.normal_.default)
-_register_non_deterministic_op(aten.kaiming_uniform_.default)
