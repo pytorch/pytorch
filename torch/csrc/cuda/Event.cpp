@@ -43,7 +43,9 @@ static PyObject* THCPEvent_pynew(
     return nullptr;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent*)ptr.get();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
       (interprocess ? cudaEventInterprocess : cudaEventDefault);
@@ -86,6 +88,7 @@ static PyObject* THCPEvent_from_ipc_handle(
   if (!ptr) {
     return nullptr;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent*)ptr.get();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

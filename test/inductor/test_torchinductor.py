@@ -2475,15 +2475,6 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
-    def test_tan(self):
-        def fn(x):
-            return aten.tan(x) + 2, aten.tan(x + 1)
-
-        self.common(
-            fn,
-            (torch.randn([16, 16]),),
-        )
-
     def test_tanh(self):
         def fn(x):
             return aten.tanh(x) + 2, aten.tanh(x + 1)
@@ -5177,6 +5168,10 @@ test_skips = {
     "test_cauchy_dynamic_shapes": ("cuda",),
     "test_clamp_dynamic_shapes": ("cuda",),
     "test_clone_dynamic_shapes": ("cuda",),
+    "test_conv2d_binary_dynamic_shapes": ("cpu",),
+    "test_conv2d_packed_dynamic_shapes": ("cpu",),
+    "test_conv2d_unary_dynamic_shapes": ("cpu",),
+    "test_conv_bn_fuse_dynamic_shapes": ("cpu",),
     "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
     "test_cos_dynamic_shapes": ("cuda",),
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),

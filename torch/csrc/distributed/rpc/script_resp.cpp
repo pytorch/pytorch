@@ -9,6 +9,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+
+using torch::jit::Pickler;
+using torch::jit::Unpickler;
+
+} // namespace
+
 ScriptResp::ScriptResp(at::IValue&& value) : value_(value) {}
 
 const at::IValue& ScriptResp::value() {

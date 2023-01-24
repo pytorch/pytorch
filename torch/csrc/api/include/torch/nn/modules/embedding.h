@@ -32,7 +32,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
   EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim)
       : EmbeddingImpl(EmbeddingOptions(num_embeddings, embedding_dim)) {}
-  explicit EmbeddingImpl(EmbeddingOptions options_);
+  explicit EmbeddingImpl(const EmbeddingOptions& options_);
 
   void reset() override;
 
@@ -110,7 +110,7 @@ class TORCH_API EmbeddingBagImpl
  public:
   EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
       : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
-  explicit EmbeddingBagImpl(EmbeddingBagOptions options_);
+  explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
 
   void reset() override;
 

@@ -24,7 +24,8 @@ std::string demangle(const char* name) {
       abi::__cxa_demangle(
           name,
           /*__output_buffer=*/nullptr,
-          /*__length=*/nullptr,
+          // NOLINTNEXTLINE(modernize-use-nullptr)
+          /*__length=*/0,
           &status),
       /*deleter=*/free);
 
