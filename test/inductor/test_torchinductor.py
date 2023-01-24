@@ -5298,11 +5298,7 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
                 )
             else:
                 setattr(
-                    other_cls,
-                    f"{name}_{suffix}",
-                    unittest.skipIf(
-                        TEST_WITH_ASAN and suffix == "cuda", "Skipped under ASAN"
-                    )(lambda self, value=value: value(self)),
+                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
                 )
 
 
@@ -5891,7 +5887,7 @@ if HAS_CPU:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
     import triton.language as tl
 
@@ -6646,7 +6642,7 @@ class ExprPrinterTests(TestCase):
             self.assertEqual(texpr(expr), result)
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
