@@ -83,7 +83,7 @@ class TritonPrinter(ExprPrinter):
             x = f"({x} // {div})"
         return f"{x} % {mod}"
 
-    def _print_IndexingDiv(self, expr):
+    def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
@@ -399,7 +399,7 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
-            expr = ir.IndexingDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = ir.FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
                 sympy_symbol(f"{self.prefix}index"), divisor, length
@@ -448,12 +448,12 @@ class IterationRangesRoot(IterationRanges):
         for node in nodes:
             if not V.graph.sizevars.maybe_guard_equals(node.divisor, divisor):
                 # fill in unused index var
-                add(self.lookup(divisor, ir.IndexingDiv(node.divisor, divisor)))
+                add(self.lookup(divisor, ir.FloorDiv(node.divisor, divisor)))
                 divisor = node.divisor
             add(node)
         if not V.graph.sizevars.maybe_guard_equals(self.numel, divisor):
             # fill in unused index var
-            add(self.lookup(divisor, ir.IndexingDiv(self.numel, divisor)))
+            add(self.lookup(divisor, ir.FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
 
@@ -627,7 +627,7 @@ class TritonKernel(Kernel):
                 raise CantSplit()
             # guard on the last item out
             sv.maybe_guard_equals(remaining[i], expr)
-            remaining[i] = ir.IndexingDiv(remaining[i], expr)
+            remaining[i] = ir.FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
             return next(var_count)
 
@@ -658,7 +658,7 @@ class TritonKernel(Kernel):
                     if not sv.maybe_guard_multiple_of(size, remaining[current_group]):
                         raise CantSplit()
                     size1 = remaining[current_group]
-                    size2 = ir.IndexingDiv(size, remaining[current_group])
+                    size2 = ir.FloorDiv(size, remaining[current_group])
                     return_getters.append(
                         make_combined(
                             size2,
@@ -804,13 +804,16 @@ class TritonKernel(Kernel):
         if self._load_mask:
             mask_vars.add(self._load_mask)
 
-        if mask_vars == {"xmask"} and index == 0 and self.range_trees[0].numel == 1:
-            # This causes a triton error:
-            # https://github.com/openai/triton/issues/633
-            mask_vars = set()
+        self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return index_str, mask_vars, mask_str
+
+    def filter_masks(self, mask_vars):
+        for tree in self.range_trees:
+            # Masks are superfluous if we only have one element
+            if V.graph.sizevars.maybe_guard_equals(tree.numel, 1):
+                mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
         return dict(
@@ -913,7 +916,9 @@ class TritonKernel(Kernel):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
-        masks = [f"{tree.prefix}mask" for tree in self.range_trees]
+        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        self.filter_masks(masks)
+        masks = sorted(list(masks))
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [":" for _ in self.range_trees]
@@ -1540,7 +1545,7 @@ class TritonScheduling:
                     b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
-                    tiling = (a0, ir.IndexingDiv(a1, b1), b1)
+                    tiling = (a0, ir.FloorDiv(a1, b1), b1)
                     ranked_tilings = [tiling] + ranked_tilings
                     break  # only 1 choice for now
 
