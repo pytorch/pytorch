@@ -8813,11 +8813,12 @@ op_db: List[OpInfo] = [
     OpInfo('exponential',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.exponential_, inp, *args, **kwargs),
            inplace_variant=torch.Tensor.exponential_,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
            sample_inputs_func=sample_inputs_exponential,
-           #TODO: error_inputs_func -- see why torch.Tensor.exponential_ checks lambda >= 0 while torch.distributions.cauchy.Cauchy checks lambda > 0
+           # TODO: error_inputs_func -- see why torch.Tensor.exponential_ checks lambda >= 0
+           # while torch.distributions.cauchy.Cauchy checks lambda > 0
            error_inputs_func=error_inputs_exponential,
            skips=(
               # Tests that assume input tensor has a meaningful effect on output tensor
