@@ -67,6 +67,11 @@ jobs:
       test-matrix: |
         { include: [
           { config: "aot_eager_all", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          # These jobs run too slowly so they must be sharded, unfortunately
+          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-periodic-dynamo-benchmarks-test:
