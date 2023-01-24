@@ -1762,8 +1762,8 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-      getPyInterpreter());
+  auto mb_obj =
+      _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
