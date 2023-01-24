@@ -294,11 +294,18 @@ test_single_dynamo_benchmark() {
 test_aot_eager_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
+  local exit_status=0
+
   # Check inference with --float32
-  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager || exit_status=$?
 
   # Check training with --amp
-  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp || exit_status=$?
+
+  if [[ $exit_status -ne 0 ]]; then
+    echo "Some benchmarks failed; scroll up for details"
+  fi
+  return $exit_status
 }
 
 test_inductor_benchmark() {
@@ -343,13 +350,18 @@ test_inductor_benchmark_perf() {
 
 # No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench 0
-  test_aot_eager_benchmark huggingface 0
-  test_aot_eager_benchmark timm_models 0
+  local exit_status=0
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" || exit_status=$?
+  if [[ $exit_status -ne 0 ]]; then
+    echo "Some benchmarks failed; scroll up for details"
+  fi
+  return $exit_status
 }
 
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface 0
+  test_inductor_benchmark huggingface ""
 }
 
 test_inductor_huggingface_perf() {
@@ -373,7 +385,7 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench 0
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
 }
 
 test_inductor_torchbench_perf() {
@@ -802,6 +814,10 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_smoke() {
+  time python test/run_test.py --include test_fx test_jit --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -926,6 +942,9 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
+elif [[ "${TEST_CONFIG}" == *smoke* ]]; then
+  # TODO: Delete me once we get more 3.11 testing
+  test_smoke
 else
   install_torchvision
   install_triton
