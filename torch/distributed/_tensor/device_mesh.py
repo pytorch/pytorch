@@ -1,7 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import numpy as np
+import numpy.typing as npt
 import os
 import warnings
-from typing import List, Optional, Sequence, TypeVar, Union
+from typing import List, Optional, Union
 
 import torch
 from torch.distributed.distributed_c10d import (
@@ -36,19 +38,6 @@ def get_global_device_mesh() -> "DeviceMesh":
 def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     global _global_device_mesh
     _global_device_mesh = mesh
-
-
-# We want a type for "can be passed to torch.as_tensor()";
-# this is a recursive sequence type, which isn't fully supported
-# yet in python. This construct simulates that up to depth 7.
-T = TypeVar("T")
-_L = Union[T, Sequence[T]]
-NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
-
-MeshExprT = Union[
-    torch.Tensor,
-    NDIntList,
-]
 
 
 class DeviceMesh(object):
@@ -97,20 +86,20 @@ class DeviceMesh(object):
     """
 
     device_type: str
-    mesh: torch.Tensor
+    mesh: np.ndarray
     _backend: str
 
     def __init__(
         self,
         device_type: str,
-        mesh: MeshExprT,
+        mesh: Union[torch.Tensor, npt.ArrayLike],
         dim_groups: Optional[List[ProcessGroup]] = None,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
-            mesh.detach()
+            mesh.numpy(force=True)
             if isinstance(mesh, torch.Tensor)
-            else torch.tensor(mesh, dtype=torch.int)
+            else np.array(mesh, dtype=np.int32)
         )
         default_pg = self._get_or_create_default_group()
         self._backend = default_pg._get_backend_name()
@@ -132,23 +121,24 @@ class DeviceMesh(object):
             )
 
         world_size = get_world_size()
-        if self.mesh.numel() > world_size:
+        if self.mesh.size > world_size:
             raise RuntimeError(
                 f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
             )
 
-        unique_mesh_values = self.mesh.unique(sorted=True)
-        if unique_mesh_values.numel() != self.mesh.numel():
+        unique_mesh_values = np.unique(self.mesh)
+        if unique_mesh_values.size != self.mesh.size:
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
 
         # coordinates of this rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
-        assert rank_coords.size(0) in (0, 1)
-        self._coordinate_on_dim: Optional[List[int]] = (
-            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-        )
+        assert len(rank_coords[0]) in (0, 1)
+        if len(rank_coords[0]) == 0:
+            self._coordinate_on_dim = None
+        else:
+            self._coordinate_on_dim = [int(rank_coord) for rank_coord in rank_coords]
 
         # groups created by dimension, each dimension should have exact
         # one valid process group per rank
@@ -194,8 +184,8 @@ class DeviceMesh(object):
             for dim in range(self.mesh.ndim):
                 # swap the current dim to the last dim
                 # then reshape to flatten out other dims
-                pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
-                    -1, self.mesh.size(dim)
+                pg_ranks_by_dim = self.mesh.swapaxes(-1, dim).reshape(
+                    -1, self.mesh.shape[dim]
                 )
 
                 # multi-dim mesh, create subgroups by
@@ -222,14 +212,14 @@ class DeviceMesh(object):
         if not is_initialized():
             # TODO: we will support mesh on a subset of WORLD in future
             world_size = int(os.getenv("WORLD_SIZE", 1))
-            if self.mesh.numel() < world_size:
+            if self.mesh.size < world_size:
                 raise RuntimeError(
                     "DeviceMesh must include every process in WORLD, "
                     f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
                 )
 
-            unique_mesh_values = self.mesh.unique(sorted=True)
-            if unique_mesh_values.numel() != self.mesh.numel():
+            unique_mesh_values = np.unique(self.mesh)
+            if unique_mesh_values.size != self.mesh.size:
                 raise RuntimeError(
                     f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
                 )
@@ -265,21 +255,21 @@ class DeviceMesh(object):
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash((self.mesh, id(self)))
+        return hash(id(self.mesh))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
         if id(self) == id(other):
             return True
-        return self.mesh.equal(other.mesh)
+        return np.equal(self.mesh, other.mesh)
 
     def get_dim_groups(self) -> List[ProcessGroup]:
         return self._dim_groups
 
     # pyre-fixme[3]: Return type must be annotated.
     def size(self, dim: int = 0):
-        return self.mesh.size(dim)
+        return self.mesh.shape[dim]
 
     @property
     def ndim(self) -> int:
