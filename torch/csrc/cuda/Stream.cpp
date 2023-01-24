@@ -66,7 +66,6 @@ static PyObject* THCPStream_pynew(
       : at::cuda::getStreamFromPool(
             /* isHighPriority */ priority < 0 ? true : false);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPStream* self = (THCPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
   self->device_index = static_cast<int64_t>(stream.device_index());
@@ -104,9 +103,7 @@ static PyObject* THCPStream_priority_range(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int least_priority, greatest_priority;
-  std::tie(least_priority, greatest_priority) =
+  auto [least_priority, greatest_priority] =
       at::cuda::CUDAStream::priority_range();
   return Py_BuildValue("(ii)", least_priority, greatest_priority);
   END_HANDLE_TH_ERRORS

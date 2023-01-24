@@ -68,8 +68,8 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
 struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   TensorMetadata(
       const RawTensorMetadata& r,
-      const std::vector<int64_t>& sizes,
-      const std::vector<int64_t>& strides);
+      std::vector<int64_t> sizes,
+      std::vector<int64_t> strides);
 
   TensorImplAddress impl() const {
     return weak_self_.get();

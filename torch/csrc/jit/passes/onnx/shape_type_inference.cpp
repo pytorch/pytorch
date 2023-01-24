@@ -2061,10 +2061,8 @@ void ONNXShapeTypeInference(
         const char shape_err[] = "ShapeInferenceError";
         // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
         const char type_err[] = "TypeInferenceError";
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        if ((strstr(ex.what(), shape_err) == NULL) &&
-            // NOLINTNEXTLINE(modernize-use-nullptr)
-            (strstr(ex.what(), type_err) == NULL)) {
+        if ((strstr(ex.what(), shape_err) == nullptr) &&
+            (strstr(ex.what(), type_err) == nullptr)) {
           throw;
         }
       }
