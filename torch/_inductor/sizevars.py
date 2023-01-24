@@ -52,6 +52,7 @@ class SizeVarAllocator(object):
         self._simplify_loops = self.make_simplify_loops_cache()
         self.declare = ""
         self.ending = ""
+        self.as_strided = "as_strided"
 
     def seed(self):
         """
@@ -246,36 +247,8 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        left = sympy.expand(left)
-        right = sympy.expand(right)
-        if left == right:
-            return left
-        expr = self.simplify(left - right)
-        assert self.size_hint(expr) == 0, (expr, self.size_hint(expr))
-        free = list(expr.free_symbols)
-        if len(free) == 0:
-            assert expr == 0
-            return left
-        elif len(free) in (1, 2, 3):
-            # remove the largest of the guarded variables
-            free.sort(key=self.size_hint)
-            try:
-                solutions = sympy.solve(expr, free[-1])
-                if (
-                    len(solutions) == 1
-                    and solutions[0]
-                    and "/" not in str(solutions[0])
-                ):
-                    self.replacements[free[-1]] = solutions[0]
-            except NotImplementedError:
-                pass
-
-        self.guards.append(ZeroGuard(expr))
-
-        if len(right.free_symbols) < len(left.free_symbols):
-            return right
-        else:
-            return left
+        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
@@ -349,8 +322,7 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            self.guard_equals(numerator % denominator, 0)
             return True
         return False
 
@@ -365,6 +337,9 @@ class SizeVarAllocator(object):
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
         return int(out)
+
+    def size_hints(self, exprs: List[Expr]) -> int:
+        return tuple(self.size_hint(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -471,7 +446,6 @@ class SizeVarAllocator(object):
 
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
-        added = set()
 
         for name, value in graph_inputs.items():
             shapes = value.get_size()
@@ -479,12 +453,9 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    added.add(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
 
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
@@ -495,9 +466,6 @@ class SizeVarAllocator(object):
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
-        assert not needed
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr
@@ -586,6 +554,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
         super().__init__(shape_env)
         self.declare = "auto "
         self.ending = ";"
+        self.as_strided = "at::as_strided"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -607,6 +576,7 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
+        self.name = "SimplifyIndexing"
         self._simplify: Callable[
             [Expr], Expr
         ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)

@@ -306,7 +306,7 @@ TEST_F(VulkanAPITest, copy_to_buffer) {
   };
 
   for (auto in_cpu : test_tensors) {
-    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
+    vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
     at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
 
     const auto check_copy = almostEqual(out_copied, in_cpu);
@@ -332,7 +332,7 @@ TEST_F(VulkanAPITest, copy_to_buffer_channels_last) {
   };
 
   for (auto in_cpu : test_tensors) {
-    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
+    vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
     at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
 
     const auto check_copy = almostEqual(out_copied, in_cpu);
@@ -359,7 +359,7 @@ TEST_F(VulkanAPITest, DISABLED_support_vulkan) {
 
   auto in_vulkan_quantized = cpu_to_vulkan(in_cpu_quantized);
   at::native::vulkan::api::PipelineBarrier pipeline_barrier{};
-  at::native::vulkan::ops::vTensor& v_self =
+  at::native::vulkan::vTensor& v_self =
       at::native::vulkan::ops::convert(in_vulkan_quantized);
   if (in_cpu.dtype() == c10::kQUInt8) {
     v_self.image(

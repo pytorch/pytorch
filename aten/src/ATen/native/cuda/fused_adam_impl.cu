@@ -6,7 +6,7 @@
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 void _fused_adam_cuda_impl_(
     at::TensorList params,
@@ -48,4 +48,4 @@ void _fused_adam_cuda_impl_(
         });
 }
 
-} } // namespace at::native
+} // namespace at::native

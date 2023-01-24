@@ -27,6 +27,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -257,7 +258,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       std::set<torch::profiler::impl::ActivityType> activities)
       : ProfilerStateBase(config),
         start_time_(getTimeUs()),
-        record_queue_(config, activities) {}
+        record_queue_(config, std::move(activities)) {}
   ~KinetoThreadLocalState() override = default;
 
   static KinetoThreadLocalState* get(bool global) {
@@ -270,6 +271,13 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   ActiveProfilerType profilerType() override {
     return ActiveProfilerType::KINETO;
+  }
+
+  void reportVulkanEventToProfiler(torch::profiler::impl::vulkan_id_t id) {
+    if (!config_.disabled()) {
+      record_queue_.getSubqueue()->emplace_vulkan_event(
+          torch::profiler::impl::getApproximateTime(), id);
+    }
   }
 
   void reportMemoryUsage(
@@ -322,7 +330,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     std::lock_guard<std::mutex> guard(state_mutex_);
     auto converter = clock_converter_.makeConverter();
     auto records_and_trace =
-        record_queue_.getRecords(converter, start_time_, end_time);
+        record_queue_.getRecords(std::move(converter), start_time_, end_time);
 
     materializeOpEvents(records_and_trace.first);
 
@@ -895,4 +903,17 @@ void ProfilerResult::save(const std::string& path) {
 
 } // namespace profiler
 } // namespace autograd
+
+namespace profiler {
+namespace impl {
+void _reportVulkanEventToProfiler(vulkan_id_t id) {
+  auto state_ptr = ::torch::autograd::profiler::KinetoThreadLocalState::get(
+      /*global=*/false);
+  if (state_ptr) {
+    state_ptr->reportVulkanEventToProfiler(id);
+  }
+}
+} // namespace impl
+} // namespace profiler
+
 } // namespace torch

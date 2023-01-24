@@ -114,7 +114,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   }
 
   torch::lazy::BackendDataPtr GetComputationDataFromNode(
-      const Node* node) const {
+      const Node* node) const override {
     auto* device_data_node = DeviceData::Cast(node);
     if (!device_data_node) {
       return nullptr;
@@ -156,11 +156,11 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
         static_cast<c10::DeviceType>(type));
   }
 
-  int64_t GetDefaultDeviceOrdinal() const {
+  int64_t GetDefaultDeviceOrdinal() const override {
     return default_device_ordinal_;
   }
 
-  virtual void SetDefaultDeviceOrdinal(int64_t ordinal) {
+  virtual void SetDefaultDeviceOrdinal(int64_t ordinal) override {
     default_device_ordinal_ = ordinal;
   }
 

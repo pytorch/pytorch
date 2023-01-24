@@ -13,7 +13,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
@@ -80,7 +80,7 @@ struct WorkEntry {
 //
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
-class TORCH_API ProcessGroupMPI : public ProcessGroup {
+class TORCH_API ProcessGroupMPI : public Backend {
  public:
   class WorkMPI : public Work {
    public:

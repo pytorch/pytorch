@@ -24,6 +24,9 @@ class TORCH_API KinetoEdgeCPUProfiler {
    * @param with_flops: whether to report flops corresponding to the op.
    * @param with_modules: whether to report original python module
    *        hierarchy to which the op belongs.
+   * @param events
+   * @param adjust_vulkan_timestamps: whether to adjust vulkan timestamps from
+   *        query pool to align with cpu event times
    *
    * Usage pattern for this profiler must be as follows:
    *
@@ -56,7 +59,8 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const bool with_stack = false,
       const bool with_flops = false,
       const bool with_modules = false,
-      std::vector<std::string> events = {});
+      std::vector<std::string> events = {},
+      const bool adjust_vulkan_timestamps = false);
 
   const std::unique_ptr<torch::autograd::profiler::ProfilerResult>&
   disableProfiler();
