@@ -48,6 +48,35 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         onnx_model = fx_onnx.export(MNISTModel(), self.opset_version, tensor_x)
         onnx.checker.check_model(onnx_model, full_check=True)
 
+    def test_trace_only_op_with_evaluator(self):
+
+        # TODO(titaiwang): Do we need this in exporter?
+
+        model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
+
+        class ArgminArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return (
+                    torch.argmin(input),
+                    torch.argmax(input),
+                    torch.argmin(input, keepdim=True),
+                    torch.argmax(input, keepdim=True),
+                    torch.argmin(input, dim=0, keepdim=True),
+                    torch.argmax(input, dim=1, keepdim=True),
+                )
+
+        onnx_model = fx_onnx.export(
+            ArgminArgmaxModel(), self.opset_version, model_input
+        )
+        onnx.checker.check_model(onnx_model, full_check=True)
+
+    def test_multiple_outputs_op_with_evaluator(self):
+        # TODO(titaiwang): Do we need this in exporter?
+        # TODO(titaiwang) what op has multiple outputs
+        # 1. torch.nn.Module with multiple outpus ops
+        # 2. use fx.export
+        pass
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
