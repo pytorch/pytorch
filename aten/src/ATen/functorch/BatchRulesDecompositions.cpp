@@ -124,6 +124,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(gradient, tensorarrayint);
   OP_DECOMPOSE2(gradient, tensorarray);
   OP_DECOMPOSE2(greater_equal, Tensor );
+  OP_DECOMPOSE2(greater_equal, Scalar );
   OP_DECOMPOSE2(greater, Tensor );
   OP_DECOMPOSE(grid_sampler);
   OP_DECOMPOSE(group_norm);
@@ -159,6 +160,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
   OP_DECOMPOSE(linalg_tensorinv);
+  OP_DECOMPOSE(linalg_vander);
+  OP_DECOMPOSE(cumprod_backward);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
@@ -174,6 +177,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(movedim, int);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
+  OP_DECOMPOSE(nanmean);
   m.impl("narrow", native::narrow_symint);
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(frobenius_norm, dim);
@@ -197,7 +201,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(resolve_neg);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
+  OP_DECOMPOSE(prelu);
   OP_DECOMPOSE2(softmax, int);
+  OP_DECOMPOSE(scaled_dot_product_attention);
   OP_DECOMPOSE(special_gammainc);
   OP_DECOMPOSE(special_gammaincc);
   OP_DECOMPOSE(special_logit);
@@ -247,6 +253,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
   OP_DECOMPOSE(tensordot);
+  OP_DECOMPOSE(_test_check_tensor);
   OP_DECOMPOSE(tile);
   OP_DECOMPOSE2(trapezoid, x);
   OP_DECOMPOSE2(trapezoid, dx);

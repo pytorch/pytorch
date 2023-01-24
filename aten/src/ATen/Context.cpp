@@ -4,7 +4,6 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/env.h>
 
 #include <algorithm>
 #include <cctype>
@@ -20,10 +19,6 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
-
-#ifdef USE_MPS
-#include <ATen/mps/MPSDevice.h>
-#endif
 
 namespace at {
 
@@ -187,8 +182,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
-  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
@@ -254,6 +248,15 @@ void Context::setAllowFP16ReductionCuBLAS(bool b) {
   allow_fp16_reduction_cublas = b;
 }
 
+bool Context::allowBF16ReductionCuBLAS() const {
+  return allow_bf16_reduction_cublas;
+}
+
+void Context::setAllowBF16ReductionCuBLAS(bool b) {
+  allow_bf16_reduction_cublas = b;
+}
+
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -265,14 +268,6 @@ bool Context::hasMKL() {
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
-#else
-  return false;
-#endif
-}
-
-bool Context::hasMPS() {
-#if USE_MPS
-  return at::mps::is_available();
 #else
   return false;
 #endif
@@ -307,7 +302,12 @@ at::QEngine Context::qEngine() const {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      qengine = at::kFBGEMM;
+      /* X86 is enabled if and only if fbgemm is available.
+       * It combines goodness of fbgemm and onednn by dispatching.
+       * If onednn not available, always dispatch to fbgemm.
+       * Make it default qengine for X86 CPU platforms.
+      */
+      qengine = at::kX86;
     }
 #endif
     return qengine;
@@ -365,6 +365,14 @@ bool Context::isXNNPACKAvailable() {
 #else
   return false;
 #endif
+}
+
+void Context::setCheckSparseTensorInvariants(bool e) {
+  enable_sparse_tensor_invariant_checks = e;
+}
+
+bool Context::checkSparseTensorInvariants() const {
+  return enable_sparse_tensor_invariant_checks;
 }
 
 bool Context::releaseWeightsWhenPrepacking() const {

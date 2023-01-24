@@ -1,15 +1,20 @@
+from dataclasses import dataclass
+from functools import partial
 import torch
+from torch.multiprocessing.reductions import StorageWeakRef
 
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
+from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
-    get_isolated_graphmodule,
-    get_proxy_slot,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
+    make_fx,
     track_tensor_tree,
+    unwrap_proxy,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
@@ -17,6 +22,11 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 from torch.utils._pytree import tree_flatten
+
+
+@dataclass
+class UnsupportedAliasMutationException(RuntimeError):
+    reason: str
 
 
 """
@@ -27,16 +37,12 @@ cond = PyOperator("cond")
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    def _unwrap_proxy(e):
-        if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
-            return e
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
-
-    assert isinstance(operands, list), "Cond operands must be a list of tensors"
+    assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
-    true_graph = get_isolated_graphmodule(true_fn, operands, {})
-    false_graph = get_isolated_graphmodule(false_fn, operands, {})
+    with disable_proxy_modes_tracing():
+        true_graph = make_fx(true_fn)(*operands)
+        false_graph = make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
@@ -76,9 +82,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    args = (pred, true_graph, false_graph, [operands])
+    args = (pred, true_graph, false_graph, operands)
 
-    proxy_args = pytree.tree_map(_unwrap_proxy, args)
+    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), args)
 
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="conditional")
@@ -148,6 +154,100 @@ def cond_python_dispatcher(*args):
     _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
     return cond(*args)
 
+
+def _has_potential_branch_input_mutation(branch, fake_inputs):
+    """
+    Dispatch-trace the branch with fake inputs and check if
+    producing graph has mutable op on the input. This is
+    bit restrictive as the branch must be traceable.
+    """
+    try:
+        gm = make_fx(branch)(*fake_inputs)
+    except UnsupportedAliasMutationException:
+        # this can happen when nested cond is
+        # functionalized
+        return True
+    except Exception as e:
+        raise e
+
+    input_nodes = set()
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            input_nodes.add(node)
+        if node.op == "call_function":
+            target = node.target
+            if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+                for arg in node.args:
+                    if arg in input_nodes:
+                        return True
+
+    return False
+
+def _has_potential_branch_input_alias(branch, fake_inputs):
+    """
+    Dispatch-trace the branch with fake inputs and check if
+    producing graph has output aliasing the branch input. This is
+    bit restrictive as the branch must be traceable.
+    """
+    try:
+        gm = make_fx(branch)(*fake_inputs)
+    except UnsupportedAliasMutationException:
+        # this can happen when nested cond is
+        # functionalized
+        return True
+    except Exception as e:
+        raise e
+
+    input_storages = set()
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
+
+    outs, _ = pytree.tree_flatten(gm(*fake_inputs))
+    for out in outs:
+        if isinstance(out, torch.Tensor) and StorageWeakRef(out._typed_storage()) in input_storages:
+            return True
+
+    return False
+
+
+
+@cond.py_impl(torch._C._functorch.TransformType.Functionalize)
+def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
+    """
+    Functionalization implementation for torch.cond. Currently:
+      1. We don't allow any input mutation inside the branches
+      2. Our check for above condition is not exhaustive
+    """
+    reapply_views = interpreter.functionalize_add_back_views()
+    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    # At this point, we will see functionalized tensors, so need to unwrap them first
+    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
+    unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
+
+    functional_true_fn = functionalize(true_fn, remove=mode)
+    functional_false_fn = functionalize(false_fn, remove=mode)
+
+    with interpreter.lower():
+        fake_tensor_mode = FakeTensorMode()
+        with fake_tensor_mode as ft_mode:
+            for branch in [functional_true_fn, functional_false_fn]:
+                def convert(x):
+                    return ft_mode.fake_tensor_converter(ft_mode, x)
+                fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
+                if _has_potential_branch_input_mutation(branch, fake_inputs):
+                    raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                            "might be modifying the input!")
+            for branch in [true_fn, false_fn]:
+                def convert(x):
+                    return ft_mode.fake_tensor_converter(ft_mode, x)
+                fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
+                if _has_potential_branch_input_alias(branch, fake_inputs):
+                    raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                            "might be aliasing the input!")
+
+        cond_return = cond(unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs)
+        return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)

@@ -11,12 +11,12 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             '_check_is_graph_module',
             '_swap_ff_with_fxff',
             '_fuse_fx',
-            'Scope',
-            'ScopeContextManager',
             'QuantizationTracer',
             '_prepare_fx',
             '_prepare_standalone_module_fx',
             'fuse_fx',
+            'Scope',
+            'ScopeContextManager',
             'prepare_fx',
             'prepare_qat_fx',
             '_convert_fx',
@@ -46,9 +46,9 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'FusedGraphModule',
             'ObservedGraphModule',
-            'is_observed_module',
+            '_is_observed_module',
             'ObservedStandaloneGraphModule',
-            'is_observed_standalone_module',
+            '_is_observed_standalone_module',
             'QuantizedGraphModule'
         ]
         self._test_function_import('fx.graph_module', function_list)

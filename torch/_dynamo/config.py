@@ -71,9 +71,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
-# Run the FX graph as it is created to get better type information
-dynamic_propagation = True
-
 # run FX normalization passes in optimizer
 normalize_ir = False
 
@@ -184,6 +181,9 @@ inductor_import = dynamo_import.replace("dynamo", "inductor")
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# Disables graph breaking on rnn. YMMV with backends.
+allow_rnn = False
+
 # root folder of the project
 if "torch." in dynamo_import:
     base_dir = dirname(dirname(dirname(abspath(__file__))))
@@ -211,3 +211,10 @@ class _AccessLimitingConfig(ModuleType):
 
 _allowed_config_names = {*globals().keys()}
 sys.modules[__name__].__class__ = _AccessLimitingConfig
+
+from .config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(
+    sys.modules[__name__],
+    ignore_set={"repro_after", "repro_level"},
+)

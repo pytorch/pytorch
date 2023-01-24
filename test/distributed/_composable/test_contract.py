@@ -1,17 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-    skipIfTorchDynamo,
-)
+from copy import deepcopy
+from typing import Tuple
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import _get_registry, contract
-
-from copy import deepcopy
-from typing import Tuple
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class ToyModel(nn.Module):
@@ -135,9 +130,7 @@ class TestContract(TestCase):
         self.assertEqual(2, len(_get_registry(model)))
         self.assertTrue([_get_registry(model).keys()], ["api1", "api2"])
 
-        with self.assertRaisesRegex(
-            AssertionError, "api1 has already been applied"
-        ):
+        with self.assertRaisesRegex(AssertionError, "api1 has already been applied"):
             model = api1(model)
 
 

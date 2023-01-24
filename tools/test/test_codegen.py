@@ -9,6 +9,7 @@ import torchgen.model
 import yaml
 
 from tools.autograd import gen_autograd_functions, load_derivatives
+from torchgen import dest
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.gen import (
@@ -356,6 +357,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                     self.op_2_native_function,
                 ],
                 backend_indices=self.backend_indices,
+                native_function_decl_gen=dest.compute_native_function_declaration,
             )
 
     def test_native_function_declaration_1_op_1_ns_valid(self) -> None:
@@ -365,6 +367,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 self.op_1_native_function,
             ],
             backend_indices=self.backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
         )
         target = """
 namespace at {
