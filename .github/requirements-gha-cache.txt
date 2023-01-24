@@ -6,7 +6,6 @@
 #   functorch/docs/requirements.txt
 #   .circleci/docker/requirements-ci.txt
 boto3==1.19.12
-dataclasses==0.6
 jinja2==3.0.1
 lintrunner==0.9.2
 ninja==1.10.0.post1

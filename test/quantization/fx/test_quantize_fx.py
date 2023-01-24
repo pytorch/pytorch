@@ -8519,17 +8519,20 @@ class TestQuantizeFxModels(QuantizationTestCase):
                     return x
 
             qengine = torch.backends.quantized.engine
-            qconfig_dict = {"": get_default_qat_qconfig(qengine),
-                            "object_type": [(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)]}
+            qconfig_dict = QConfigMapping() \
+                .set_global(get_default_qat_qconfig(qengine)) \
+                .set_object_type(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)
 
             train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
             eval_output = [[torch.randint(0, 10, (12, 1))]]
 
             model = EmbeddingBagLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
+            print("after prepare:", prepared_fx_model)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
                                      qconfig_mapping=qconfig_dict)
+            print("quant model:", quant_model)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
