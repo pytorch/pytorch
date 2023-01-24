@@ -45,8 +45,7 @@ TEST_F(ModuleTest, ZeroGrad) {
   for (auto& parameter : module->parameters()) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
-    ASSERT_TRUE(grad.defined());
-    ASSERT_EQ(grad.sum().item<float>(), 0);
+    ASSERT_FALSE(grad.defined());
   }
 }
 
