@@ -1435,10 +1435,12 @@ std::string ExpandOp::toString(int indent_size) const {
   std::stringstream ss;
   indent(ss, indent_size) << out()->toString() << " = expand( " << in()
                           << ", {";
+  bool comma = false;
   for (auto expanded_extent : expanded_extents()) {
-    if (ss.tellp()) {
+    if (comma) {
       ss << ", ";
     }
+    comma = true;
     ss << expanded_extent;
   }
   ss << "} )\n";
