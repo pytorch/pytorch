@@ -8835,8 +8835,10 @@ op_db: List[OpInfo] = [
               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
               # vmap: calling random operator not supported
-              DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-              DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+              DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+              DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+
+              DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
@@ -17634,6 +17636,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.exponential",
         torch_opinfo_name="exponential",
+        supports_out=True,
         decorators=(
             # dtypes that do not support check_uniform_bounds of rand_like
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
@@ -17652,6 +17655,7 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),

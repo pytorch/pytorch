@@ -202,6 +202,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "complex": {f16, f32, f64},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
+    "exponential": {f16, f32, f64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
