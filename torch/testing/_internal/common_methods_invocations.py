@@ -17623,6 +17623,7 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),

@@ -119,6 +119,7 @@ dtensor_fails = {
     xfail("block_diag"),
     xfail("broadcast_shapes"),
     xfail("cat"),
+    xfail("cauchy"),
     xfail("cartesian_prod"),
     xfail("cdist"),
     xfail("cholesky"),
