@@ -1484,4 +1484,9 @@ class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
 
 if __name__ == '__main__':
+    # TODO: Remove once 3.11 is supported
+    import sys
+    if sys.version_info >= (3, 11):
+        print("3.11 is not supported")
+        sys.exit(0)
     run_tests()

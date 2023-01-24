@@ -5,7 +5,7 @@ from numbers import Real
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
-    dis.opmap["JUMP_ABSOLUTE"],
+    dis.opmap["JUMP_ABSOLUTE" if sys.version_info < (3, 11) else "JUMP_BACKWARD"],
     dis.opmap["JUMP_FORWARD"],
     dis.opmap["RAISE_VARARGS"],
     # TODO(jansel): double check exception handling
