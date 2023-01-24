@@ -10,7 +10,7 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/Math.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // See note [Jiterator]
 const char digamma_name[] = "digamma";
@@ -105,4 +105,4 @@ REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);
 REGISTER_DISPATCH(lgamma_stub, &lgamma_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

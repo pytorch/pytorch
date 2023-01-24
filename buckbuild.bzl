@@ -110,6 +110,35 @@ def get_static_dispatch_backend():
         return []
     return static_dispatch_backend.split(";")
 
+def get_glsl_paths():
+    paths = [
+        "//xplat/caffe2:aten_vulkan_glsl_src_path",
+        "aten/src/ATen/native/vulkan/glsl",
+    ] + [
+        p
+        for p in read_config("gen_vulkan_spv", "additional_glsl_paths", "").split(" ")
+        if p
+    ]
+
+    if len(paths) % 2 != 0:
+        fail(
+            "gen_vulkan_spv.additional_glsl_paths must contain an even number of elements"
+        )
+
+    return " ".join(
+        [
+            "$(location {})/{}".format(
+                paths[i],
+                paths[i + 1],
+            )
+            for i in range(
+                0,
+                len(paths),
+                2,
+            )
+        ]
+    )
+
 # @lint-ignore BUCKRESTRICTEDSYNTAX
 IS_OSS = read_config("pt", "is_oss", "0") == "1"  # True for OSS BUCK build, and False for internal BUCK build
 
@@ -158,7 +187,7 @@ def third_party(name):
 def get_pt_compiler_flags():
     return select({
         "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accomodate for eigen
+            "-std=gnu++17",  #to accommodate for eigen
         ],
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
@@ -859,7 +888,6 @@ def define_buck_targets(
         header_namespace = "",
         exported_headers = subdir_glob([
             ("aten/src", "ATen/native/vulkan/*.h"),
-            ("aten/src", "ATen/native/vulkan/api/*.h"),
             ("aten/src", "ATen/native/vulkan/ops/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
         ]),

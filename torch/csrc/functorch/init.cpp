@@ -447,11 +447,11 @@ void initFuncTorchBindings(PyObject* module) {
       "get_inplace_requires_grad_allowed",
       &at::functorch::getInplaceRequiresGradAllowed);
   m.def(
-      "set_autograd_function_allowed",
-      &at::functorch::setAutogradFunctionAllowed);
+      "set_single_level_autograd_function_allowed",
+      &at::functorch::setSingleLevelAutogradFunctionAllowed);
   m.def(
-      "get_autograd_function_allowed",
-      &at::functorch::getAutogradFunctionAllowed);
+      "get_single_level_autograd_function_allowed",
+      &at::functorch::getSingleLevelAutogradFunctionAllowed);
   m.def("unwrap_if_dead", &unwrapIfDead);
   m.def("is_dead_tensor_wrapper", &isDeadTensorWrapper);
   m.def("dlevel", &dlevel, "dlevel");
@@ -494,6 +494,10 @@ void initFuncTorchBindings(PyObject* module) {
       .value("Jvp", TransformType::Jvp)
       .value("Functionalize", TransformType::Functionalize)
       .value("Vmap", TransformType::Vmap);
+  py::enum_<RandomnessType>(m, "RandomnessType")
+      .value("Error", RandomnessType::Error)
+      .value("Same", RandomnessType::Same)
+      .value("Different", RandomnessType::Different);
   py::class_<Interpreter>(m, "CInterpreter")
       .def("key", &Interpreter::key)
       .def("level", &Interpreter::level);
@@ -503,11 +507,25 @@ void initFuncTorchBindings(PyObject* module) {
       .def("level", &GradInterpreterPtr::level)
       .def("lift", &GradInterpreterPtr::lift)
       .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
+  py::class_<JvpInterpreterPtr>(m, "CJvpInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &JvpInterpreterPtr::key)
+      .def("level", &JvpInterpreterPtr::level)
+      .def("lift", &JvpInterpreterPtr::lift)
+      .def("prevFwdGradMode", &JvpInterpreterPtr::prevFwdGradMode);
   py::class_<VmapInterpreterPtr>(m, "CVmapInterpreterPtr")
       .def(py::init<const Interpreter*>())
       .def("key", &VmapInterpreterPtr::key)
       .def("level", &VmapInterpreterPtr::level)
-      .def("batchSize", &VmapInterpreterPtr::batchSize);
+      .def("batchSize", &VmapInterpreterPtr::batchSize)
+      .def("randomness", &VmapInterpreterPtr::randomness);
+  py::class_<FunctionalizeInterpreterPtr>(m, "CFunctionalizeInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &FunctionalizeInterpreterPtr::key)
+      .def("level", &FunctionalizeInterpreterPtr::level)
+      .def(
+          "functionalizeAddBackViews",
+          &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
 }
 
 } // namespace impl
