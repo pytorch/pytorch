@@ -4,10 +4,6 @@
 Distributed Checkpoint - torch.distributed.checkpoint
 =====================================================
 
-.. py:module:: torch.distributed.checkpoint
-
-.. automodule:: torch.distributed.checkpoint
-.. currentmodule:: torch.distributed.checkpoint
 
 Distributed Checkpoint (DCP) support loading and saving models from multiple ranks in parallel.
 It handles load-time resharding which enables saving in one cluster topology and loading into another.
@@ -17,11 +13,15 @@ DCP is different than `torch.save` and `torch.load` in a few significant ways:
 * It produces multiple files per checkpoint, with at least one per rank.
 * It operates in place, meaning that the model should allocate its data first and DCP uses that storage instead.
 
-
 The entrypoints to load and save a checkpoint are the following:
 
-* :func:`torch.distributed.checkpoint.load_state_dict`
-* :func:`torch.distributed.checkpoint.save_state_dict`
+
+.. automodule:: torch.distributed.checkpoint
+
+.. currentmodule:: torch.distributed.checkpoint
+
+.. autofunction::  load_state_dict
+.. autofunction::  save_state_dict
 
 The following types define the IO interface used during checkpoint:
 
