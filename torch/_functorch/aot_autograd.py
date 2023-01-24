@@ -1861,7 +1861,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             )
             del contiguous_args
 
-            def call_compiled_backward(all_args):
+            def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
                     # TODO - pass in fake tensors ?
                     context = disable_autocast_manager if disable_amp else nullcontext
@@ -1881,24 +1881,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 return tuple(out)
 
             if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
-                # If backward pass was run with create_graph=True, ensure that the graph is
-                # properly connected, but errors when the user performs double backward.
+                # Ensure that the graph is connected, and error if double backward is performed.
                 # See comment for why once_differentiable is not sufficient:
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     @staticmethod
-                    def forward(ctx, *all_args):
-                        all_args_list = list(all_args)
-                        del all_args
-                        return call_compiled_backward(all_args_list)
+                    def forward(ctx, unused):
+                        del unused
+                        return call_compiled_backward()
 
                     @staticmethod
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
-
-                out = CompiledFunctionBackward.apply(*all_args)
+                # Pass a tensor that requires grad so autograd Function knows to create the graph
+                out = CompiledFunctionBackward.apply(torch.empty([], requires_grad=True))
             else:
-                out = call_compiled_backward(all_args)
+                out = call_compiled_backward()
             return out
 
     @wraps(CompiledFunction.apply)
