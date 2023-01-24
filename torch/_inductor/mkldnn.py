@@ -13,6 +13,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 
@@ -129,7 +130,7 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -203,7 +204,7 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -288,7 +289,7 @@ class ConvBinaryInplace2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )

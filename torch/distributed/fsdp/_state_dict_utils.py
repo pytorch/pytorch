@@ -239,7 +239,8 @@ def _common_unshard_post_state_dict_hook(
             buffers.append(state_dict[fqn])
     if buffers:
         mixed_precision_enabled_for_buffers = (
-            fsdp_state._mixed_precision_enabled_for_buffers() if not _is_composable(fsdp_state)
+            fsdp_state._mixed_precision_enabled_for_buffers()
+            if not _is_composable(fsdp_state)
             else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
         if mixed_precision_enabled_for_buffers:
