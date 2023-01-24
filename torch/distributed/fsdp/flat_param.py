@@ -23,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
+from torch.distributed.utils import p_assert, _alloc_storage, _free_storage
 from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
@@ -30,11 +31,8 @@ from torch.distributed.fsdp._common_utils import (
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import (
-    _alloc_storage,
-    _free_storage,
     _no_dispatch_record_stream,
     _same_storage,
-    p_assert,
 )
 
 __all__ = [

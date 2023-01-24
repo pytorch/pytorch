@@ -22,6 +22,7 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
+from torch.distributed.utils import p_assert
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
@@ -92,7 +93,6 @@ from ._unshard_param_utils import (
     _register_orig_params,
     _unshard_params,
 )
-from ._utils import p_assert
 from .flat_param import FlatParameter
 from .wrap import _FSDPPolicy
 

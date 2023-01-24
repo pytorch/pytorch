@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
+from torch.distributed.utils import p_assert
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
@@ -27,9 +28,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.fsdp._utils import (
-    _apply_to_tensors,
     _no_dispatch_record_stream,
-    p_assert,
 )
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
@@ -39,7 +38,7 @@ from torch.distributed.fsdp.flat_param import (
     HandleShardingStrategy,
     HandleTrainingState,
 )
-from torch.distributed.utils import _to_kwargs
+from torch.distributed.utils import _to_kwargs, _apply_to_tensors
 
 RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,

@@ -11,7 +11,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp._utils import _apply_to_tensors
+from torch.distributed.utils import _apply_to_tensors
 from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.utils import _replace_by_prefix
