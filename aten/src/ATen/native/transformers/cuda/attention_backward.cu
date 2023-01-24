@@ -74,14 +74,15 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const at::Tensor& out,
-    const at::Tensor& logsumexp,
+    const Tensor& out,
+    const Tensor& logsumexp,
     const Tensor& cumulative_sequence_length_q,
     const Tensor& cumulative_sequence_length_k,
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_k,
     double dropout_p,
-    bool is_causal) {
+    bool is_causal,
+    const Tensor& rng_state) {
 #if defined(USE_FLASH_ATTENTION)
   /*
   num_splits determines how much to parallelize over the seqlen_q dimension

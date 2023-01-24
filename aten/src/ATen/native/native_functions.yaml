@@ -13816,7 +13816,7 @@
   dispatch:
     CUDA: _flash_attention_forward
 
-- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> (Tensor, Tensor, Tensor)
+- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, Tensor rng_state) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _flash_attention_backward
