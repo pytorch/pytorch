@@ -94,48 +94,52 @@ SymInt SymInt::operator%(const SymInt& sci) const {
   return SymInt(res[0]->mod(res[1]));
 }
 
-bool SymInt::operator==(const SymInt& sci) const {
+SymBool SymInt::sym_eq(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ == sci.data_;
   }
   auto res = normalize_symints(*this, sci);
-  return res[0]->eq(res[1])->bool_();
+  return res[0]->eq(res[1]);
 }
 
-bool SymInt::operator!=(const SymInt& sci) const {
-  return !(*this == sci);
+SymBool SymInt::sym_ne(const SymInt& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ != sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->ne(res[1]);
 }
 
-bool SymInt::operator<(const SymInt& sci) const {
+SymBool SymInt::sym_lt(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ < sci.data_;
   }
   auto res = normalize_symints(*this, sci);
-  return res[0]->lt(res[1])->bool_();
+  return res[0]->lt(res[1]);
 }
 
-bool SymInt::operator<=(const SymInt& sci) const {
+SymBool SymInt::sym_le(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ <= sci.data_;
   }
   auto res = normalize_symints(*this, sci);
-  return res[0]->le(res[1])->bool_();
+  return res[0]->le(res[1]);
 }
 
-bool SymInt::operator>(const SymInt& sci) const {
+SymBool SymInt::sym_gt(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ > sci.data_;
   }
   auto res = normalize_symints(*this, sci);
-  return res[0]->gt(res[1])->bool_();
+  return res[0]->gt(res[1]);
 }
 
-bool SymInt::operator>=(const SymInt& sci) const {
+SymBool SymInt::sym_ge(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ >= sci.data_;
   }
   auto res = normalize_symints(*this, sci);
-  return res[0]->ge(res[1])->bool_();
+  return res[0]->ge(res[1]);
 }
 
 SymInt SymInt::min(const SymInt& sci) const {
