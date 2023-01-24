@@ -318,6 +318,10 @@ class CppVecOverrides(OpOverrides):
         return f"{a} || {b}"
 
     @staticmethod
+    def tan(a):
+        return f"{a}.tan()"
+
+    @staticmethod
     def tanh(a):
         vec_one = f"decltype({a})(1)"
         vec_two = f"decltype({a})(2)"
@@ -499,6 +503,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"std::log1p({x})"
+
+    @staticmethod
+    def tan(x):
+        return f"std::tan({x})"
 
     @staticmethod
     def tanh(x):
@@ -1343,7 +1351,7 @@ class CppVecKernelChecker(CppVecKernel):
 
         left_dtype, right_dtype = get_cmp_dtypes(node)
         if left_dtype is None or right_dtype is None:
-            # TODO(Eikan): Should be conservative?
+            # TODO(Eikan): To record, deduce and propagate the data type of every expression.
             return True
         else:
             return left_dtype == right_dtype
