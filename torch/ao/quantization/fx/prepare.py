@@ -124,12 +124,12 @@ def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
 
-def _get_dtype_and_is_dynamic(obs_or_fq_ctr: Optional[Callable]) -> Tuple[torch.dtype, bool]:
+def _get_dtype_and_is_dynamic(obs_or_fq_ctr: Optional[Callable]) -> Tuple[Optional[torch.dtype], bool]:
     """ Given a constructor for observer or fake quant module, returns
     a Tuple of dtype and is_dynamic
     """
     if obs_or_fq_ctr is None:
-        return None, None
+        return None, False
     else:
         obs_or_fq = obs_or_fq_ctr()
         return obs_or_fq.dtype, getattr(obs_or_fq, "is_dynamic", False)
@@ -170,6 +170,7 @@ def _is_input_arg_dtype_supported_by_backend(
         if "weight_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
             weight_obs_or_fq_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"]
         qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
+        backend_config_weight_dtype = dtype_config.weight_dtype
         dtype_matches = qconfig_weight_dtype == backend_config_weight_dtype
         qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
             qconfig, dtype_config.weight_dtype_with_constraints, is_activation=False)
@@ -180,7 +181,8 @@ def _is_input_arg_dtype_supported_by_backend(
         if "bias_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
             bias_obs_or_fq_ctr = node.meta["target_dtype_info"]["bias_obs_or_fq_ctr"]
         qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
-        return backend_config_bias_dtype is None or qconfig_bais_dtype == backend_config_bias_dtype
+        backend_config_bias_dtype = dtype_config.bias_dtype
+        return backend_config_bias_dtype is None or qconfig_bias_dtype == backend_config_bias_dtype
 
 def _is_output_dtype_supported_by_backend(
     node: Node,
@@ -196,9 +198,13 @@ def _is_output_dtype_supported_by_backend(
     # from input activation check can be reused here
     qconfig_output_dtype = None
     output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
-    if output_act_obs_or_fq_ctr is not None:
-        output_act_obs_or_fq = output_act_obs_or_fq_ctr()
-        qconfig_output_dtype = output_act_obs_or_fq.dtype
+    qconfig_output_dtype, qconfig_output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    # TODO: this is a hack because we can only specify one activation_obs_or_fq for
+    # qconfig (qconfig.activation), and we are only supporting dynamically quantized
+    # linear op which has fp32 output dtype, this should be removed if we generalize
+    # the structure of qconfig in the future
+    if qconfig_output_is_dynamic:
+        qconfig_output_dtype = torch.float32
     dtype_matches = qconfig_output_dtype == backend_config_output_dtype
     qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
         qconfig, dtype_config.output_dtype_with_constraints)
@@ -449,19 +455,19 @@ def _get_arg_target_dtype_as_output(
     # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
     # not be able to accurately detect whether this node is a consumer of custom module LSTM.
     custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
+    output_act_obs_or_fq_ctr = None
     if custom_module_lstm_node is not None:
-        return custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"][0]  # type: ignore[index]
+         output_act_obs_or_fq_ctr = custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
-        return observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"][0]  # type: ignore[index]
+        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
     else:
-        output_act_dtype_info = \
+        output_act_obs_or_fq_ctr = \
             arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
-        if output_act_dtype_info is not None:
-            return output_act_dtype_info[0]
-        else:
-            return None
+    output_act_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    # TODO: should support is_dynamic here as well
+    return output_act_dtype
 
 def _get_arg_target_dtype_as_input_to_node(
     arg: Node,
@@ -1504,7 +1510,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         _qat_swap_modules(model, module_to_qat_module)
-        _update_qconfig_for_qat(qconfig_mapping, {})
+        _update_qconfig_for_qat(qconfig_mapping, backend_config)
 
     # mapping from fully qualified module name to module instance
     # for example,
