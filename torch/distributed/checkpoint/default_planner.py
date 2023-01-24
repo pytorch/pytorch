@@ -43,7 +43,9 @@ from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
-from torch.distributed.checkpoint._sharded_tensor_utils import _flatten_sharded_tensors
+from torch.distributed.checkpoint._sharded_tensor_utils import (
+    _flatten_sharded_tensors,
+)
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import (
     find_state_dict_object,
@@ -72,16 +74,18 @@ class DefaultSavePlanner(SavePlanner):
 
     def __init__(
         self,
-        flatten_state_dict: bool = False,
-        flatten_sharded_tensors: bool = False,
-        dedup_replicated_tensors: bool = False,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
+        dedup_replicated_tensors: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
 
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self, state_dict: STATE_DICT_TYPE, is_coordinator: bool
+    ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
@@ -165,8 +169,8 @@ class DefaultLoadPlanner(LoadPlanner):
 
     def __init__(
         self,
-        flatten_state_dict: bool = False,
-        flatten_sharded_tensors: bool = False,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
@@ -179,10 +183,10 @@ class DefaultLoadPlanner(LoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        self.original_state_dict = state_dict
+
         if self.flatten_sharded_tensors:
             state_dict = _flatten_sharded_tensors(state_dict)
-
-        self.original_state_dict = state_dict
 
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
@@ -221,14 +225,7 @@ class DefaultLoadPlanner(LoadPlanner):
         """
         This is an extension from the planner interface to make it easy to extend the default planner
         """
-        if self.flatten_state_dict:
-            obj = get_element(
-                self.original_state_dict, self.mappings[index.fqn]
-            )
-            assert isinstance(obj, torch.Tensor)
-            return find_tensor_shard(obj, index)
-        else:
-            return find_state_dict_object(self.state_dict, index)
+        return find_state_dict_object(self.state_dict, index)
 
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
         """
