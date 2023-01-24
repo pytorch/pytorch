@@ -9,10 +9,11 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Any, Type
+from typing import Callable, Any, Type, Dict
 
 import torch
 import torch.distributed as dist
+from torch.distributed.utils import _replace_by_prefix
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import (
     Join,
@@ -705,17 +706,24 @@ class DistributedDataParallel(Module, Joinable):
 
     @staticmethod
     def _pre_load_state_dict_hook(
-        module: nn.Module,
+        module,
         state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
     ) -> None:
         """
-        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()``
-        is called. For ``DistributedDataParallel``, it will add back the module
-        prefix so that non-DDP modules (i.e. local nn.Modules) can be loaded into
-        DDP module properly.
+        ``_pre_state_dict_hook`` is called before ``self._load_from_state_dict()``
+        is called. For ``DistributedDataParallel``, if ``PYTORCH_DDP_LOAD_LOCAL_MODULE``
+        is set, it will add back the module prefix so that non-DDP modules
+        (i.e. local nn.Modules) can be loaded into DDP module properly.
         """
+        print(" --- in hook --")
+        load_local_module = (
+            os.environ.get("PYTORCH_DDP_LOAD_LOCAL_MODULE", "0") == "1"
+        )
+        if not load_local_module:
+            return
+
         _replace_by_prefix(state_dict, prefix, prefix + f"{_DDP_PREFIX}.")
 
     def _setup_in_backward_optimizers(self):
