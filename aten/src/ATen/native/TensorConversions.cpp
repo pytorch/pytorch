@@ -1549,7 +1549,9 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
       ") instead.");
 
   auto input_values = self.values().contiguous();
-  auto [input_compressed_indices, input_plain_indices] = sparse_csr::getCompressedPlainIndices(self);
+  Tensor input_compressed_indices;
+  Tensor input_plain_indices;
+  std::tie(input_compressed_indices, input_plain_indices) = sparse_csr::getCompressedPlainIndices(self);
   input_compressed_indices = input_compressed_indices.contiguous();
   input_plain_indices = input_plain_indices.contiguous();
 
