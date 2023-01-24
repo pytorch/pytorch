@@ -864,10 +864,10 @@ void add_out_dense_sparse_csr_cpu(
     return;
   }
 
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
+  auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
+  auto src_crow_indices = src.crow_indices().reshape({-1, src.crow_indices().size(-1)});
+  auto src_col_indices = src.col_indices().reshape({-1, src.col_indices().size(-1)});
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
@@ -1290,6 +1290,13 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
       result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
     });
   return result;
+}
+
+Tensor triton_bsr_dense_mm(
+    const Tensor& bsr,
+    const Tensor& dense) {
+  TORCH_CHECK(false, "_triton_bsr_dense_mm: Triton kernel should be overwritten in Python.");
+  return Tensor {};
 }
 
 } // namespace native

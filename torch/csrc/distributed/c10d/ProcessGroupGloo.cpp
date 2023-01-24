@@ -626,16 +626,16 @@ void socketInitialize() {
 // gracefully fall back to an alternative if it doesn't.
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
   socketInitialize();
-  struct addrinfo hints;
+  struct addrinfo hints {};
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  struct addrinfo* result;
+  struct addrinfo* result = nullptr;
   auto rv = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
   if (rv < 0) {
     return false;
   }
-  struct addrinfo* rp;
+  struct addrinfo* rp = nullptr;
   for (rp = result; rp != nullptr; rp = rp->ai_next) {
     auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
     if (fd == -1) {

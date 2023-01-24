@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <stdexcept>
+#include <utility>
 
 namespace c10d {
 
@@ -23,7 +24,7 @@ struct CollectiveFingerPrint {
   // Current collective's operation type.
   OpType op_type_;
   // Number of input tensors
-  std::size_t num_tensors_;
+  std::size_t num_tensors_{};
   // input tensor data types
   std::vector<int8_t> tensor_dtypes_;
   // input tensor device types
@@ -52,9 +53,9 @@ struct CollectiveFingerPrint {
       std::vector<int8_t> tensor_device_types,
       std::vector<std::vector<int64_t>> tensor_sizes)
       : op_type_(op_type),
-        tensor_dtypes_(tensor_dtypes),
-        tensor_device_types_(tensor_device_types),
-        tensor_sizes_(tensor_sizes) {}
+        tensor_dtypes_(std::move(tensor_dtypes)),
+        tensor_device_types_(std::move(tensor_device_types)),
+        tensor_sizes_(std::move(tensor_sizes)) {}
 
   // Logs collective information in case of a failure.
   friend std::ostream& operator<<(
@@ -267,7 +268,7 @@ ProcessGroupWrapper::ProcessGroupWrapper(
     c10::intrusive_ptr<Backend> glooBackend)
     : Backend(backend->getRank(), backend->getSize()),
       backend_(backend),
-      glooBackend_(glooBackend) {
+      glooBackend_(std::move(glooBackend)) {
   // Set the sequence number for the underlying process group.
   backend_->setSequenceNumberForGroup();
 }

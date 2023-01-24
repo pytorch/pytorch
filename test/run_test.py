@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     is_slow_gradcheck_env,
 )
 import torch.distributed as dist
-from torch.multiprocessing import get_context
+from torch.multiprocessing import current_process, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -48,6 +48,26 @@ except ImportError:
     print(
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
+
+
+# Note [ROCm parallel CI testing]
+# https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
+# In .jenkins/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
+# This results in multiple test files sharing the same GPU.
+# This should be a supported use case for ROCm, but it exposed issues in the kernel driver resulting in hangs.
+# See https://github.com/pytorch/pytorch/issues/90940.
+#
+# Further, ROCm self-hosted runners have up to 4 GPUs.
+# Device visibility was set to 0 to match CUDA test behavior, but this was wasting available GPU resources.
+# Assigning each Pool worker their own dedicated GPU avoids the ROCm oversubscription issues.
+# This should also result in better overall wall clock time since all GPUs can be utilized.
+def maybe_set_hip_visible_devies():
+    # Special handling of ROCm GHA runners for parallel (file granularity) tests.
+    if torch.version.hip:
+        p = current_process()
+        if p.name != 'MainProcess':
+            # this is a Process from a parallel Pool, not the MainProcess
+            os.environ['HIP_VISIBLE_DEVICES'] = str(p._identity[0] % NUM_PROCS)
 
 
 def strtobool(s):
@@ -118,7 +138,6 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
-        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -299,6 +318,8 @@ CI_SERIAL_LIST = [
     'test_modules',  # failed test due to mismatched elements
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
+    'test_dataloader',  # frequently hangs for ROCm
+    'dynamo/test_dynamic_shapes',   # flaky on MacOS when running in parallel https://github.com/pytorch/pytorch/issues/92196
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -432,6 +453,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -464,7 +486,8 @@ def run_test(
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
+                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")),
+                                        suffix=".log")
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
@@ -659,10 +682,9 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
-    #
     enabled = {
         # TODO: expose these options to the user
-        # Temporary disable all feature-conditional tests
+        # For now disable all feature-conditional tests
         # 'lapack': 'auto',
         # 'cuda': 'auto',
         # 'cuda1': 'auto',
@@ -671,6 +693,9 @@ def run_doctests(test_module, test_directory, options):
         'cuda': 0,
         'cuda1': 0,
         'qengine': 0,
+        'autograd_profiler': 0,
+        'cpp_ext': 0,
+        'monitor': 0,
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -707,13 +732,34 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine']:
         os.environ['TORCH_DOCTEST_QENGINE'] = '1'
 
+    if enabled['autograd_profiler']:
+        os.environ['TORCH_DOCTEST_AUTOGRAD_PROFILER'] = '1'
+
+    if enabled['cpp_ext']:
+        os.environ['TORCH_DOCTEST_CPP_EXT'] = '1'
+
+    if enabled['monitor']:
+        os.environ['TORCH_DOCTEST_MONITOR'] = '1'
+
+    if 0:
+        # TODO: could try to enable some of these
+        os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
+        os.environ['TORCH_DOCTEST_ANOMOLY'] = '1'
+        os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
+        os.environ['TORCH_DOCTEST_HUB'] = '1'
+        os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+        os.environ['TORCH_DOCTEST_FUTURES'] = '1'
+
     pkgpath = os.path.dirname(torch.__file__)
+
     xdoctest_config = {
         'global_exec': r'\n'.join([
             'from torch import nn',
             'import torch.nn.functional as F',
             'import torch',
         ]),
+        'analysis': 'static',  # set to "auto" to test doctests in compiled modules
         'style': 'google',
         'options': '+IGNORE_WHITESPACE',
     }
@@ -849,6 +895,9 @@ CUSTOM_HANDLERS = {
     "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
+    # not a test_ops file, but takes 2 hrs on some architectures and
+    # run_test_ops is good at parallelizing things
+    "test_decomp": run_test_ops,
 }
 
 
@@ -1016,7 +1065,7 @@ def parse_args():
     )
     parser.add_argument(
         "--xdoctest-command",
-        default='list',
+        default='all',
         help=(
             "Control the specific doctest action. "
             "Use 'list' to simply parse doctests and check syntax. "
@@ -1082,7 +1131,8 @@ def must_serial(file: str) -> bool:
         "distributed" in file or
         file in CUSTOM_HANDLERS or
         file in RUN_PARALLEL_BLOCKLIST or
-        file in CI_SERIAL_LIST
+        file in CI_SERIAL_LIST or
+        file in JIT_EXECUTOR_TESTS
     )
 
 
@@ -1233,6 +1283,8 @@ def get_selected_tests(options):
 
 
 def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
+    maybe_set_hip_visible_devies()
+
     test_module = parse_test_module(test)
 
     # Printing the date here can help diagnose which tests are slow
@@ -1283,7 +1335,8 @@ def main():
     print_to_stderr("parallel (file granularity) tests:\n {}".format("\n ".join(selected_tests_parallel)))
     print_to_stderr("serial (file granularity) tests:\n {}".format("\n ".join(selected_tests_serial)))
 
-    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=1)
+    # See Note [ROCm parallel CI testing]
+    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1)
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     def success_callback(err_message):

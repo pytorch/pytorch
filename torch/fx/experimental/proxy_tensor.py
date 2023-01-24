@@ -101,6 +101,14 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
 def snapshot_fake(val):
     return val.detach()
 
+def unwrap_proxy(proxy_mode, e):
+    if isinstance(e, torch.Tensor):
+        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
+    elif isinstance(e, (torch.SymInt, torch.SymFloat)):
+        return get_proxy_slot(e.node, proxy_mode.tracer, e, lambda e: e())
+    else:
+        return e
+
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
 # (most notably autograd, but also vmap, functorch transforms, etc).  This means
@@ -661,9 +669,11 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
                 # TODO: it would be nice to line these up with the names
                 # FX will choose for the placeholders, but we don't
                 # actually know what the names will be at this point yet
-                sname = f"input{arg_count}"
+                # NB: the Source here is actually meaningless
+                from torch._dynamo.source import ConstantSource
+                source = ConstantSource(f"input{arg_count}")
                 arg_count += 1
-                return fake_tensor_mode.from_tensor(x, sname=sname)  # type: ignore[attr-defined]
+                return fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
 
             return x
 

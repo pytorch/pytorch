@@ -36,6 +36,8 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#include <utility>
+
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -254,8 +256,8 @@ struct VectorizedLoop2d {
   static constexpr int ntensors = traits::arity + 1;
   using data_t = std::array<char*, ntensors>;
 
-  VectorizedLoop2d(const op_t &op, const vop_t &vop):
-    op(op), vop(vop) {}
+  VectorizedLoop2d(const op_t &op, vop_t vop):
+    op(op), vop(std::move(vop)) {}
 
   static void advance(data_t &data, const int64_t *outer_strides) {
     for (const auto arg : c10::irange(data.size())) {

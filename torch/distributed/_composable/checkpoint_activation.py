@@ -5,11 +5,7 @@ from weakref import ref, ReferenceType, WeakKeyDictionary
 
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import (
-    detach_variable,
-    get_device_states,
-    set_device_states,
-)
+from torch.utils.checkpoint import detach_variable, get_device_states, set_device_states
 
 from .contract import contract
 
@@ -199,6 +195,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
             autograd.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
@@ -216,7 +213,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
 
     """
 
-    def forward_pre_hook(module: nn.Module, inputs: Tuple[Any]) -> None:
+    def forward_pre_hook(module: nn.Module, inputs: Tuple[Any, ...]) -> None:
         if checkpoint.state(module).enable_hook:
             checkpoint.state(module).orig_grad_enabled = torch.is_grad_enabled()
             if checkpoint.state(module).use_reentrant:
@@ -256,13 +253,11 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
                 saved_tensor_hooks.__enter__()
                 checkpoint.state(module).saved_tensor_hooks = saved_tensor_hooks
 
-    def forward_hook(module: nn.Module, inputs: Tuple[Any], output: Any) -> Any:
+    def forward_hook(module: nn.Module, inputs: Tuple[Any, ...], output: Any) -> Any:
         if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
             if checkpoint.state(module).use_reentrant:
-                return _ModuleHookCheckpointFunction.apply(
-                    module, output, *inputs
-                )
+                return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
             else:
                 checkpoint.state(module).saved_tensor_hooks.__exit__()
                 checkpoint.state(module).saved_tensor_hooks = None

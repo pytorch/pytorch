@@ -7,6 +7,7 @@
 #include <memory>
 #include <queue>
 #include <type_traits>
+#include <utility>
 
 #include <fmt/format.h>
 
@@ -528,7 +529,7 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
 RecordQueue::RecordQueue(
     const ProfilerConfig& config,
     std::set<ActivityType> activities)
-    : id_(++queue_id_), config_{config}, activities_{activities} {
+    : id_(++queue_id_), config_{config}, activities_{std::move(activities)} {
   if (tracePython()) {
     python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }

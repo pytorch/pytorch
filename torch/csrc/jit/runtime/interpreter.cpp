@@ -97,8 +97,8 @@ inline int64_t getDistAutogradContextId() {
 
 thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
-  TLSCurrentInterpreterGuard(InterpreterStateImpl* state) {
-    prev_state_ = tls_int_state_ptr_;
+  TLSCurrentInterpreterGuard(InterpreterStateImpl* state)
+      : prev_state_(tls_int_state_ptr_) {
     tls_int_state_ptr_ = state;
   }
 
@@ -454,8 +454,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     Stack stack)
                     : stateImpl_(std::move(state)),
                       state_(stateImpl_),
-                      stack_(std::move(stack)) {
-                  dist_autograd_context_id_ = getDistAutogradContextId();
+                      stack_(std::move(stack)),
+                      dist_autograd_context_id_(getDistAutogradContextId()) {
                   state_ = InterpreterState(stateImpl_);
                 }
                 void operator()(c10::ivalue::Future& /* unused */) {

@@ -14,7 +14,7 @@
 #include <cstring>
 #include <type_traits>
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 /**  NOTE [ Grid Sample CPU Kernels ]
  *
@@ -1319,4 +1319,4 @@ REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl);
 REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl);
 
 
-}}  // namespace at::native
+}  // namespace at::native

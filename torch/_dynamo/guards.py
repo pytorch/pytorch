@@ -9,8 +9,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-import numpy as np
-
 import sympy
 
 import torch
@@ -21,6 +19,7 @@ from torch._guards import (
     GuardBuilderBase,
     GuardEnvExpr,
     GuardSource,
+    Source,
 )
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
@@ -32,7 +31,9 @@ from .utils import (
     dict_const_keys,
     dict_param_key_ids,
     guard_failures,
+    HAS_NUMPY,
     istype,
+    np,
     orig_code_map,
     rename_implicit,
     tuple_iterator_getitem,
@@ -83,11 +84,13 @@ class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
+        source_ref: Callable[[Source], str],
         scope: Optional[Dict[str, object]],
         guarded_code: "CheckFunctionManager",
         renames=True,
     ):
         self.id_ref = id_ref
+        self.source_ref = source_ref
         if scope:
             if renames:
                 scope = {rename_implicit(k): v for k, v in scope.items()}
@@ -191,6 +194,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
+        np_types = (
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
+            )
+            if HAS_NUMPY
+            else ()
+        )
         assert istype(
             val,
             (
@@ -209,16 +229,10 @@ class GuardBuilder(GuardBuilderBase):
                 torch.Size,
                 torch.device,
                 torch.dtype,
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
+            )
+            + np_types,
         ), t.__name__
+
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
             code = [f"str({ref}) == {str(val)!r}"]
@@ -373,10 +387,10 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.guarded_code.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        # TODO: arg_ref the used arg names
         code = output_graph.shape_env.codegen_guards(
             [a.fake for a in fs],
-            [a.sname for a in fs],
+            [a.source for a in fs],
+            source_ref=self.source_ref,
         )
         if code != "True":
             self._produce_guard_code(guard, [code], shape_env=True)
@@ -487,12 +501,37 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
+        def source_ref(source):
+            guard_source = source.guard_source()
+            if guard_source is GuardSource.CONSTANT:
+                # No need to track constants
+                return source.name()
+            builder = guard_source.select(w_local(), w_global())
+            assert builder is not None
+            return builder.arg_ref(source.name())
+
         local_builder = GuardBuilder(
-            self.id_ref, combine_scopes(f_globals, f_locals), self, renames=True
+            self.id_ref,
+            source_ref,
+            combine_scopes(f_globals, f_locals),
+            self,
+            renames=True,
         )
-        global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
+        global_builder = GuardBuilder(
+            self.id_ref, source_ref, f_globals, self, renames=False
+        )
+        # source_ref can cause a cycle, make sure we break it with weakref
+        w_local = weakref.ref(local_builder)
+        w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                # Default func args must be guarded on.
+                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
+                and "__defaults__" not in guard.name
+                and "__kwdefaults__" not in guard.name
+            ):
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(

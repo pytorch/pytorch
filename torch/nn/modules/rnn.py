@@ -23,9 +23,11 @@ _rnn_impls = {
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
+
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return _apply_permutation(tensor, permutation, dim)
+
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
@@ -238,7 +240,7 @@ class RNNBase(Module):
 
     def _weights_have_changed(self):
         # Returns True if the weight tensors have changed since the last forward pass.
-        # This is the case when used with stateless.functional_call(), for example.
+        # This is the case when used with torch.func.functional_call(), for example.
         weights_changed = False
         for ref, name in zip(self._flat_weight_refs, self._flat_weights_names):
             weight = getattr(self, name) if hasattr(self, name) else None
@@ -1203,9 +1205,9 @@ class LSTMCell(RNNCellBase):
 
     Examples::
 
-        >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
-        >>> input = torch.randn(2, 3, 10) # (time_steps, batch, input_size)
-        >>> hx = torch.randn(3, 20) # (batch, hidden_size)
+        >>> rnn = nn.LSTMCell(10, 20)  # (input_size, hidden_size)
+        >>> input = torch.randn(2, 3, 10)  # (time_steps, batch, input_size)
+        >>> hx = torch.randn(3, 20)  # (batch, hidden_size)
         >>> cx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(input.size()[0]):
