@@ -95,6 +95,9 @@
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
 #
+#   USE_FLASH_ATTENTION=0
+#     disables building flash attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
