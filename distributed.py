@@ -380,13 +380,28 @@ class DistributedDataParallel(Module, Joinable):
             >>>     dist_optim.step(context_id)
 
     .. note::
-        DistributedDataParallel currently offers limited support for gradient
-        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
-        expected when there are no unused parameters in the model and each layer
-        is checkpointed at most once (make sure you are not passing
-        `find_unused_parameters=True` to DDP). We currently do not support the
-        case where a layer is checkpointed multiple times, or when there unused
-        parameters in the checkpointed model.
+        DistributedDataParallel does offer support for gradient checkpointing with
+        :meth:`torch.utils.checkpoint`. The new non-reentrant checkpoint API in PyTorch 
+        now supports the previously unsupported use cases when used with DDP.We also support
+        cases where a layer is checkpointed multiple times, or when there are unusued parameters 
+        in the checkpointed model. 
+        
+        Example:: 
+     
+     		>>> import torch
+		>>> from torch.nn import Linear
+		>>> from torch.nn.parallel import DistributedDataParallel
+
+		>>> model = Linear(10, 10)
+		>>> model = DistributedDataParallel(model)
+
+		>>> # Checkpointing the model multiple times with non_reentrant=True
+		>>> for _ in range(3):
+		>>>    	with torch.no_grad():
+		>>>	checkpoint = torch.utils.checkpoint.checkpoint(model, non_reentrant=True)
+		>>>   	output = checkpoint(torch.randn(10))
+		>>>    	print(output)
+        
 
     .. note::
         To let a non-DDP model load a state dict from a DDP model,
