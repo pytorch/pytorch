@@ -663,6 +663,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("Tensor"):
             return x + 1
 
+    @make_test
+    def test_torch_operators_out_variants_with_none(x):
+        return torch.mean(x, dim=-1, out=None)
+
     @requires_static_shapes
     @make_test
     def test_tensor_new_with_size(x):
