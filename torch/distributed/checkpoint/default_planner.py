@@ -81,7 +81,7 @@ class DefaultSavePlanner(SavePlanner):
         self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
 
-    def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
@@ -173,7 +173,7 @@ class DefaultLoadPlanner(LoadPlanner):
         self.original_state_dict = {}
         self.mappings = {}
 
-    def init(
+    def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
         metadata: Metadata,
