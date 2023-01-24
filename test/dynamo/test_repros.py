@@ -1601,6 +1601,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), torch._dynamo.optimize("eager")(f)())
 
+    def test_out_none(self):
+        # https://github.com/pytorch/pytorch/issues/92814
+        def fn(input):
+            return torch.nn.functional.normalize(input, dim=0, out=None)
+
+        x = torch.rand([1])
+        compiled = torch.compile(fn)
+        compiled = compiled(x)
+
     @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
         @torch._dynamo.optimize("eager", nopython=True)
