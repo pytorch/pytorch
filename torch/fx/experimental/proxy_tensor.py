@@ -239,8 +239,14 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
-    if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
-        return NotImplemented
+    from torch._subclasses.fake_tensor import (
+        check_tensor_subclass_pytree_flatten_called, check_for_subclass_flattening
+    )
+    with check_for_subclass_flattening():
+        check = pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs))
+        # See Note [Detecting when pytree'ing through a tensor subclass]
+        if not check or check_tensor_subclass_pytree_flatten_called():
+            return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:

@@ -2433,13 +2433,23 @@ def aot_module_simplified(
         **dict(_named_parameters(mod, remove_duplicate=False)),
         **dict(_named_buffers(mod, remove_duplicate=False)),
     }
+    # Note: As long as our tensor subclass is pytree-able, tree_unflatten here effectively implements AOTDispatch.
+    # tree_unflatten will unwrap our tensor subclass into its constituent tensors,
+    # and later inside of functional_call(), we unflatten to recover the subclass during tracing.
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
 
-    def functional_call(*args, **kwargs):
+    args_flat, args_spec = pytree.tree_flatten(args)
+    args_flat = tuple(args_flat)
+    args_len = len(args_flat)
+
+    def functional_call(*params_and_args_flat, **kwargs):
+        params_flat, args_flat = params_and_args_flat[:params_len], params_and_args_flat[params_len:]
+        params = pytree.tree_unflatten(params_flat, params_spec)
+        args = pytree.tree_unflatten(args_flat, args_spec)
         with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            mod, params
         ):
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.override_stack_trace(), warnings.catch_warnings():
@@ -2447,9 +2457,9 @@ def aot_module_simplified(
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
-                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                        out = Interpreter(mod).run(*args, **kwargs)
             else:
-                out = mod(*args[params_len:], **kwargs)
+                out = mod(*args, **kwargs)
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
@@ -2471,85 +2481,13 @@ def aot_module_simplified(
         aot_id=next(AOT_COUNTER),
     )
 
-    full_args = []
-    full_args.extend(params_flat)
-    full_args.extend(args)
-
-    full_args_unwrapped = []
-    # TODO: this bookkeeping isn't very robust
-    wrap_info: Dict[int, Union[int, tuple]] = collections.defaultdict()
-    unwrapped_args_count = 0
-    for i, a in enumerate(full_args):
-        if hasattr(a, 'unwrap_tensors'):
-            unwrapped_tensors = a.unwrap_tensors()
-            full_args_unwrapped += unwrapped_tensors
-            assert hasattr(a, 'creation_lambda')
-            wrap_info[i] = (a.creation_lambda(), unwrapped_args_count, len(unwrapped_tensors))
-            unwrapped_args_count += len(unwrapped_tensors)
-        else:
-            full_args_unwrapped.append(a)
-            wrap_info[i] = unwrapped_args_count
-            unwrapped_args_count += 1
-
-
-    # This is a function that takes in plain tensors, and figures out how to (potentially)
-    # wrap them into the tensor subclasses that our module expects
-    unwrap_outs_info: Dict[int, Union[int, tuple]] = collections.defaultdict()
-    def wrapped_functional_call(*args_unwrapped, **kwargs):
-        args_wrapped = []
-        for idx, info in wrap_info.items():
-            if isinstance(info, int):
-                args_wrapped.append(args_unwrapped[info])
-                continue
-            assert isinstance(info, tuple) and len(info) == 3
-            creation_lambda, start_idx, arg_count = info
-            lambda_args = args_unwrapped[start_idx:start_idx + arg_count]
-            wrapped_arg = creation_lambda(lambda_args)
-            args_wrapped.append(wrapped_arg)
-
-        outs_wrapped = functional_call(*args_wrapped, **kwargs)
-        unwrapped_outs_count = 0
-        outs_unwrapped = []
-        for i, a in enumerate(outs_wrapped):
-            if hasattr(a, 'unwrap_tensors'):
-                unwrapped_tensors = a.unwrap_tensors()
-                outs_unwrapped += unwrapped_tensors
-                assert hasattr(a, 'creation_lambda')
-                unwrap_outs_info[i] = (a.creation_lambda(), unwrapped_outs_count, len(unwrapped_tensors))
-                unwrapped_outs_count += len(unwrapped_tensors)
-            else:
-                outs_unwrapped.append(a)
-                unwrap_outs_info[i] = unwrapped_outs_count
-                unwrapped_outs_count += 1
-        return outs_unwrapped
-
-
-    def unwrap_args(args_wrapped):
-        args_unwrapped = []
-        for a in args_wrapped:
-            if hasattr(a, 'unwrap_tensors'):
-                args_unwrapped += a.unwrap_tensors()
-            else:
-                args_unwrapped.append(a)
-        return args_unwrapped
-
-    def wrap_outs(outs_unwrapped):
-        outs_wrapped = []
-        for idx, info in unwrap_outs_info.items():
-            if isinstance(info, int):
-                outs_wrapped.append(outs_unwrapped[info])
-                continue
-            assert isinstance(info, tuple) and len(info) == 3
-            creation_lambda, start_idx, arg_count = info
-            lambda_args = outs_unwrapped[start_idx:start_idx + arg_count]
-            wrapped_out = creation_lambda(lambda_args)
-            outs_wrapped.append(wrapped_out)
-        return outs_wrapped
-
+    full_args_flat = []
+    full_args_flat.extend(params_flat)
+    full_args_flat.extend(args_flat)
 
     compiled_fn = create_aot_dispatcher_function(
-        wrapped_functional_call,
-        full_args_unwrapped,
+        functional_call,
+        full_args_flat,
         aot_config,
     )
 
@@ -2558,11 +2496,13 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     def forward(*runtime_args):
+        args_flat, params_spec = pytree.tree_flatten(runtime_args)
         full_args = []
         full_args.extend(params_flat)
-        full_args.extend(runtime_args)
-        unwrapped_args = unwrap_args(full_args)
-        return wrap_outs(compiled_fn(unwrapped_args))
+        full_args.extend(args_flat)
+        out = compiled_fn(full_args)
+        return out
+        #return compiled_fn(full_args))
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad

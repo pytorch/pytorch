@@ -656,29 +656,33 @@ class FakeTensor(torch.Tensor):
             nonlocal common_device
             nonlocal is_cpu_zero_dim
             if not isinstance(t, FakeTensor):
-                return
+                # hmm... should tree_map() take in a flag when it's meant to not return anything?
+                # Otherwise we'll try to reconstruct a pytree container (or subclass)
+                # with None's. Alternatively, we could force the subclass to handle that more gracefully.
+                # NOTE: OpTree actually solves this! They have an inplace version of tree_map: https://github.com/pytorch/pytorch/pull/92679
+                return t
 
             if common_device is None:
                 common_device = t.device
                 is_cpu_zero_dim = cpu_zero_dim(t)
-                return
+                return t
 
             t_is_cpu_zero_dim = cpu_zero_dim(t)
             if t.device == common_device:
                 if is_cpu_zero_dim:
                     is_cpu_zero_dim = t_is_cpu_zero_dim
-                return
+                return t
 
             # mismatching devices !
             # if current tensor is cpu 0 dim, defer to existing device
             if t_is_cpu_zero_dim:
-                return
+                return t
 
             # current device is from cpu 0 dim tensor, overwrite
             if is_cpu_zero_dim:
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
-                return
+                return t
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
@@ -708,6 +712,25 @@ class FakeTensor(torch.Tensor):
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
+# This needs design.
+# See note [Detecting when pytree'ing through a tensor subclass]
+_subclass_unflatten_called = False
+
+def set_tensor_subclass_pytree_flatten_called(called):
+    global _subclass_unflatten_called
+    _subclass_unflatten_called = called
+
+def check_tensor_subclass_pytree_flatten_called():
+    global _subclass_unflatten_called
+    return _subclass_unflatten_called
+
+class check_for_subclass_flattening():
+
+    def __enter__(self):
+        set_tensor_subclass_pytree_flatten_called(False)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        set_tensor_subclass_pytree_flatten_called(False)
 
 # We keep one instantiation of `fake_tensor_converter` active
 # for the duration of `with FakeTensorMode()`.
@@ -754,6 +777,7 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        exclude_str = str(torch._C._dispatch_tls_local_exclude_set())
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -940,7 +964,13 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+        # Note [Detecting when pytree'ing through a tensor subclass]
+        # So this is annoying. We can't check for subclasses via pytree'ing anymore,
+        # since our subclass might get pytree.flatten'd into its tensor components!
+        # TODO: is this a sign that making subclasses pytree-able is the wrong API?
+        with check_for_subclass_flattening():
+            any_subclass = any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+            return any_subclass or check_tensor_subclass_pytree_flatten_called()
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """

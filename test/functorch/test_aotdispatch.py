@@ -2189,6 +2189,104 @@ class TestAOTModuleSimplified(AOTTestCase):
         ):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
+# A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
+class DoubleTensor(torch.Tensor):
+
+    @staticmethod
+    def __new__(cls, a_, b_):
+        # Note [PyTree Subclass Hacks: 1]
+        # TODO: this is an annoying consequence of making the subclass pytree-able:
+        # Our tracing infra will try to "fill" it with FakeTensor's, _ProxyTensor's, or fx.Proxy's,
+        def _get_tensor(x):
+            if isinstance(x, torch.fx.experimental.proxy_tensor._ProxyTensor):
+                return x.proxy.node.meta['val']
+            elif isinstance(x, torch.fx.Proxy):
+                return x.node.meta['val']
+            else:
+                return x
+
+
+        a = _get_tensor(a_)
+        b = _get_tensor(b_)
+        assert a.device == b.device and a.layout == b.layout and a.requires_grad == b.requires_grad and a.dtype == b.dtype
+        # Eh it would be more accurate to represent the shape as torch.cat(a, b).shape
+        shape = a.shape
+        kwargs = {}
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(
+            cls, shape, **kwargs
+        )
+
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        assert any(isinstance(x, DoubleTensor) for x in args)
+        args_a = [x.a if isinstance(x, DoubleTensor) else x for x in args]
+        args_b = [x.b if isinstance(x, DoubleTensor) else x for x in args]
+        out_a = func(*args_a, **kwargs)
+        out_b = func(*args_b, **kwargs)
+        return DoubleTensor(out_a, out_b)
+
+    @staticmethod
+    def flatten(x):
+        # Note [PyTree Subclass Hacks: 2]
+        # See Note [Detecting when pytree'ing through a tensor subclass]
+        from torch._subclasses.fake_tensor import set_tensor_subclass_pytree_flatten_called
+        set_tensor_subclass_pytree_flatten_called(True)
+        return [x.a, x.b], None
+
+    @staticmethod
+    def unflatten(inner_tensors, meta):
+        a, b = inner_tensors
+        return DoubleTensor(a, b)
+
+pytree._register_pytree_node(DoubleTensor, DoubleTensor.flatten, DoubleTensor.unflatten)
+
+class TestAOTDispatch(AOTTestCase):
+
+    def test_aot_dispatch(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            import pdb; pdb.set_trace()
+            aa = torch.mul(a, 2)
+            bb = torch.mul(b, 3)
+            out = torch.mul(aa, bb)
+            return out
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = DoubleTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = DoubleTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_function(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(a_ref.grad, a_test.grad)
+        self.assertEqual(b_ref.grad, b_test.grad)
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+        """)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
