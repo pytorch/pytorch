@@ -398,6 +398,14 @@ Tensor& tanh_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(tanh_));
 }
 
+Tensor abs(const Tensor& self) {
+  return ops::activation(self, VK_KERNEL(abs));
+}
+
+Tensor& abs_(Tensor& self) {
+  return ops::activation_(self, VK_KERNEL(abs_));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
@@ -417,6 +425,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::sigmoid_"), sigmoid_);
   m.impl(TORCH_SELECTIVE_NAME("aten::tanh"), tanh);
   m.impl(TORCH_SELECTIVE_NAME("aten::tanh_"), tanh_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::abs"), abs);
+  m.impl(TORCH_SELECTIVE_NAME("aten::abs_"), abs_);
   m.impl(TORCH_SELECTIVE_NAME("aten::relu"), relu);
   m.impl(TORCH_SELECTIVE_NAME("aten::relu_"), relu_);
   m.impl(TORCH_SELECTIVE_NAME("aten::threshold"), threshold);

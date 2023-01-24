@@ -352,6 +352,7 @@ from torch._C._autograd import (
     _record_function_with_args_exit,
     _set_empty_test_observer,
     _supported_activities,
+    _unsafe_decrement_version_counter,
     DeviceType,
     kineto_available,
     ProfilerEvent,

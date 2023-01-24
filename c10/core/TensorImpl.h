@@ -388,6 +388,18 @@ struct C10_API VariableVersion {
     }
   }
 
+  void decrement() {
+    // TODO: Replace the link to the documentation once it's available.
+    TORCH_CHECK(
+        version_counter_,
+        "Tried to call torch.autograd._unsafe_decrement_version() on a tensor "
+        "that does not have a version counter. Was it created it in inference mode?");
+    TORCH_CHECK(
+        version_counter_->version_ > 0,
+        "Cannot decrement a version_counter that is already at 0");
+    --version_counter_->version_;
+  }
+
   // Inference tensor doesn't have version counter so it shouldn't be
   // accessed.
   uint32_t current_version() const {
