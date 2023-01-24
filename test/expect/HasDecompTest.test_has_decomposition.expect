@@ -472,8 +472,6 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
-aten::_symeig_helper
-aten::_symeig_helper.out
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -1270,8 +1268,6 @@ aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::std_mean.correction_out
-aten::symeig
-aten::symeig.e
 aten::t_
 aten::t_copy
 aten::t_copy.out
@@ -1309,10 +1305,7 @@ aten::unique_dim
 aten::unique_dim.out
 aten::unique_dim_consecutive
 aten::unique_dim_consecutive.out
-aten::unsafe_split.Tensor
 aten::unsafe_split.Tensor_out
-aten::unsafe_split_with_sizes
-aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
 aten::unsqueeze_copy
 aten::unsqueeze_copy.out

@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -441,21 +442,21 @@ class AttributePropagator {
       for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
-      attr = std::move(elems);
+      attr = elems;
     } else if (attr.isGenericDict()) {
       auto dict = std::move(attr).toGenericDict();
       for (const auto& pair : dict) {
         auto val = pair.value();
-        val = overrideGradient(val);
+        val = overrideGradient(std::move(val));
       }
-      attr = std::move(dict);
+      attr = dict;
     } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
       auto obj_type = attr.type()->expect<ClassType>();
       auto obj_value = std::move(attr).toObject();
       auto sub_attributes = obj_type->getAttributes();
       for (const auto& sub_attr : sub_attributes) {
         auto sub_attr_val = obj_value->getAttr(sub_attr.getName());
-        sub_attr_val = overrideGradient(sub_attr_val);
+        sub_attr_val = overrideGradient(std::move(sub_attr_val));
       }
       return obj_value;
     }
