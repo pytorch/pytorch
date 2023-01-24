@@ -49,13 +49,11 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // executed through .grad(), or when inputs arg is specified for .backward(),
   // exec_info will be non-empty.
   //
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecInfo {
     struct Capture {
       Capture(const Capture&) = delete;
       Capture(Capture&&) = default;
 
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
@@ -195,7 +193,6 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   uint64_t id_;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphTask(
       bool keep_graph,
       bool grad_mode,
