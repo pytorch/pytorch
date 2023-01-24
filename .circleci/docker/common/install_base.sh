@@ -157,7 +157,7 @@ esac
 
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
-VALGRIND_VERSION=3.16.1
+VALGRIND_VERSION=3.20.0
 wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
