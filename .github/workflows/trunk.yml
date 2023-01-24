@@ -137,25 +137,25 @@ jobs:
       build-environment: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
       docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
 
-  linux-bionic-py3_7-clang9-slow-build:
-    name: linux-bionic-py3.7-clang9-slow
+  linux-bionic-py3_11-clang9-slow-build:
+    name: linux-bionic-py3.11-clang9-slow
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3.7-clang9-slow
-      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      build-environment: linux-bionic-py3.11-clang9-slow
+      docker-image-name: pytorch-linux-bionic-py3.11-clang9
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-py3_7-clang9-slow-test:
-    name: linux-bionic-py3.7-clang9-slow
+  linux-bionic-py3_11-clang9-slow-test:
+    name: linux-bionic-py3.11-clang9-slow
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_7-clang9-slow-build
+    needs: linux-bionic-py3_11-clang9-slow-build
     with:
-      build-environment: linux-bionic-py3.7-clang9-slow
-      docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.test-matrix }}
+      build-environment: linux-bionic-py3.11-clang9-slow
+      docker-image: ${{ needs.linux-bionic-py3_11-clang9-slow-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-py3_11-clang9-slow-build.outputs.test-matrix }}
 
   linux-focal-py3_7-clang7-tsan-build:
     name: linux-focal-py3.7-clang7-tsan
