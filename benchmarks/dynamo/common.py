@@ -117,12 +117,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
-CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
-    *CI_SKIP[CI("aot_eager", training=True)],
-    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "twins_pcpvt_base",  # timeout
-]
-
 CI_SKIP[CI("inductor", training=False)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # TorchBench
@@ -169,6 +163,21 @@ CI_SKIP[CI("inductor", training=True)] = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
+CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # cannot determine truth value of Relational
+    # timm_models
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
+]
+
+CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=True)],
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "twins_pcpvt_base",  # timeout
+]
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
