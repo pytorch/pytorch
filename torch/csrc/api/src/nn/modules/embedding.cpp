@@ -13,8 +13,8 @@ namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
-EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
-    : options(std::move(options_)) {
+EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_)
+    : options(options_) { // NOLINT(modernize-pass-by-value)
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -89,8 +89,8 @@ torch::Tensor EmbeddingImpl::forward(const Tensor& input) {
       options.sparse());
 }
 
-EmbeddingBagImpl::EmbeddingBagImpl(EmbeddingBagOptions options_)
-    : options(std::move(options_)) {
+EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_)
+    : options(options_) { // NOLINT(modernize-pass-by-value)
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }

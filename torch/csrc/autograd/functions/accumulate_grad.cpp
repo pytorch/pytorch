@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <utility>
 
+using at::Tensor;
+
 namespace torch {
 namespace autograd {
 

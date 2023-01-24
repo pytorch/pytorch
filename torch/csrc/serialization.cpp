@@ -226,7 +226,9 @@ void THPStorage_writeFileRaw(
     bool save_size,
     uint64_t element_size) {
   c10::DeviceGuard guard(self->device());
-  uint8_t* data{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint8_t* data;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   at::Tensor cpu_tensor;
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
@@ -249,7 +251,8 @@ void THPStorage_writeFileRaw(
         torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
       doWrite(fd, &numel, sizeof(int64_t));
     else {
-      int64_t nsize{}; // convert big endian cpu to little endian storage
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      int64_t nsize; // convert big endian cpu to little endian storage
       torch::utils::THP_encodeInt64Buffer(
           (uint8_t*)&nsize,
           (const int64_t*)&numel,
@@ -266,6 +269,7 @@ void THPStorage_writeFileRaw(
   } else {
     int64_t buffer_size = std::min(numel, (int64_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::unique_ptr<uint8_t[]> le_buffer(
         new uint8_t[buffer_size * element_size]);
     for (int64_t i = 0; i < numel; i += buffer_size) {
@@ -315,11 +319,16 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (storage.defined()) {
     guard.reset_device(storage->device());
   }
-  int64_t size{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint8_t* data;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t size;
   doRead(file, &size, sizeof(int64_t));
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
-    int64_t tsize = size; // convert little endian storage to big endian cpu
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int64_t tsize; // convert little endian storage to big endian cpu
+    tsize = size;
     torch::utils::THP_decodeInt64Buffer(
         &size, (const uint8_t*)&tsize, torch::utils::THP_nativeByteOrder(), 1);
   }
@@ -339,9 +348,9 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
         _storage_nbytes);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<char[]> cpu_data;
 
-  uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
     data = storage->data<uint8_t>();
   } else {
@@ -357,6 +366,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::unique_ptr<uint8_t[]> le_buffer(
         new uint8_t[buffer_size * element_size]);
 

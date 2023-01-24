@@ -5992,7 +5992,7 @@
   variants: function
 
 - func: where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor
   variants: function

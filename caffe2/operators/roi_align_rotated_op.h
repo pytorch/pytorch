@@ -35,7 +35,9 @@ class RoIAlignRotatedOp final : public Operator<Context> {
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override;
+  bool RunOnDevice() override {
+    CAFFE_NOT_IMPLEMENTED;
+  }
 
  protected:
   StorageOrder order_;

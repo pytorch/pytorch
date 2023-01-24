@@ -25,7 +25,6 @@
 #include <Python.h>
 #include <fmt/format.h>
 #include <pybind11/pybind11.h>
-#include <utility>
 #include <vector>
 
 using at::ArrayRef;
@@ -388,7 +387,7 @@ static PyObject* THPVariable__to_functional_tensor(
       }
     }
   }
-  return wrap(std::move(wrapped));
+  return wrap(wrapped);
   END_HANDLE_TH_ERRORS
 }
 
@@ -404,7 +403,7 @@ static PyObject* THPVariable__from_functional_tensor(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
   auto unwrapped = at::functionalization::impl::from_functional_tensor(self_);
-  return wrap(std::move(unwrapped));
+  return wrap(unwrapped);
   END_HANDLE_TH_ERRORS
 }
 

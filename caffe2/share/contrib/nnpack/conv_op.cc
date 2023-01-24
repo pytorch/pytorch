@@ -161,7 +161,8 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   const int oH = Y->dim32(2), oW = Y->dim32(3);
 
-  const float* biasData = nullptr;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  const float* biasData = NULL;
   if (InputSize() == 3) {
     /* Convolution with bias */
     auto& bias = Input(2);

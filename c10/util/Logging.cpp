@@ -32,7 +32,7 @@ std::function<string(void)>* GetFetchStackTrace() {
 } // namespace
 
 void SetStackTraceFetcher(std::function<string(void)> fetcher) {
-  *GetFetchStackTrace() = std::move(fetcher);
+  *GetFetchStackTrace() = fetcher;
 }
 
 void ThrowEnforceNotMet(
@@ -113,13 +113,13 @@ DDPUsageLoggerType* GetDDPUsageLogger() {
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   TORCH_CHECK(logger);
-  *GetAPIUsageLogger() = std::move(logger);
+  *GetAPIUsageLogger() = logger;
 }
 
 void SetPyTorchDDPUsageLogger(
     std::function<void(const DDPLoggingData&)> logger) {
   TORCH_CHECK(logger);
-  *GetDDPUsageLogger() = std::move(logger);
+  *GetDDPUsageLogger() = logger;
 }
 
 void LogAPIUsage(const std::string& event) try {
