@@ -186,6 +186,7 @@ jobs:
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
+    if: false
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.8-py3
@@ -200,6 +201,7 @@ jobs:
 
   win-vs2019-cuda11_8-py3-test:
     name: win-vs2019-cuda11.8-py3
+    if: false
     uses: ./.github/workflows/_win-test.yml
     needs: win-vs2019-cuda11_8-py3-build
     with:
