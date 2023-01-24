@@ -311,10 +311,6 @@ class CppVecOverrides(OpOverrides):
         return f"{a} || {b}"
 
     @staticmethod
-    def tan(a):
-        return f"{a}.tan()"
-
-    @staticmethod
     def tanh(a):
         vec_one = f"decltype({a})(1)"
         vec_two = f"decltype({a})(2)"
@@ -457,11 +453,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def log1p(x):
         return f"std::log1p({x})"
-    
-    
-    @staticmethod
-    def tan(x):
-        return f"std::tan({x})"
 
     @staticmethod
     def tanh(x):

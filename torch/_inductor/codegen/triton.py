@@ -252,10 +252,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.log1p({x})"
 
     @staticmethod
-    def tan(x):
-        return f"tl.libdevice.tan({x})"
-
-    @staticmethod
     def tanh(x):
         return f"tl.libdevice.tanh({x})"
 
