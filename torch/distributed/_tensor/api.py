@@ -14,7 +14,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.prop import ShardingPropagator
+from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.utils._pytree import tree_flatten
 
