@@ -2016,6 +2016,10 @@ Tensor _is_all_true(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
   return self.all();
 }
+Tensor _is_any_true(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
+  return self.any();
+}
 Tensor logcumsumexp(const Tensor& self, Dimname dim) {
   return at::logcumsumexp(self, dimname_to_position(self, dim));
 }
