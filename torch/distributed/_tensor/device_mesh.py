@@ -283,7 +283,7 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
-        # TODO: Ideally we should use the meta tensor way 
+        # TODO: Ideally we should use the meta tensor way
         # (to register a meta kernel for the collective op)
         # so that it would avoid the communication. Need to
         # remove the check below once that is done.
@@ -336,7 +336,7 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
-        # TODO: Ideally we should use the meta tensor way 
+        # TODO: Ideally we should use the meta tensor way
         # (to register a meta kernel for the collective op)
         # so that it would avoid the communication. Need to
         # remove the check below once that is done.
