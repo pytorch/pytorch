@@ -856,7 +856,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         """
 
         def func_with_default_torch_args(
-            dt=torch.float16, ds=torch.Size((1, 2, 3)), dd=torch.device("cuda")
+            dt=torch.float16, ds=torch.Size((1, 2, 3)), dd=torch.device("cpu")
         ):
             return torch.ones(ds, dtype=dt, device=dd)
 
