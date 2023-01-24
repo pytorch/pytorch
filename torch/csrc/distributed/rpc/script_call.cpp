@@ -12,14 +12,14 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& stack)
-    : op_(std::move(op)), stack_(stack), isAsyncExecution_(false) {}
+    : op_(std::move(op)), stack_(std::move(stack)), isAsyncExecution_(false) {}
 
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& stack,
     const bool isAsyncExecution)
     : qualifiedName_(qualifiedName),
-      stack_(stack),
+      stack_(std::move(stack)),
       isAsyncExecution_(isAsyncExecution) {}
 
 bool ScriptCall::hasOp() const {
