@@ -10,7 +10,7 @@ from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functiona
 from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
-    get_isolated_graphmodule,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     make_fx,
     track_tensor_tree,
@@ -40,8 +40,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
-    true_graph = get_isolated_graphmodule(true_fn, operands, {})
-    false_graph = get_isolated_graphmodule(false_fn, operands, {})
+    with disable_proxy_modes_tracing():
+        true_graph = make_fx(true_fn)(*operands)
+        false_graph = make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
@@ -81,7 +82,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    args = (pred, true_graph, false_graph, [operands])
+    args = (pred, true_graph, false_graph, operands)
 
     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), args)
 
