@@ -61,11 +61,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(atleast_3d);
   OP_DECOMPOSE2(atleast_3d, Sequence);
   OP_DECOMPOSE(batch_norm);
-  OP_DECOMPOSE2(bitwise_and_, Scalar);
   OP_DECOMPOSE2(bitwise_or, Scalar);
-  OP_DECOMPOSE2(bitwise_or_, Scalar);
   OP_DECOMPOSE2(bitwise_xor, Scalar);
-  OP_DECOMPOSE2(bitwise_xor_, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
   m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
@@ -206,6 +203,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(rrelu);
   OP_DECOMPOSE(prelu);
   OP_DECOMPOSE2(softmax, int);
+  OP_DECOMPOSE(scaled_dot_product_attention);
   OP_DECOMPOSE(special_gammainc);
   OP_DECOMPOSE(special_gammaincc);
   OP_DECOMPOSE(special_logit);
