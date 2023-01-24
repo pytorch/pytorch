@@ -805,7 +805,7 @@ def sample_inputs_geometric(op, device, dtype, requires_grad, **kwargs):
     )
     for shape, rate in samples:
         yield SampleInput(make_arg(shape), args=(rate,))
-    
+
 
 def error_inputs_geometric(op, device, **kwargs):
     t = torch.zeros([10], device=device)
@@ -815,8 +815,8 @@ def error_inputs_geometric(op, device, **kwargs):
         error_type=RuntimeError,
         error_regex=r"geometric_ expects p to be in \(0, 1\), but got p={}".format(neg_prob),
     )
-    
-    
+
+
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -8787,9 +8787,24 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_geometric,
            error_inputs_func=error_inputs_geometric,
            skips=(
-               # Tests that assume input tensor has a meaningful effect on output tensor
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+              # Tests that assume input tensor has a meaningful effect on output tensor
+              DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+              DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+
+              # AssertionError: JIT Test does not execute any logic
+              DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+
+              # AssertionError: Tensor-likes are not close!
+              DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+
+              # FX failed to normalize op - add the op to the op_skip list.
+              DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
+              # vmap: calling random operator not supported
+              DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+              DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+
+              DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
@@ -17544,6 +17559,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.geometric",
         torch_opinfo_name="geometric",
+        supports_out=True,
         decorators=(
             # dtypes that do not support check_uniform_bounds of rand_like
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
@@ -17551,12 +17567,15 @@ python_ref_db = [
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
-            
+
             # TODO: RuntimeError: no _refs support for torch.rand_like
             DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
                          'TestCommon',
                          'test_python_ref'),
-            
+            DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor', device_type='cuda'),
+
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
                          'TestCommon',
