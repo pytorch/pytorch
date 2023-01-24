@@ -3,6 +3,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <utility>
+
 namespace torch {
 namespace autograd {
 
@@ -113,7 +115,7 @@ void _process_forward_mode_AD(
   torch::autograd::variable_list forward_grads;
   {
     at::AutoFwGradMode fw_grad_mode(false);
-    forward_grads = jvp_user_function(inputs, input_grads);
+    forward_grads = jvp_user_function(inputs, std::move(input_grads));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -439,12 +441,12 @@ optional_variable_list _wrap_outputs(
   // computations happening here to track backward mode gradients.
   _process_forward_mode_AD(
       input_vars,
-      inputs_mapping,
+      std::move(inputs_mapping),
       raw_outputs,
       outputs,
       non_differentiable,
       dirty_inputs,
-      jvp_user_function);
+      std::move(jvp_user_function));
 
   return outputs;
 }

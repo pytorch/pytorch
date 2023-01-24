@@ -719,7 +719,7 @@ static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
       }
     }
   }
-  return THPVariable_Wrap(out);
+  return THPVariable_Wrap(std::move(out));
   END_HANDLE_TH_ERRORS
 }
 
@@ -2302,7 +2302,8 @@ py::object torchDispatchFromTensorImpl(
   Tensor self_t = Tensor(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
           unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  auto self_p =
+      py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
@@ -2883,7 +2884,8 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
   Tensor self_t = Tensor(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
           unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  auto self_p =
+      py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
 }
