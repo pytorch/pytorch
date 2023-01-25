@@ -1221,6 +1221,9 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
     // the destination tensor.  If the output tensor is also an input, we'll
     // pick it up later in the operands.
     if (config.resize_outputs_ && op.is_output) continue;
+    TORCH_CHECK(!op.tensor_base().unsafeGetTensorImpl()->has_symbolic_sizes_strides(),
+      "TensorIterator does not support symbolic shapes; please implement this operator in torch/_refs "
+      "using the elementwise or reduction helpers (look at backtrace to find out what operator this is)");
     auto shape = op.tensor_base().sizes();
     if (shape.size() == 0) {
       has_scalars = true;
