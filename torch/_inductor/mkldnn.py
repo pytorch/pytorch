@@ -488,7 +488,9 @@ def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
 
 def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     # make sure the autograd is disabled.
