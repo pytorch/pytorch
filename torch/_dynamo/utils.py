@@ -5,6 +5,7 @@ import cProfile
 import dataclasses
 import datetime
 import dis
+import enum
 import functools
 import gc
 import inspect
@@ -698,7 +699,7 @@ def is_safe_constant(v):
             type(type),
             torch.device,
         ),
-    )
+    ) or isinstance(v, enum.Enum)
 
 
 def check_constant_args(args, kwargs):

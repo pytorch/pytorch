@@ -265,7 +265,12 @@ class GetItemSource(Source):
         if isinstance(self.index, Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
-            return f"{self.base.name()}[{self.index!r}]"
+            if isinstance(self.index, enum.Enum):
+                # Workaround repr(Enum) returns invalid global reference before python 3.11
+                # https://peps.python.org/pep-0663/
+                return f"{self.base.name()}[{self.index!s}]"
+            else:
+                return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass
