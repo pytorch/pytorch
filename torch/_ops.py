@@ -239,6 +239,7 @@ class OpOverload(PyOperatorABC):
         self._schema = schema
         self._overloadpacket = overloadpacket
         self._tags = tags
+        self.dk_res = None
         self._overloadname = (
             "default" if schema.overload_name == "" else schema.overload_name
         )
@@ -301,9 +302,14 @@ class OpOverload(PyOperatorABC):
             # apply Python CompositeImplicitAutograd *before* tracing
             # using Python dispatcher (also taking advantage of the autograd
             # formula).  But it's included for completeness
-            return self.py_kernels[dk](*args, **kwargs)
+            self.dk_res = self.py_kernels[dk](*args, **kwargs)
+            return self.dk_res
         elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
-            return self._op_dk(dk, *args, **kwargs)
+            self.dk_res = self._op_dk(dk, *args, **kwargs)
+            from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
+
+            # with no_dispatch():
+            return self.dk_res
         else:
             return NotImplemented
 

@@ -322,6 +322,10 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 
 
 # TODO: implement dtype validation here, too, or on the corresponding refs
+import functools
+
+
+@functools.lru_cache(None)
 def _elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
