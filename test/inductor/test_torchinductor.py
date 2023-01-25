@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+import sympy
+
 import torch
 
 import torch._dynamo
@@ -35,8 +37,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-import sympy
-
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
@@ -48,7 +48,6 @@ from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
 from torch._inductor.ir import ModularIndexing
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 from torch._inductor.overrides import (
     linear_permute_fusion,
     linear_transpose,
@@ -60,6 +59,7 @@ from torch._inductor.overrides import (
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 # This will only pass on pytorch builds newer than roughly 5/15/2022
 assert get_decompositions([torch.ops.aten.trace])
