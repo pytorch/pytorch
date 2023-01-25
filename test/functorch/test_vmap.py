@@ -20,7 +20,7 @@ import random
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    OpDTypes
+    skipCUDAIfNoMagma, OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3260,6 +3260,16 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to vmap over aten::where"):
             vmap(f)(x)
 
+    @skipCUDAIfNoMagma
+    @allowVmapFallbackUsage
+    def test_symeig(self, device):
+        def op(x):
+            return torch.symeig(x, eigenvectors=True)[0]
+
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
@@ -4254,6 +4264,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
             torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
+
+    def test_vmap_with_anomaly_detection(self):
+        with torch.autograd.set_detect_anomaly(True):
+            x = torch.zeros(3) - 1
+
+            def fn(x):
+                return x.sum()
+
+            per_sample_grad = vmap(grad(fn))(x)
+            self.assertEqual(per_sample_grad, torch.ones_like(x))
+
+            def bad_fn(x):
+                return x.sqrt().sum()
+
+            err_msg = "Function 'SqrtBackward0' returned nan values in its 0th output."
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                vmap(grad(bad_fn))(x)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):

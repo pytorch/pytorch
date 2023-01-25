@@ -3033,6 +3033,19 @@ def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout
             args=sample_input.args,
             kwargs=sample_input.kwargs)
 
+        if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
+            # uncoalesced samples
+            inp = sample_input.input.detach().to_sparse(layout=layout)
+            inp = torch.sparse_coo_tensor(inp.indices().repeat(1, 2),
+                                          inp.values().repeat(2),
+                                          inp.shape,
+                                          dtype=inp.dtype,
+                                          device=inp.device)
+            assert not inp.is_coalesced()
+            yield SampleInput(inp.requires_grad_(requires_grad),
+                              args=sample_input.args,
+                              kwargs=sample_input.kwargs)
+
         if sample_input.input.ndim > 2:
             # hybrid samples
             yield SampleInput(
@@ -5021,6 +5034,16 @@ def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
         other_matrix_shape = (m, n) if left else (n, m)
         other = make_input((*batch, *other_matrix_shape), requires_grad=requires_grad)
         yield SampleInput(reflectors, tau, other, left=left, transpose=transpose)
+
+def sample_inputs_symeig(op_info, device, dtype, requires_grad=False, **kwargs):
+    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+
+    for o in out:
+        o.kwargs = {"upper": bool(np.random.choice([True, False])),
+                    "eigenvectors": True}
+        # A gauge-invariant function
+        o.output_process_fn_grad = lambda output: (output[0], abs(output[1]))
+        yield o
 
 
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -9525,6 +9548,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),
            )),
+    OpInfo('symeig',
+           dtypes=floating_and_complex_types(),
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_symeig,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           skips=(
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
+                            device_type='mps', dtypes=[torch.float32]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
+                            device_type='mps', dtypes=[torch.float32]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            device_type='mps', dtypes=[torch.float32]),
+           ),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off]),
     OpInfo('clamp',
            aliases=('clip',),
            ref=_clamp_numpy,
@@ -16056,10 +16094,10 @@ op_db: List[OpInfo] = [
            )
            ),
     OpInfo('logcumsumexp',
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.bfloat16),
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),

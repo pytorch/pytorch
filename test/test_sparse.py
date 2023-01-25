@@ -4447,7 +4447,7 @@ class TestSparseAny(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(reduction_ops_with_sparse_support)
-    @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-4})
+    @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions(self, layout, device, dtype, op):
         count = 0
