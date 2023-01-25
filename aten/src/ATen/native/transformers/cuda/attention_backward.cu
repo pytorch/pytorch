@@ -337,6 +337,47 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_cuda(
+    const at::Tensor& grad_out_,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const Tensor& rng_state){
+  if (!grad_out_.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+  auto grad_out = grad_out_.transpose(1, 2);
+  auto out_t = out.transpose(1, 2);
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+
+  Tensor grad_q, grad_k, grad_v;
+  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+    grad_out,
+    query,
+    key,
+    value,
+    out,
+    logsumexp,
+    cumulative_sequence_length_q,
+    cumulative_sequence_length_k,
+    max_seqlen_batch_q,
+    max_seqlen_batch_k,
+    dropout_p,
+    is_causal,
+    rng_state);
+  return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
+}
+
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
     const at::Tensor& grad_out_,
