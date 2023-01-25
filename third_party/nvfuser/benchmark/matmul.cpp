@@ -101,16 +101,21 @@ std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
     MatmulLayout layout) {
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
 
+  // Use randint to reduce numerical error so we can easily validate the
+  // correctness of results.
   switch (layout) {
     case MatmulLayout::TT:
       return std::make_pair(
-          at::randn({M, K}, options), at::randn({K, N}, options));
+          at::randint(-3, 3, {M, K}, options).div_(8),
+          at::randint(-3, 3, {K, N}, options).div_(8));
     case MatmulLayout::TN:
       return std::make_pair(
-          at::randn({M, K}, options), at::randn({N, K}, options));
+          at::randint(-3, 3, {M, K}, options).div_(8),
+          at::randint(-3, 3, {N, K}, options).div_(8));
     case MatmulLayout::NT:
       return std::make_pair(
-          at::randn({K, M}, options), at::randn({K, N}, options));
+          at::randint(-3, 3, {K, M}, options).div_(8),
+          at::randint(-3, 3, {K, N}, options).div_(8));
     default:
       TORCH_CHECK(false, "unsupported data layout.");
   }
@@ -152,9 +157,15 @@ static void SingleMatmulBase(
   // inputs
   at::manual_seed(0);
 
+  // tolerance
+  double rtol = 1e-6 * input_mnk.at(2);
+  double atol = 1e-6 * input_mnk.at(2);
+
   // Tensor inputs
   auto inputs = fp16MatmulAtInput(
       input_mnk.at(0), input_mnk.at(1), input_mnk.at(2), layout);
+  auto expected_output = atMatmul(
+      inputs.first.to(at::kDouble), inputs.second.to(at::kDouble), layout);
 
   KernelArgumentHolder args = KernelArgumentHolder::createKernelArgumentHolder(
       {inputs.first, inputs.second});
@@ -174,10 +185,18 @@ static void SingleMatmulBase(
   auto outputs = fe.runFusion({inputs.first, inputs.second});
   fe.setMeasureKernelTimeFlag(true);
 
+  TORCH_CHECK(
+      at::allclose(expected_output, outputs.at(0).to(at::kDouble), rtol, atol),
+      "Fusion returns wrong results!");
+
   // Sync everything up before we start
   for (auto _ : benchmark_state) {
     clearL2Cache();
     auto outputs = fe.runFusion({inputs.first, inputs.second});
+    TORCH_CHECK(
+        at::allclose(
+            expected_output, outputs.at(0).to(at::kDouble), rtol, atol),
+        "Fusion returns wrong results!");
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
