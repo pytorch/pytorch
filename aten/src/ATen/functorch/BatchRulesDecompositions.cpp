@@ -162,6 +162,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_tensorinv);
   OP_DECOMPOSE(linalg_vander);
   OP_DECOMPOSE(cumprod_backward);
+  OP_DECOMPOSE(linalg_matrix_power);
+  OP_DECOMPOSE(linalg_vecdot);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
