@@ -174,7 +174,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
     "vision_maskrcnn",  # cannot determine truth value of Relational
     # timm_models
-    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
 ]
 
