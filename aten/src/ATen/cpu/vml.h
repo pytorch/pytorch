@@ -56,17 +56,12 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 
 // NB: We ignore numerical errors by convention and leave them to the user
 
-#define IMPLEMENT_VML(op)                                                         \
-  template <typename scalar_t>                                                    \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      using vecscalar_t = at::opmath_type<scalar_t>;                              \
-      map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
-  }
+#define IMPLEMENT_VML(op)                                               \
+  template <typename scalar_t>                                          \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
+    using vec_t = Vectorized<vec_scalar_t<scalar_t>>;                   \
+    vec::map([](vec_t x) { return x.op(); }, out, in, size);            \
+  }                                                                     \
 
 IMPLEMENT_VML(abs)
 IMPLEMENT_VML(acos)
@@ -108,9 +103,9 @@ IMPLEMENT_VML(lgamma)
 static_assert(
     std::is_same<MKL_INT, int32_t>::value,
     "MKL_INT is assumed to be int32_t");
-#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                    \
+#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
-  inline void v##op(type * out, const type * in, int64_t size) {          \
+  inline void v##op(type * out, const type * in, int64_t size) {        \
     int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
