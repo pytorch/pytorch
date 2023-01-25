@@ -270,6 +270,10 @@ class TORCH_CUDA_CU_API SegmentedFusion {
     return groups_;
   }
 
+  const std::vector<SegmentedGroup*>& groups() const {
+    return groups_;
+  }
+
   std::vector<SegmentedEdge*>& edges() {
     return edges_;
   }
@@ -329,6 +333,16 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
   HeuristicSummary* getCachedHeuristicDataFor(SegmentedGroup* group);
+
+  //! Make sure it's a DAG and optionally disjoint
+  void validate(bool require_disjoint = true) const;
+
+  //! Same as validate but only enabled when NDEBUG is undefined
+  void validateIfDebug(bool require_disjoint = true) const;
+
+ private:
+  void validateDAG() const;
+  void validateDisjoint() const;
 
  private:
   //! Unique name for segmented fusion
@@ -491,6 +505,8 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
 
   bool codeGenSupportedMerge(SegmentedGroup* group1, SegmentedGroup* group2);
 
+  void buildInitialSegments();
+
   void findSegments();
 
   std::unordered_set<SegmentedEdge*> disconnectGroup(SegmentedGroup* group);
@@ -614,6 +630,12 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   //!  implement the expression evaluator transfer and
   //!  remove runtime_inputs_ in a follow up.
   const KernelArgumentHolder& runtime_inputs_;
+
+  // List of vals to treat as complete fusion inputs for segmentation
+  std::vector<Val*> forwarded_fusion_inputs_;
+
+  //! Keep track of complete fusion input use
+  std::unordered_map<Val*, SegmentedGroup*> input2group_;
 };
 
 // TODO: Make as member functions on classes instead of global scope

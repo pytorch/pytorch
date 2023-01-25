@@ -411,7 +411,8 @@ void scheduleNormalization(Fusion& fusion, const OuterReductionParams& params) {
           input_tv->toString());
       auto cast_tv = dynamic_cast<TensorView*>(cast_expr->out());
       TORCH_CHECK(cast_tv != nullptr);
-      for (auto use : cast_tv->uses()) {
+      auto cast_tv_use_exprs = cast_tv->uses();
+      for (auto use : cast_tv_use_exprs) {
         auto replica = RecomputeTv::recompute(cast_tv);
         ir_utils::replaceValInExpr(use, cast_tv, replica);
       }

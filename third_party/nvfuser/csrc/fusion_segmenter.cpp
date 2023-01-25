@@ -644,8 +644,11 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
     return vals_to_sort;
   };
 
-  os << "g{"
-     << "(" << toString(group->heuristic()) << ")\n";
+  os << "g{";
+  if (group->heuristic() != ScheduleHeuristic::None) {
+    os << "(" << toString(group->heuristic()) << ")";
+  }
+  os << "\n";
   os << "inputs: \n";
   for (auto input : sort_val_by_name(getAllInputs(group))) {
     os << input << " " << input->getDataType().value() << "\n";
@@ -1831,12 +1834,7 @@ TranslateApplicableWelford::TranslateApplicableWelford(
   // replaced by the translation.
   for (auto welford : welford_to_translate) {
     translateSingleWelford(welford);
-  }
-
-  for (auto translated_group : translated_groups) {
-    // Update heuristics and expr list of translated groups
-    translated_group->heuristic_ = ScheduleHeuristic::Persistent;
-    translated_group->resetExprList();
+    translated_any_welford_ = true;
   }
 }
 
@@ -2630,14 +2628,15 @@ SegmentCandidateFinder::SegmentCandidateFinder(
   findSegments();
 }
 
-void SegmentCandidateFinder::findSegments() {
-  FUSER_PERF_SCOPE("Finding valid fusion segment solutions");
+void SegmentCandidateFinder::buildInitialSegments() {
+  groups().clear();
+  edges().clear();
+  forwarded_fusion_inputs_.clear();
+  input2group_.clear();
+
   // TODO: Make traversal items local to this function.
   // Need this for initialization of the DAG that is process
   std::unordered_map<Expr*, SegmentedGroup*> expr2group;
-
-  // Keep track of complete fusion input use
-  std::unordered_map<Val*, SegmentedGroup*> input2group;
 
   // Initialize DAG, convert each expr to a segment group
   auto exprs = completeFusion()->exprs();
@@ -2673,6 +2672,7 @@ void SegmentCandidateFinder::findSegments() {
     while (!to_visit.empty()) {
       auto expr = to_visit.front();
       to_visit.pop_front();
+      // TODO: fix here. See issue #2351
       if (expr->isA<UnaryOp>() || expr->output(0)->isFusionOutput()) {
         continue;
       }
@@ -2691,42 +2691,42 @@ void SegmentCandidateFinder::findSegments() {
       {forwarded_inputs.begin(), forwarded_inputs.end()});
 
   // List of vals to treat as complete fusion inputs for segmentation
-  auto forwarded_fusion_inputs = completeFusion()->inputs();
+  forwarded_fusion_inputs_ = completeFusion()->inputs();
 
-  forwarded_fusion_inputs.erase(
+  forwarded_fusion_inputs_.erase(
       std::remove_if(
-          forwarded_fusion_inputs.begin(),
-          forwarded_fusion_inputs.end(),
+          forwarded_fusion_inputs_.begin(),
+          forwarded_fusion_inputs_.end(),
           [&excluded_fusion_inputs](Val* inp) {
             return std::find(
                        excluded_fusion_inputs.begin(),
                        excluded_fusion_inputs.end(),
                        inp) != excluded_fusion_inputs.end();
           }),
-      forwarded_fusion_inputs.end());
+      forwarded_fusion_inputs_.end());
 
-  forwarded_fusion_inputs.insert(
-      forwarded_fusion_inputs.end(),
+  forwarded_fusion_inputs_.insert(
+      forwarded_fusion_inputs_.end(),
       forwarded_inputs.begin(),
       forwarded_inputs.end());
 
-  auto isFusionInput = [&forwarded_fusion_inputs](Val* val) -> bool {
+  auto isFusionInput = [this](Val* val) -> bool {
     return std::find(
-               forwarded_fusion_inputs.begin(),
-               forwarded_fusion_inputs.end(),
-               val) != forwarded_fusion_inputs.end();
+               forwarded_fusion_inputs_.begin(),
+               forwarded_fusion_inputs_.end(),
+               val) != forwarded_fusion_inputs_.end();
   };
 
   // Insert auxiliary groups to use group dependency on inputs as well
   // TODO: these groups should never merged into any other groups, but are
   //       just there to support the dependency analysis. Later re-factor should
   //       avoid introducing them explicitly on the segmented fusion.
-  for (auto input : forwarded_fusion_inputs) {
+  for (auto input : forwarded_fusion_inputs_) {
     // These groups are used to represent input as a common
     //  producer in horizontal merges, and should never be
     //  seen as a candidate for vertical merge
     auto new_group = segmented_fusion_->newGroup();
-    input2group.insert({input, new_group});
+    input2group_.insert({input, new_group});
   }
 
   // Create edges between the Exprs. Mark inputs and outputs of the fusion.
@@ -2744,7 +2744,7 @@ void SegmentCandidateFinder::findSegments() {
     for (auto inp : expr->inputs()) {
       if (isFusionInput(inp)) {
         expr_group->input_vals.push_back(inp);
-        auto aux_group = input2group.at(inp);
+        auto aux_group = input2group_.at(inp);
         auto new_edge = segmented_fusion_->newEdge(aux_group, expr_group, inp);
         expr_group->producer_edges.push_back(new_edge);
         aux_group->consumer_edges.push_back(new_edge);
@@ -2775,6 +2775,14 @@ void SegmentCandidateFinder::findSegments() {
       }
     }
   }
+}
+
+void SegmentCandidateFinder::findSegments() {
+  FUSER_PERF_SCOPE("Finding valid fusion segment solutions");
+
+  buildInitialSegments();
+
+  segmented_fusion_->validateIfDebug();
 
   auto reduction_ops =
       ir_utils::getReductionOps(segmented_fusion_->completeFusion());
@@ -2782,8 +2790,15 @@ void SegmentCandidateFinder::findSegments() {
 
   if (options_.run_translate_welford &&
       (welford_ops.begin() != welford_ops.end())) {
-    TranslateApplicableWelford::run(segmented_fusion_.get(), runtime_inputs_);
+    if (TranslateApplicableWelford::run(
+            segmented_fusion_.get(), runtime_inputs_)) {
+      // If modified, rebuild segments as existing expressions may be
+      // pulled into welford groups
+      buildInitialSegments();
+    }
   }
+
+  segmented_fusion_->validateIfDebug();
 
   for (auto group : groups()) {
     if (!group->outputs().empty()) {
@@ -2801,14 +2816,18 @@ void SegmentCandidateFinder::findSegments() {
     CombineReductions::run(this);
   }
 
+  segmented_fusion_->validateIfDebug();
+
   // All merges will be vertical beyond this point for now, so
   //  we can remove the input auxiliary groups. Should make the vertical
   //  merges avoid auxiliary group once we start general horizontal merges
   std::unordered_set<SegmentedGroup*> input_groups;
-  for (auto input : forwarded_fusion_inputs) {
-    input_groups.insert(input2group.at(input));
+  for (auto input : forwarded_fusion_inputs_) {
+    input_groups.insert(input2group_.at(input));
   }
   eraseGroups(input_groups);
+
+  segmented_fusion_->validateIfDebug();
 
   if (options_.run_herrmann_merge) {
     bool merged_nodes = true;
@@ -2854,8 +2873,12 @@ void SegmentCandidateFinder::findSegments() {
       }
 
       mergeNodes();
+
+      segmented_fusion_->validateIfDebug();
     }
   }
+
+  segmented_fusion_->validateIfDebug();
 
   if (options_.run_final_merge) {
     // TODO: consider interleaving herrmman merge and bruteforce merge, as
@@ -2863,7 +2886,14 @@ void SegmentCandidateFinder::findSegments() {
     finalMerge();
   }
 
+  segmented_fusion_->validateIfDebug();
+
   finalize();
+
+  // Do sanity check on the final graph. At this point, the graph may
+  // not be disjoint as some unary exprs from fusion inputs may be
+  // shared in multiple groups. See resolveInputsInGroup.
+  segmented_fusion_->validate(false);
 
   if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
     segmented_fusion_->draw();
@@ -3126,6 +3156,110 @@ void SegmentedFusion::setCachedHeuristicDataFor(
     std::unique_ptr<HeuristicSummary> data) {
   TORCH_INTERNAL_ASSERT(!heuristic_summary_cache_.count(group));
   heuristic_summary_cache_[group] = std::move(data);
+}
+
+void SegmentedFusion::validateDAG() const {
+  // Make sure the groups are a DAG
+  std::unordered_set<SegmentedGroup*> input_groups;
+  std::copy_if(
+      groups().begin(),
+      groups().end(),
+      std::inserter(input_groups, input_groups.end()),
+      [](SegmentedGroup* group) { return group->isInputGroup(); });
+
+  // DFS traversal from each input group. If a group is visited
+  // multiple times in any of the DFS traversal paths, there must be a
+  // cycle.
+  for (auto input_group : input_groups) {
+    std::unordered_set<SegmentedGroup*> visited_groups;
+
+    // Traversal stack to represent frontier groups to visit
+    std::deque<std::deque<SegmentedGroup*>> dfs_stack(
+        {std::deque<SegmentedGroup*>({input_group})});
+
+    while (!dfs_stack.empty()) {
+      auto& cur_frontiers = dfs_stack.back();
+
+      // If cur_frontiers is empty, it means the traversal to the
+      // frontiers from their parent group is completed.
+      if (cur_frontiers.empty()) {
+        dfs_stack.pop_back();
+        // Traversal from the parent group is done. Remove the parent
+        // group from the visited group set
+        if (!dfs_stack.empty()) {
+          auto& parent_frame = dfs_stack.back();
+          TORCH_INTERNAL_ASSERT(!parent_frame.empty());
+          auto parent_group = parent_frame.back();
+          parent_frame.pop_back();
+          // Remove parent group from visited
+          TORCH_INTERNAL_ASSERT(visited_groups.erase(parent_group) == 1);
+        }
+      } else {
+        // DFS traversal to one of the frontier groups
+        auto group_to_visit = cur_frontiers.back();
+        TORCH_INTERNAL_ASSERT(
+            visited_groups.count(group_to_visit) == 0,
+            "Cycle detected at ",
+            group_to_visit);
+        // If no outgoing edge exists, the traversal to this group is done
+        if (group_to_visit->consumer_edges.empty()) {
+          cur_frontiers.pop_back();
+        } else {
+          // If there are further groups to visit, mark this group as
+          // visited and create a new frame with the consumer groups
+          visited_groups.insert(group_to_visit);
+          // Creates a new frame for traversals from group_to_visit
+          std::deque<SegmentedGroup*> next_frame;
+          std::transform(
+              group_to_visit->consumer_edges.begin(),
+              group_to_visit->consumer_edges.end(),
+              std::back_inserter(next_frame),
+              [](SegmentedEdge* edge) { return edge->to; });
+          dfs_stack.emplace_back(next_frame);
+        }
+      }
+    }
+  }
+}
+
+void SegmentedFusion::validateDisjoint() const {
+  // Make sure it's disjoint. This property is not maintained after
+  // the finalization as some of UnaryOp exprs using inputs may be
+  // shared between multiple groups.
+  std::unordered_set<Expr*> exprs;
+
+  for (auto group : groups()) {
+    if (group->merged_ || group->exprs().empty()) {
+      continue;
+    }
+
+    for (auto expr : group->exprs()) {
+      // Allow scalar exprs to exist in multiple groups
+      if (ir_utils::isScalarOp(expr)) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(
+          exprs.insert(expr).second,
+          "Duplicate expression detected: ",
+          expr->toString());
+    }
+  }
+}
+
+void SegmentedFusion::validate(bool require_disjoint) const {
+  validateDAG();
+
+  if (require_disjoint) {
+    validateDisjoint();
+  }
+
+  // No error detected
+}
+
+void SegmentedFusion::validateIfDebug(bool require_disjoint) const {
+#ifndef NDEBUG
+  validate(require_disjoint);
+#endif // NDEBUG
 }
 
 namespace {
