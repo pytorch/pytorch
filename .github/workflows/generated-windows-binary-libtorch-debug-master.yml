@@ -28,8 +28,7 @@ concurrency:
 
 jobs:
   libtorch-cpu-shared-with-deps-debug-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows-latest
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -137,9 +136,8 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-debug-build
-    runs-on: windows.4xlarge
+    runs-on: windows-latest
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
