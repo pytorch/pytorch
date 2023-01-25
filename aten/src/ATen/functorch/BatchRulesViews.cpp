@@ -6,6 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <iostream>
+#include <utility>
 
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
@@ -284,12 +285,12 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Ten
 
 std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
-    return std::make_tuple(self.select_symint(dim, index), nullopt);
+    return std::make_tuple(self.select_symint(dim, std::move(index)), nullopt);
   }
 
   auto _self = moveBatchDimToFront(self, bdim);
   auto dim_physical = getPhysicalDim(_self, true, dim);
-  auto result = _self.select_symint(dim_physical, index);
+  auto result = _self.select_symint(dim_physical, std::move(index));
   return std::make_tuple(result, 0);
 }
 
@@ -359,7 +360,7 @@ std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   dim = getPhysicalDim(self, self_bdim.has_value(), dim);
 
-  auto result = self_.slice_symint(dim, start, end, step);
+  auto result = self_.slice_symint(dim, std::move(start), std::move(end), std::move(step));
   return std::make_tuple(result, 0);
 }
 
@@ -416,7 +417,7 @@ std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
   c10::SymDimVector input_sizes_(input_sizes.size() + 1);
   input_sizes_[0] = grad_input_.sym_size(0);
   std::copy(input_sizes.begin(), input_sizes.end(), input_sizes_.begin() + 1);
-  auto result = at::select_backward_symint(grad_input_, input_sizes_, dim, index);
+  auto result = at::select_backward_symint(grad_input_, input_sizes_, dim, std::move(index));
   return std::make_tuple(std::move(result), 0);
 }
 
@@ -429,7 +430,7 @@ std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
   c10::SymDimVector input_sizes_(input_sizes.size() + 1);
   input_sizes_[0] = grad_input_.size(0);
   std::copy(input_sizes.begin(), input_sizes.end(), input_sizes_.begin() + 1);
-  auto result = at::slice_backward_symint(grad_input_, input_sizes_, dim, start, end, step);
+  auto result = at::slice_backward_symint(grad_input_, input_sizes_, dim, std::move(start), std::move(end), std::move(step));
   return std::make_tuple(std::move(result), 0);
 }
 
@@ -517,7 +518,7 @@ std::tuple<Tensor, optional<int64_t>> narrow_copy_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
-  auto result = self_.narrow_copy_symint(dim, start, length);
+  auto result = self_.narrow_copy_symint(dim, std::move(start), std::move(length));
 
   return std::make_tuple(result, 0);
 }
@@ -531,7 +532,7 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> unsafe_split_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
-  auto result = self_.unsafe_split_symint(split_size, dim);
+  auto result = self_.unsafe_split_symint(std::move(split_size), dim);
   return std::make_tuple(result, 0);
 }
 
