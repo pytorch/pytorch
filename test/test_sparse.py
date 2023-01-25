@@ -4442,6 +4442,25 @@ class TestSparseAny(TestCase):
             torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    @dtypes(torch.double)
+    def test_to_sparse_identity(self, device, layout, dtype):
+        for dense_dim in range(4):
+            x_dense = torch.eye(dense_dim, dtype=dtype, device=device)
+            for sparse_dim_in in range(1, dense_dim):
+                x_sparse = x_dense.to_sparse(sparse_dim_in)
+                for sparse_dim_out in range(0, dense_dim):
+                    if sparse_dim_out == sparse_dim_in:
+                        self.assertTrue(x_sparse.to_sparse(sparse_dim_out).sparse_dim() == sparse_dim_out)
+                    else:
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                r"to_sparse: conversion from Sparse to Sparse with sparse_dim argument !=self.sparse_dim\(\)"
+                                " is not supported"):
+                            x_sparse.to_sparse(sparse_dim_out)
+
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
 
