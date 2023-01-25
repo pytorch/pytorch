@@ -296,8 +296,6 @@ class DDPOptimizer:
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
 
-                    # modify the currently running FX graph
-                    # maybe this isn't sound in general, but only changing the target of a node might be ok?
                     if n.op == "call_module":
                         real_mod = self.fetch_attr(n.target)
                         if fake_mode:
@@ -308,15 +306,28 @@ class DDPOptimizer:
                         log.debug(
                             f"\n---{n.target} graph---\n" + str(curr_submod.graph)
                         )
+
+                        # When calling the compiler on the submod, inputs (new_args) are expected to
+                        # be FakeTensors already since Dynamo would have made them FakeTensors in the
+                        # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
+                        # since this wrapping happens during compilation
                         compiled_submod_real = self.compile_submod(
                             real_mod, new_args, kwargs
                         )
+
+                        # We update the original (outer) graph with a call into the compiled module
+                        # instead of the uncompiled one.
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod_real)
-                        return curr_submod(*new_args, **kwargs)
-                    # then we execute the modified node using the usual logic
-                    return getattr(self, n.op)(n.target, new_args, kwargs)
+
+                        # Finally, we have to produce inputs for use compiling the next submodule,
+                        # and these need to be FakeTensors, so we execute the module under fake_mode
+                        with fake_mode:
+                            return curr_submod(*new_args, **kwargs)
+                    else:
+                        # placeholder or output nodes don't need to get compiled, just executed
+                        return getattr(self, n.op)(n.target, new_args, kwargs)
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
         submod_compiler.run(*example_inputs)
