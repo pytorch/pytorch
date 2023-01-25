@@ -147,6 +147,9 @@ struct PythonResolver : public Resolver {
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << name
+      << std::endl;
     if (classType_ && name == classname_) {
       return classType_;
     }
