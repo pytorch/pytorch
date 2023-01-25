@@ -49,7 +49,6 @@ try:
     from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import ModularIndexing
-    from torch.fx.experimental.symbolic_shapes import FloorDiv
     from torch._inductor.overrides import (
         linear_permute_fusion,
         linear_transpose,
@@ -61,6 +60,7 @@ try:
     )
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, timed
+    from torch.fx.experimental.symbolic_shapes import FloorDiv
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
