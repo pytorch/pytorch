@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM
 import inspect
 import contextlib
 
