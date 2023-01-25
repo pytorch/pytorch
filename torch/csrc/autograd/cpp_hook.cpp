@@ -21,12 +21,13 @@ namespace torch {
 namespace autograd {
 
 // NOLINTNEXTLINE(modernize-pass-by-value)
-CppFunctionPreHook::CppFunctionPreHook(
+CppFunctionTensorPreHook::CppFunctionTensorPreHook(
     const std::shared_ptr<hooks_list>& hooks,
     int value_idx)
     : hooks_(hooks), value_idx_(value_idx) {}
 
-variable_list CppFunctionPreHook::operator()(const variable_list& values) {
+variable_list CppFunctionTensorPreHook::operator()(
+    const variable_list& values) {
   auto value = values[value_idx_];
   for (const auto i : c10::irange(hooks_->size())) {
     auto& hook = (*hooks_)[i];
@@ -44,6 +45,23 @@ variable_list CppFunctionPreHook::operator()(const variable_list& values) {
   }
   variable_list results(values);
   results[value_idx_] = value;
+  return results;
+}
+
+// NOLINTNEXTLINE(modernize-pass-by-value)
+CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
+    std::function<at::TensorBase(const at::TensorBase&)> hook,
+    int value_idx)
+    : hook_(hook), value_idx_(value_idx) {}
+
+variable_list CppFunctionSingleTensorPreHook::operator()(
+    const variable_list& values) {
+  auto value = values[value_idx_];
+  auto res = hook_(value);
+  TORCH_INTERNAL_ASSERT(
+      !res.defined(),
+      "CppFunctionSingleTensorPreHook currently only supports hooks that don't return");
+  variable_list results(values);
   return results;
 }
 
