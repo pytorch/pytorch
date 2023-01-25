@@ -470,7 +470,7 @@ class RNN(RNNBase):
         orig_input = input
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = int(batch_sizes[0])
+            max_batch_size = batch_sizes[0]
         else:
             batch_sizes = None
             assert (input.dim() in (2, 3)), f"RNN: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
@@ -487,7 +487,7 @@ class RNN(RNNBase):
                 if hx is not None and hx.dim() != 3:
                     raise RuntimeError(
                         f"For batched 3-D input, hx should also be 3-D but got {hx.dim()}-D tensor")
-            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            max_batch_size = torch.as_tensor(input.size(0) if self.batch_first else input.size(1))
             sorted_indices = None
             unsorted_indices = None
 
@@ -767,7 +767,6 @@ class LSTM(RNNBase):
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
-            max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
             assert (input.dim() in (2, 3)), f"LSTM: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
@@ -775,7 +774,7 @@ class LSTM(RNNBase):
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
                 input = input.unsqueeze(batch_dim)
-            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            max_batch_size = torch.as_tensor(input.size(0) if self.batch_first else input.size(1))
             sorted_indices = None
             unsorted_indices = None
 
