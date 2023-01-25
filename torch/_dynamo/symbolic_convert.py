@@ -287,6 +287,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, bool
                 ):
+                    self.output.guards.update(result.guards)
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
