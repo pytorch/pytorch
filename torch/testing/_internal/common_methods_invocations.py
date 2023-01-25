@@ -12737,7 +12737,7 @@ op_db: List[OpInfo] = [
             # pytorch computes (0+nanj), numpy computes (-5e-18-1j) for input (-501.-1.0000e+20j)
             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
                          "test_reference_numerics_large", dtypes=(torch.complex64,), device_type='cpu',
-                         active_if=not IS_MACOS),),
+                         active_if=not IS_MACOS and not IS_WINDOWS),),
     ),
     UnaryUfuncInfo(
         'nn.functional.tanhshrink',
