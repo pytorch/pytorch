@@ -4932,7 +4932,7 @@ class TestRandomness(TestCase):
         y = torch.randn(1, 3, device=device)
 
         def fn(x, y):
-            # output from dropout should be a unbatched 2-d tensor.
+            # output from dropout should be a Tensor[B, 1, 3] (B=3)
             return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
 
         # We just verify that this doesn't raise an error for
