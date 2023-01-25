@@ -729,6 +729,16 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    def test_randn_generator(self):
+        def fn(a, generator):
+            torch.randn([20, 20], generator=generator, device=a.device)
+
+        self.common(fn, (torch.linspace(-10, 10, 41), None))
+
+        # generator not yet supported in dynamo
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
+            self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
+
     def test_sgn_extremal(self):
         def fn(a):
             return (torch.sgn(a),)
