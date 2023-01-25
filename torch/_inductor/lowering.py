@@ -1094,6 +1094,9 @@ def make_rand(fn_name):
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
+fallback_randn_like = fallback_handler(aten.randn_like)
+
+
 fast_rand = make_rand("rand")
 fast_randn = make_rand("randn")
 
@@ -1114,6 +1117,20 @@ def randn(*args, **kwargs):
     else:
         kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
+
+
+@register_lowering([aten.randn_like])
+def randn_like(x, **kwargs):
+    if config.fallback_random:
+        return fallback_randn_like(*args, **kwargs)
+    else:
+        dtype = kwargs.pop("dtype", None)
+        dtype = x.get_dtype() if dtype is None else dtype
+
+        device = kwargs.pop("device", None)
+        device = x.get_device() if device is None else device
+
+        return fast_randn(x.get_size(), dtype=dtype, device=device, **kwargs)
 
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
