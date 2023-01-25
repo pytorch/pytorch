@@ -284,10 +284,7 @@ def gen_headers(
     cpu_fm.write(
         "Functions.h",
         lambda: {
-            "static_dispatch_extra_headers": [
-                '#include "CustomOpsNativeFunctions.h"',
-                "#include <ATen/Functions.h>",
-            ]
+            "static_dispatch_extra_headers": "#include <ATen/Functions.h>"
             if use_aten_lib
             else ['#include "NativeFunctions.h"'],
             "Functions_declarations": gen_functions_declarations(
@@ -494,48 +491,44 @@ def parse_yaml_files(
     """
     import tempfile
 
-    gen_native_fns = use_aten_lib and native_yaml_path
     with tempfile.TemporaryDirectory() as tmpdirname:
         # If native_yaml_path doesn't exist, point to an empty file.
         if not native_yaml_path or not os.path.exists(native_yaml_path):
             native_yaml_path = os.path.join(tmpdirname, "functions.yaml")
             with open(native_yaml_path, "w"):
                 pass
-        # Translate native_yaml_path to the same format of native_functions.yaml
+
+        # If custom_ops_yaml_path exists, combine both files.
+        if custom_ops_yaml_path and os.path.exists(custom_ops_yaml_path):
+            combined_yaml_path = os.path.join(tmpdirname, "combined.yaml")
+            with open(combined_yaml_path, "w") as tmp:
+                with open(native_yaml_path, "r") as native:
+                    for line in native:
+                        tmp.write(line)
+                with open(custom_ops_yaml_path, "r") as custom:
+                    for line in custom:
+                        tmp.write(line)
+            custom_ops_parsed_yaml = parse_native_yaml(
+                custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
+            )
+        else:
+            # No custom_ops; just parse native_yaml_path.
+            custom_ops_parsed_yaml = None
+            combined_yaml_path = native_yaml_path
         translated_yaml_path = os.path.join(tmpdirname, "translated.yaml")
         with open(translated_yaml_path, "w") as translated:
             translate_native_yaml(
                 tags_yaml_path,
                 aten_yaml_path,
-                native_yaml_path,
+                combined_yaml_path,
                 use_aten_lib,
                 translated,
             )
-        # If custom_ops_yaml_path doesn't exist, point to an empty file.
-        if not custom_ops_yaml_path or not os.path.exists(custom_ops_yaml_path):
-            custom_ops_yaml_path = os.path.join(tmpdirname, "custom_ops.yaml")
-            with open(custom_ops_yaml_path, "w"):
-                pass
-            custom_ops_parsed_yaml = None
-        else:
-            custom_ops_parsed_yaml = parse_native_yaml(
-                custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
-            )
-
-        combined_yaml_path = os.path.join(tmpdirname, "combined.yaml")
-        with open(combined_yaml_path, "w") as tmp, open(
-            translated_yaml_path, "r"
-        ) as native, open(custom_ops_yaml_path, "r") as custom:
-            for line in native.readlines():
-                tmp.write(line)
-            for line in custom.readlines():
-                tmp.write(line)
-
         parsed_yaml = parse_native_yaml(
-            combined_yaml_path,
+            translated_yaml_path,
             tags_yaml_path,
             None,
-            skip_native_fns_gen=(not gen_native_fns),
+            skip_native_fns_gen=(not use_aten_lib),
         )
 
     return parsed_yaml, custom_ops_parsed_yaml
