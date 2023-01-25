@@ -2049,7 +2049,6 @@ def meta__scaled_dot_product_flash(
     key: Tensor,
     value: Tensor,
     dropout_p: float = 0.0,
-    return_softmax: bool = False,
     is_causal: bool = False,
 ):
     batch_size = query.size(0)
@@ -2092,17 +2091,7 @@ def meta__scaled_dot_product_flash(
     elif max_seqlen_k <= 256:
         max_seqlen_k = 256
 
-    softmax = torch.empty(
-        (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    softmax = torch.empty(
-        0,
-        dtype=query.dtype,
-        device=query.device,
-    )
-    return ouput, logsumexp, softmax
+    return ouput, logsumexp
 
 
 @register_meta(
