@@ -12,7 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
-from functools import wraps, lru_cache
+from functools import wraps
 import warnings
 from itertools import chain
 
@@ -109,7 +109,6 @@ class elementwise_type_promotion_wrapper(object):
         sig = inspect.signature(fn)
 
         @wraps(fn)
-        @lru_cache(None)
         def _fn(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
             type_promoting_args = tuple(
@@ -214,7 +213,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
 
         @wraps(fn)
-
         def _fn(*args, out=None, **kwargs):
             if is_factory_fn and out is not None:
                 for k in factory_kwargs:
