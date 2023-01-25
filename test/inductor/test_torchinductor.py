@@ -4396,7 +4396,7 @@ class CommonTemplate:
         model = Model()
         x = torch.rand(10, 3, 0)
 
-        self.common(model, x)
+        self.common(model, (x,))
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
@@ -5178,6 +5178,7 @@ test_skips = {
     "test_add_inplace_permuted_dynamic_shapes": ("cuda",),
     "test_addmm_dynamic_shapes": ("cuda",),
     "test_alexnet_prefix_dynamic_shapes": ("cpu", "cuda"),
+    "test_randn_like_empty_dynamic_shapes": ("cpu", "cuda"),
     "test_any_dynamic_shapes": ("cuda",),
     "test_argmax_argmin2_dynamic_shapes": ("cuda",),
     "test_as_strided_dynamic_shapes": ("cuda",),
