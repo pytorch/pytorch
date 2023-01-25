@@ -46,7 +46,12 @@ from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
-from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
+
+from torch._inductor.compile_fx import (
+    compile_fx,
+    compile_fx_inner,
+    complex_memory_overlap,
+)
 from torch._inductor.ir import ModularIndexing
 from torch._inductor.overrides import (
     linear_permute_fusion,
@@ -60,11 +65,6 @@ from torch._inductor.overrides import (
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
 from torch.fx.experimental.symbolic_shapes import FloorDiv
-
-# This will only pass on pytorch builds newer than roughly 5/15/2022
-assert get_decompositions([torch.ops.aten.trace])
-# Requires functorch
-from torch._inductor.compile_fx import compile_fx_inner
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
