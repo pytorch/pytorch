@@ -135,7 +135,6 @@ static_assert(
 
 // NB: abs, cosh and sinh were temporarily disabled due to issues with Apple
 // NB: expm1 is disabled because on some configs it produces expm1(nan)=-1
-IMPLEMENT_VML_MKL(abs, Abs)
 IMPLEMENT_VML_MKL(acos, Acos)
 IMPLEMENT_VML_MKL(asin, Asin)
 IMPLEMENT_VML_MKL(atan, Atan)
@@ -148,13 +147,16 @@ IMPLEMENT_VML_MKL(exp, Exp)
 // IMPLEMENT_VML_MKL(expm1, Expm1)
 IMPLEMENT_VML_MKL(log, Ln)
 IMPLEMENT_VML_MKL(log10, Log10)
-IMPLEMENT_VML_MKL(log1p, Log1p)
 IMPLEMENT_VML_MKL(sin, Sin)
 // IMPLEMENT_VML_MKL(sinh, Sinh)
 IMPLEMENT_VML_MKL(sqrt, Sqrt)
 IMPLEMENT_VML_MKL(tan, Tan)
 IMPLEMENT_VML_MKL(tanh, Tanh)
 IMPLEMENT_VML_MKL(trunc, Trunc)
+
+// Not vectorized in MKL version tested
+// IMPLEMENT_VML_MKL(abs, Abs)
+// IMPLEMENT_VML_MKL(log1p, Log1p)
 
 #if INTEL_MKL_VERSION >= 20180406
 IMPLEMENT_VML_MKL(log2, Log2)
