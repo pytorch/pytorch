@@ -383,16 +383,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const AllToAllOptions& opts = AllToAllOptions()) {
     static auto op = c10::Dispatcher::singleton()
                          .findSchemaOrThrow("c10d::alltoall_", "")
-                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                         .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
                              at::TensorList,
                              at::TensorList,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
-    return op.call(
+    return std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-        opts.timeout.count());
+        opts.timeout.count()));
   }
 
   virtual void monitoredBarrier(
