@@ -297,6 +297,7 @@ if HAS_SYMPY:
                 ))
             return None
 
+@lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         return sympy.expand(r)
