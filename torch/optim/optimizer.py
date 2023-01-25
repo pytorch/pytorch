@@ -64,7 +64,7 @@ def _default_to_foreach(tensorlists: List[List[torch.Tensor]], differentiable: b
     all_tensors = []
     for tensorlist in tensorlists:
         all_tensors.extend(tensorlist)
-    return all(p.is_cuda for p in all_tensors)
+    return all(p is None or (p.is_cuda and type(p) == torch.Tensor) for p in all_tensors)
 
 
 # Common doc strings among optimizers
