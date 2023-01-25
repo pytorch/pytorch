@@ -50,7 +50,6 @@ class ComputeGraph final {
   std::vector<ValueRef> outputs_;
 
  public:
-
   //
   // Accessors
   //
