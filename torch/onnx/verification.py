@@ -1916,14 +1916,14 @@ def verify_model_with_fx_to_onnx_exporter(
 
     if not isinstance(onnx_model, bytes):
         onnx_model = onnx_model.SerializeToString()
-    onnx_model = io.BytesIO(onnx_model)
+    onnx_model_f = io.BytesIO(onnx_model)
 
     with torch.no_grad(), contextlib.ExitStack() as stack:
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
 
         _compare_onnx_pytorch_model(
             fx_model,
-            onnx_model,
+            onnx_model_f,
             input_args=input_args,
             # Dynamo exporter folds all kwargs into in-graph constants,
             # so we can't specify input_kwargs=input_kwargs.
