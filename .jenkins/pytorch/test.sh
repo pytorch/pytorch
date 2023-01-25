@@ -814,7 +814,7 @@ test_executorch() {
 }
 
 test_smoke() {
-  time python test/run_test.py --include test_fx test_jit --verbose
+  time python test/run_test.py --include test_fx test_jit test_schema_check test_foreach test_weak --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
