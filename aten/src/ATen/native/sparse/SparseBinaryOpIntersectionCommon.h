@@ -13,7 +13,6 @@
 #else
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/zeros.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/from_blob.h>
@@ -186,7 +185,20 @@ void _sparse_binary_op_intersection_kernel_impl(
     if (restrict_indices_to_rhs) {
       // x is coalesced and y is marked as uncoalesced so that the intersection result
       // respects the order of indices in y.
-      rhs._coalesced_(false);
+      if (!rhs.is_same(y_)) {
+        // Safe to modify in-place, no side effects for y.
+        return rhs._coalesced_(false);
+      } else {
+        // No copy-constructor for sparse, hence a temporary sparse tensor is created
+        // with the fields taken from y. Ensures no side effects for y.
+        auto rhs_copy = at::empty({0}, rhs.options());
+        auto* rhs_copy_sparse_impl = get_sparse_impl(rhs_copy);
+        rhs_copy_sparse_impl->raw_resize_(rhs.sparse_dim(), rhs._values().dim() - 1, rhs.sizes());
+        rhs_copy_sparse_impl->set_indices_and_values_unsafe(rhs._indices(), rhs._values());
+        rhs_copy_sparse_impl->set_nnz_and_narrow(rhs._nnz());
+        rhs_copy._coalesced_(false);
+        return rhs_copy;
+      }
     }
     return rhs;
   }();
