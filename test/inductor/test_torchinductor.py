@@ -48,7 +48,7 @@ try:
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
     from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
-    from torch._inductor.ir import IndexingDiv, ModularIndexing
+    from torch._inductor.ir import ModularIndexing
     from torch._inductor.overrides import (
         linear_permute_fusion,
         linear_transpose,

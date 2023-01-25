@@ -30,6 +30,7 @@ from .lowering import (
     lowerings,
     make_fallback,
     needs_realized_inputs,
+    FALLBACK_ALLOW_LIST,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
 from .utils import (
@@ -291,7 +292,10 @@ class GraphLowering(torch.fx.Interpreter):
                 return super().call_function(target, args, kwargs)
 
             if target not in lowerings:
-                if config.implicit_fallbacks:
+                base_name = target.name().split('.')[0]
+                if base_name in FALLBACK_ALLOW_LIST:
+                    make_fallback(target)
+                elif config.implicit_fallbacks:
                     error = (
                         MissingOperatorWithDecomp
                         if get_decompositions([target])
