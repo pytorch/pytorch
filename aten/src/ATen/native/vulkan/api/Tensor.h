@@ -6,6 +6,8 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/accumulate.h>
 
+#include <iostream>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -101,6 +103,13 @@ class vTensor final {
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
+  // Copy Constructor and Assignment
+  vTensor(const vTensor& other) noexcept;
+  vTensor& operator=(const vTensor& other) noexcept;
+
+  // Move
+  vTensor(vTensor&& other) noexcept;
+
   // Used for passing buffer sizes and strides data to shaders
   struct BufferMetadata {
     api::utils::uvec4 sizes;
@@ -149,6 +158,7 @@ class vTensor final {
   // unfamiliar with the internal mechanics of this class, that I decided to
   // take the performance pentalty of this extra layer of indirection in favor
   // of making this class easier to use.
+ public:
   std::shared_ptr<vTensorStorage> view_;
 
  public:
@@ -269,15 +279,15 @@ class vTensor final {
     return c10::multiply_integers(sizes());
   }
 
+  inline size_t nbytes() const {
+    return c10::elementSize(dtype()) * numel();
+  }
+
   /*
    * Returns numel but based on gpu_sizes_ instead of sizes_
    */
   inline size_t gpu_numel() const {
     return view_->buffer_length_;
-  }
-
-  inline size_t nbytes() const {
-    return c10::elementSize(dtype()) * numel();
   }
 
   /*
