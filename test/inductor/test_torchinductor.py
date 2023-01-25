@@ -4398,6 +4398,13 @@ class CommonTemplate:
 
         self.common(model, (x,))
 
+    @patch.object(config, "fallback_random", True)
+    def test_like_rands(self):
+        def fn(x):
+            return torch.rand_like(x), torch.randn_like(x)
+
+        self.common(fn, [torch.zeros([20, 20])])
+
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
