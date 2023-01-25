@@ -85,18 +85,6 @@ _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
-    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
-    CUDNN_VERSION=8
-    TENSORRT_VERSION=8.0.1.6
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    CONDA_CMAKE=yes
-    ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
@@ -123,8 +111,21 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     ;;
+  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.8.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    ;;
   pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -132,7 +133,7 @@ case "$image" in
     CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
@@ -159,29 +160,19 @@ case "$image" in
     SWIFTSHADER=yes
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-bionic-py3.8-gcc9)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-bionic-py3.11-clang9)
+    ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=7
+  pytorch-linux-bionic-py3.8-gcc9)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -228,6 +219,15 @@ case "$image" in
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.7
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.8
     CUDNN_VERSION=8
     CLANG_VERSION=12
     PROTOBUF=yes
