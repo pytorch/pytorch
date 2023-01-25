@@ -1073,7 +1073,7 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         )
 
     def _test_no_sync_correctness(self, sharding_strategy: ShardingStrategy):
-        model = nn.Linear(3, 3, bias=False, device="cuda")
+        model = nn.Linear(3, 3, device="cuda")
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
         }
@@ -1135,7 +1135,9 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
             param.grad.detach().clone() for param in model_use_flat_params.parameters()
         ]
         ref_grads_use_orig_params = [
-            param.grad.detach().clone() for param in model_use_orig_params.parameters()
+            param.grad.detach().clone()
+            for param in model_use_orig_params.parameters()
+            if param.grad is not None
         ]
 
         # Run a forward/backward in `no_sync()`
@@ -1159,7 +1161,9 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
             param.grad.detach().clone() for param in model_use_flat_params.parameters()
         ]
         grads_use_orig_params = [
-            param.grad.detach().clone() for param in model_use_orig_params.parameters()
+            param.grad.detach().clone()
+            for param in model_use_orig_params.parameters()
+            if param.grad is not None
         ]
         for grad, ref_grad in zip(grads_use_flat_params, ref_grads_use_flat_params):
             torch.testing.assert_close(grad, 2 * ref_grad)
@@ -1184,7 +1188,7 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         )
 
     def _test_no_sync_mixed_precision(self, sharding_strategy: ShardingStrategy):
-        model = nn.Linear(3, 3, bias=False, device="cuda")
+        model = nn.Linear(3, 3, device="cuda")
         mixed_precision = MixedPrecision(
             param_dtype=torch.float16,
             reduce_dtype=torch.float32,
