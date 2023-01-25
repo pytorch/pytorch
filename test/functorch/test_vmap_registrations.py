@@ -22,7 +22,6 @@ xfail_functorch_batched = {
     "aten::isfinite",
     "aten::isreal",
     "aten::item",
-    "aten::linalg_matrix_power",
     "aten::linalg_matrix_rank.atol_rtol_float",
     "aten::linalg_matrix_rank.atol_rtol_tensor",
     "aten::linalg_pinv",
@@ -165,7 +164,6 @@ xfail_not_implemented = {
     "aten::linalg_eigh.eigvals",
     "aten::linalg_ldl_factor",
     "aten::linalg_lu_factor",
-    "aten::linalg_matrix_power",
     "aten::linalg_matrix_rank",
     "aten::linalg_matrix_rank.atol_rtol_float",
     "aten::linalg_matrix_rank.atol_rtol_tensor",
@@ -178,7 +176,6 @@ xfail_not_implemented = {
     "aten::linalg_slogdet",
     "aten::linalg_svd.U",
     "aten::linalg_tensorsolve",
-    "aten::linalg_vecdot",
     "aten::linear",
     "aten::log_sigmoid",
     "aten::log_softmax.int",
@@ -321,6 +318,7 @@ xfail_not_implemented = {
     "aten::var_mean.names_dim",
     "aten::where",
     "aten::where.Scalar",
+
 }
 
 
