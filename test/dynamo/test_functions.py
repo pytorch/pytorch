@@ -713,6 +713,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @make_test
+    def test_torch_distributions_functions(x):
+        normal = torch.distributions.Normal(x, torch.tensor(1))
+        independent = torch.distributions.Independent(normal, 1)
+        return independent.log_prob(x)
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
@@ -849,6 +855,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x, kw_x = compiled_mod()
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
+
+    def test_func_default_torch_args(self):
+        """
+        Tests other types of torch types as function default (size, dtype, device)
+        """
+
+        def func_with_default_torch_args(
+            dt=torch.float16, ds=torch.Size((1, 2, 3)), dd=torch.device("cpu")
+        ):
+            return torch.ones(ds, dtype=dt, device=dd)
+
+        def func():
+            return func_with_default_torch_args()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_func = torch.compile(func, backend=cnts)
+        out = func()
+        compiled_out = compiled_func()
+        self.assertEqual(out.dtype, compiled_out.dtype)
+        self.assertEqual(out.device, compiled_out.device)
+        self.assertEqual(out.size(), compiled_out.size())
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
 
 
 if __name__ == "__main__":
