@@ -36,7 +36,7 @@ def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
             per_device_and_dtype_tensors[key][j + 1].append(i)
     return per_device_and_dtype_tensors
 
-def _has_foreach_support(tensors: List[Tensor], device: torch.device = None) -> bool:
-    if (device is not None and device.type not in ['cpu', 'cuda']) or torch.jit.is_scripting():
+def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
+    if device.type not in ['cpu', 'cuda'] or torch.jit.is_scripting():
         return False
     return all([t is None or type(t) == torch.Tensor for t in tensors])
