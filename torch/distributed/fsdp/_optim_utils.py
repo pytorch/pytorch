@@ -1442,16 +1442,16 @@ def _optim_state_dict(
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     if to_save:
-        # NamedOptimizer/KeyedOptimizer allow users to plugin any states.
-        if is_named_optimizer:
-            flat_param_fqns = set(flat_param_to_fqn.values())
-            for key, value in optim_state_dict["state"].items():
-                if key in fsdp_osd_state:
-                    continue
-                if key in flat_param_fqns:
-                    continue
-                # This key is not a parameter state. It is a user-defined state.
-                fsdp_osd_state[key] = copy.copy(value)
+        flat_param_fqns = set(flat_param_to_fqn.values())
+        for key, value in optim_state_dict["state"].items():
+            if key in fsdp_osd_state:
+                continue
+            if key in flat_param_fqns:
+                continue
+            if key in param_key_to_param:
+                continue
+            # This key is not a parameter state. It is a user-defined state.
+            fsdp_osd_state[key] = copy.copy(value)
 
         fsdp_osd["param_groups"] = _unflatten_param_groups(
             optim_state_dict, param_key_to_param, param_to_fqns

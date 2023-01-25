@@ -172,7 +172,7 @@ class triton:
     # should we give different names to kernels
     ordered_kernel_names = False
     # should we put op names in kernel names
-    descriptive_kernel_names = True
+    descriptive_kernel_names = False
 
 
 # create a directory containing lots of debug information
