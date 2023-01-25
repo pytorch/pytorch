@@ -1094,8 +1094,6 @@ def make_rand(fn_name):
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
-
-
 fast_rand = make_rand("rand")
 fast_randn = make_rand("randn")
 
