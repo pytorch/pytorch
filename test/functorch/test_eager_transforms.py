@@ -2814,6 +2814,34 @@ class TestHelpers(TestCase):
 
 
 class TestComposability(TestCase):
+    def test_deprecation_vmap(self, device):
+        x = torch.randn(3, device=device)
+
+        # functorch version of the API is deprecated
+        with self.assertWarnsRegex(UserWarning, "Please use torch.vmap"):
+            vmap(torch.sin)
+
+        # the non-functorch version is not deprecated
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            torch.vmap(torch.sin)
+
+    @parametrize('transform', [
+        'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_deprecation_transforms(self, device, transform):
+        api = getattr(functorch, transform)
+        new_api = getattr(torch.func, transform)
+
+        # functorch version of the API is deprecated
+        with self.assertWarnsRegex(UserWarning, f"Please use torch.func.{transform}"):
+            api(torch.sin)
+
+        # the non-functorch version is not deprecated
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            new_api(torch.sin)
+
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
         y = grad(grad(torch.sin))(x)
@@ -3037,7 +3065,7 @@ class TestComposability(TestCase):
 
         x = torch.randn(3, device=device)
         transform = getattr(functorch, transform)
-        with self.assertRaisesRegex(RuntimeError, 'must have a setup_context'):
+        with self.assertRaisesRegex(RuntimeError, 'must override the setup_context'):
             transform(MySin.apply)(x)
 
     @parametrize('transform', [
@@ -3351,6 +3379,25 @@ class TestMakeFunctional(TestCase):
         num_models = 3
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = stack_module_state(models)
+
+    def test_stack_module_state_leaf(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        params, buffers = stack_module_state(models)
+        for param in params.values():
+            self.assertTrue(param.requires_grad)
+            self.assertTrue(param.is_leaf)
+
+    def test_stack_module_state_mismatch_error(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[0].weight.requires_grad_(False)
+        with self.assertRaisesRegex(RuntimeError, "same .requires_grad"):
+            params, buffers = stack_module_state(models)
 
     def test_stack_module_state_error(self):
         in_features = 2

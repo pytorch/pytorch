@@ -383,7 +383,7 @@ class TestOperators(TestCase):
 
         # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('view_as_complex'),
-        decorate('nn.functional._scaled_dot_product_attention',
+        decorate('nn.functional.scaled_dot_product_attention',
                  decorator=expectedFailureIf(not IS_WINDOWS), device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -454,7 +454,7 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
         xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
-        xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
+        xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
@@ -573,7 +573,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
         # NOTE: This passes on Windows!
-        decorate('nn.functional._scaled_dot_product_attention',
+        decorate('nn.functional.scaled_dot_product_attention',
                  decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
         # BUG
         # AssertionError: Tensor-likes are not close!
@@ -645,7 +645,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
-        skip('nn.functional._scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
         # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
@@ -740,7 +740,7 @@ class TestOperators(TestCase):
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         # It looks like you're either (1) calling .item() on a Tensor or
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
@@ -849,7 +849,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
-        skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -941,7 +941,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.dropout3d', ''),
-        skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.scaled_dot_product_attention'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
@@ -1113,7 +1113,6 @@ class TestOperators(TestCase):
         xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
-        xfail('cumprod'),
         xfail('fill'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
@@ -1181,11 +1180,9 @@ class TestOperators(TestCase):
         xfail('cfloat', ''),
         xfail('chalf', ''),
         xfail('index_reduce', ''),
-        xfail('linalg.vander', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
-        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
@@ -1229,7 +1226,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
-        skip('nn.functional._scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
@@ -1350,13 +1347,12 @@ class TestOperators(TestCase):
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
-        xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
-        skip('nn.functional._scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
@@ -1476,12 +1472,11 @@ class TestOperators(TestCase):
         # were not batched.
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
-        xfail('nn.functional.binary_cross_entropy'),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # ForwardAD not implemented and no decomposition
         xfail('nn.functional.dropout2d'),  # calls random op
         xfail('nn.functional.dropout3d'),  # calls random op
         xfail('nn.functional.dropout'),  # calls random op
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.alpha_dropout'),  # calls randomn op
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
@@ -1518,7 +1513,6 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
-        xfail('symeig'),  # Forward AD not implemented and no decomposition
         xfail('take'),  # vmap: inplace into regular tensor
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
