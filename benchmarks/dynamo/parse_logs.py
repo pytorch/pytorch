@@ -61,7 +61,7 @@ out.writerow(
         "fake_tensor_dispatch_calls",
         "proxy_torch_dispatch_calls",
         "time_per_op",
-        "dispatches_per_op"
+        "dispatches_per_op",
     ]
 )
 
@@ -164,8 +164,8 @@ for name, name2, log in chunker(entries, 3):
             )
     time_per_op = None
     if frame_time is not None and tot_ops is not None:
-        time_per_op = frame_time / tot_ops * 1000 # ms
-    
+        time_per_op = frame_time / tot_ops * 1000  # ms
+
     dispatches_per_op = None
     if fm_dispatches is not None and pm_dispatches is not None and tot_ops is not None:
         dispatches_per_op = (fm_dispatches + pm_dispatches) / tot_ops

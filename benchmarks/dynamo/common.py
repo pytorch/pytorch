@@ -1523,8 +1523,9 @@ class BenchmarkRunner:
 
             print_time_report()
             stats = f"STATS: call_* op count: {op_count}"
-            for key, value in simple_call_counter.items():
-                stats = f"{stats} | {key}:{value}"
+            stats = stats + " | ".join(
+                f"{key}:{value}" for key, value in simple_call_counter.items()
+            )
             print(stats)
 
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
