@@ -384,8 +384,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     static auto op = c10::Dispatcher::singleton()
                          .findSchemaOrThrow("c10d::alltoall_", "")
                          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-                             at::TensorList,
-                             at::TensorList,
+                             const at::TensorList&,
+                             const at::TensorList&,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
     return std::get<1>(op.call(
