@@ -2807,4 +2807,7 @@ instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("c
 
 
 if __name__ == '__main__':
-    run_tests()
+    if os.getenv("PYTORCH_TEST_WITH_DYNAMO", "0") == "1":
+        print("Crashes with Dynamo, see  https://github.com/pytorch/pytorch/issues/92942")
+    else:
+        run_tests()
