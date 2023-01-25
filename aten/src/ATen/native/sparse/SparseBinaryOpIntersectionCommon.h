@@ -111,7 +111,7 @@ TensorIterator make_value_selection_intersection_iter(
     sizes[0] = lhs_select_idx.numel();
     return sizes;
   }();
-  auto res_values = at::zeros(res_values_sizes, lhs_values.options());
+  auto res_values = at::empty(res_values_sizes, lhs_values.options());
 
   const auto restride_idx = [&res_values](const Tensor& idx) -> Tensor {
     auto idx_sizes = std::vector<int64_t>(res_values.dim(), 1);

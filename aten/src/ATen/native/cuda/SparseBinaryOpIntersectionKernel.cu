@@ -99,6 +99,8 @@ void binary_op_intersection_kernel(
       *ptr_res_values = binary_op_t::apply(
           *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
           *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
+    } else {
+      *ptr_res_values = 0;
     }
   };
 
