@@ -2934,8 +2934,7 @@ void SegmentCandidateFinder::buildInitialSegments() {
     while (!to_visit.empty()) {
       auto expr = to_visit.front();
       to_visit.pop_front();
-      // TODO: fix here. See issue #2351
-      if (expr->isA<UnaryOp>() || expr->output(0)->isFusionOutput()) {
+      if (!expr->isA<UnaryOp>() || expr->output(0)->isFusionOutput()) {
         continue;
       }
 
