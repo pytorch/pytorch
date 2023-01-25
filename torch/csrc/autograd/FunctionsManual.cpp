@@ -3472,7 +3472,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(
   auto dL = is_hermitian && dA.is_complex() ? at::real(dP.diagonal(0, -2, -1))
                                             : dP.diagonal(0, -2, -1);
   auto dV = [&dP, &V, &L, is_hermitian] {
-    const auto dX = [&] {
+    auto dX = [&] {
       auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
       ret.diagonal(0, -2, -1).zero_();
       ret = at::matmul(V, ret);
