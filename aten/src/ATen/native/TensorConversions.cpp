@@ -1640,6 +1640,9 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
     TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
                 "to_sparse_bsr: conversion from Csr to Bsr for batched inputs is not implemented.");
 
+    if (self.device() != kCPU) {
+      TORCH_WARN("sparse_compressed_to_sparse_bsr executing on the CPU device, as currently this device in the only one supported, the performance may be sub-optimal");
+    }
     return _compressed_to_block_compressed_cpu<kSparseBsr>(self.cpu(), blocksize).to(self.device());
   }
   AT_ERROR(
@@ -1670,6 +1673,9 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
     TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
                 "to_sparse_bsc: conversion from Csc to Bsc for batched inputs is not implemented.");
 
+    if (self.device() != kCPU) {
+      TORCH_WARN("sparse_compressed_to_sparse_bsc executing on the CPU device, as currently this device in the only one supported, the performance may be sub-optimal");
+    }
     return _compressed_to_block_compressed_cpu<kSparseBsc>(self.cpu(), blocksize).to(self.device());
   }
   AT_ERROR(
