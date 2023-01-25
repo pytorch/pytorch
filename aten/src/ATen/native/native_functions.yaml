@@ -13800,6 +13800,7 @@
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
 
 - func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, Tensor rng_state) -> (Tensor, Tensor, Tensor)
+  device_check: NoCheck   # rng_state is a byte tensor stored on the CPU
   variants: function
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
@@ -13823,6 +13824,7 @@
     CUDA: _flash_attention_forward
 
 - func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, Tensor rng_state) -> (Tensor, Tensor, Tensor)
+  device_check: NoCheck   # rng_state is a byte tensor stored on the CPU
   variants: function
   dispatch:
     CUDA: _flash_attention_backward
