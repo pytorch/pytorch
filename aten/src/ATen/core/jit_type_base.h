@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
@@ -451,7 +452,7 @@ struct TORCH_API Type {
         return *renamed;
       }
     }
-    return annotation_str_impl(printer);
+    return annotation_str_impl(std::move(printer));
   }
   std::string annotation_str() const {
     // Overload instead of define a default value for `printer` to help

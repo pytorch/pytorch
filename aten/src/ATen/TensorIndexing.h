@@ -20,6 +20,8 @@
 
 #include <ATen/core/List.h>
 
+#include <utility>
+
 namespace at {
 namespace indexing {
 
@@ -230,7 +232,7 @@ static inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice_symint(dim, start, stop, step);
+  return self.slice_symint(dim, start, stop, std::move(step));
 }
 
 static inline Tensor applySelect(

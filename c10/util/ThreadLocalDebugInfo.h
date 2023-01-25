@@ -41,7 +41,7 @@ class C10_API ThreadLocalDebugInfo {
 
   // Internal, use DebugInfoGuard/ThreadLocalStateGuard
   static void _forceCurrentDebugInfo(
-      const std::shared_ptr<ThreadLocalDebugInfo>& info);
+      std::shared_ptr<ThreadLocalDebugInfo> info);
 
   // Push debug info struct of a given kind
   static void _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
