@@ -178,7 +178,7 @@ case "$image" in
     VISION=yes
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-rocm-n-py3)
+  pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
@@ -188,7 +188,7 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-rocm-n-1-py3)
+  pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
