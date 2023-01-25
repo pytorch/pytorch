@@ -6,8 +6,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/accumulate.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace vulkan {
@@ -107,7 +105,7 @@ class vTensor final {
   vTensor(const vTensor& other) noexcept;
   vTensor& operator=(const vTensor& other) noexcept;
 
-  // Move
+  // Move Constructor
   vTensor(vTensor&& other) noexcept;
 
   // Used for passing buffer sizes and strides data to shaders
@@ -158,7 +156,6 @@ class vTensor final {
   // unfamiliar with the internal mechanics of this class, that I decided to
   // take the performance pentalty of this extra layer of indirection in favor
   // of making this class easier to use.
- public:
   std::shared_ptr<vTensorStorage> view_;
 
  public:

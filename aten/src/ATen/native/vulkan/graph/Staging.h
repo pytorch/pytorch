@@ -5,8 +5,6 @@
 #include <ATen/native/vulkan/api/Context.h>
 #include <ATen/native/vulkan/api/Tensor.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace vulkan {

@@ -2,8 +2,6 @@
 #include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/accumulate.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace vulkan {

@@ -7,8 +7,6 @@
 #include <ATen/native/vulkan/graph/Staging.h>
 #include <ATen/native/vulkan/graph/Types.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace vulkan {
