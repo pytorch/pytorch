@@ -128,7 +128,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // Case 1: arguments are not functional tensors, so we no-op and redispatch.
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
      at::AutoDispatchSkipFunctionalize guard;
-     at::Tensor tmp_output = self_.resize_(size, memory_format);
+     self_.resize_(size, memory_format);
      return self;
   }
 
