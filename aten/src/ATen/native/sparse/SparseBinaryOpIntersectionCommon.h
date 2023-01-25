@@ -178,9 +178,9 @@ void _sparse_binary_op_intersection_kernel_impl(
   using KernelLauncher = KernelLauncher<kernel_t>;
 
   // If the op and sum are not commutative, coalesce is required.
-  // If restrict_indices_to_rhs is true, x is coalesced so that
+  // If restrict_indices_to_rhs is true, x needs to be coalesced so that
   // (x.coalesce() intersection y union y).indices().counts() == y.indices().counts().
-  const Tensor x = (restrict_indices_to_rhs || commutes_with_sum) ? x_ : x_.coalesce();
+  const Tensor x = (!commutes_with_sum || restrict_indices_to_rhs) ? x_.coalesce() : x_;
   const Tensor y = [&]() -> Tensor {
     auto rhs = commutes_with_sum ? y_ : y_.coalesce();
     if (restrict_indices_to_rhs) {
