@@ -826,8 +826,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
   constexpr int num_splits{0};
   auto softmax_scale = std::pow(query.size(-1), -0.5);
   at::Tensor output = at::empty_like(query);
-  Tensor logsumexp, rng_state;
 
+  Tensor logsumexp, rng_state;
   std::tie(logsumexp, rng_state) = fmha::mha_fwd(
       query,
       key,

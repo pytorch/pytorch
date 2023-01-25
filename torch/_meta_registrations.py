@@ -2076,23 +2076,63 @@ def meta__scaled_dot_product_flash(
         dtype=torch.float,
         device=query.device,
     )
-    is_sm80 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
-    is_sm75 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5)
-    head_size_rounded = 64 if head_dim <= 64 else 128
-    blocksize_c = (
-        128
-        if (head_size_rounded == 128 and (dropout_p != 0.0 or not is_sm80))
-        or (is_sm75 and head_size_rounded == 64 and dropout_p != 0.0)
-        else 256
-    )
-    max_seqlen_k = math.ceil(max_seqlen_batch_k / blocksize_c) * blocksize_c
-    if max_seqlen_k <= 128:
-        max_seqlen_k = 128
-    elif max_seqlen_k <= 256:
-        max_seqlen_k = 256
+    cumulative_sequence_length_q = torch.empty(batch_size + 1, dtype=torch.int32, device="meta")
+    cumulative_sequence_length_k = torch.empty(batch_size + 1, dtype=torch.int32, device="meta")
 
-    return ouput, logsumexp
+    if dropout_p > 0.0:
+        DEFAULT_RNG_STATE_SIZE = 816
+        # [Note] This number feels magical but it is derived from the calculation:
+        # pytorch/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp:154
+        # where sizeof(4120) will equal 4 bytes for all systems that are expected to run this meta function :hope:
+        rng_state_size = torch.empty(DEFAULT_RNG_STATE_SIZE, dtype=torch.uint8, device="meta")
+    else:
+        rng_state_size = torch.empty(0,dtype=query.dtype, device=query.device)
+    return ouput, logsumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, rng_state_size
 
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_flash_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    rng_state: Tensor
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    head_dim = query.size(3)
+
+    Nnz_q = batch_size * max_q
+    Nnz_kv = batch_size * max_k
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
+    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
+    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
+
+    grad_q = torch.empty_like(query_reshaped)
+    grad_k = torch.empty_like(key_reshaped)
+    grad_v = torch.empty_like(value_reshaped)
+
+    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
+    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+
+    return grad_q, grad_k, grad_v
 
 @register_meta(
     [
