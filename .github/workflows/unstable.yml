@@ -51,3 +51,24 @@ jobs:
       build-environment: linux-bionic-py3_7-clang8-xla
       docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
+
+  linux-bionic-py3_7-clang9-build:
+    name: linux-bionic-py3.7-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-py3.7-clang9
+      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      test-matrix: |
+        { include: [
+          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+        ]}
+
+  linux-bionic-py3_7-clang9-test:
+    name: linux-bionic-py3.7-clang9
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-py3_7-clang9-build
+    with:
+      build-environment: linux-bionic-py3.7-clang9
+      docker-image: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.test-matrix }}
