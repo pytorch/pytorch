@@ -445,6 +445,8 @@ def translate_native_yaml(
 
     with open(native_yaml_path, "r") as native_yaml:
         native_es = yaml.load(native_yaml, Loader=LineLoader)
+        if not native_es:
+            return
         for e in native_es:
             assert isinstance(e.get("__line__"), int), e
             loc = Location(native_yaml_path, e.pop("__line__"))
