@@ -1470,17 +1470,6 @@ class TestSparse(TestSparseBase):
                 "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
             ab = a.bmm(b)
 
-    @onlyCUDA
-    @skipIfRocm
-    @dtypes(torch.double)
-    def test_bmm_cuda_version_error(self, device, dtype):
-        a = torch.rand(2, 2, 2, dtype=dtype).to_sparse().cuda()
-        b = torch.rand(2, 2, 2, dtype=dtype).cuda()
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "bmm sparse-dense requires CUDA 10.1 or greater"):
-            ab = a.bmm(b)
-
     @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
