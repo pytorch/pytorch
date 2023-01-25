@@ -46,6 +46,9 @@ class JobCheckState:
         self.status: Optional[str] = status
         self.classification: Optional[str] = classification
 
+    def __repr__(self) -> str:
+        return f"JobCheckState([{self.name},{self.url},{self.status},{self.classification}])"
+
 JobNameToStateDict = Dict[str, JobCheckState]
 
 class WorkflowCheckState:
@@ -222,23 +225,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
         edges {
           node {
             name
-          }
-        }
-      }
-      headRef {
-        compare(headRef: "master") {
-          commits(first: 1) {
-            edges {
-              node {
-                parents(first: 1) {
-                  edges {
-                    node {
-                      oid
-                    }
-                  }
-                }
-              }
-            }
           }
         }
       }
@@ -474,27 +460,31 @@ def _fetch_url(url: str, *,
             print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
         raise
 
-def fetch_json(url: str,
-               params: Optional[Dict[str, Any]] = None,
-               data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+def _fetch_json_any(
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None
+) -> Any:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
         url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
+    return _fetch_url(url, headers=headers, data=data, reader=json.load)
+
+def fetch_json_list(url: str,
+                    params: Optional[Dict[str, Any]] = None,
+                    data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    return cast(List[Dict[str, Any]], _fetch_json_any(url, params, data))
 
 def fetch_json_dict(url: str,
                     params: Optional[Dict[str, Any]] = None,
                     data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
-    headers = {'Accept': 'application/vnd.github.v3+json'}
-    if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return cast(Dict[str, Any], _fetch_url(url, headers=headers, data=data, reader=json.load))
+    return cast(Dict[str, Any], _fetch_json_any(url, params, data))
 
 def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
     if dry_run:
         print(comment)
         return []
-    return fetch_json(url, data={"body": comment})
+    return fetch_json_list(url, data={"body": comment})
 
 
 def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
@@ -506,8 +496,8 @@ def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_r
 
 
 def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
-    fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
-               data={"labels": labels})
+    fetch_json_list(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
+                    data={"labels": labels})
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -711,6 +701,7 @@ class GitHubPR:
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
+        self.merge_base: Optional[str] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -743,7 +734,12 @@ class GitHubPR:
         return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_merge_base(self) -> str:
-        return cast(str, self.info["headRef"]["compare"]["commits"]["edges"][0]["node"]["parents"]["edges"][0]["node"]["oid"])
+        if self.merge_base is not None:
+            return self.merge_base
+        url = f"https://api.github.com/repos/{self.org}/{self.project}/compare/master...{self.last_commit()['oid']}"
+        res = fetch_json_dict(url)
+        self.merge_base = res["merge_base_commit"]['sha']
+        return self.merge_base
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -1304,7 +1300,7 @@ def get_flaky_rules() -> List[FlakyRule]:
     flaky_rules_json: List[FlakyRule] = []
     for _ in range(3):
         try:
-            raw_json = fetch_json(url)
+            raw_json = fetch_json_list(url)
             for rule in raw_json:
                 flaky_rules_json.append(FlakyRule(**rule))
             break
@@ -1329,10 +1325,10 @@ FROM
 where
     j.head_sha in ('{head_sha}','{merge_base}')
 """
-    res: List[Dict[str, Any]] = rockset.Client(
+    res = rockset.Client(
         api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     ).sql(rockset.Q(query))
-    return res
+    return cast(List[Dict[str, Any]], res.results())
 
 def get_classifications(
     head_sha: str,
@@ -1486,7 +1482,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         return
     response = cast(
         Dict[str, Any],
-        fetch_json(
+        fetch_json_list(
             "https://api.github.com/search/issues",
             params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
         ),
@@ -1538,6 +1534,10 @@ def categorize_checks(
                 ok_failed_checks.append((checkname, check_runs[checkname].url))
             else:
                 failed_checks.append((checkname, check_runs[checkname].url))
+
+    if ok_failed_checks:
+        print("The following checks failed but were ok to fail: " + ", ".join([x[0] for x in ok_failed_checks]))
+
     if len(ok_failed_checks) > ok_failed_checks_threshold:
         failed_checks = failed_checks + ok_failed_checks
 
@@ -1705,9 +1705,9 @@ def main() -> None:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
 
-    if pr.is_closed():
-        gh_post_pr_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
-        return
+    # if pr.is_closed():
+    #     gh_post_pr_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
+    #     return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)

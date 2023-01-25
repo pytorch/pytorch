@@ -11,19 +11,25 @@ import json
 import os
 from hashlib import sha256
 
-from trymerge import (find_matching_merge_rule,
-                      get_land_checkrun_conclusions,
-                      validate_land_time_checks,
-                      gh_graphql,
-                      gh_get_team_members,
-                      read_merge_rules,
-                      validate_revert,
-                      GitHubPR,
-                      MergeRule,
-                      MandatoryChecksMissingError,
-                      PostCommentError,
-                      FlakyRule,
-                      main as trymerge_main)
+from trymerge import (
+    find_matching_merge_rule,
+    get_land_checkrun_conclusions,
+    validate_land_time_checks,
+    gh_graphql,
+    gh_get_team_members,
+    read_merge_rules,
+    validate_revert,
+    GitHubPR,
+    MergeRule,
+    MandatoryChecksMissingError,
+    PostCommentError,
+    FlakyRule,
+    categorize_checks,
+    get_combined_checks_from_pr_and_land_validation,
+    _fetch_json_any,
+    get_rockset_results,
+    main as trymerge_main,
+)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, Dict, List, Optional
 from unittest import TestCase, main, mock
@@ -32,8 +38,13 @@ from urllib.error import HTTPError
 if 'GIT_REMOTE_URL' not in os.environ:
     os.environ['GIT_REMOTE_URL'] = "https://github.com/pytorch/pytorch"
 
-def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
-    gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
+def mock_query(
+    fallback_function: Any,
+    file_name: str,
+    key_function: Any,
+    *args: Any,
+) -> Any:
+    gql_db_fname = os.path.join(os.path.dirname(__file__), file_name)
 
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
@@ -46,21 +57,25 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
             json.dump(obj, f, indent=2)
             f.write("\n")
 
-    key = f"query_sha={sha256(query.encode('utf-8')).hexdigest()} " + " ".join([f"{k}={kwargs[k]}" for k in sorted(kwargs.keys())])
+    key = key_function(*args)
     mocked_queries = get_mocked_queries()
 
     if key in mocked_queries:
         return mocked_queries[key]
 
     try:
-        rc = gh_graphql(query, **kwargs)
+        rc = fallback_function(*args)
     except HTTPError as err:
         if err.code == 401:
-            err_msg = "If you are seeing this message during workflow run, please make sure to update gql_mocks.json"
+            err_msg = f"If you are seeing this message during workflow run, please make sure to update {file_name}"
             err_msg += f" locally, by deleting it and running {os.path.basename(__file__)} with "
             err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN environment variable"
-            if os.getenv("GITHUB_TOKEN") is None:
-                err_msg = "Failed to update cached GraphQL queries as GITHUB_TOKEN is not defined." + err_msg
+            err_msg += " the rockset api key passed via ROCKSET_API_KEY environment variable"
+            if os.getenv("GITHUB_TOKEN") is None or os.getenv("ROCKSET_API_KEY") is None:
+                err_msg = (
+                    "Failed to update cached GraphQL queries as GITHUB_TOKEN or ROCKSET_API_KEY is not defined."
+                    + err_msg
+                )
             raise RuntimeError(err_msg) from err
     mocked_queries[key] = rc
 
@@ -68,8 +83,48 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
 
     return rc
 
-def mock_parse_args(revert: bool = False,
-                    force: bool = False) -> Any:
+
+def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
+    def key_function(query: str, kwargs: Any) -> str:
+        return f"query_sha={sha256(query.encode('utf-8')).hexdigest()} " + " ".join(
+            [f"{k}={kwargs[k]}" for k in sorted(kwargs.keys())]
+        )
+
+    def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
+        return gh_graphql(query, **kwargs)
+    return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
+
+
+def mocked_fetch_json(
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None
+) -> Any:
+    def key_function(
+        url: str,
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None
+    ) -> str:
+        params_key = (
+            [f"{k}={params[k]}" for k in sorted(params.keys())] if params else "None"
+        )
+        data_key = [f"{k}={data[k]}" for k in sorted(data.keys())] if data else "None"
+        return f"query_sha={url} {params_key} {data_key}"
+
+    return mock_query(
+        _fetch_json_any, "json_mocks.json", key_function, url, params, data
+    )
+
+def mocked_rockset_results(head_sha: str, merge_base: str) -> Any:
+    return mock_query(
+        get_rockset_results,
+        "rockset_mocks.json",
+        lambda x, y: f"{x} {y}",
+        head_sha,
+        merge_base,
+    )
+
+def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
     class Object(object):
         def __init__(self) -> None:
             self.revert = revert
@@ -133,13 +188,17 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
 
-
-def mocked_get_flaky_rules() -> List[FlakyRule]:
-    return [FlakyRule("flakyrule", ["first capture", "second capture"])]
-
-def mocked_get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
+def empty_flaky_rules() -> List[FlakyRule]:
     return []
 
+def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
+    return []
+
+def dummy_merge_base() -> str:
+    return "dummy"
+
+def mocked_flaky_rules() -> List[FlakyRule]:
+    return [FlakyRule("distributed", ["##[error]The operation was canceled."])]
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -150,8 +209,10 @@ class DummyGitRepo(GitRepo):
     def commit_message(self, ref: str) -> str:
         return "super awsome commit message"
 
-@mock.patch('trymerge.get_flaky_rules', side_effect=mocked_get_flaky_rules)
-@mock.patch('trymerge.get_rockset_results', side_effect=mocked_get_rockset_results)
+
+@mock.patch("trymerge.get_flaky_rules", side_effect=empty_flaky_rules)
+@mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
+@mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
 class TestGitHubPR(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
@@ -244,7 +305,7 @@ class TestGitHubPR(TestCase):
         self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
     def test_team_members(self, mocked_gql: Any, *args: Any) -> None:
         "Test fetching team members works"
         dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
@@ -378,6 +439,33 @@ class TestGitHubPR(TestCase):
 
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
+
+@mock.patch("trymerge._fetch_json_any", side_effect=mocked_fetch_json)
+@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+class TestBypassFailures(TestCase):
+    @mock.patch("trymerge.get_flaky_rules", side_effect=mocked_flaky_rules)
+    def test_get_classifications(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 92863)
+        checks = get_combined_checks_from_pr_and_land_validation(pr, None)
+        self.assertTrue(
+            checks[
+                "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
+            ].classification
+            == "BROKEN_TRUNK"
+        )
+        self.assertTrue(
+            checks[
+                "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
+            ].classification
+            == "FLAKY"
+        )
+        pending, failed = categorize_checks(checks, list(checks.keys()), ok_failed_checks_threshold=2)
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        pending, failed = categorize_checks(checks, list(checks.keys()), ok_failed_checks_threshold=1)
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
 
 if __name__ == "__main__":
     main()
