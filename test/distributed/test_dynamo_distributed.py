@@ -66,10 +66,7 @@ def get_custom_model(device):
             self.weight = nn.Parameter(torch.randn(512, 512))
 
         def forward(self, x):
-            tmp = torch.mm(x, self.weight.t())
-            # test an edge case where torch.where.scalar was decomposed to aten.where.self(tensor, tensor, tensor)
-            # and the tensors T(0.4) and T(0.5) were not wrapped in FakeTensors during DDPOptimizer compilation
-            return tmp + torch.where(tmp < 0.5, 0.3, 0.6)
+            return torch.mm(x, self.weight.t())
 
     class MyLinear(torch.nn.Module):
         def __init__(self):
