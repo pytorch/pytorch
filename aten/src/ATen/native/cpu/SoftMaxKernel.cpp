@@ -24,7 +24,7 @@
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t>
@@ -1289,4 +1289,4 @@ REGISTER_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
 REGISTER_DISPATCH(
     log_softmax_backward_kernel,
     &log_softmax_backward_kernel_impl);
-}} // namespace at::native
+} // namespace at::native

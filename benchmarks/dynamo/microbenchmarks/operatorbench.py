@@ -135,14 +135,6 @@ def skip_operator(operator):
     if inductor_config.triton.convolution == "aten" and "convolution" in str(operator):
         return True
 
-    if inductor_config.triton.mm == "aten" and operator in (
-        aten.mm.default,
-        aten.bmm.default,
-        aten.addmm.default,
-        aten.matmul.default,
-    ):
-        return True
-
     return False
 
 
