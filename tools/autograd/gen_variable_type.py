@@ -376,7 +376,6 @@ GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
     "coalesce",
     "values",
     "_sparse_coo_tensor_with_dims_and_tensors",
-    "sparse_mask_helper_cuda",
     "_sparse_addmm",
 }
 
