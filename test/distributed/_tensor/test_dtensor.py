@@ -73,40 +73,46 @@ class DTensorTest(DTensorTestBase):
             self.assertTrue(meta_dtensor.is_meta)
             meta_dtensor = torch.empty_like(meta_dtensor, device=self.device_type)
             torch.nn.init.constant_(meta_dtensor, 1.2)
+            value_tensor = torch.empty_like(meta_dtensor.to_local()).fill_(1.2)
             self.assertFalse(meta_dtensor.is_meta)
             self.assertEqual(meta_dtensor.device.type, self.device_type)
+            self.assertEqual(meta_dtensor.to_local(), value_tensor)
             # Test from_local on meta tensor
             meta_dtensor = DTensor.from_local(meta_tensor, device_mesh, dist_spec)
             meta_dtensor = torch.empty_like(meta_dtensor, device=self.device_type)
             torch.nn.init.constant_(meta_dtensor, 1.5)
             self.assertEqual(meta_dtensor.device.type, self.device_type)
+            value_tensor = torch.empty_like(meta_dtensor.to_local()).fill_(1.5)
+            self.assertEqual(meta_dtensor.to_local(), value_tensor)
 
     @with_comms
     def test_modules_w_meta_dtensor(self):
         model = DummyMLP("meta")
         device_mesh = self.build_device_mesh()
         model_tp = parallelize_module(model, device_mesh, PairwiseParallel())
-        optim = torch.optim.SGD(model_tp.parameters(), lr=0.1)
         model_tp.to_empty(device=self.device_type)
         model_tp.reset_parameters()
+        optim = torch.optim.SGD(model_tp.parameters(), lr=0.1)
         model_regular = DummyMLP(self.device_type)
         model_regular_tp = parallelize_module(model_regular, device_mesh, PairwiseParallel())
-        optim_tp = torch.optim.SGD(model_regular_tp.parameters(), lr=0.1)
+        optim_regular = torch.optim.SGD(model_regular_tp.parameters(), lr=0.1)
         model_regular_tp.reset_parameters()
+        torch.manual_seed(0)
         inp = torch.randn(20, 5, device=self.device_type)
 
-        output = model(inp)
-        output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
+        output = model_tp(inp)
+        output_regular = model_regular_tp(inp)
+        self.assertEqual(output, output_regular)
 
         output.sum().backward()
-        output_tp.sum().backward()
+        output_regular.sum().backward()
 
         optim.step()
-        optim_tp.step()
+        optim_regular.step()
 
+        torch.manual_seed(1)
         inp = torch.randn(20, 5, device=self.device_type)
-        self.assertEqual(model(inp), model_tp(inp))
+        self.assertEqual(model_tp(inp), model_regular_tp(inp))
 
     @with_comms
     def test_dtensor_stride(self):
