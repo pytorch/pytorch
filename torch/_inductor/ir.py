@@ -3026,6 +3026,11 @@ class MultiOutputLayout(IRNode):
     device: torch.device
 
 
+@dataclasses.dataclass
+class MultiOutputLayoutOut(IRNode):
+    outputs: List[Layout]
+
+
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
         wrapper.writeline(
@@ -3394,17 +3399,33 @@ class AllGather(ExternKernelOut):
             x.size(),
             x.stride(),
         )
-        return AllGather(
-            layout=MultiOutputLayout(x.get_device()),
+        num_ranks = get_num_ranks(arg)
+
+        packed = AllGather(
+            layout=MultiOutputLayoutOut(x.get_device()),
             inputs=[x],
         )
+
+        return [
+            MultiOutput(
+                FixedLayout(
+                    x.get_device(),
+                    x.get_dtype(),
+                    x.size(),
+                    x.stride(),
+                ),
+                packed,
+                index,
+            )
+            for index in range(num_ranks)
+        ]
 
     def codegen(self, wrapper):
         wrapper.header.writeline(
             f"import torch.distributed as dist"
         )
         wrapper.writeline(
-            f"{self.get_name()}_work = dist.reduce_scatter({self.get_name()}, {self.codegen_args()[0]}, async_op=True)"
+            f"{self.get_name()}_work = dist.all_gather({', '.join(self.get_names())}, {self.codegen_args()[0]}, async_op=True)"
         )
         wrapper.writeline(
             f"{self.get_name()}_work.wait()"

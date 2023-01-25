@@ -147,15 +147,8 @@ class Shard(Placement):
         scattered_list, pad_idx = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-        # wrap with comm tensor
-        scattered_list = [CommTensor(t) for t in scattered_list]
-        output = torch.empty_like(scattered_list[my_coordinate])
-        mesh.reduce_scatter(
-            CommTensor(output),
-            scattered_list,  # pyre-ignore[6]
-            op=reduce_op,
-            mesh_dim=mesh_dim,
-        )
+        output = torch.ops.c10d.traceable_reduce_scatter(
+            scattered_list, str(num_chunks))
         if pad_idx != 0 and my_coordinate >= pad_idx:
             output = self._unpad_tensor(output)
         return output
@@ -183,22 +176,17 @@ class Shard(Placement):
         if pad_idx != 0 and my_coordinate >= pad_idx:
             local_tensor = self._pad_tensor(local_tensor).contiguous()
 
-        gathered_list = []
-        # N.B. CommTensor does not change eager mode behavior. During tracing, it
-        # makes sure communication result is properly waited before subsequent
-        # read operations.
-        for _ in range(num_chunks):
-            gathered_list.append(
-                CommTensor(
-                    torch.empty_like(
-                        local_tensor,
-                        memory_format=torch.contiguous_format,
-                    )
-                )
-            )
+        # temporarily not supported while hacking compiler mode
 
-        mesh.all_gather(gathered_list, CommTensor(local_tensor.contiguous()), mesh_dim=mesh_dim)  # type: ignore[arg-type]
-        # unpad the tensor if the input tensor was padded
+        gathered = torch.ops.c10d.traceable_all_gather_base(
+            local_tensor,
+            str(num_chunks),
+        )
+
+        if self.dim == 0 and pad_idx == 0:
+            return gathered
+
+        gathered_list = torch.tensor_split(gathered, num_chunks)
         if pad_idx != 0:
             gathered_list = [
                 self._unpad_tensor(gathered_tensor)  # type: ignore[misc]
@@ -206,7 +194,7 @@ class Shard(Placement):
                 else gathered_tensor
                 for i, gathered_tensor in enumerate(gathered_list)
             ]
-        return torch.cat(gathered_list, dim=self.dim)  # type: ignore[arg-type]
+        return torch.cat(gathered_list, self.dim)
 
 
 @dataclass

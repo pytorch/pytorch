@@ -396,6 +396,10 @@ class WrapperCodeGen(CodeGen):
             allocation = self.get_deferred_line(name, layout)
             self.writeline(allocation)
             return
+        if isinstance(layout, ir.MultiOutputLayoutOut):
+            for out_node in layout.outputs:
+                self.codegen_allocation(out_node)
+
 
         self.write_allocate_line(buffer)
 

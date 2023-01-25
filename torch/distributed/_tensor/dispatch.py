@@ -73,6 +73,8 @@ class OpSchema(object):
     is_inplace: bool = False
     is_out_variant: bool = False
 
+    # used for ops with no input
+    default_mesh: dtensor.DeviceMesh = None
 
     def __post_init__(self) -> None:
         # simple analysis of function schema to determine
@@ -155,12 +157,13 @@ def propagate_input_sharding(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
     op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]],
+    default_mesh: dtensor.DeviceMesh = None,
 ) -> Tuple[OpSchema, bool, Optional[OutputSharding]]:
     # unwrap the args/kwargs schema
     args_schema = tree_map(unwrap_schema, args)
     kwargs_schema = tree_map(unwrap_schema, kwargs)
 
-    op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
+    op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema, default_mesh=default_mesh)
 
     if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
         print(f"{op_call}({op_schema})")
@@ -230,6 +233,7 @@ def operator_dispatch(
     kwargs: Dict[str, object],
     op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]],
     custom_dispatch_ops: Dict[str, Callable[..., object]],
+    default_mesh: dtensor.DeviceMesh = None,
 ) -> object:
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
@@ -242,7 +246,7 @@ def operator_dispatch(
         return custom_dispatch_ops[str(op_call)](*args, **kwargs)
 
     target_schema, redistribute, output_sharding = propagate_input_sharding(
-        op_call, args, kwargs, op_to_rules
+        op_call, args, kwargs, op_to_rules, default_mesh=default_mesh,
     )
 
     if output_sharding is None:
