@@ -109,9 +109,15 @@ class TestFSDPCheckpoint(FSDPTest):
         use_orig_params: bool,
         sharding_strategy: ShardingStrategy,
     ) -> bool:
-        if fsdp_checkpoint_model_init_fn in (
-            self._init_fsdp_checkpoint_model6,
-            self._init_fsdp_checkpoint_model7,
+        if fsdp_checkpoint_model_init_fn in (self._init_fsdp_checkpoint_model6,):
+            return True
+        if (
+            fsdp_checkpoint_model_init_fn == self._init_fsdp_checkpoint_model7
+            and checkpoint_fn
+            in (
+                _checkpoint_wrapper_nonreentrant,
+                _utils_checkpoint_nonreentrant,
+            )
         ):
             return True
         if fsdp_checkpoint_model_init_fn in (
