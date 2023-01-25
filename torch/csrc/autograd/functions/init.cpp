@@ -15,6 +15,8 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <utility>
+
 using namespace torch::autograd;
 
 struct DelayedErrorCtor {
@@ -30,7 +32,7 @@ struct DelayedErrorCtor {
     TORCH_CHECK(
         THPUtils_checkLong(arg2), "argument 'num_inputs' must be an int");
     int num_inputs = THPUtils_unpackLong(arg2);
-    return new DelayedError(msg, num_inputs);
+    return new DelayedError(std::move(msg), num_inputs);
   }
 };
 
