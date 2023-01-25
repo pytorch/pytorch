@@ -1368,49 +1368,42 @@ class TritonScheduling:
         # Minimum register instruction sequence problem: revisiting optimal code generation for DAGs
         # If you intend to do that, talk to Lezcano, as he knows how to improve the algorithm in that paper
 
-        die_now = []
-        dead_variables = set()
-        for n in reversed(list_nodes):
-            if n in (EnableReduction, DisableReduction):
-                die_now.append(set())
-            else:
-                # Use the writes as this may run before DCE
-                used_vars = set(itertools.chain((dep.name for dep in n.read_writes.reads),
-                                                (dep.name for dep in n.read_writes.writes)))
-                die_now.append(used_vars - dead_variables)
-                dead_variables |= die_now[-1]
-
         # We assume we are in a reduction by default. This can be generalised afterwards
         in_reduction_loop = True
         loads_in_loop = set()
         max_alive_in_loop = 0
         max_alive = 0
         alive = set()
-        for n, die in zip(list_nodes, reversed(die_now)):
+        for n in reversed(list_nodes):
             if n is EnableReduction:
+                in_reduction_loop = False
+                # Loads are all done at the beginning of the loop
+                max_alive = max(
+                    max_alive, len(alive | loads_in_loop) + max_alive_in_loop
+                )
+            elif n is DisableReduction:
                 in_reduction_loop = True
                 loads_in_loop = set()
                 max_alive_in_loop = 0
-            elif n is DisableReduction:
-                in_reduction_loop = False
-                # Loads are all done at the beginning of the loop
-                max_alive = max(max_alive, len(alive) + len(loads_in_loop) + max_alive_in_loop)
             else:
                 max_alive_node = n.max_alive_variables()
-
-                writes = set(w.name for w in n.read_writes.writes)
-                alive = (alive | writes) - die
+                # Update alive
+                reads = n.read_writes.reads
+                alive -= n.read_writes.writes
+                alive |= reads
                 if in_reduction_loop:
-                    reads = set(r.name for r in n.read_writes.reads)
                     loads_in_loop |= reads
                     # We add the loads later as we consider them alive for the whole reduction
-                    max_alive_in_loop = max(max_alive_in_loop, max_alive_node - len(reads))
+                    max_alive_in_loop = max(
+                        max_alive_in_loop, max_alive_node - len(reads)
+                    )
                 else:
                     max_alive = max(max_alive, max_alive_node + len(alive))
-        # There's no DisableReduction at the end
+        # There's no EnableReduction at the beginning
         if in_reduction_loop:
-            # Loads are all done at the beginning of the loop
-            max_alive = max(max_alive, len(alive) + len(loads_in_loop) + max_alive_in_loop)
+            max_alive = max(
+                max_alive, len(alive | loads_in_loop) + max_alive_in_loop
+            )
 
         return max_alive
 

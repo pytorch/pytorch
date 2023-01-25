@@ -180,25 +180,24 @@ class BaseSchedulerNode:
 
     def max_alive_variables(self):
         graph = self._body.root_block.graph
-        die_now = []
-        dead_variables = set()
-        for n in reversed(graph.nodes):
-            # Use n.name, we don't asume that DCE has run before this function
-            used_vars = set(itertools.chain((node.name for node in n.args if isinstance(node, torch.fx.Node)),
-                                            (node.name for node in n.kwargs.values() if isinstance(node, torch.fx.Node)),
-                                            (n.name,)))
-            die_now.append(used_vars - dead_variables)
-            dead_variables |= die_now[-1]
-
-        # We don't want to track the ops variable
-        die_now[-1].add("ops")
         max_alive = 0
-        alive = set()
-        for n, die in zip(graph.nodes, reversed(die_now)):
-            var = n.name
-            alive.add(var)
-            alive -= die
-            max_alive = max(max_alive, len(alive))
+        alive_variables = set()
+        for n in reversed(graph.nodes):
+            alive_variables.discard(n.name)
+            used_vars = set(
+                itertools.chain(
+                    (node.name for node in n.args if isinstance(node, torch.fx.Node)),
+                    (
+                        node.name
+                        for node in n.kwargs.values()
+                        if isinstance(node, torch.fx.Node)
+                    ),
+                )
+            )
+
+            alive_variables |= used_vars
+            max_alive = max(max_alive, len(alive_variables))
+
         return max_alive
 
     def codegen_originating_info(self, buffer, only_once=True):
