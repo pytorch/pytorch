@@ -47,7 +47,10 @@ class BatchUpdateParameterServer(object):
     def update_and_fetch_model(ps_rref, grads):
         self = ps_rref.local_value()
         for p, g in zip(self.model.parameters(), grads):
-            p.grad += g
+            if p.grad is None:
+                p.grad = g
+            else:
+                p.grad += g
         with self.lock:
             timed_log(f"PS got {self.curr_update_size}/{self.batch_update_size} updates")
             self.curr_update_size += 1
