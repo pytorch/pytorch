@@ -64,7 +64,6 @@ namespace nn {
 /// iteration over submodules, positional access, adding new modules from a
 /// vector of key-module pairs or an `OrderedDict` or another `ModuleDict` after
 /// construction via `update`.
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
  public:
   using Iterator =

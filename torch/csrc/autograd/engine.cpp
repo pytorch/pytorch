@@ -1546,8 +1546,8 @@ void GraphTask::init_to_execute(
 
   struct Frame {
     Frame(Node* fn) : fn_(fn), next_next_fn_(0) {}
-    Node* fn_;
-    size_t next_next_fn_;
+    Node* fn_{};
+    size_t next_next_fn_{};
 
     Node* get_next_fn() {
       const auto& next = fn_->next_edges();

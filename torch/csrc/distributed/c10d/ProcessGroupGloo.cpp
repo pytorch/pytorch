@@ -519,7 +519,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
     // correct timestamps for work that is asynchronously executed.
     : Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
       outputTensors_(std::move(outputTensors)),
-      future_(createFutureAsOutput(outputTensors)) {
+      future_(createFutureAsOutput(outputTensors_)) {
   if (profilingTitle != nullptr) {
     recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
   }
