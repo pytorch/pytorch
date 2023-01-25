@@ -18,7 +18,6 @@ tag="${DOCKER_TAG}"
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 image="${registry}/pytorch/${IMAGE_NAME}"
-ghcr_image="ghcr.io/pytorch/ci-image"
 
 login() {
   aws ecr get-authorization-token --region us-east-1 --output text --query 'authorizationData[].authorizationToken' |
@@ -36,9 +35,6 @@ if [[ -z "${GITHUB_ACTIONS}" ]]; then
   trap "docker logout ${registry}" EXIT
 fi
 
-# export EC2=1
-# export JENKINS=1
-
 # Try to pull the previous image (perhaps we can reuse some layers)
 # if [ -n "${last_tag}" ]; then
 #   docker pull "${image}:${last_tag}" || true
@@ -54,13 +50,6 @@ if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
   # NOTE: The only workflow that should push these images should be the docker-builds.yml workflow
   if ! docker manifest inspect "${image}:${tag}" >/dev/null 2>/dev/null; then
     docker push "${image}:${tag}"
-  fi
-
-  if [ "${PUSH_GHCR_IMAGE:-}" = "true" ]; then
-    # Push docker image to the ghcr.io
-    echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
-    docker tag "${image}:${tag}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
-    docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
   fi
 fi
 

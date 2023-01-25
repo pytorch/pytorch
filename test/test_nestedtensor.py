@@ -1805,7 +1805,7 @@ class TestNestedTensorDeviceType(TestCase):
         def rand_tensor(*shape):
             return torch.randn(shape, device=device)
 
-        E = 10
+        E = 8
         if input_dim == 3:
             # Shape: (N, L, E); ragged L
             query = torch.nested.nested_tensor([rand_tensor(2, E), rand_tensor(3, E), rand_tensor(4, E)])
@@ -1814,6 +1814,7 @@ class TestNestedTensorDeviceType(TestCase):
             key = torch.nested.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
             value = torch.nested.nested_tensor([rand_tensor(3, E), rand_tensor(4, E), rand_tensor(5, E)])
         elif input_dim == 4:
+            # In the 4D case the L and S is ragged
             # Shape: (N, N', L, E); ragged N' and L
             query = torch.nested.nested_tensor([rand_tensor(2, 2, E), rand_tensor(3, 3, E), rand_tensor(4, 4, E)])
             # Shape: (N, N', S, E); ragged N' and S
@@ -1829,34 +1830,28 @@ class TestNestedTensorDeviceType(TestCase):
         attn_mask = torch.nested.nested_tensor([rand_mask((2, 3)), rand_mask((3, 4)), rand_mask((4, 5))])
 
         dropout_p = 0.0  # no dropout for reproducibility
-        need_attn_weights: bool = True
 
         # Success case: no attn_mask set and is_causal=False.
-        actual = torch.ops.aten._scaled_dot_product_attention(
-            query, key, value, attn_mask=None, dropout_p=dropout_p, need_attn_weights=need_attn_weights)
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            query, key, value, attn_mask=None, is_causal=False, dropout_p=dropout_p)
 
         expected_outputs = []
-        expected_attn_weights = []
         for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):
-            (output, attn_weights) = torch.ops.aten._scaled_dot_product_attention(
-                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p,
-                need_attn_weights=need_attn_weights)
+            output = torch.nn.functional.scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p)
             expected_outputs.append(output.squeeze(0))
-            expected_attn_weights.append(attn_weights.squeeze(0))
         expected_output_nested = torch.nested.nested_tensor(expected_outputs)
-        expected_attn_weight_nested = torch.nested.nested_tensor(expected_attn_weights)
-        self.assertEqual(actual[0], expected_output_nested)
-        self.assertEqual(actual[1], expected_attn_weight_nested)
+        self.assertEqual(actual, expected_output_nested)
 
         # Error case: explicit attn_mask set.
         with self.assertRaisesRegex(RuntimeError, "not supported when an explicit attn_mask is set"):
-            torch.ops.aten._scaled_dot_product_attention(
-                query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, need_attn_weights=need_attn_weights)
+            torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask, dropout_p=dropout_p)
 
         # Error case: is_causal=True.
         with self.assertRaisesRegex(RuntimeError, "not supported when is_causal=True"):
-            torch.ops.aten._scaled_dot_product_attention(
-                query, key, value, dropout_p=dropout_p, need_attn_weights=need_attn_weights, is_causal=True)
+            torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=True)
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_empty_like(self, device, dtype):
