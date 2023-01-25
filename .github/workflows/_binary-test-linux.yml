@@ -18,7 +18,7 @@ on:
       BUILDER_ROOT:
         required: true
         type: string
-        description: Root directory for the pytorch/builder repository
+        description: Root directory for the ptrblck/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
@@ -151,14 +151,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
 
-      - name: Checkout pytorch/builder to builder dir
+      - name: Checkout ptrblck/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
           ref: main
           submodules: recursive
-          repository: pytorch/builder
+          repository: ptrblck/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean ptrblck/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
