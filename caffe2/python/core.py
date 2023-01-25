@@ -7,7 +7,6 @@
 
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
-from future.utils import viewitems, viewkeys, viewvalues
 from itertools import chain
 from six import binary_type, string_types, text_type
 
@@ -311,7 +310,7 @@ class BlobReference(object):
             if '_ENGINE_' not in op or '_ENGINE_CUDNN' in op]
         return sorted(set(chain(
             dir(type(self)),
-            viewkeys(self.__dict__),
+            self.__dict__.keys(),
             additional_methods
         )))
 
@@ -414,7 +413,7 @@ def CreateOperator(
     if arg is not None:
         operator.arg.extend(arg)
     # Add all other arguments
-    for key, value in viewitems(kwargs):
+    for key, value in kwargs.items():
         if value is not None:
             operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
 
@@ -627,8 +626,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
     def AppendSparseGenerators(self, sparse_generators):
         # merge indices and values generators for sparse gradients
-        for name, input_generators in viewitems(sparse_generators):
-            for version, generators in viewitems(input_generators):
+        for name, input_generators in sparse_generators.items():
+            for version, generators in input_generators.items():
                 if len(generators) == 1:
                     # either indices or values are generated (but not both)
                     generator = generators[0]
@@ -995,7 +994,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         input_to_grad = {}
         gradient_ops = []
 
-        for y, g in viewitems(ys):
+        for y, g in ys.items():
             autograd_op = None
             if g is None:
                 autograd_op = CreateOperator(
@@ -1062,7 +1061,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
         # Set the gradient frontier with the initialized external
         # gradients.
-        for y in viewkeys(ys):
+        for y in ys.keys():
             self.gradient_frontier[y] = self.frontier[y]
             self.input_usages[str(y)][self.frontier[str(y)]].append(
                 len(self.ssa))
@@ -1094,7 +1093,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # operators ready. For the output map, we will convert everything to
         # BlobReferences for easier handling in python.
         all_input_to_grad_out = {}
-        for key, val in viewitems(all_input_to_grad):
+        for key, val in all_input_to_grad.items():
             if val is not None:
                 if (isinstance(val, string_types) or
                         isinstance(val, binary_type)):
@@ -1412,7 +1411,7 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
     ssa, blob_versions = get_ssa(proto)
     undef_blobs = get_undefined_blobs(ssa)
 
-    for blob in viewkeys(blob_versions):
+    for blob in blob_versions.keys():
         if blob in blob_remap:
             continue
         elif blob in undef_blobs:
@@ -1824,7 +1823,7 @@ class Net(object):
             OrderedDict(zip(inputs, inputs)))
         for output in outputs:
             assert self.BlobIsDefined(output), "{} is not defined".format(output)
-        input_names = {str(k): str(v) for k, v in viewitems(inputs)}
+        input_names = {str(k): str(v) for k, v in inputs.items()}
         output_names = [str(o) for o in outputs]
         proto = self._net
         blob_versions = {str(i): 0 for i in inputs}
@@ -1836,7 +1835,7 @@ class Net(object):
             'generate the given input.')
 
         sub_ssa = [op for i, op in enumerate(ssa) if i in used_op_ids]
-        undef_blobs = get_undefined_blobs(sub_ssa) - set(viewkeys(input_names))
+        undef_blobs = get_undefined_blobs(sub_ssa) - set(input_names.keys())
         prefix = (name + '/') if name else ''
 
         def remap(blob_name):
@@ -1847,10 +1846,10 @@ class Net(object):
             else:
                 return prefix + blob_name
 
-        blob_mapping = {b: remap(b) for b in viewkeys(blob_versions)}
+        blob_mapping = {b: remap(b) for b in blob_versions.keys()}
         new_net = self.Clone(name, blob_mapping, used_op_ids, remap_funcs)
         new_in = [
-            blob_mapping[i] for i in viewkeys(input_names)] + list(undef_blobs)
+            blob_mapping[i] for i in input_names.keys()] + list(undef_blobs)
         new_out = [blob_mapping[o] for o in output_names]
         del new_net.Proto().external_input[:]
         new_net.Proto().external_input.extend(new_in)
@@ -2285,7 +2284,7 @@ class Net(object):
             if '_ENGINE_' not in op]
         return sorted(set(chain(
             dir(type(self)),
-            viewkeys(self.__dict__),
+            self.__dict__.keys(),
             additional_methods
         )))
 
@@ -2366,7 +2365,7 @@ class Net(object):
             grad_output_indices=grad_output_indices,
             grad_input_indices=grad_input_indices,
             *args,
-            **dict(chain(viewitems(kwargs), viewitems(core_kwargs)))
+            **dict(chain(kwargs.items(), core_kwargs.items()))
         )
 
     def is_external_input(self, blob):
@@ -2725,7 +2724,7 @@ class ExecutionStep(object):
             len(self._step.substep) > 0)
 
     def Nets(self):
-        return list(viewvalues(self._net_dict))
+        return list(self._net_dict.values())
 
     def Substeps(self):
         return self._substeps
@@ -2805,7 +2804,7 @@ class ExecutionStep(object):
         """
         return [
             attr
-            for net in viewvalues(self._net_dict)
+            for net in self._net_dict.values()
             for attr in net.get_attributes(name)
         ]
 
@@ -2902,7 +2901,7 @@ class Plan(object):
                 self._plan.network.add().CopyFrom(net.Proto())
 
     def Nets(self):
-        return list(viewvalues(self._net_dict))
+        return list(self._net_dict.values())
 
     def AddStep(self, step):
         assert isinstance(step, ExecutionStep)
@@ -2926,7 +2925,7 @@ class Plan(object):
         """
         return [
             attr
-            for net in viewvalues(self._net_dict)
+            for net in self._net_dict.values()
             for attr in net.get_attributes(name)
         ]
 
