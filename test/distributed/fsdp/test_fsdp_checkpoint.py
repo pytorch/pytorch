@@ -4,12 +4,14 @@ import contextlib
 import sys
 from copy import deepcopy
 from functools import partial
+from typing import Any, Callable, Dict
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
+    CheckpointImpl,
     offload_wrapper,
 )
 from torch.distributed.fsdp import ShardingStrategy
@@ -17,7 +19,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
-
+from torch.testing._internal.common_dist_composable import CompositeParamModel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest
 from torch.testing._internal.common_utils import (
@@ -72,7 +74,484 @@ def patch_save_on_cpu(new_save_on_cpu):
         )
 
 
+def _patch_utils_checkpoint(module: nn.Module, use_reentrant: bool) -> nn.Module:
+    orig_forward = module.forward
+    module._orig_forward = orig_forward
+    module.forward = lambda *args, **kwargs: checkpoint(
+        module._orig_forward, *args, use_reentrant=use_reentrant, **kwargs
+    )
+    return module
+
+
+_checkpoint_wrapper_reentrant = partial(
+    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT
+)
+_checkpoint_wrapper_nonreentrant = partial(
+    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+)
+_utils_checkpoint_reentrant = partial(_patch_utils_checkpoint, use_reentrant=True)
+_utils_checkpoint_nonreentrant = partial(_patch_utils_checkpoint, use_reentrant=False)
+
+
 class TestFSDPCheckpoint(FSDPTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda")
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _is_error_config(
+        self,
+        fsdp_checkpoint_model_init_fn: Callable,
+        checkpoint_fn: Callable,
+        use_orig_params: bool,
+        sharding_strategy: ShardingStrategy,
+    ) -> bool:
+        if fsdp_checkpoint_model_init_fn in (
+            self._init_fsdp_checkpoint_model4,
+            self._init_fsdp_checkpoint_model5,
+            self._init_fsdp_checkpoint_model6,
+            self._init_fsdp_checkpoint_model7,
+        ):
+            return True
+        return False
+
+    def _init_baseline_model(
+        self, local_model: CompositeParamModel, fsdp_kwargs: Dict[str, Any]
+    ):
+        return FSDP(deepcopy(local_model), **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model1(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        return FSDP(checkpoint_fn(deepcopy(local_model)), **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model2(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        model = deepcopy(local_model)
+        model.u1 = FSDP(checkpoint_fn(model.u1), **fsdp_kwargs)
+        return FSDP(model, **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model3(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        model = deepcopy(local_model)
+        model.u1 = checkpoint_fn(model.u1)
+        model.u2 = checkpoint_fn(model.u2)
+        model.u1 = FSDP(model.u1, **fsdp_kwargs)
+        model.u2 = FSDP(model.u2, **fsdp_kwargs)
+        return FSDP(model, **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model4(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        model = deepcopy(local_model)
+        model.u1 = checkpoint_fn(model.u1)
+        return FSDP(model, **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model5(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        model = deepcopy(local_model)
+        model.u1.l1 = FSDP(model.u1.l1, **fsdp_kwargs)
+        model.u1.seq = FSDP(model.u1.seq, **fsdp_kwargs)
+        model.u1 = checkpoint_fn(model.u1)
+        return FSDP(model, **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model6(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        model = deepcopy(local_model)
+        model.u1.l1 = FSDP(model.u1.l1, **fsdp_kwargs)
+        model.u1.l2 = FSDP(model.u1.l2, **fsdp_kwargs)
+        model.u1 = checkpoint_fn(model.u1)
+        return FSDP(model, **fsdp_kwargs)
+
+    def _init_fsdp_checkpoint_model7(
+        self,
+        local_model: CompositeParamModel,
+        fsdp_kwargs: Dict[str, Any],
+        checkpoint_fn: Callable,
+    ):
+        model = deepcopy(local_model)
+        model.u1.l1 = FSDP(model.u1.l1, **fsdp_kwargs)
+        model.u1.seq = FSDP(model.u1.seq, **fsdp_kwargs)
+        model.u1.l2 = FSDP(model.u1.l2, **fsdp_kwargs)
+        model.u1 = checkpoint_fn(model.u1)
+        return FSDP(model, **fsdp_kwargs)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_checkpoint_parity(self):
+        def _run_skipping_error_configs(
+            fsdp_checkpoint_model_init_fn: Callable,
+            checkpoint_fn: Callable,
+            use_orig_params: bool,
+            sharding_strategy: ShardingStrategy,
+        ):
+            if self._is_error_config(
+                fsdp_checkpoint_model_init_fn,
+                checkpoint_fn,
+                use_orig_params,
+                sharding_strategy,
+            ):
+                # Skip erroring configs since they have separate unit tests to
+                # assert the errors
+                return
+            try:
+                return self._test_fsdp_checkpoint_parity(
+                    fsdp_checkpoint_model_init_fn,
+                    checkpoint_fn,
+                    use_orig_params,
+                    sharding_strategy,
+                )
+            except Exception as e:
+                if self.rank == 0:
+                    print(
+                        f"Error!!\n"
+                        f"model_init_fn: {fsdp_checkpoint_model_init_fn.__name__}\n"
+                        f"checkpoint_fn: {checkpoint_fn}\n"
+                        f"use_orig_params: {use_orig_params}\n"
+                        f"sharding_strategy: {sharding_strategy}"
+                    )
+                raise e
+
+        self.run_subtests(
+            {
+                "fsdp_checkpoint_model_init_fn": [
+                    self._init_fsdp_checkpoint_model1,
+                    self._init_fsdp_checkpoint_model2,
+                    self._init_fsdp_checkpoint_model3,
+                    self._init_fsdp_checkpoint_model4,
+                    self._init_fsdp_checkpoint_model5,
+                    self._init_fsdp_checkpoint_model6,
+                    self._init_fsdp_checkpoint_model7,
+                ],
+                "checkpoint_fn": [
+                    _checkpoint_wrapper_reentrant,
+                    _checkpoint_wrapper_nonreentrant,
+                    _utils_checkpoint_reentrant,
+                    _utils_checkpoint_nonreentrant,
+                ],
+                "use_orig_params": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+            },
+            _run_skipping_error_configs,
+        )
+
+    def _test_fsdp_checkpoint_parity(
+        self,
+        fsdp_checkpoint_model_init_fn: Callable,
+        checkpoint_fn: Callable,
+        use_orig_params: bool,
+        sharding_strategy: ShardingStrategy,
+    ):
+        torch.manual_seed(0)
+        model = CompositeParamModel(device=self.device)
+        fsdp_kwargs = {
+            "use_orig_params": use_orig_params,
+            "sharding_strategy": sharding_strategy,
+        }
+        baseline_model = self._init_baseline_model(model, fsdp_kwargs)
+        test_model = fsdp_checkpoint_model_init_fn(model, fsdp_kwargs, checkpoint_fn)
+        baseline_optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-2)
+        test_optim = torch.optim.Adam(test_model.parameters(), lr=1e-2)
+
+        torch.manual_seed(self.rank + 1)
+        for i in range(6):
+            losses = []
+            # Set `requires_grad=True` on the input tensor as required by
+            # reentrant checkpointing
+            inp = torch.randn((8, 100), device=self.device, requires_grad=True)
+            for model, optim in (
+                (baseline_model, baseline_optim),
+                (test_model, test_optim),
+            ):
+                optim.zero_grad(set_to_none=(i % 2 == 0))
+                loss = model(inp).sum()
+                losses.append(loss)
+                loss.backward()
+                optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_checkpoint_strict_submodule_reentrant_raises(self):
+        def run_with_error_ctx(
+            checkpoint_fn: Callable,
+            use_orig_params: bool,
+            sharding_strategy: ShardingStrategy,
+        ):
+            error_type_sharded_strategy = RuntimeError
+            error_regex_sharded_strategy = (
+                r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+                "offset 10000, and itemsize 4 requiring a storage size of 80000 "
+                "are out of bounds for storage of size 0"
+            )
+            error_type_no_shard = AssertionError
+            error_regex_no_shard = "Scalars are not close"
+            if sharding_strategy in (
+                ShardingStrategy.FULL_SHARD,
+                ShardingStrategy.SHARD_GRAD_OP,
+            ):
+                error_type = error_type_sharded_strategy
+                error_regex = error_regex_sharded_strategy
+            elif sharding_strategy == ShardingStrategy.NO_SHARD:
+                error_type = error_type_no_shard
+                error_regex = error_regex_no_shard
+            with self.assertRaisesRegex(error_type, error_regex):
+                self._test_fsdp_checkpoint_parity(
+                    self._init_fsdp_checkpoint_model4,
+                    checkpoint_fn,
+                    use_orig_params,
+                    sharding_strategy,
+                )
+
+        self.run_subtests(
+            {
+                "checkpoint_fn": [
+                    _checkpoint_wrapper_reentrant,
+                    _utils_checkpoint_reentrant,
+                ],
+                "use_orig_params": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    # ShardingStrategy.NO_SHARD,  # TODO: intermittent
+                ],
+            },
+            run_with_error_ctx,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_consecutive_fsdp_reentrant_raises(self):
+        def run_with_error_ctx(
+            checkpoint_fn: Callable,
+            use_orig_params: bool,
+            sharding_strategy: ShardingStrategy,
+        ):
+            error_type_sharded_strategy = RuntimeError
+            error_regex_sharded_strategy = (
+                r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+                "offset 10000, and itemsize 4 requiring a storage size of 80000 "
+                "are out of bounds for storage of size 0"
+            )
+            error_type_no_shard = AssertionError
+            error_regex_no_shard = "Scalars are not close"
+            if sharding_strategy in (
+                ShardingStrategy.FULL_SHARD,
+                ShardingStrategy.SHARD_GRAD_OP,
+            ):
+                error_type = error_type_sharded_strategy
+                error_regex = error_regex_sharded_strategy
+            elif sharding_strategy == ShardingStrategy.NO_SHARD:
+                error_type = error_type_no_shard
+                error_regex = error_regex_no_shard
+            with self.assertRaisesRegex(error_type, error_regex):
+                self._test_fsdp_checkpoint_parity(
+                    self._init_fsdp_checkpoint_model5,
+                    checkpoint_fn,
+                    use_orig_params,
+                    sharding_strategy,
+                )
+
+        self.run_subtests(
+            {
+                "checkpoint_fn": [
+                    _checkpoint_wrapper_reentrant,
+                    _utils_checkpoint_reentrant,
+                ],
+                "use_orig_params": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    # ShardingStrategy.NO_SHARD,  # TODO: intermittent
+                ],
+            },
+            run_with_error_ctx,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_nonconsecutive_fsdp_reentrant_raises(self):
+        def run_with_error_ctx(
+            checkpoint_fn: Callable,
+            use_orig_params: bool,
+            sharding_strategy: ShardingStrategy,
+        ):
+            error_type_sharded_strategy = RuntimeError
+            error_regex_sharded_strategy = (
+                r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+                "offset 10000, and itemsize 4 requiring a storage size of 80000 "
+                "are out of bounds for storage of size 0"
+            )
+            error_type_no_shard = AssertionError
+            error_regex_no_shard = "Scalars are not close"
+            if sharding_strategy in (
+                ShardingStrategy.FULL_SHARD,
+                ShardingStrategy.SHARD_GRAD_OP,
+            ):
+                error_type = error_type_sharded_strategy
+                error_regex = error_regex_sharded_strategy
+            elif sharding_strategy == ShardingStrategy.NO_SHARD:
+                error_type = error_type_no_shard
+                error_regex = error_regex_no_shard
+            with self.assertRaisesRegex(error_type, error_regex):
+                self._test_fsdp_checkpoint_parity(
+                    self._init_fsdp_checkpoint_model6,
+                    checkpoint_fn,
+                    use_orig_params,
+                    sharding_strategy,
+                )
+
+        self.run_subtests(
+            {
+                "checkpoint_fn": [
+                    _checkpoint_wrapper_reentrant,
+                    _utils_checkpoint_reentrant,
+                ],
+                "use_orig_params": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    # ShardingStrategy.NO_SHARD,  # TODO: intermittent
+                ],
+            },
+            run_with_error_ctx,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_nonconsecutive_fsdp_nonreentrant_raises(self):
+        def run_with_error_ctx(
+            checkpoint_fn: Callable,
+            use_orig_params: bool,
+            sharding_strategy: ShardingStrategy,
+        ):
+            error_type_full_shard = RuntimeError
+            error_regex_full_shard = (
+                r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+                "offset 0, and itemsize 4 requiring a storage size of 40000 "
+                "are out of bounds for storage of size 0"
+            )
+            error_type_shard_grad_op = error_type_no_shard_use_flat_params = ValueError
+            error_regex_shard_grad_op = error_regex_no_shard_use_flat_params = (
+                r"expected to be in states \[<TrainingState.FORWARD_BACKWARD: 2>\] "
+                "but current state is TrainingState.IDLE"
+            )
+            error_type_no_shard_use_orig_params = RuntimeError
+            error_regex_no_shard_use_orig_params = (
+                "Cannot writeback when the parameter shape changes"
+            )
+            if sharding_strategy == ShardingStrategy.FULL_SHARD:
+                error_type = error_type_full_shard
+                error_regex = error_regex_full_shard
+            elif sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
+                error_type = error_type_shard_grad_op
+                error_regex = error_regex_shard_grad_op
+            elif sharding_strategy == ShardingStrategy.NO_SHARD:
+                if use_orig_params:
+                    error_type = error_type_no_shard_use_orig_params
+                    error_regex = error_regex_no_shard_use_orig_params
+                else:
+                    error_type = error_type_no_shard_use_flat_params
+                    error_regex = error_regex_no_shard_use_flat_params
+
+            with self.assertRaisesRegex(error_type, error_regex):
+                self._test_fsdp_checkpoint_parity(
+                    self._init_fsdp_checkpoint_model6,
+                    checkpoint_fn,
+                    use_orig_params,
+                    sharding_strategy,
+                )
+
+        self.run_subtests(
+            {
+                "checkpoint_fn": [
+                    _checkpoint_wrapper_nonreentrant,
+                    _utils_checkpoint_nonreentrant,
+                ],
+                "use_orig_params": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+            },
+            run_with_error_ctx,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_all_consecutive_fsdp_nonreentrant_raises(self):
+        def run_with_error_ctx(
+            checkpoint_fn: Callable,
+            use_orig_params: bool,
+            sharding_strategy: ShardingStrategy,
+        ):
+            error_type_full_shard = RuntimeError
+            error_regex_full_shard = (
+                r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+                "offset 0, and itemsize 4 requiring a storage size of 40000 "
+                "are out of bounds for storage of size 0"
+            )
+            error_type_shard_grad_op = ValueError
+            error_regex_shard_grad_op = (
+                r"expected to be in states \[<TrainingState.FORWARD_BACKWARD: 2>\] "
+                "but current state is TrainingState.IDLE"
+            )
+            if (
+                sharding_strategy == ShardingStrategy.FULL_SHARD
+                or sharding_strategy == ShardingStrategy.NO_SHARD
+            ):
+                error_type = error_type_full_shard
+                error_regex = error_regex_full_shard
+            elif sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
+                error_type = error_type_shard_grad_op
+                error_regex = error_regex_shard_grad_op
+            with self.assertRaisesRegex(error_type, error_regex):
+                self._test_fsdp_checkpoint_parity(
+                    self._init_fsdp_checkpoint_model7,
+                    checkpoint_fn,
+                    use_orig_params,
+                    sharding_strategy,
+                )
+
+        self.run_subtests(
+            {
+                "checkpoint_fn": [
+                    _checkpoint_wrapper_nonreentrant,
+                    _utils_checkpoint_nonreentrant,
+                ],
+                "use_orig_params": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                ],
+            },
+            run_with_error_ctx,
+        )
+
     class SequentialModule(nn.Module):
         def __init__(
             self,
@@ -310,7 +789,7 @@ class ModelWithCheckpointSubmodule(nn.Module):
         return self.l2(self.relu(self.s2(self.s1(self.l1(x)))))
 
 
-class TestModel(nn.Module):
+class _TestModel(nn.Module):
     def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
         super().__init__()
         self.l1 = nn.Linear(100, 100)
@@ -329,7 +808,7 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [False])
     def test_checkpoint_submodule(self, use_reentrant: bool):
-        model = TestModel(use_reentrant=use_reentrant).cuda()
+        model = _TestModel(use_reentrant=use_reentrant).cuda()
         model_ac = deepcopy(model)
 
         for _, m in model_ac.named_modules():
