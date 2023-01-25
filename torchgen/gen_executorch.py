@@ -516,6 +516,12 @@ def parse_yaml_files(
             custom_ops_yaml_path = os.path.join(tmpdirname, "custom_ops.yaml")
             with open(custom_ops_yaml_path, "w"):
                 pass
+            custom_ops_parsed_yaml = None
+        else:
+            custom_ops_parsed_yaml = parse_native_yaml(
+                custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
+            )
+
         combined_yaml_path = os.path.join(tmpdirname, "combined.yaml")
         with open(combined_yaml_path, "w") as tmp, open(
             translated_yaml_path, "r"
@@ -524,9 +530,6 @@ def parse_yaml_files(
                 tmp.write(line)
             for line in custom.readlines():
                 tmp.write(line)
-        custom_ops_parsed_yaml = parse_native_yaml(
-            custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
-        )
 
         parsed_yaml = parse_native_yaml(
             combined_yaml_path,
