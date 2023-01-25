@@ -96,6 +96,13 @@ class DDPOptimizer:
        and therefore aren't allreduced by DDP.  (They are broadcast during forward, but this is not covered by
        DDPOptimizer)
 
+    Debugging
+     - Generally, it is easiest to debug DDPOptimizer in a single process program, using pdb.
+     - In many cases, the log messages are helpful (they show bucket size assignments)-
+       just configure torch._dynamo.config.log_level to info or debug.
+     - See `benchmarks/dynamo/distributed.py` for a simple harness that will run a toy model or a torchbench model
+       in a single process (or with torchrun, in multiple processes)
+
     Args:
         bucket_bytes_cap (int): Controls the size of buckets, in bytes, used to determine graphbreaks.  Should be
             set to match the equivalent parameter on the original DDP module.
