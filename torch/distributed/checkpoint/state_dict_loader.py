@@ -92,7 +92,7 @@ def load_state_dict(
         assert planner is not None
         metadata = storage_reader.read_metadata()
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
-        storage_reader.init(metadata, distW.is_coordinator)
+        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_reader.prepare_local_plan(local_plan)
