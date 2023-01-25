@@ -2839,14 +2839,9 @@ else:
         self._test_cumminmax_helper(x, torch.cummin, expected_val, expected_ind)
 
     def test_bool_tensor_value_change(self, device):
-        print("WONJOO: test_bool_tensor_value_change1")
         x = torch.tensor([True, False], dtype=torch.bool, device=device)
-        print(f"WONJOO: torch._is_functional_tensor(x): {torch._is_functional_tensor(x)}")
-        print("WONJOO: test_bool_tensor_value_change2")
         x[0] = False
-        print("WONJOO: test_bool_tensor_value_change3")
         x[1] = True
-        print("WONJOO: test_bool_tensor_value_change4")
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
     # FIXME: move to shape ops test suite
@@ -3057,15 +3052,7 @@ else:
                         num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
                     )
                     expected = dest.clone()
-                    print("WONJOO: at test_torch.py before dest.index_reduce_1")
-                    print("WONJOO: at test_torch.py before dest.index_reduce_2, dim=" + str(dim))
-                    print("WONJOO: at test_torch.py before dest.index_reduce_3, idx=" + str(idx))
-                    print("WONJOO: at test_torch.py before dest.index_reduce_4, src=" + str(src))
-                    if dim == 2 and idx.size()[0] == 0:
-                        print("WONJOO: at test_torch.py, THIS IS WHAT WE WANT TO BREAK ON!")
-                        # import pdb; pdb.set_trace()
                     dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
-                    print("WONJOO: at test_torch.py after dest.index_reduce_")
                     # fill rows in idx with reduction inits if include_self=False
                     if (not include_self):
                         expected.index_fill_(dim, idx.long(), reduction_init[reduce])

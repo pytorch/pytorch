@@ -20,7 +20,6 @@ namespace at { namespace native {
 // convenience helper for converting tensors to cpu
 
 std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
-  // std::cout << "WONJOO: at CPUFallback.cpp, to_cpu" << std::endl;
     // We can't just call at::to_cpu() on the entire list of Tensors
     // Because it will break on undefined tensors. Separate out undefined tensors first.
     std::vector<at::Tensor> cpu_tensors(tensors.size());
@@ -67,7 +66,6 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
 
 
 void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views) {
-  // std::cout << "WONJOO: at CPUFallback.cpp, cpu_fallback" << std::endl;
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);

@@ -1799,7 +1799,6 @@ def meta_select(self, dim, index):
 
     check(
         not (-index > size or index >= size),
-        lambda: f"WONJOO(meta_select): select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
         IndexError,
     )

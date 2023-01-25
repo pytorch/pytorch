@@ -1748,17 +1748,14 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
 }
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
-  // std::cout << "WONJOO: at TensorShape.cpp select_a" << std::endl;
   return at::select_symint(self, dim, c10::SymInt{index});
 }
 
 Tensor select(const Tensor& self, Dimname dim, int64_t index) {
-  // std::cout << "WONJOO: at TensorShape.cpp select_b" << std::endl;
   return at::select_symint(self, dimname_to_position(self, dim), c10::SymInt{index});
 }
 
 Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
-  // std::cout << "WONJOO: at TensorShape.cpp select_symint" << std::endl;
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
@@ -1812,7 +1809,6 @@ Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_size
 }
 
 Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& index) {
-  // std::cout << "WONJOO: at TensorShape.cpp, index_select_sparse_cpu" << std::endl;
   /*
     Algorithm:
     index - a 1-D tensor of indicies with shape (n,)
