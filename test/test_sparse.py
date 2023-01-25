@@ -16,7 +16,7 @@ from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater, CUDA11OrLater)
+    (SM53OrLater, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
@@ -39,7 +39,7 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
-) or (not IS_WINDOWS and CUDA11OrLater)
+) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
@@ -1881,6 +1881,7 @@ class TestSparse(TestSparseBase):
         test_shape([3, 4], [1, 4], [4, 4, 4], [3, 4, 4])
         test_shape([3, 4, 0], [1, 4], [4, 4, 4, 0], [3, 4, 4, 0])
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @dtypes(torch.double, torch.cdouble)
     def test_add_noncontiguous(self, device, dtype):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
@@ -3418,9 +3419,9 @@ class TestSparse(TestSparseBase):
     @skipIfRocm
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if CUDA11OrLater and SM53OrLater else [],
-                                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
-                                      *[torch.complex64] if CUDA11OrLater else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater else [],
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      torch.complex64,
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
@@ -3457,8 +3458,11 @@ class TestSparse(TestSparseBase):
             c.backward(g)
 
             a_grad, b_grad = test_grad_dense(a, b, g)
-            self.assertEqual(a.grad, a_grad)
-            self.assertEqual(b.grad, b_grad)
+
+            # We convert grad to dense since dense and sparse mm
+            # implementations handle materialized zeroes differently.
+            self.assertEqual(a.grad.to_dense(), a_grad.to_dense())
+            self.assertEqual(b.grad.to_dense(), b_grad.to_dense())
 
         def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a, dtype, device, coalesced)

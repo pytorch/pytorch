@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
-                        _differentiable_doc, _maximize_doc)
+                        _default_to_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch._utils import is_compiling
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
@@ -150,15 +150,14 @@ ASGD.__doc__ = r"""Implements Averaged Stochastic Gradient Descent.
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {maximize}
         {differentiable}
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
 
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def asgd(
@@ -170,7 +169,7 @@ def asgd(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
     *,
@@ -186,8 +185,8 @@ def asgd(
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        foreach = _default_to_foreach([params, grads, axs, mus, etas, state_steps],
+                                      differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
