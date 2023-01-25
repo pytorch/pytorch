@@ -284,7 +284,7 @@ test_single_dynamo_benchmark() {
   # Feel free to remove --device cuda if you ever decide to need to
   # test CPU as well in CI
   python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --device cuda \
+    --ci --accuracy --timing --explain --device cuda \
     "$@" "${partition_flags[@]}" \
     --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   python benchmarks/dynamo/check_csv.py \
