@@ -4831,33 +4831,6 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
-scaled_dot_product_attention = _add_docstr(
-    torch._C._nn.scaled_dot_product_attention, r"""
-Computes scaled dot product attention on query, key and value tensors, using
-an optional attention mask if passed, and applying dropout if a probability
-greater than 0.0 is specified.
-
-Args:
-     query (Tensor): Query tensor; shape (N, ..., L, E)
-     key (Tensor): Key tensor; shape (N, ..., S, E)
-     value (Tensor): Value tensor; shape (N, ..., S, E)
-     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-         is supported, where a value of True indicates that the element *should* take part in attention.
-     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-     is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
-
-
-Returns a tuple containing:
-    output (Tensor): Attention output; shape (N, ..., L, E)
-
-Shape legend:
-    N: Batch size
-    ...: Any number of other batch dimensions (optional)
-    S: Source sequence length
-    L: Target sequence lengthE: Embedding dimension
-
-""")
-
 
 def _scaled_dot_product_attention(
         query: Tensor,

@@ -60,6 +60,8 @@ out.writerow(
         "total_ops",
         "fake_tensor_dispatch_calls",
         "proxy_torch_dispatch_calls",
+        "time_per_op",
+        "dispatches_per_op"
     ]
 )
 
@@ -156,10 +158,17 @@ for name, name2, log in chunker(entries, 3):
 
         if len(split_all) == 3:
             tot_ops = int(split_all[0].split("call_* op count:")[1])
-            fm_dispatches = int(split_all[0].split("FakeTensor.__torch_dispatch__:")[1])
+            fm_dispatches = int(split_all[1].split("FakeTensor.__torch_dispatch__:")[1])
             pm_dispatches = int(
-                split_all[0].split("ProxyTorchDispatchMode.__torch_dispatch__:")[1]
+                split_all[2].split("ProxyTorchDispatchMode.__torch_dispatch__:")[1]
             )
+    time_per_op = None
+    if frame_time is not None and tot_ops is not None:
+        time_per_op = frame_time / tot_ops * 1000 # ms
+    
+    dispatches_per_op = None
+    if fm_dispatches is not None and pm_dispatches is not None and tot_ops is not None:
+        dispatches_per_op = (fm_dispatches + pm_dispatches) / tot_ops
 
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
@@ -187,6 +196,8 @@ for name, name2, log in chunker(entries, 3):
             tot_ops,
             fm_dispatches,
             pm_dispatches,
+            time_per_op,
+            dispatches_per_op,
         ]
     )
     i += 1
