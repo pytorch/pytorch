@@ -354,19 +354,34 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
-  auto grad_out = grad_out_.transpose(1, 2);
-  auto out_t = out.transpose(1, 2);
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
+
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim = query.size(3);
+
+  Tensor q_t = query.transpose(1, 2);
+  Tensor k_t = key.transpose(1, 2);
+  Tensor v_t = value.transpose(1, 2);
+
+  int64_t Nnz_q{batch_size * max_seqlen_batch_q};
+  int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
+
+  // For the standard MHA these will actually be views
+  Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
+  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
+  Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
+
+  //  CUDA code assumes that dout is contiguous
+  auto grad_out_reshaped = grad_out_.transpose(1,2).reshape({{Nnz_q, num_heads, head_dim}});
+  auto out_reshaped = out.transpose(1,2).reshape({Nnz_q, num_heads, head_dim});
 
   Tensor grad_q, grad_k, grad_v;
   std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
-    grad_out,
-    query,
-    key,
-    value,
-    out,
+    grad_out_reshaped,
+    query_reshaped,
+    key_reshaped,
+    value_reshaped,
+    out_reshaped,
     logsumexp,
     cumulative_sequence_length_q,
     cumulative_sequence_length_k,
@@ -375,7 +390,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     dropout_p,
     is_causal,
     rng_state);
-  return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
+
+  grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
+  grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
+  grad_v = grad_v.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
+
+  return std::make_tuple(grad_q, grad_k, grad_v);
 }
 
 

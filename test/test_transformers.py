@@ -1259,7 +1259,8 @@ class TestSDPA(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
-    def test_sdp_fused_grad_against_math(self, contiguous_inputs: bool):
+    @parametrize("is_causal", [True, False])
+    def test_sdp_mem_efficient_grad_against_math(self, contiguous_inputs: bool, is_causal: bool):
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
         rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
 
@@ -1287,11 +1288,11 @@ class TestSDPA(NNTestCase):
             value_lp = value_lp.contiguous()
 
         with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
-            out = torch.nn.functional.scaled_dot_product_attention(query, key, value, None, 0.0, False)
+            out = torch.nn.functional.scaled_dot_product_attention(query, key, value, None, 0.0, is_causal)
 
         with sdp_kernel(enable_math=False, enable_mem_efficient=True, enable_flash=False):
             out_lp = torch.nn.functional.scaled_dot_product_attention(
-                query_lp, key_lp, value_lp, None, 0.0, False)
+                query_lp, key_lp, value_lp, None, 0.0, is_causal)
 
         rand_upward = torch.rand_like(out)
         rand_upward_lp = rand_upward.to(torch.float32)
@@ -1301,6 +1302,53 @@ class TestSDPA(NNTestCase):
 
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Flash Attention was not built for this system")
+    @parametrize("contiguous_inputs", [True, False])
+    @parametrize("is_causal", [True, False])
+    def test_sdp_flash_attention_grad_against_math(self, contiguous_inputs: bool, is_causal: bool):
+        batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
+        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+
+        qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
+        qkv_lp = qkv.detach().clone().to(torch.float16).requires_grad_()
+
+        query, key, value = qkv.chunk(3, dim=-1)
+        query_lp, key_lp, value_lp = qkv_lp.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        query_lp = query_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        if contiguous_inputs:
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
+            query_lp = query_lp.contiguous()
+            key_lp = key_lp.contiguous()
+            value_lp = value_lp.contiguous()
+
+        with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
+            out = torch.nn.functional.scaled_dot_product_attention(query, key, value, None, 0.0, is_causal)
+
+        with sdp_kernel(enable_math=False, enable_mem_efficient=False, enable_flash=True):
+            out_lp = torch.nn.functional.scaled_dot_product_attention(
+                query_lp, key_lp, value_lp, None, 0.0, is_causal)
+
+        rand_upward = torch.rand_like(out)
+        rand_upward_lp = rand_upward.to(torch.float32)
+
+        out.backward(rand_upward)
+        out_lp.backward(rand_upward_lp)
+
+        # Cast up and compare
+        # Since we are doing the compute on fp16 we have to bump the tolerance
+        self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=7e-4, rtol=7e-4)
 
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, type: str):

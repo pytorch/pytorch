@@ -369,9 +369,8 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 7> constraints {{
       check_runtime_disabled_flash,
-      check_requires_grad,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size,
