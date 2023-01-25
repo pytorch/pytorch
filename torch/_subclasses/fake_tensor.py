@@ -560,7 +560,7 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
-        return torch.Tensor._make_subclass(
+        self = torch.Tensor._make_subclass(
             cls,
             elem,
             elem.requires_grad,
@@ -568,13 +568,6 @@ class FakeTensor(torch.Tensor):
             device_for_backend_keys=device,
         )
 
-    def __init__(
-        self,
-        fake_mode,
-        elem,
-        device: Union[torch.device, str],
-        constant: Optional[torch.Tensor] = None,
-    ):
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
@@ -589,13 +582,35 @@ class FakeTensor(torch.Tensor):
         # normalize cuda device.
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        self.fake_device = device
-        self.fake_mode = fake_mode
-        self.constant = constant
+        self.fake_device = device  # type: ignore[attr-defined]
+        self.fake_mode = fake_mode  # type: ignore[attr-defined]
+        self.constant = constant  # type: ignore[attr-defined]
         if FakeTensorConfig.debug:
             import traceback
 
-            self._debug_trace = traceback.extract_stack()
+            self._debug_trace = traceback.extract_stack()  # type: ignore[attr-defined]
+        return self
+
+    # In some circumstances, a conventional torch.Tensor constructor
+    # will get rewritten to call into FakeTensor.  We must provide an
+    # __init__ method that can accept the Python interpreters initialization
+    # in such a situation; we must also be able to handle direct fake
+    # tensor construction via FakeTensor().
+    #
+    # In particular, the __init__ call will look funny in the following case:
+    #
+    #   with FakeTensorMode():
+    #       x = torch.Tensor([1, 2, 3])
+    #
+    # this desugars into:
+    #
+    #   with FakeTensorMode():
+    #       x = torch.Tensor.__new__([1, 2, 3])
+    #       # NB: x is a fake tensor, because of the mode!
+    #       x.__init__([1, 2, 3])  # not the normal fake tensor args!
+    #
+    def __init__(self, *args, **kwargs):
+        super().__init__()
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -656,29 +671,33 @@ class FakeTensor(torch.Tensor):
             nonlocal common_device
             nonlocal is_cpu_zero_dim
             if not isinstance(t, FakeTensor):
-                return
+                # hmm... should tree_map() take in a flag when it's meant to not return anything?
+                # Otherwise we'll try to reconstruct a pytree container (or subclass)
+                # with None's. Alternatively, we could force the subclass to handle that more gracefully.
+                # NOTE: OpTree actually solves this! They have an inplace version of tree_map: https://github.com/pytorch/pytorch/pull/92679
+                return t
 
             if common_device is None:
                 common_device = t.device
                 is_cpu_zero_dim = cpu_zero_dim(t)
-                return
+                return t
 
             t_is_cpu_zero_dim = cpu_zero_dim(t)
             if t.device == common_device:
                 if is_cpu_zero_dim:
                     is_cpu_zero_dim = t_is_cpu_zero_dim
-                return
+                return t
 
             # mismatching devices !
             # if current tensor is cpu 0 dim, defer to existing device
             if t_is_cpu_zero_dim:
-                return
+                return t
 
             # current device is from cpu 0 dim tensor, overwrite
             if is_cpu_zero_dim:
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
-                return
+                return t
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
@@ -708,6 +727,25 @@ class FakeTensor(torch.Tensor):
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
+# This needs design.
+# See note [Detecting when pytree'ing through a tensor subclass]
+_subclass_unflatten_called = False
+
+def set_tensor_subclass_pytree_flatten_called(called):
+    global _subclass_unflatten_called
+    _subclass_unflatten_called = called
+
+def check_tensor_subclass_pytree_flatten_called():
+    global _subclass_unflatten_called
+    return _subclass_unflatten_called
+
+class check_for_subclass_flattening():
+
+    def __enter__(self):
+        set_tensor_subclass_pytree_flatten_called(False)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        set_tensor_subclass_pytree_flatten_called(False)
 
 # We keep one instantiation of `fake_tensor_converter` active
 # for the duration of `with FakeTensorMode()`.
@@ -754,6 +792,7 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        exclude_str = str(torch._C._dispatch_tls_local_exclude_set())
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -940,7 +979,13 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+        # Note [Detecting when pytree'ing through a tensor subclass]
+        # So this is annoying. We can't check for subclasses via pytree'ing anymore,
+        # since our subclass might get pytree.flatten'd into its tensor components!
+        # TODO: is this a sign that making subclasses pytree-able is the wrong API?
+        with check_for_subclass_flattening():
+            any_subclass = any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+            return any_subclass or check_tensor_subclass_pytree_flatten_called()
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """

@@ -4,6 +4,7 @@ import weakref
 from typing import ContextManager, Optional
 
 import torch
+import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
@@ -512,8 +513,9 @@ class MetaConverter:
             # tensors into their trace / some subclasses don't correctly
             # support meta.  Trying to YOLO this is more trouble than it's
             # worth.
-            if hasattr(t, "to_meta_tensor"):
-                return t.to_meta_tensor(meta_callback=lambda d: self.meta_tensor(d, shape_env=shape_env, callback=callback, sname=sname))
+            if type(t) in pytree.SUPPORTED_NODES:
+                out = pytree.tree_map(lambda x: self.meta_tensor(x, shape_env=shape_env, callback=callback, source=source), t)
+                return out
             self.miss += 1
             return NotImplemented
         else:
