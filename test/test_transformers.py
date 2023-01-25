@@ -1303,7 +1303,7 @@ class TestSDPA(NNTestCase):
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Flash Attention was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
     def test_sdp_flash_attention_grad_against_math(self, contiguous_inputs: bool, is_causal: bool):
