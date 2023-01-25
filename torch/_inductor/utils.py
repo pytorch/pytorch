@@ -103,7 +103,6 @@ def convert_shape_to_symint(
         return lst
     if all(isinstance(i, sympy.Integer) for i in lst):
         return [int(i) for i in lst]
-    from .virtualized import V
     return [V.graph.sizevars.shape_env.create_symintnode(i) for i in lst]
 
 
