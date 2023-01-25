@@ -7315,7 +7315,7 @@ TEST_F(
       KernelArgumentHolder::createKernelArgumentHolder(
           {aten_input, aten_weight, aten_bias});
   bool isTranslated =
-      SegmentCandidateFinder::TranslateWelfordInFusion(&fusion, runtime_inputs);
+      SegmentCandidateFinder::translateWelfordInFusion(&fusion, runtime_inputs);
   TORCH_INTERNAL_ASSERT(isTranslated);
 
   // persistent buffer should be projected to input
