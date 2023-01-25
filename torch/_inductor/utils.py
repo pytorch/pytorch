@@ -9,7 +9,7 @@ import tempfile
 import textwrap
 import time
 from io import StringIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from unittest import mock
 
 import sympy
@@ -77,6 +77,33 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
     return -(numer // -denom)
+
+
+def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+    """
+    Gets the shape and stride of a tensor. For non-symbolic tensors, this is
+    trivial. But for symbolic tensors, we need to map from SymIntNode into
+    sympy.Expr.
+    """
+    return [
+        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
+    ]
+
+
+def convert_shape_to_symint(
+    lst: List[Union[int, sympy.Expr]]
+) -> List[Union[int, torch.SymInt]]:
+    """
+    Takes a list of shapes from Inductor and converts them into symints (or just
+    ints if all shapes are static).
+    """
+    from .virtualized import V
+
+    if all(isinstance(i, int) for i in lst):
+        return lst
+    if all(isinstance(i, sympy.Integer) for i in lst):
+        return [int(i) for i in lst]
+    return [V.graph.sizevars.shape_env.create_symintnode(i) for i in lst]
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -228,9 +255,9 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, IndexingDiv, ModularIndexing
+    from .ir import CleanDiv, FloorDiv, ModularIndexing
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
