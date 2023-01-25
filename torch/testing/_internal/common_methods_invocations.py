@@ -8058,6 +8058,8 @@ class foreach_inputs_sample_func:
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
         if self.arity < 2:
             return None
+        if "foreach_pow" in opinfo.name and dtype in integral_types():
+            return True
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             disable_fastpath = "foreach_div" in opinfo.name and dtype in integral_types_and(torch.bool)
             if "foreach_add" in opinfo.name and dtype == torch.bool:
