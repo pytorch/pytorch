@@ -20,6 +20,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils._stats import count
 from torch.utils.weak import WeakIdRef
 
 pytree = torch.utils._pytree
@@ -623,6 +624,7 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
     @classmethod
+    @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]

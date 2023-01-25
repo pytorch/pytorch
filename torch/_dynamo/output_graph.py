@@ -627,6 +627,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        tot = 0
+        for node in gm.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                tot += 1
+        torch._dynamo.utils.increment_op_count(tot)
         try:
             name = (
                 self.compiler_fn.__name__
