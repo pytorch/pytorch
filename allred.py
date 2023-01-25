@@ -9,6 +9,10 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch._C._distributed_c10d import _register_process_group
 from torch._dispatch.python import enable_python_dispatcher
 
+# LOL if you don't remember to import this, then the op isn't registered and it hits
+# the no-op C++ kernel that i am forced to implement despite not using it
+import torch.distributed.traceable_collectives
+
 def matmul_cat_col(a, b, c, d, e, f, *, pg_id):
     x = torch.matmul(a, b)
     y = torch.matmul(c, d)
