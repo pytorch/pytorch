@@ -19,7 +19,7 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {
@@ -200,4 +200,4 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_TENSOR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_TENSOR(addcmul, std::multiplies);
 
-}} // namespace at::native
+} // namespace at::native
