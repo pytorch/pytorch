@@ -69,7 +69,8 @@ def create_pop_jump_if_true(target):
 
 def create_load_global(name, arg, push_null):
     if sys.version_info >= (3, 11):
-        arg = (arg << 1) + push_null
+        # arg = (arg << 1) + push_null
+        arg <<= 1
     return create_instruction(
         "LOAD_GLOBAL", arg, name
     )
@@ -93,19 +94,21 @@ def create_rot_n(n):
 def create_call_function(nargs, push_null=True):
     if sys.version_info >= (3, 11):
         output = []
-        if push_null:
-            output.append(create_instruction("PUSH_NULL"))
-            output.extend(create_rot_n(nargs + 2))
+        # if push_null:
+        output.append(create_instruction("PUSH_NULL"))
+        output.extend(create_rot_n(nargs + 2))
         output.append(create_instruction("PRECALL", nargs))
         output.append(create_instruction("CALL", nargs))
         return output
     return [create_instruction("CALL_FUNCTION", nargs)]
 
 def create_call_method(nargs):
-    output = [create_instruction("CALL_METHOD", nargs)]
     if sys.version_info >= (3, 11):
-        output = [create_instruction("PRECALL", nargs)] + output
-    return output
+        return [
+            create_instruction("PRECALL", nargs),
+            create_instruction("CALL", nargs)
+        ]
+    return [create_instruction("CALL_METHOD", nargs)]
 
 def create_pop_block():
     if sys.version_info >= (3, 11):

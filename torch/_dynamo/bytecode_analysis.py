@@ -28,8 +28,15 @@ if sys.version_info < (3, 8):
             return 0
         return dis.stack_effect(opcode, arg)
 
-else:
+elif sys.version_info < (3, 11):
     stack_effect = dis.stack_effect
+else:
+    def stack_effect(opcode, arg, jump=None):
+        result = dis.stack_effect(opcode, arg, jump=jump)
+        if dis.opname[opcode] == "CALL":
+            # our implementation of CALL uses 1 less pop
+            result += 1
+        return result
 
 
 def remove_dead_code(instructions):

@@ -341,8 +341,9 @@ def break_graph_if_unsupported(*, push):
             self.output.compile_subgraph(self, reason=reason)
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 # stack effect for PRECALL + CALL is split between the two instructions
+                # we also don't push NULL, so we pop one less argument.
                 stack_effect = dis.stack_effect(dis.opmap["PRECALL"], inst.arg) + \
-                    dis.stack_effect(dis.opmap["CALL"], inst.arg)
+                    dis.stack_effect(dis.opmap["CALL"], inst.arg) + 1
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
             self.popn(push - stack_effect)
@@ -373,11 +374,10 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions([
                         create_instruction("KW_NAMES", PyCodegen.get_const_index(self.code_options, kw_names)),
                     ])
-                self.output.add_output_instructions([
-                    create_instruction("PRECALL", inst.arg),
-                ])
+                self.output.add_output_instructions(create_call_function(inst.arg))
                 # no need to reset self.kw_names since self should not continue to run
-            self.output.add_output_instructions([inst])
+            else:
+                self.output.add_output_instructions([inst])
 
             # Add the cleanup instructions from try..finally block
             self.output.add_output_instructions(cleanup)
@@ -1516,13 +1516,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.kw_names = ConstantVariable(value=kw_names)
 
     def PUSH_NULL(self, inst):
-        self.push(NullVariable())
+        # self.push(NullVariable())
+        pass
 
-    # TODO is push=1 correct?
     @break_graph_if_unsupported(push=1)
     def CALL(self, inst):
         # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
         # for convention
+        """
         contents = self.popn(inst.arg + 2)
         if isinstance(contents[0], NullVariable):
             fn = contents[1]
@@ -1530,14 +1531,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             fn = contents[0]
             args = [contents[1]]
+        """
+        # We follow a fn + args convention, unlike the 3.11 conventions.
+        # If fn is a method, self is expected to be bound to fn so that
+        # self should not be in args.
+        contents = self.popn(inst.arg)
+        fn = self.pop()
+        args = []
         kw_names = () if self.kw_names is None else self.kw_names.value
         if len(kw_names) > 0:
-            args = args + contents[2: -len(kw_names)]
+            args = args + contents[: -len(kw_names)]
             kwargs_list = contents[-len(kw_names) :]
             kwargs = dict(zip(kw_names, kwargs_list))
             assert len(kwargs) == len(kw_names)
         else:
-            args = args + contents[2:]
+            args = args + contents
             kwargs = {}
         self.call_function(fn, args, kwargs)
         self.kw_names = None
@@ -1567,10 +1575,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def CACHE(self, inst):
         pass
 
-    def BEGIN_WITH(self, inst):
+    def BEFORE_WITH(self, inst):
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
-            unimplemented(f"SETUP_WITH {ctx}")
+            unimplemented(f"BEFORE_WITH {ctx}")
         self.output.guards.update(ctx.guards)
 
         self.push(
@@ -1854,7 +1862,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(
-            create_call_function(nargs) + [
+            create_call_function(nargs, push_null=False) + [
                 create_instruction("RETURN_VALUE"),
             ]
         )
