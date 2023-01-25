@@ -40,6 +40,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - docs_type: cpp
