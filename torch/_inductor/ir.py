@@ -3037,10 +3037,8 @@ class Convolution(ExternKernelAlloc):
         self.preferred_stride_order = preferred_stride_order
 
     def codegen(self, wrapper):
-        if self.kernel == "triton_ops.conv":
-            wrapper.header.writeline(
-                f"import {config.inductor_import}.triton_ops.conv as {self.kernel}"
-            )
+        if self.kernel.startswith("triton_ops."):
+            wrapper.header.writeline(f"from {config.inductor_import} import triton_ops")
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
