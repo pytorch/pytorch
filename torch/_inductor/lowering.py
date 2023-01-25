@@ -1100,17 +1100,19 @@ fast_randn = make_rand("randn")
 
 @register_lowering([aten.rand, torch.rand])
 def rand(*args, **kwargs):
-    if config.fallback_random:
+    if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_rand(*args, **kwargs)
     else:
+        kwargs.pop("generator", None)
         return fast_rand(*args, **kwargs)
 
 
 @register_lowering([aten.randn, torch.randn])
 def randn(*args, **kwargs):
-    if config.fallback_random:
+    if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_randn(*args, **kwargs)
     else:
+        kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
 
 
@@ -3592,6 +3594,11 @@ register_lowering(
 
 register_pointwise(
     aten.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
+    aten.tan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
