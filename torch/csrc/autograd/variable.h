@@ -229,7 +229,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // each other, so using both is not defined behavior.
   std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
-  std::shared_ptr<hooks_list> retains_grad_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -286,7 +285,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
