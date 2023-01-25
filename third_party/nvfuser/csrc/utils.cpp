@@ -147,6 +147,7 @@ auto parseDisableOptions() {
       {"grouped_grid_welford_outer_opt",
        DisableOption::GroupedGridWelfordOuterOpt},
       {"index_hoist", DisableOption::IndexHoist},
+      {"expr_simplify", DisableOption::ExprSimplify},
       {"nvtx", DisableOption::Nvtx},
       {"predicate_elimination", DisableOption::PredicateElimination},
       {"welford_vectorization", DisableOption::WelfordVectorization},

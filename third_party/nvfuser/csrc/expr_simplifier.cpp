@@ -15,6 +15,7 @@
 #include <numeric>
 #include <regex>
 #include <sstream>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -1638,11 +1639,15 @@ Val* reducePredicateRegisterUsage(Val* value, const VarInfoMap& var_info) {
 
 } // namespace rules
 
-#define RUN_PASS(pass_name)                                    \
-  simplified = recurseDown(simplified, [&var_info](Val* val) { \
-    return rules::pass_name(val, var_info);                    \
-  });                                                          \
-  logger->record(#pass_name, simplified)
+#define RUN_PASS(pass_name)                                      \
+  if (disabled_passes == nullptr ||                              \
+      (!disabled_passes->empty() &&                              \
+       disabled_passes->count(#pass_name) == 0)) {               \
+    simplified = recurseDown(simplified, [&var_info](Val* val) { \
+      return rules::pass_name(val, var_info);                    \
+    });                                                          \
+    logger->record(#pass_name, simplified);                      \
+  }
 
 // Requires that all the passes before the barrier to be converged before
 // procceeding to the passes after the barrier.
@@ -1654,6 +1659,16 @@ Val* simplifyExpr(Val* value, const std::list<VarInfo>& variables) {
   FusionGuard fg(value->fusion());
   const VarInfoMap var_info(variables);
   auto logger = debug_print::createLogger(value);
+
+  // nullptr -> disable nothing
+  // empty set -> disable everything
+  // {"abc", "def"} -> disable passes abc and def
+  std::unique_ptr<std::unordered_set<std::string>> disabled_passes = nullptr;
+  if (isOptionDisabled(DisableOption::ExprSimplify)) {
+    const auto& v = getDisableOptionArguments(DisableOption::ExprSimplify);
+    disabled_passes =
+        std::make_unique<std::unordered_set<std::string>>(v.begin(), v.end());
+  }
 
   Val* simplified = value;
   Val* old_simplified = nullptr;

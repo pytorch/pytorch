@@ -89,6 +89,7 @@ enum class DisableOption {
   GroupedGridWelfordOuterOpt, //! Disable use of outer-optimized
                               //! grouped grid welford kernel
   IndexHoist, //! Disable index hoisting
+  ExprSimplify, //! Disable expression simplifier
   Nvtx, //! Disable NVTX instrumentation
   PredicateElimination, //! Disable predicate elimination
   WelfordVectorization, //! Disable vectorizaton of Welford ops
