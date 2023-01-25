@@ -1167,6 +1167,26 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def sample_inputs_sparse(
+        self, layout, device, dtype, requires_grad=False, **kwargs
+    ):
+        """Returns an iterable of SampleInputs that contain inputs with a
+        specified sparse layout.
+        """
+        if layout is torch.sparse_coo:
+            sample_inputs_mth = self.sample_inputs_sparse_coo
+        elif layout is torch.sparse_csr:
+            sample_inputs_mth = self.sample_inputs_sparse_csr
+        elif layout is torch.sparse_csc:
+            sample_inputs_mth = self.sample_inputs_sparse_csc
+        elif layout is torch.sparse_bsr:
+            sample_inputs_mth = self.sample_inputs_sparse_bsr
+        elif layout is torch.sparse_bsc:
+            sample_inputs_mth = self.sample_inputs_sparse_bsc
+        else:
+            raise NotImplementedError(f"sample_inputs_sparse: {layout}")
+        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
+
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         coo layout.
