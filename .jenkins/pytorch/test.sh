@@ -284,7 +284,7 @@ test_single_dynamo_benchmark() {
   # Feel free to remove --device cuda if you ever decide to need to
   # test CPU as well in CI
   python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --device cuda \
+    --ci --accuracy --timing --explain --device cuda \
     "$@" "${partition_flags[@]}" \
     --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   python benchmarks/dynamo/check_csv.py \
@@ -814,7 +814,7 @@ test_executorch() {
 }
 
 test_smoke() {
-  time python test/run_test.py --include test_fx test_jit --verbose
+  time python test/run_test.py --include test_fx test_jit test_schema_check test_foreach test_weak --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then

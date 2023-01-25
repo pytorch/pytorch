@@ -4033,8 +4033,8 @@ class Wait(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         (x, work) = [t.codegen_reference() for t in self.inputs]
-        wrapper.writeline(f"{work}.wait()")
-        # wrapper.writeline(f"{self.get_name()} = {x}")
+        wrapper.writeline(f"{work}.wait()  # {work} is a Work object")
+        wrapper.writeline(f"{self.get_name()} = {x}  # The 'output' name from Wait op really aliases an earlier buffer")
 
     def get_mutation_names(self):
         assert isinstance(self.layout, MutationLayout)
@@ -4058,15 +4058,20 @@ class AllReduce(ExternKernelAlloc):
         reduce_op: str,
     ):
         # Force input to become a materialized buffer (compile a kernel if needed)
+        # breakpoint()
         x = cls.realize_input(x)
+        
+        # If x had a flexible layout, I couldn't build a MutationLayout on top 
+        # TODO: is this harmful to call if x is already a FixedLayout?
+        if isinstance(x.data.layout, FlexibleLayout):
+            x.decide_layout()
+        
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
         # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         all_reduce = AllReduce(
-            layout=FixedLayout(
-                device=x.get_device(), dtype=x.get_dtype(), size=[1], stride=[1]
-            ),
+            layout=MutationLayout(x),
             inputs=[x],
             constant_args=[group_id, reduce_op],
         )
