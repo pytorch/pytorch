@@ -30,7 +30,7 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 fi
 
-# This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.py"
+# This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
 CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
 mkdir -p "$CI_SCRIPTS_DIR"
 
@@ -55,7 +55,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-python "$SCRIPT_HELPERS_DIR"/build_pytorch.py
+"$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 
 assert_git_not_dirty
 
