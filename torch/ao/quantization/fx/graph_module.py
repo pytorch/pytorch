@@ -55,7 +55,7 @@ class ObservedGraphModule(GraphModule):
         return ObservedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
 def _is_observed_module(module: Any) -> bool:
-    return isinstance(module, ObservedGraphModule)
+    return hasattr(module, "meta") and "_observed_graph_module_attrs" in module.meta
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
@@ -70,7 +70,7 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
         return ObservedStandaloneGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
 def _is_observed_standalone_module(module: Any) -> bool:
-    return isinstance(module, ObservedStandaloneGraphModule)
+    return _is_observed_module(module) and module.meta["_observed_graph_module_attrs"].is_observed_standalone_module
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):

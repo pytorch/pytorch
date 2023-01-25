@@ -24,6 +24,12 @@ from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.utils import get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
 
+def attach_preserved_attrs_to_model(model: GraphModule, preserved_attrs: Dict[str, Any]):
+    """ Store preserved attributes to the model.meta so that it can be preserved during deepcopy
+    """
+    for attr_name, attr in preserved_attrs.items():
+        model.meta[attr_name] = attr
+
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
         raise ValueError(
@@ -65,7 +71,6 @@ def _fuse_fx(
     return fuse(
         graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
-
 def _prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
@@ -103,12 +108,11 @@ forward graph of the parent module,
 
     skipped_module_names, skipped_module_classes = \
         get_skipped_module_name_and_classes(prepare_custom_config, is_standalone_module)
-    preserved_attributes = prepare_custom_config.preserved_attributes
+    preserved_attr_names = prepare_custom_config.preserved_attributes
+    preserved_attrs = {attr: getattr(model, attr) for attr in preserved_attr_names if hasattr(model, attr)}
     # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
-    for attr_name in preserved_attributes:
-        setattr(graph_module, attr_name, getattr(model, attr_name))
     fuse_custom_config = FuseCustomConfig().set_preserved_attributes(prepare_custom_config.preserved_attributes)
     graph_module = _fuse_fx(
         graph_module,
@@ -127,8 +131,7 @@ forward graph of the parent module,
         is_standalone_module=is_standalone_module,
     )  # type: ignore[operator]
 
-    for attr_name in preserved_attributes:
-        setattr(prepared, attr_name, getattr(model, attr_name))
+    attach_preserved_attrs_to_model(prepared, preserved_attrs)
     return prepared
 
 
@@ -204,13 +207,13 @@ def fuse_fx(
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
+    preserved_attr_names = prepare_custom_config.preserved_attributes
+    preserved_attrs = {attr: getattr(model, attr) for attr in preserved_attr_names if hasattr(model, attr)}
+
     graph_module = torch.fx.symbolic_trace(model)
-    preserved_attributes: Set[str] = set()
-    if fuse_custom_config:
-        preserved_attributes = set(fuse_custom_config.preserved_attributes)
-    for attr_name in preserved_attributes:
-        setattr(graph_module, attr_name, getattr(model, attr_name))
-    return _fuse_fx(graph_module, False, fuse_custom_config, backend_config)
+    graph_module = _fuse_fx(graph_module, False, fuse_custom_config, backend_config)
+    attach_preserved_attrs_to_model(graph_module, preserved_attrs)
+    return graph_module
 
 
 def prepare_fx(
@@ -492,6 +495,8 @@ def _convert_fx(
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     _check_is_graph_module(graph_module)
+    preserved_attr_names = convert_custom_config.preserved_attributes
+    preserved_attrs = {attr: graph_module.meta[attr] for attr in preserved_attr_names if attr in graph_module.meta}
 
     quantized = convert(
         graph_module,
@@ -504,9 +509,7 @@ def _convert_fx(
         is_decomposed=is_decomposed,
     )
 
-    preserved_attributes = convert_custom_config.preserved_attributes
-    for attr_name in preserved_attributes:
-        setattr(quantized, attr_name, getattr(graph_module, attr_name))
+    attach_preserved_attrs_to_model(quantized, preserved_attrs)
     return quantized
 
 

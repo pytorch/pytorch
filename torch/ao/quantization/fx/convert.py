@@ -445,19 +445,6 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
         dtype == torch.float16
     )
 
-def _restore_state(
-        observed: torch.nn.Module
-) -> Tuple[Dict[str, Tuple[str, type]],
-           PrepareCustomConfig,
-           Set[str]]:
-    # assert _is_observed_module(observed), \
-    #     'incoming model must be produced by prepare_fx'
-    print("observed.meta:", observed.meta)
-    prepare_custom_config: PrepareCustomConfig = observed.meta["prepare_custom_config"]  # type: ignore[assignment]
-    node_name_to_scope: Dict[str, Tuple[str, type]] = observed.meta["node_name_to_scope"]  # type: ignore[assignment]
-    observed_node_names: Set[str] = observed.meta["observed_node_names"]  # type: ignore[assignment]
-    return node_name_to_scope, prepare_custom_config, observed_node_names
-
 def _has_none_qconfig(node: Argument, node_name_to_qconfig: Dict[str, QConfigAny]) -> bool:
     """ Check if a node has a qconfig of None, i.e. user requested to not quantize
     the node
@@ -608,8 +595,7 @@ def convert_standalone_module(
     observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
     sm_input_quantized_idxs = \
         observed_standalone_module \
-        .meta["standalone_module_input_quantized_idxs"] \
-        .tolist()  # type: ignore[operator]
+        .meta["_observed_graph_module_attrs"].standalone_module_input_quantized_idxs
     # remove the dequantize nodes for inputs
     args = list(node.args)
     for idx in range(len(args)):
@@ -623,8 +609,7 @@ def convert_standalone_module(
     # add dequantize node for output
     sm_output_quantized_idxs = \
         observed_standalone_module \
-        .meta["standalone_module_output_quantized_idxs"] \
-        .tolist()  # type: ignore[operator]
+        .meta["_observed_graph_module_attrs"].standalone_module_output_quantized_idxs
     if len(sm_output_quantized_idxs) > 0:
         assert sm_output_quantized_idxs[0] == 0, "Currently only quantized"
         "output idxs = [0] is supported"
@@ -900,8 +885,13 @@ def convert(
     if backend_config is None:
         backend_config = get_native_backend_config()
 
-    node_name_to_scope, prepare_custom_config, observed_node_names = _restore_state(model)
-    node_name_to_qconfig: Dict[str, QConfigAny] = model.meta["node_name_to_qconfig"]  # type: ignore[assignment]
+    assert _is_observed_module(model), \
+        'incoming model must be produced by prepare_fx'
+    observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
+    node_name_to_scope: Dict[str, Tuple[str, type]] = observed_graph_module_attrs.node_name_to_scope
+    prepare_custom_config: PrepareCustomConfig = observed_graph_module_attrs.prepare_custom_config
+    observed_node_names: Set[str] = observed_graph_module_attrs.observed_node_names
+    node_name_to_qconfig: Dict[str, QConfigAny] = observed_graph_module_attrs.node_name_to_qconfig  # type: ignore[assignment]
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -917,10 +907,10 @@ def convert(
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
     if qconfig_mapping:
-        prepare_qconfig_mapping: QConfigMapping = model.meta["qconfig_mapping"]  # type: ignore[assignment]
+        prepare_qconfig_mapping: QConfigMapping = observed_graph_module_attrs.qconfig_mapping  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
-        if model.meta["is_qat"]:
+        if observed_graph_module_attrs.is_qat:
             _update_qconfig_for_qat(qconfig_mapping, {})
         _update_qconfig_for_fusion(model, qconfig_mapping)
 
@@ -941,7 +931,7 @@ def convert(
     custom_module_classes = get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)
     custom_module_class_mapping = convert_custom_config.observed_to_quantized_mapping
 
-    if model.meta["equalization_node_name_to_qconfig"] is not None:
+    if observed_graph_module_attrs.equalization_node_name_to_qconfig is not None:
         # If we want to do equalization then do the following:
         # Calculate the equalization scale, update the observers with the scaled
         # inputs, and scale the weight
@@ -1038,11 +1028,6 @@ def convert(
                     node, model.graph, modules, custom_module_class_mapping,
                     statically_quantized_custom_module_nodes)
 
-    preserved_attr_names = set(convert_custom_config.preserved_attributes)
-    preserved_attrs = {attr: getattr(model, attr) for attr in preserved_attr_names if hasattr(model, attr)}
-    for attr_name, attr in preserved_attrs.items():
-        model.meta[attr_name] = attr
-
     # remove deadcode after converting observers to quant/dequant ops
     model.graph.eliminate_dead_code()
     model.recompile()
@@ -1055,4 +1040,6 @@ def convert(
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
         _remove_qconfig(model)
+    model.delete_all_unused_submodules()
+    model.meta.pop("_observed_graph_module_attrs", None)
     return model
