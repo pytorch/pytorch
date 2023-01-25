@@ -19,8 +19,6 @@ from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.onnx._internal import jit_utils, registration
 from torch.utils import _pytree
 
-# TODO: REMOVE THIS. Dummy comment to trigger CI after merge with master.
-
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
     table: Dict[torch._ops.OpOverload, str] = {}
@@ -361,7 +359,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
 
 def _ts_graph_to_onnx_model_in_protobuf(
     ts_graph, ts_name_to_real_tensor, opset_version
-):
+) -> bytes:
     proto, _, _, _ = ts_graph._export_onnx(
         initializers=ts_name_to_real_tensor,
         onnx_opset_version=opset_version,
@@ -420,7 +418,7 @@ def _export(
     *args,
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
     use_binary_format: bool = True,
-):
+) -> Union[onnx.ModelProto, bytes]:
     # Export FX graph to ONNX ModelProto.
     if decomposition_table is None:
         # Use default decomposition table.
@@ -448,7 +446,7 @@ def export(
     opset_version,
     *args,
     use_binary_format: bool = True,
-):
+) -> Union[onnx.ModelProto, bytes]:
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -476,7 +474,7 @@ def export_without_kwargs(
     *args,
     use_binary_format: bool = True,
     **kwargs,
-):
+) -> Union[onnx.ModelProto, bytes]:
     if isinstance(fn, torch.nn.Module):
         signature = inspect.signature(fn.forward)
     else:
