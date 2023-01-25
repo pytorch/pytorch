@@ -39,8 +39,7 @@ class TORCH_API TransformerEncoderLayerImpl
   TransformerEncoderLayerImpl(int64_t d_model, int64_t nhead)
       : TransformerEncoderLayerImpl(
             TransformerEncoderLayerOptions(d_model, nhead)) {}
-  explicit TransformerEncoderLayerImpl(
-      TransformerEncoderLayerOptions options_);
+  explicit TransformerEncoderLayerImpl(TransformerEncoderLayerOptions options_);
 
   Tensor forward(
       const Tensor& src,
@@ -115,8 +114,7 @@ class TORCH_API TransformerDecoderLayerImpl
   TransformerDecoderLayerImpl(int64_t d_model, int64_t nhead)
       : TransformerDecoderLayerImpl(
             TransformerDecoderLayerOptions(d_model, nhead)) {}
-  explicit TransformerDecoderLayerImpl(
-      TransformerDecoderLayerOptions options_);
+  explicit TransformerDecoderLayerImpl(TransformerDecoderLayerOptions options_);
 
   void reset() override;
 
