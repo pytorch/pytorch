@@ -1,13 +1,27 @@
+from __future__ import annotations
+
 import copy
 import inspect
 import itertools
 import operator
+from types import ModuleType
 from typing import Callable, Dict, Optional, Tuple, Union
 
-import onnx
-import onnxscript
-from onnxscript import evaluator, opset18
-from onnxscript.function_libs.torch_aten import graph_building, ops
+try:
+    import onnx
+    import onnxscript
+    from onnxscript import evaluator, opset18
+    from onnxscript.function_libs.torch_aten import graph_building, ops
+    # TODO: Handle imports
+except ImportError:
+    onnx = ModuleType("onnx")
+
+    def _onnx_not_available(name):
+        raise RuntimeError(
+            "ONNX is not available. Please install ONNX to use this feature."
+        )
+
+    onnx.__getattr__ = _onnx_not_available
 
 import torch
 import torch._C
@@ -514,7 +528,7 @@ def _export(
     *args,
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
-):
+) -> Union["onnx.ModelProto", bytes]:
     # Export FX graph to ONNX ModelProto.
     if decomposition_table is None:
         # Use default decomposition table.
@@ -543,7 +557,7 @@ def export(
     opset_version,
     *args,
     use_binary_format: bool = True,
-):
+) -> Union["onnx.ModelProto", bytes]:
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -571,7 +585,7 @@ def export_without_kwargs(
     *args,
     use_binary_format: bool = True,
     **kwargs,
-):
+) -> Union["onnx.ModelProto", bytes]:
     if isinstance(fn, torch.nn.Module):
         signature = inspect.signature(fn.forward)
     else:

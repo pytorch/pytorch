@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(gather_out_mps)
 (const Tensor & self_arg,
@@ -413,5 +412,4 @@ TORCH_IMPL_FUNC(scatter_add_mps_out)
   scatter_mps_general(self, dim, index, src, output, "scatter_add_mps_out", "add");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
