@@ -913,7 +913,6 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
-    @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -5373,7 +5372,6 @@ def make_dynamic_cls(cls):
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
-        (config, "dynamic_shapes", True),
         (torch._dynamo.config, "dynamic_shapes", True),
         (functorch_config, "use_dynamic_shapes", True),
     )
@@ -5525,7 +5523,6 @@ if HAS_CPU:
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
-        @patch.object(config, "dynamic_shapes", True)
         @patch.object(torch._dynamo.config, "dynamic_shapes", True)
         @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_vec_dynamic_shapes(self):
@@ -6255,7 +6252,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
         # TODO: Abstract this out, test more extensively
-        @patch.object(config, "dynamic_shapes", True)
         @patch.object(torch._dynamo.config, "dynamic_shapes", True)
         @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_dynamic_shapes(self):

@@ -265,7 +265,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.static_weight_shapes
             and (
                 len(self.graph_inputs) < self.num_static_inputs
-                or not config.dynamic_shapes
+                or not dynamo_config.dynamic_shapes
             )
             and not example._has_symbolic_sizes_strides
         ):
