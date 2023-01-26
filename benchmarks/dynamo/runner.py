@@ -334,6 +334,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     with open(generated_file, "w") as runfile:
         lines = []
 
+        lines.append("#!/bin/bash")
+        lines.append("set -x")
         lines.append("# Setup the output directory")
         lines.append(f"rm -rf {output_dir}")
         lines.append(f"mkdir {output_dir}")
