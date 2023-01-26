@@ -88,7 +88,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-rocm5.3-py3.8
-      docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
