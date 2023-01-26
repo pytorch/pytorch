@@ -23,7 +23,7 @@ from torch._sources import get_source_lines_and_file, parse_def, make_source_con
 from torch._sources import ParsedDef as _ParsedDef
 from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
-from torch._jit_internal import should_drop, is_drop_fn, is_static_fn, FunctionModifiers  # noqa: F401
+from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 from torch import _jit_internal
 import torch.jit.annotations
 
@@ -195,7 +195,6 @@ def get_jit_class_def(cls, self_name):
         predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
-        and not is_drop_fn(m)
     )
 
     def is_classmethod(fn):
@@ -263,7 +262,6 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     parsed_def = parse_def(fn) if not isinstance(fn, _ParsedDef) else fn
     type_line = torch.jit.annotations.get_type_line(parsed_def.source)
     fn_def = parsed_def.ast.body[0]
-    print(f"XXX frontend.py:265 fn_def:{ast.dump(fn_def)}")
 
     if is_classmethod:
         arg_name = fn_def.args.args[0].arg
@@ -273,23 +271,20 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        print(f"XXX frontend.py:276 should_drop:{fn}")
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
         if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
             raise RuntimeError(f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}")
         unused_def = unused_fn_def.body[0]
-        print(f"XXX frontend.py:281 fn_def:{ast.dump(fn_def)}")
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
         for arg in fn_def.args.args + fn_def.args.kwonlyargs:
-            print(f"XXX frontend.py:286 {ast.dump(arg)}")
             # Replace potentially unsupported type annotations by "Any"
             arg.annotation = unused_def.args.args[0].annotation
-            if arg.annotation is not None:
-                print(f"XXX frontend.py:290 {arg.annotation.id}")
-        # import pdb
-        # pdb.set_trace()
+        # Type annotations can be in decorator_list, returns, type_comment
+        fn_def.decorator_list = []
+        fn_def.returns = None
+        fn_def.type_comment = None
 
     # If MonkeyType is installed, get all the consolidated type traces
     # for the arguments from type_trace_db

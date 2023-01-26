@@ -529,7 +529,6 @@ class FunctionModifiers(object):
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
-    DROP = ""
 
 
 def export(fn):
@@ -629,10 +628,6 @@ def unused(fn):
         return prop
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED
-    return fn
-
-def drop(fn):
-    fn._torchscript_modifier = FunctionModifiers.DROP
     return fn
 
 
@@ -776,11 +771,6 @@ def should_drop(fn) -> bool:
 def is_ignored_fn(fn) -> bool:
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
-
-
-def is_drop_fn(fn) -> bool:
-    mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.DROP
 
 
 def is_static_fn(cls, fn) -> bool:

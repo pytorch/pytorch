@@ -13,7 +13,6 @@ from torch._jit_internal import (
     _IgnoreContextManager,
     _overload,
     _overload_method,
-    drop,
     ignore,
     _isinstance,
     is_scripting,

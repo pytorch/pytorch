@@ -224,15 +224,6 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
-  // 
-  auto t_str = expr.range().text().str();
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << expr.range().text().str()
-      << std::endl;
-  if (t_str == "torch.fx.node.Argument") {
-    throw std::runtime_error(t_str);
-  }
-
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text().str(), expr.range())) {
@@ -309,9 +300,6 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
 
 TypePtr ScriptTypeParser::parseType(const std::string& str) {
   Parser p(std::make_shared<Source>(str));
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << str
-      << std::endl;
   return parseTypeFromExpr(p.parseExp());
 }
 
