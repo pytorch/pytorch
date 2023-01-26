@@ -11,6 +11,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
+from torch._dynamo.variables import DynamicShapeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -478,7 +479,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 **options,
             )
 
-            if "out" in kwargs:
+            if "out" in kwargs and not (
+                isinstance(kwargs["out"], variables.ConstantVariable)
+                and kwargs["out"].as_python_constant() is None
+            ):
                 # out variants of torch operators like torch.sort and
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
@@ -768,7 +772,9 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
+            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+                type(args[0])
+            )  # predicate
             assert isinstance(
                 args[1], (UserFunctionVariable, NestedUserFunctionVariable)
             ), str(
