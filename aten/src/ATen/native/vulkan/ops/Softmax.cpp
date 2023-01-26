@@ -14,7 +14,7 @@ Tensor softmax_internal(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       input_arg.dim() == 4, "Vulkan softmax expects 4-dimensional input!");
 

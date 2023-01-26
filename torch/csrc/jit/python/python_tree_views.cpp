@@ -10,8 +10,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 c10::optional<std::string> maybeConvertToString(const py::object& obj) {
   if (obj.is_none()) {
@@ -409,5 +408,4 @@ void initTreeViewBindings(PyObject* module) {
           [](const SourceRange& range) { return Maybe<Expr>::create(range); }));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
