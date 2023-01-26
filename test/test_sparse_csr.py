@@ -1477,13 +1477,6 @@ class TestSparseCSR(TestCase):
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
 
-        from torch.sparse._triton_ops import bsr_dense_mm
-
-        if bsr_dense_mm is not None:
-            lib = torch.library.Library("aten", "IMPL")
-            lib.impl("aten::_triton_bsr_dense_mm",
-                     lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs), "SparseCsrCUDA")
-
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
 
