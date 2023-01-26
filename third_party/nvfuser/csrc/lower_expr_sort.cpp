@@ -7,6 +7,7 @@
 #include <lower2device.h>
 #include <lower_expr_sort.h>
 #include <lower_utils.h>
+#include <utils.h>
 
 #include <deque>
 #include <list>
@@ -870,6 +871,13 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (pa_ids.count(id)) {
       joined_groups->payload()->pa_domains.emplace_back(id);
     }
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::ExprSort)) {
+    std::cout << "==========================================\n" << std::endl;
+    std::cout << "Producer:\n" << producer->toString() << std::endl;
+    std::cout << "Consumer:\n" << consumer->toString() << std::endl;
+    std::cout << "Merged:\n" << joined_groups->toString() << std::endl;
   }
 
   return joined_groups;

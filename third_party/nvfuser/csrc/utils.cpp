@@ -128,7 +128,8 @@ auto parseDebugDumpOptions() {
       {"bank_conflict", DebugDumpOption::BankConflictInfo},
       {"sync_map", DebugDumpOption::SyncMap},
       {"lower_verbose", DebugDumpOption::LowerVerbose},
-      {"expr_simplify", DebugDumpOption::ExprSimplification}};
+      {"expr_simplify", DebugDumpOption::ExprSimplification},
+      {"expr_sort", DebugDumpOption::ExprSort}};
 
   return parseEnvOptions("PYTORCH_NVFUSER_DUMP", available_options);
 }
