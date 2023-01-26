@@ -21,8 +21,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -1410,5 +1409,4 @@ void GroupNormBackwardKernelImpl(
 REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
 REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
