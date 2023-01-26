@@ -277,7 +277,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # in the mesh dimension
         device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
         # convert the local tensor to desired device base on device mesh's device_type
-        local_tensor = local_tensor.to(device_mesh.device_type)
+        if not local_tensor.is_meta:
+            local_tensor = local_tensor.to(device_mesh.device_type)
 
         # set default placements to replicated if not specified
         if placements is None:
