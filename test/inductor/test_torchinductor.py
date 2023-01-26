@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+import sympy
+
 import torch
 
 import torch._dynamo
@@ -28,6 +30,8 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -35,42 +39,42 @@ from torch.testing._internal.common_utils import (
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-try:
-    import sympy
-
-    importlib.import_module("functorch")
-    importlib.import_module("filelock")
-
-    import torch._inductor.config
-    from functorch.compile import config as functorch_config
-    from torch._decomp import get_decompositions
-    from torch._inductor import codecache, config, metrics, test_operators
-    from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
-    from torch._inductor.codegen.triton import texpr
-    from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
-    from torch._inductor.ir import ModularIndexing
-    from torch._inductor.overrides import (
-        linear_permute_fusion,
-        linear_transpose,
-        permute_linear_fusion,
-        permute_matmul_fusion,
-        sink_cat_after_pointwise,
-        transpose_linear,
-        transpose_matmul,
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
     )
-    from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, timed
-    from torch.fx.experimental.symbolic_shapes import FloorDiv
-
-    # This will only pass on pytorch builds newer than roughly 5/15/2022
-    assert get_decompositions([torch.ops.aten.trace])
-    # Requires functorch
-    from torch._inductor.compile_fx import compile_fx_inner
-except (ImportError, AssertionError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock") from e
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+importlib.import_module("functorch")
+importlib.import_module("filelock")
+
+import torch._inductor.config
+from functorch.compile import config as functorch_config
+from torch._decomp import get_decompositions
+from torch._inductor import codecache, config, metrics, test_operators
+from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
+from torch._inductor.codegen.triton import texpr
+
+from torch._inductor.compile_fx import (
+    compile_fx,
+    compile_fx_inner,
+    complex_memory_overlap,
+)
+from torch._inductor.ir import ModularIndexing
+from torch._inductor.overrides import (
+    linear_permute_fusion,
+    linear_transpose,
+    permute_linear_fusion,
+    permute_matmul_fusion,
+    sink_cat_after_pointwise,
+    transpose_linear,
+    transpose_matmul,
+)
+from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.utils import has_torchvision_roi_align, timed
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
