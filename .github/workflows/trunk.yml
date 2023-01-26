@@ -19,12 +19,12 @@ concurrency:
 
 jobs:
   # Build PyTorch with BUILD_CAFFE2=ON
-  caffe2-linux-focal-py3_7-gcc7-build:
-    name: caffe2-linux-focal-py3.7-gcc7
+  caffe2-linux-focal-py3_8-gcc7-build:
+    name: caffe2-linux-focal-py3.8-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: caffe2-linux-focal-py3.7-gcc7
-      docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      build-environment: caffe2-linux-focal-py3.8-gcc7
+      docker-image-name: pytorch-linux-focal-py3.8-gcc7
 
   linux-bionic-cuda11_7-py3_10-gcc7-build:
     name: linux-bionic-cuda11.7-py3.10-gcc7
@@ -137,25 +137,25 @@ jobs:
       build-environment: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
       docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
 
-  linux-bionic-py3_7-clang9-slow-build:
-    name: linux-bionic-py3.7-clang9-slow
+  linux-bionic-py3_8-clang9-slow-build:
+    name: linux-bionic-py3.8-clang9-slow
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3.7-clang9-slow
-      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      build-environment: linux-bionic-py3.8-clang9-slow
+      docker-image-name: pytorch-linux-bionic-py3.8-clang9
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-py3_7-clang9-slow-test:
-    name: linux-bionic-py3.7-clang9-slow
+  linux-bionic-py3_8-clang9-slow-test:
+    name: linux-bionic-py3.8-clang9-slow
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_7-clang9-slow-build
+    needs: linux-bionic-py3_8-clang9-slow-build
     with:
-      build-environment: linux-bionic-py3.7-clang9-slow
-      docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.test-matrix }}
+      build-environment: linux-bionic-py3.8-clang9-slow
+      docker-image: ${{ needs.linux-bionic-py3_8-clang9-slow-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-py3_8-clang9-slow-build.outputs.test-matrix }}
 
   linux-focal-py3_9-clang7-tsan-build:
     name: linux-focal-py3.9-clang7-tsan
