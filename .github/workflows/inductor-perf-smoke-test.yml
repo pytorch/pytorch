@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/inductor-perf-smoke-test.yml
+      - benchmarks/dynamo/check_hf_bert_perf_csv.py
   workflow_dispatch:
 
 concurrency:

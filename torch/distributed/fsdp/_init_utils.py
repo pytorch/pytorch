@@ -484,8 +484,6 @@ def _init_param_handles_from_module(
             )
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
-        # Pass `root_module` to have internal FQN metadata prefix starting from
-        # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
     # Reverse `_handles` to preserve depth-first `.modules()` order for
     # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
