@@ -729,6 +729,16 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    def test_randn_generator(self):
+        def fn(a, generator):
+            torch.randn([20, 20], generator=generator, device=a.device)
+
+        self.common(fn, (torch.linspace(-10, 10, 41), None))
+
+        # generator not yet supported in dynamo
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
+            self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
+
     def test_sgn_extremal(self):
         def fn(a):
             return (torch.sgn(a),)
@@ -2469,6 +2479,15 @@ class CommonTemplate:
             return aten.elu(x, 1.6732632423543772, 1.0507009873554805) + 2, aten.elu(
                 x + 1, 2, 3, 4
             )
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_tan(self):
+        def fn(x):
+            return aten.tan(x) + 2, aten.tan(x + 1)
 
         self.common(
             fn,
@@ -5168,10 +5187,6 @@ test_skips = {
     "test_cauchy_dynamic_shapes": ("cuda",),
     "test_clamp_dynamic_shapes": ("cuda",),
     "test_clone_dynamic_shapes": ("cuda",),
-    "test_conv2d_binary_dynamic_shapes": ("cpu",),
-    "test_conv2d_packed_dynamic_shapes": ("cpu",),
-    "test_conv2d_unary_dynamic_shapes": ("cpu",),
-    "test_conv_bn_fuse_dynamic_shapes": ("cpu",),
     "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
     "test_cos_dynamic_shapes": ("cuda",),
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
@@ -5908,7 +5923,7 @@ if HAS_CPU:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
     import triton.language as tl
 
@@ -6663,7 +6678,7 @@ class ExprPrinterTests(TestCase):
             self.assertEqual(texpr(expr), result)
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
