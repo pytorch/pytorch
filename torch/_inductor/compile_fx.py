@@ -18,6 +18,7 @@ from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
 
+import torch._dynamo.config as dynamo_config
 from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -375,7 +376,7 @@ def compile_fx(
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(config.triton.cudagraphs and not config.dynamic_shapes)
+    cudagraphs = BoxedBool(config.triton.cudagraphs and not dynamo_config.dynamic_shapes)
 
     graph_id = next(_graph_counter)
 
