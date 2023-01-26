@@ -231,6 +231,39 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cuda_(
       std::move(tensor_vec), work);
 }
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
+allreduce_sparse_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  std::cout << "allreduce_sparse_cuda_" << std::endl;
+  // For each tensor in list print out if it is sparse
+  std::vector<at::Tensor> dense_tensor_vec;
+  for (auto tensor : tensors) {
+    std::cout << "tensor.is_sparse() = " << tensor.is_sparse() << std::endl;
+    // [REMOVE] Just so this collective will work for now... turn tensor into
+    // dense
+    dense_tensor_vec.push_back(tensor.to_dense());
+  }
+
+  // step-B2. Local reduce across samples
+
+  // TODO: update with the correct backend
+  auto work =
+      process_group->getBackend(c10::DeviceType::CUDA)
+          ->allreduce_sparse(
+              dense_tensor_vec,
+              AllreduceOptions{
+                  *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  // Return input tensors as output tensors to make inplace allreduce look like
+  // a functional API, so that make_fx can correctly build the dependencies in
+  // the graph later.
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(dense_tensor_vec), work);
+}
+
 c10::intrusive_ptr<Work> allreduce_coalesced_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -627,7 +660,7 @@ TORCH_LIBRARY_IMPL(c10d, SparseCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(c10d, SparseCUDA, m) {
-  m.impl("allreduce_", allreduce_cuda_);
+  m.impl("allreduce_", allreduce_sparse_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {

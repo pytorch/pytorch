@@ -1839,6 +1839,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
       "nccl:all_reduce");
 }
 
+// Sparse allreduce (note: ProcessGroupGloo.cpp::AsyncSparseAllreduceWork)
+c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  std::cout << "in ProcessGroupNCCL::allreduceSparse" << std::endl;
+  return allreduce_impl(tensors, opts);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
