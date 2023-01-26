@@ -99,7 +99,7 @@ TEST(CUDATest, cuda_device_assertions_from_2_processes) {
   c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled = true;
   cuda_device_assertions_from_2_processes();
 #else
-  GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled.";
+  GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled at compile time.";
 #endif
 }
 
