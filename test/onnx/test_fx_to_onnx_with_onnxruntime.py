@@ -94,7 +94,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     # test single op with no kwargs
     def test_sigmoid_add(self):
-        x = torch.randn(1, 4, 2, 3)
+        self.opset_version = 17
+        # TODO(titaiwang): change to randn once it's ready
+        x = torch.tensor([1.0, 2.0], dtype=torch.float)
 
         class SigmoidAddModel(torch.nn.Module):
             def __init__(self):
