@@ -3015,6 +3015,94 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_model(x)
         self.assertTrue(same(ref, res))
 
+    def test_if_cond_user_defined_object(self):
+        # obj.__bool__ is not existed
+        class A(object):  # noqa: B903
+            def __init__(self, x):
+                self.x = x
+
+        # obj.__bool__ is function and returns bool type
+        class B(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __bool__(self):
+                return self.x > 0
+
+        # obj.__bool__ is non-function
+        class C(object):
+            def __init__(self, x):
+                self.x = x
+                self.__bool__ = False
+
+        def fn(x, obj):
+            if not obj:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        obj1 = A(0.5)
+        obj2 = B(0.5)
+        obj3 = B(-0.5)
+        obj4 = C(0.5)
+        for obj in [obj1, obj2, obj3, obj4, obj3, obj2]:
+            ref = fn(x, obj)
+            res = opt_fn(x, obj)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 4)
+
+    def test_if_cond_user_defined_object2(self):
+        # obj.__bool__ is function and returns non-bool type
+        class MyObj(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __bool__(self):
+                self.x = 1
+                return self.x
+
+        def fn(a, obj):
+            if not obj:
+                return a + obj.x
+            else:
+                return a - obj.x
+
+        x = torch.rand(4)
+        obj = MyObj(0.5)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        try:
+            opt_fn(x, obj)
+            self.assertFalse(True)
+        except TypeError as e:
+            self.assertIn("__bool__ should return bool, returned int", str(e))
+
+    def test_class_has_instancecheck_method(self):
+        class A(object):
+            pass
+
+        class ExampleMeta(type):
+            def __instancecheck__(cls, instance):
+                return True
+
+        class B(object, metaclass=ExampleMeta):
+            pass
+
+        def fn(x, obj):
+            if isinstance(obj, B):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        obj = A()
+        ref = fn(x, obj)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, obj)
+        self.assertTrue(same(ref, res))
+
     def test_torch_cuda_is_available(self):
         def fn(x):
             if torch.cuda.is_available():
