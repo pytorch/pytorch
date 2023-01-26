@@ -253,7 +253,7 @@ class TestTypesAndAnnotation(JitTestCase):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return torch.sin(x)
 
-            @torch.jit.unused
+            @torch.jit.ignore
             def __fx_create_arg__(self, tracer: torch.fx.Tracer) -> torch.fx.node.Argument:
                 # torch.fx classes are not scriptable
                 return tracer.create_node(
