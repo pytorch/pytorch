@@ -359,6 +359,9 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   void revertInputOutputPrecisionChanges(
       const std::vector<SegmentedEdge*>& edges);
 
+  //! Grab edges with val
+  std::vector<SegmentedEdge*> getEdgesByVal(Val* val) const;
+
   //! Make sure it's a DAG and optionally disjoint
   void validate(bool require_disjoint = true) const;
 

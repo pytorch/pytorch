@@ -917,6 +917,16 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
   return affected_edges;
 }
 
+std::vector<SegmentedEdge*> SegmentedFusion::getEdgesByVal(Val* val) const {
+  std::vector<SegmentedEdge*> edges_with_val;
+  std::copy_if(
+      cedges().begin(),
+      cedges().end(),
+      std::back_inserter(edges_with_val),
+      [&](auto edge) { return edge->val == val; });
+  return edges_with_val;
+}
+
 void SegmentedFusion::revertInputOutputPrecisionChanges(
     const std::vector<SegmentedEdge*>& edges) {
   std::unordered_set<Val*> lowered_tv_to_remove;
@@ -933,8 +943,20 @@ void SegmentedFusion::revertInputOutputPrecisionChanges(
       same_precision_tv_to_remove.insert(same_precision_tv);
     }
     edge->val = original_tv;
-    edge->from->resetExprList();
-    edge->to->resetExprList();
+  }
+
+  // Any group with an edge with the original TVs may have its
+  // expressions replaced.
+  std::unordered_set<SegmentedGroup*> groups_to_reset;
+  for (auto lowered_tv : lowered_tv_to_remove) {
+    auto original_tv = lowered_tv->definition()->inputs().at(0);
+    for (auto e : getEdgesByVal(original_tv)) {
+      groups_to_reset.insert(e->from);
+      groups_to_reset.insert(e->to);
+    }
+  }
+  for (auto group : groups_to_reset) {
+    group->resetExprList();
   }
 
   // Remove the temporary vals
