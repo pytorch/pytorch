@@ -1,3 +1,4 @@
+import builtins
 import collections
 import logging
 import math
@@ -97,16 +98,14 @@ class GuardBuilder(GuardBuilderBase):
         else:
             scope = dict()
         self.scope: Dict[str, object] = scope
-
-        if "__builtins__" not in self.scope:
-            self.scope["__builtins__"] = {}
+        self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
             package_module,
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"].__dict__[name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 

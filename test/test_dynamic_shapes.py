@@ -13,9 +13,7 @@ import itertools
 import random
 import contextlib
 import math
-import builtins
 import atexit
-import io
 import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
@@ -391,6 +389,13 @@ class TestPySymInt(TestCase):
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
     @skipIfNoSympy
+    def test_non_overlapping_and_dense(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = torch.empty_strided((a0, 7), (1, a0), device='meta')
+        self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
+
+    @skipIfNoSympy
     def test_symint_as_scalar(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -415,8 +420,7 @@ class TestPySymInt(TestCase):
         self.assertTrue(sym_int_encountered)
 
     @skipIfNoSympy
-    @unittest.mock.patch('sys.stdout', new_callable=io.StringIO)
-    def test_print_readable_with_symints(self, mock_stdout):
+    def test_print_readable_with_symints(self):
         def f(a, b):
             dim0 = a.shape[0] + b.shape[0]
             dim1 = a.shape[1] + b.shape[1]
@@ -425,9 +429,9 @@ class TestPySymInt(TestCase):
             return d
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5, 3), torch.randn(4, 3))
-        fx_g.print_readable()
+        out = fx_g.print_readable(print_output=False)
 
-        self.assertExpectedInline(mock_stdout.getvalue().strip(), """\
+        self.assertExpectedInline(out.strip(), """\
 class f(torch.nn.Module):
     def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
         # No stacktrace found for following nodes
@@ -475,10 +479,14 @@ expected_failure_sym_magic_methods = {
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
-        seed_node = (create_symint(shape_env, 1) / 1.).get_pyobj()
+        seed_node = (create_symint(shape_env, 1) / 1.).node
+        bool_seed_node = (create_symint(shape_env, 1) == 1).node
 
         def get_sym_inp(inp):
-            if isinstance(inp, int):
+            # NB: this must come before int
+            if isinstance(inp, bool):
+                return torch.SymBool(to_node(bool_seed_node, inp))
+            elif isinstance(inp, int):
                 return torch.SymInt(to_node(seed_node, inp))
             else:
                 return torch.SymFloat(to_node(seed_node, inp))
@@ -499,14 +507,12 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        # These functions might return plain int/float
-        has_valid_downcast = fn in ["min", "max"]
-        if fn in symbolic_shapes.magic_methods_on_builtins:
-            lambda_apply = getattr(builtins, fn)
-        elif fn in symbolic_shapes.magic_methods_on_math:
+        if fn in symbolic_shapes.magic_methods_on_math:
             lambda_apply = getattr(math, fn)
         elif fn in symbolic_shapes.magic_methods_on_submodule:
             lambda_apply = getattr(symbolic_shapes, fn)
+        elif fn in symbolic_shapes.magic_methods_on_operator_with_trailing_underscore:
+            lambda_apply = getattr(operator, f"{fn}_")
         else:
             lambda_apply = getattr(operator, fn)
 
@@ -514,22 +520,15 @@ class TestSymNumberMagicMethods(TestCase):
             tp = "float"
         elif fn in symbolic_shapes.always_int_magic_methods:
             tp = "int"
+        elif fn in symbolic_shapes.always_bool_magic_methods:
+            tp = "bool"
         elif is_unary_fn:
             tp = "float" if isinstance(inp1, float) else "int"
         else:
             tp = "float" if any(isinstance(i, float) for i in [inp1, inp2]) else "int"
 
         def guard_fn(v):
-            try:
-                if fn in symbolic_shapes.always_bool_magic_methods:
-                    return bool(v)
-                else:
-                    return getattr(v.node, f"guard_{tp}")("", 0)
-            except Exception as e:
-                if has_valid_downcast:
-                    return v
-                else:
-                    raise e
+            return getattr(v.node, f"guard_{tp}")("", 0)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
@@ -563,16 +562,30 @@ class TestSymNumberMagicMethods(TestCase):
 
 
     @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
+    def test_bool_method(self, fn):
+        if fn not in symbolic_shapes.bool_magic_methods:
+            self.skipTest(f"{fn} is non-bool")
+
+        is_unary_fn = fn in symbolic_shapes.unary_magic_methods
+        shape_env = ShapeEnv()
+        self._do_test(fn, True, False, shape_env, is_unary_fn)
+
+
+    @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
     def test_method(self, fn, first_type, second_type):
         if first_type == "float":
+            # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
         is_unary_fn = fn in symbolic_shapes.unary_magic_methods
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")
+
+        if fn in symbolic_shapes.bool_magic_methods:
+            self.skipTest(f"{fn} is bool")
 
         # We could pass int/float directly for types but then the
         # mangled test name is bad
@@ -735,7 +748,9 @@ class TestFloorDiv(TestCase):
             # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
             # always returns an integer 1 when both args are the same object.
             # This even works for Symbols with no assumptions specified.
-            if base is divisor or (base.is_integer and divisor.is_integer):
+            # Otherwise, we only state that the result is a real. We DO NOT
+            # assert anything about integers because it makes SymPy too eager.
+            if base is divisor:
                 self.assertTrue(op.is_integer)
                 self.assertTrue(op.is_real)
             else:

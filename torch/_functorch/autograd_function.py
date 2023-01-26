@@ -1,7 +1,7 @@
 import torch
 from torch._ops import PyOperator
 from torch._C._functorch import TransformType
-from torch._functorch.utils import enable_autograd_function
+from torch._functorch.utils import enable_single_level_autograd_function
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -86,7 +86,7 @@ custom_function_call = CustomFunctionPyOperator()
 @custom_function_call.py_impl(TransformType.Jvp)
 def custom_function_call_grad(interpreter, autograd_function, *operands):
     Generated = generate_single_level_function(interpreter, autograd_function)
-    with enable_autograd_function():
+    with enable_single_level_autograd_function():
         flat_out = Generated.apply(*operands)
     return flat_out
 
@@ -145,11 +145,23 @@ def generate_single_level_function(interpreter, autograd_function):
     )
     return Generated
 
+# wrap_outputs_maintaining_identity handles outputs from the vmap,
+# backward (vjp), and jvp staticmethod. The way it distinguishes
+# between the vmap case and the {backward, jvp} case is if the out_dims
+# are specified or not.
+#
+# NB: we cannot use out_dims=None as the deciding factor. This because
+# out_dims=None can still happen in the vmap staticmethod! What the
+# user is saying in that case is that their output does not have a
+# dimension that is being vmapped over, which is valid.
+NO_OUT_DIMS = "not specified"
+
 # NOTE [mark_dirty object identity check]
 # autograd.Function's ctx.mark_dirty expect a returned input
 # to have the same object identity as the input.
 # Mode-only functorch will greatly simplify this logic.
-def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=None):
+def wrap_outputs_maintaining_identity(
+        outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=NO_OUT_DIMS):
     flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
     flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
 
@@ -161,8 +173,23 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wr
     flat_outputs, spec = pytree.tree_flatten(outputs)
     result = []
 
-    if out_dims is not None:
+    out_dims_specified = out_dims != NO_OUT_DIMS
+
+    if out_dims_specified:
         flat_out_dims = _broadcast_to_and_flatten(out_dims, spec)
+        # _broadcast_to_and_flatten returns None if it is unable to broadcast.
+        # TODO: update following link from master to stable once that's out
+        if flat_out_dims is None:
+            raise RuntimeError(
+                f"The autograd.Function's vmap staticmethod returned an "
+                f"incompatible (output, out_dims) tuple. "
+                f"Expected out_dims={out_dims} "
+                f"to be compatible with the structure of `output`. "
+                f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
+                f"but output has structure {spec}. "
+                f"For more details, please see "
+                f"https://pytorch.org/docs/master/notes/extending.func.html"
+            )
 
     for i, output in enumerate(flat_outputs):
         if not isinstance(output, torch.Tensor):
@@ -171,9 +198,8 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wr
         if id(output) in unwrapped_input_to_orig_input:
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
-        if out_dims is not None:
-            assert flat_out_dims is not None
-            result.append(wrap_fn(output, flat_out_dims[i]))
+        if out_dims_specified:
+            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[index]
         else:
             result.append(wrap_fn(output))
 
@@ -227,26 +253,44 @@ class VmapInfo(NamedTuple):
     randomness: str
 
 
+def has_overriden_vmap_rule(autograd_function):
+    return autograd_function.vmap is not torch.autograd.Function.vmap
+
+
+def validate_vmap_returns_tuple_of_two_elements(result):
+    base_error_msg = (
+        "Expected the vmap staticmethod to have two returns, an output "
+        "and out_dims with pytree structure compatible with the output. "
+    )
+    if not isinstance(result, tuple):
+        raise RuntimeError(base_error_msg + f"Got a {type(result)} instead")
+    if not len(result) == 2:
+        raise RuntimeError(base_error_msg + f"Got {len(result)} returns instead")
+
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
-    if getattr(autograd_function, 'generate_vmap_rule', False):
-        if hasattr(autograd_function, "vmap"):
-            # TODO: link docs when they're ready.
-            # https://github.com/pytorch/pytorch/issues/90224
+    if autograd_function.generate_vmap_rule:
+        if has_overriden_vmap_rule(autograd_function):
+            # TODO: Update link to stable once that's out
+            # https://github.com/pytorch/pytorch/issues/92029
             raise RuntimeError(
                 f"You tried to vmap over {autograd_function.__name__}, but "
-                f"it has both generate_vmap_rule=True and a vmap staticmethod "
-                f"defined on it. Please set generate_vmap_rule=False or delete "
-                f"the vmap staticmethod to avoid ambiguity.")
+                f"it has both generate_vmap_rule=True and an overriden vmap "
+                f"staticmethod. Please set generate_vmap_rule=False or delete "
+                f"the overriden vmap staticmethod to avoid ambiguity. "
+                f"For more details, please see "
+                f"https://pytorch.org/docs/master/notes/extending.func.html")
         return custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands)
 
-    if not hasattr(autograd_function, "vmap"):
-        # TODO: link docs when they're ready.
-        # https://github.com/pytorch/pytorch/issues/90224
+    if not has_overriden_vmap_rule(autograd_function):
+        # TODO: Update link to stable once that's out
+        # https://github.com/pytorch/pytorch/issues/92029
         raise RuntimeError(
             f"You tried to vmap over {autograd_function.__name__}, but "
-            f"it does not have a vmap rule defined. Please add a vmap "
-            f"staticmethod to it or set generate_vmap_rule=True.")
+            f"it does not have vmap support. Please override and implement the "
+            f"vmap staticmethod or set generate_vmap_rule=True. "
+            f"For more details, please see "
+            f"https://pytorch.org/docs/master/notes/extending.func.html")
 
     current_level = interpreter.level()
     info = VmapInfo(
@@ -263,16 +307,14 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             return custom_function_call(autograd_function, *operands)
 
     with interpreter.lower():
-        unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+        result = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+    validate_vmap_returns_tuple_of_two_elements(result)
+    unwrapped_output, out_dims = result
 
     # See NOTE [mark_dirty object identity check]
     def wrap_fn(output, out_dim):
         return output if out_dim is None else _add_batch_dim(output, out_dim, current_level)
 
-    # TODO: raise better error message to the user when they don't follow the API.
-    # Should probably mimic the logic of _process_batched_inputs,
-    # but that one is hyperspecialized on error messages.
-    # https://github.com/pytorch/pytorch/issues/90224
     return wrap_outputs_maintaining_identity(
         unwrapped_output,
         unwrapped_operands,
@@ -309,7 +351,6 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
     #   get overwritten.
     out_dims = "not populated"
     input_shapes: Any = "not populated"
-    output_shapes: Any = "not populated"
     saved_tensors_bdims: Any = "not populated"
 
     def forward(*operands):
@@ -320,7 +361,6 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
     def setup_context(ctx, inputs, outputs):
         input_shapes_ = None
-        output_shapes_ = None
         saved_tensors_bdims_ = None
 
         def inner(inputs, outputs):
@@ -338,9 +378,6 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             nonlocal input_shapes_
             input_shapes_ = tuple(inp.shape if isinstance(inp, torch.Tensor) else None
                                   for inp in inputs)
-            nonlocal output_shapes_
-            output_shapes_ = tuple(out.shape if isinstance(out, torch.Tensor) else None
-                                   for out in outputs)
             nonlocal saved_tensors_bdims_
             saved_tensors_bdims_ = wrapped_ctx._pt_saved_tensors_bdims
 
@@ -354,15 +391,12 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
         nonlocal input_shapes
         input_shapes = input_shapes_
-        nonlocal output_shapes
-        output_shapes = output_shapes_
         nonlocal saved_tensors_bdims
         saved_tensors_bdims = saved_tensors_bdims_
 
     def jvp(ctx, *tangents):
         assert out_dims != "not populated"
         assert saved_tensors_bdims != "not populated"
-        assert output_shapes != "not populated"
 
         def jvp_no_context(saved_tensors, tangents):
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
@@ -373,8 +407,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             jvp_no_context, (saved_tensors_bdims, tangent_in_dims), batch_size, randomness)(
                 ctx.saved_tensors, tangents)
 
-        result = reductify(out_tangents, out_tangents_dims, out_dims,
-                           output_shapes, batch_size, allow_expanded_grad=False)
+        result = reductify(out_tangents, out_tangents_dims, out_dims, batch_size)
         return result
 
     def backward(ctx, *grad_outputs):
@@ -390,7 +423,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         grad_ins, grad_ins_dims = restore_vmap(
             backward_no_context, ((saved_tensors_bdims, out_dims),), batch_size, randomness)(
                 (ctx.saved_tensors, grad_outputs))
-        result = reductify(grad_ins, grad_ins_dims, in_dims, input_shapes, batch_size)
+        result = reductify(grad_ins, grad_ins_dims, in_dims, batch_size, input_shapes)
         return result
 
     name = f'Vmapped{autograd_function.__name__}'
@@ -531,27 +564,27 @@ class CtxCustomSave(WrappedCtx):
         self._pt_saved_tensors_bdims = bdims
 
 
-def reductify(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim, batch_size,
-              allow_expanded_grad=True):
+def reductify(grad_input, grad_input_bdim, input_bdim, batch_size,
+              target_shape_without_bdim_to_reduce_to=None):
     if not isinstance(grad_input, tuple):
         grad_input = (grad_input,)
     if not isinstance(grad_input_bdim, tuple):
         grad_input_bdim = (grad_input_bdim,)
     if not isinstance(input_bdim, tuple):
         input_bdim = (input_bdim,)
-    if not isinstance(input_shape_without_bdim, tuple):
-        input_shape_without_bdim = (input_shape_without_bdim,)
 
+    if target_shape_without_bdim_to_reduce_to is None:
+        target_shape_without_bdim_to_reduce_to = len(grad_input) * (None,)
     result = tuple(
-        reductify_leaf(gi, gi_bdim, i_bdim, ishape, batch_size, allow_expanded_grad)
-        for gi, gi_bdim, i_bdim, ishape in
-        zip(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim)
+        reductify_leaf(gi, gi_bdim, i_bdim, batch_size, maybe_ishape)
+        for gi, gi_bdim, i_bdim, maybe_ishape in
+        zip(grad_input, grad_input_bdim, input_bdim, target_shape_without_bdim_to_reduce_to)
     )
     return result
 
 
-def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim, batch_size,
-                   allow_expanded_grad=True):
+def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
+                   target_shape_without_bdim_to_reduce_to=None):
     if grad_input is None:
         return None
 
@@ -581,8 +614,8 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_
     # from [B, 4].
     #
     # This means that we need to also reduce the grad_input to the shape of the
-    # input. This behavior is controlled by the `allow_expanded_grad` flag;
-    # if True then we do the reducing manually.
+    # input. This behavior is controlled by the `target_shape_without_bdim_to_reduce_to` flag;
+    # if not-None then we do the reducing manually, otherwise, we do not do a reduction.
     assert input_bdim is not None
 
     if grad_input_bdim is None:
@@ -592,9 +625,9 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_
         grad_input = grad_input.expand(new_shape)
         grad_input_bdim = input_bdim
 
-    if allow_expanded_grad:
+    if target_shape_without_bdim_to_reduce_to is not None:
         return vmap(torch.Tensor.sum_to_size, in_dims=(grad_input_bdim, None), out_dims=input_bdim)(
-            grad_input, input_shape_without_bdim)
+            grad_input, target_shape_without_bdim_to_reduce_to)
 
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
