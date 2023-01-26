@@ -7,28 +7,6 @@
 
 #include <ATen/native/vulkan/api/vk_api.h>
 
-#define CONCAT_LITERALS(a, b) #a #b
-#ifdef USE_VULKAN_SHADERC_RUNTIME
-#include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderSource {      \
-    CONCAT_LITERALS(vulkan., name), name##_glsl, \
-  }
-#else
-#include <ATen/native/vulkan/spv.h>
-#define VK_KERNEL(name)                                         \
-  ::at::native::vulkan::api::ShaderSource {                     \
-    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
-        name##_spv_layout                                       \
-  }
-#define VK_SHADER(name)                                                        \
-  ::at::native::vulkan::api::ShaderInfo {                                      \
-    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len,                \
-        name##_spv_layout, name##_spv_tile_size, name##_spv_bias_storage_type, \
-        name##_spv_weight_storage_type,                                        \
-  }
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
-
 /*
  * Check that the return code of a Vulkan API call is VK_SUCCESS, throwing an
  * error with the returned code if not. If STRIP_ERROR_MESSAGES is defined then

@@ -12,6 +12,31 @@ from .modules.utils import _pair_from_first
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.
 
+__all__ = [
+    "avg_pool2d",
+    "avg_pool3d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "conv1d",
+    "conv2d",
+    "conv3d",
+    "interpolate",
+    "linear",
+    "max_pool1d",
+    "max_pool2d",
+    "celu",
+    "leaky_relu",
+    "hardtanh",
+    "hardswish",
+    "threshold",
+    "elu",
+    "hardsigmoid",
+    "clamp",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
+]
+
 def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
                count_include_pad=True, divisor_override=None):
     r"""
@@ -139,6 +164,7 @@ def conv1d(input, weight, bias,
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(33, 16, 3, dtype=torch.float)
         >>> inputs = torch.randn(20, 16, 50, dtype=torch.float)
@@ -198,6 +224,7 @@ def conv2d(input, weight, bias,
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
@@ -258,6 +285,7 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, 5, dtype=torch.float)

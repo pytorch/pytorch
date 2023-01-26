@@ -93,10 +93,11 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
+#include <c10/core/SymIntArrayRef.h>
 #include <algorithm>
 #include <cstddef>
 #include <string>
-#include <c10/core/SymIntArrayRef.h>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -749,7 +750,7 @@ Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 Tensor& rand_out(IntArrayRef size, Tensor& result) {
@@ -758,7 +759,7 @@ Tensor& rand_out(IntArrayRef size, Tensor& result) {
 
 Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 Tensor rand_like(
@@ -793,7 +794,7 @@ Tensor randint(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::randint(0, high, size, generator, dtype, layout, device, pin_memory);
+  return native::randint(0, high, size, std::move(generator), dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
@@ -820,7 +821,7 @@ Tensor randint(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.random_(low, high, generator);
+  return result.random_(low, high, std::move(generator));
 }
 
 Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
@@ -832,7 +833,7 @@ Tensor& randint_out(int64_t high,
     c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
-  return result.random_(0, high, generator);
+  return result.random_(0, high, std::move(generator));
 }
 
 Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result) {
@@ -845,7 +846,7 @@ Tensor& randint_out(int64_t low,
     c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
-  return result.random_(low, high, generator);
+  return result.random_(low, high, std::move(generator));
 }
 
 Tensor randint_like(
@@ -898,7 +899,7 @@ Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor& randn_out(IntArrayRef size, Tensor& result) {
@@ -907,7 +908,7 @@ Tensor& randn_out(IntArrayRef size, Tensor& result) {
 
 Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
@@ -920,13 +921,13 @@ Tensor normal(double mean, double std, IntArrayRef size,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.normal_(mean, std, generator);
+  return result.normal_(mean, std, std::move(generator));
 }
 
 Tensor& normal_out(double mean, double std,
                    IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.normal_(mean, std, generator);
+  return result.normal_(mean, std, std::move(generator));
 }
 
 Tensor randn_like(
@@ -992,7 +993,7 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto tensor = at::empty(n, options);
-  return at::randperm_out(tensor, n, generator);
+  return at::randperm_out(tensor, n, std::move(generator));
 }
 
 Tensor& randperm_out(int64_t n, Tensor& result) {
@@ -1161,6 +1162,19 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
+Tensor _efficientzerotensor_meta(IntArrayRef size,
+                                 c10::optional<ScalarType> dtype,
+                                 c10::optional<Layout> layout,
+                                 c10::optional<Device> device,
+                                 c10::optional<bool> pin_memory) {
+  auto device_ = device_or_default(device);
+  auto allocator = at::native::ZeroTensorAllocator(device_);
+  auto dtype_ = dtype_or_default(dtype);
+  auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+  auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  return out;
+}
+
 Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
   result.sparse_resize_and_clear_(size, size.size(), 0.);
   return result;
@@ -1258,7 +1272,7 @@ Tensor bartlett_window(
                     .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ blackman_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1298,7 +1312,7 @@ Tensor blackman_window(
       native::arange(window_length, dtype, layout, device, pin_memory)
           .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hamming_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1366,7 +1380,7 @@ Tensor hamming_window(
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory);
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hann_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1450,7 +1464,7 @@ Tensor kaiser_window(
   auto window = at::empty(window_length, options);
   auto iter = TensorIterator::unary_op(window, initial);
   kaiser_window_stub(iter.device_type(), iter, window_length, beta);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1626,7 +1640,7 @@ Tensor randn(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, names, options);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor rand(
@@ -1651,7 +1665,7 @@ Tensor rand(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, names, options);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 

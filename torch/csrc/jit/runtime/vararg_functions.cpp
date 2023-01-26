@@ -272,7 +272,7 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 void tupleConstruct(Stack& stack, size_t num_inputs) {
   switch (num_inputs) {
     case 0:
-      stack.push_back(c10::ivalue::Tuple::create());
+      stack.emplace_back(c10::ivalue::Tuple::create());
       break;
     case 1:
       stack.back() = c10::ivalue::Tuple::create(std::move(stack.back()));
@@ -336,7 +336,7 @@ void listConstruct(
         drop(stack, num_inputs);
         return vals;
       };
-  stack.push_back(makeList(stack, list_type, num_inputs));
+  stack.emplace_back(makeList(stack, list_type, num_inputs));
 }
 
 void dictConstruct(

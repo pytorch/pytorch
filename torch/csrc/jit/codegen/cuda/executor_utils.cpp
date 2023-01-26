@@ -63,9 +63,7 @@ std::string kernelPreamble() {
 
 #ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
-#endif
 #else
   ss << R"(
 #ifndef __noinline__
@@ -1009,7 +1007,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   });
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -1036,7 +1034,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   const bool disable_fma = isOptionDisabled(DisableOption::Fma);

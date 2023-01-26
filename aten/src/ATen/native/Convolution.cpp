@@ -13,6 +13,7 @@
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
 #include <limits>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -314,7 +315,7 @@ struct ConvParams {
 
   bool is_output_padding_neg() const {
     bool is_non_neg = false;
-    for (auto p : output_padding) {
+    for (const auto& p : output_padding) {
       is_non_neg |= (p < 0);
     }
     return is_non_neg;
@@ -330,7 +331,7 @@ struct ConvParams {
 
   bool is_padding_neg() const {
     bool is_non_neg = false;
-    for (auto p : padding) {
+    for (const auto& p : padding) {
       is_non_neg |= (p < 0);
     }
     return is_non_neg;
@@ -659,7 +660,7 @@ static void check_shape_forward(const at::Tensor& input,
 
     TORCH_CHECK(at::symint::size<T>(input, 1) == (weight_sizes[1] * groups),
                 "Given groups=", groups, ", weight of size ", weight_sizes,
-                ", expected input", input.sizes(), " to have ",
+                ", expected input", at::symint::sizes<T>(input), " to have ",
                 (weight_sizes[1] * groups), " channels, but got ", at::symint::size<T>(input, 1),
                 " channels instead");
 
@@ -697,12 +698,12 @@ static void check_shape_forward(const at::Tensor& input,
   } else { // transposed
     TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
-             ", expected input", input.sizes(), " to have ", weight_sizes[0],
+             ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
              " channels, but got ", at::symint::size<T>(input, 1), " channels instead");
     TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && at::symint::size<T>(bias, 0) == weight_sizes[1] * groups),
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
-             ", but got bias of size ", bias.sizes(), " instead");
+             ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
   }
 }
 
@@ -898,7 +899,7 @@ at::Tensor conv1d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv2d(
@@ -925,7 +926,7 @@ at::Tensor conv2d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv3d(
@@ -944,7 +945,7 @@ at::Tensor conv3d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 
@@ -1045,7 +1046,7 @@ at::Tensor conv1d(
   } else {
     output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv2d(
@@ -1061,7 +1062,7 @@ at::Tensor conv2d(
   } else {
     output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv3d(
@@ -1077,7 +1078,7 @@ at::Tensor conv3d(
   } else {
     output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv_transpose1d(
@@ -1098,7 +1099,7 @@ at::Tensor conv_transpose1d(
     output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv_transpose2d(
@@ -1119,7 +1120,7 @@ at::Tensor conv_transpose2d(
     output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv_transpose3d(
@@ -1140,7 +1141,7 @@ at::Tensor conv_transpose3d(
     output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor convolution(

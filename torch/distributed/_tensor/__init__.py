@@ -1,15 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Optional, Sequence, Callable, cast
+from typing import Callable, cast, Optional, Sequence
 
 import torch
-import torch.nn as nn
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
-from torch.distributed._tensor.placement_types import Placement, Shard, Replicate
-
 
 # Import all builtin dist tensor ops
 import torch.distributed._tensor.ops
+import torch.nn as nn
+from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
+from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 
 def distribute_tensor(
@@ -39,9 +38,7 @@ def distribute_tensor(
         A :class:`DTensor` object
     """
     # get default device mesh if there's nothing specified
-    device_mesh = (
-        get_global_device_mesh() if device_mesh is None else device_mesh
-    )
+    device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
     # convert tensor to the correponding device type if it's not in that device type
     tensor = tensor.to(device_mesh.device_type)
     # set default placements to replicated if not specified
@@ -145,15 +142,11 @@ def distribute_module(
             if param is not None and not isinstance(param, DTensor):
                 m.register_parameter(
                     key,
-                    nn.Parameter(
-                        distribute_tensor(param.data, mesh, full_replicate)
-                    ),
+                    nn.Parameter(distribute_tensor(param.data, mesh, full_replicate)),
                 )
         for key, buffer in m._buffers.items():
             if buffer is not None and not isinstance(buffer, DTensor):
-                m._buffers[key] = distribute_tensor(
-                    buffer, mesh, full_replicate
-                )
+                m._buffers[key] = distribute_tensor(buffer, mesh, full_replicate)
 
     if partition_fn is None:
         # if partition_fn not specified, we by default replicate
