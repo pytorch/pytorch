@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices
+    parametrize, subtest, is_coalesced_indices, suppress_warnings
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -19,13 +19,20 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (sparse_unary_ufuncs, sparse_masked_reduction_ops)
+    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+
+reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and
+                                     (op.supports_sparse
+                                      or op.supports_sparse_csr
+                                      or op.supports_sparse_csc
+                                      or op.supports_sparse_bsr
+                                      or op.supports_sparse_bsc)]
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -4436,6 +4443,51 @@ class TestSparseAny(TestCase):
                 compressed_indices, plain_indices = r.ccol_indices(), r.row_indices()
             torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(reduction_ops_with_sparse_support)
+    @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_reductions(self, layout, device, dtype, op):
+        count = 0
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+            count += 1
+
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            result = op.op(t_inp, *t_args, **t_kwargs)
+
+            #  Checking invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+            dense = op.op(t_inp.to_dense(), *t_args, **t_kwargs)
+            self.assertEqual(result, dense)
+
+        if count == 0:
+            # we count samples to avoid false-positive test reports
+            self.skipTest('no sample inputs')
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(reduction_ops_with_sparse_support, allowed_dtypes=(torch.float32, torch.float64, torch.complex64, torch.complex128))
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_reductions_backward(self, layout, device, dtype, op):
+        count = 0
+        for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            r = op.op(t_inp, *t_args, **t_kwargs)
+            if r.numel() != 0:
+                r = r.sum()
+
+            if op.name == 'sum':
+                count += 1
+                r.backward()
+                self.assertEqual(t_inp.grad, torch.ones(t_inp.shape, dtype=dtype, device=device))
+            else:
+                self.skipTest('NOT IMPL')
+
+        if count == 0:
+            # we count samples to avoid false-positive test reports
+            self.skipTest('no sample inputs')
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')

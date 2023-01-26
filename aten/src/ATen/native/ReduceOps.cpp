@@ -26,6 +26,8 @@
 #include <ATen/ops/_cummin_helper_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/_sparse_sum.h>
+#include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -2134,6 +2136,32 @@ Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
 
 Tensor sum_coo(const Tensor &self, c10::optional<ScalarType> dtype) {
   return self._values().sum(dtype);
+}
+
+Tensor sum_sparse_coo(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  if (dim.has_value()) {
+    if (dtype.has_value()) {
+      result = at::_sparse_sum(self, *dim, *dtype);
+    } else {
+      if (c10::isIntegralType(self.scalar_type(), true)) {
+        result = at::_sparse_sum(self, *dim, at::kLong);
+      } else {
+        result = at::_sparse_sum(self, *dim);
+      }
+    }
+  } else {
+    result = sum_coo(self, dtype);
+  }
+  if (keepdim) {
+    auto dim_mask = make_dim_mask(dim, self.dim());
+    for (int dim = 0; dim < self.dim(); dim++) {
+      if (dim_mask[dim]) {
+        result = result.unsqueeze(dim);
+      }
+    }
+  }
+  return result;
 }
 
 } // namespace native
