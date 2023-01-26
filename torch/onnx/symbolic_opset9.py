@@ -163,6 +163,7 @@ __all__ = [
     "mish",
     "mm",
     "movedim",
+    "mse_loss",
     "mul",
     "multinomial",
     "mv",
@@ -3453,7 +3454,7 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
 
 @_onnx_symbolic("aten::_cast_Byte")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3464,7 +3465,7 @@ def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Char")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3475,7 +3476,7 @@ def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Short")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3486,7 +3487,7 @@ def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Int")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3497,7 +3498,7 @@ def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Long")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3508,7 +3509,7 @@ def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Half")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3519,7 +3520,7 @@ def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Float")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3530,7 +3531,7 @@ def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Double")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3541,7 +3542,7 @@ def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Bool")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -6107,6 +6108,23 @@ def kl_div(g: jit_utils.GraphContext, input, target, reduction, log_target):
     else:
         return symbolic_helper._onnx_unsupported(
             "kl_div with reduction other than none, mean, or sum.", input
+        )
+
+
+@_onnx_symbolic("aten::mse_loss")
+@symbolic_helper.parse_args("v", "v", "i")
+@_beartype.beartype
+def mse_loss(g: jit_utils.GraphContext, input, target, reduction):
+    output = mul(g, sub(g, input, target), sub(g, input, target))
+    if reduction == 0:
+        return output
+    elif reduction == 1:
+        return g.op("ReduceMean", output, keepdims_i=0)
+    elif reduction == 2:
+        return symbolic_helper._reducesum_helper(g, output, keepdims_i=0)
+    else:
+        return symbolic_helper._onnx_unsupported(
+            "mse_loss with reduction other than none, mean, or sum.", input
         )
 
 

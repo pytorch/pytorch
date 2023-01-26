@@ -77,11 +77,8 @@ class TORCH_API Adam : public Optimizer {
         "Invalid weight_decay value: ",
         defaults.weight_decay());
   }
-  explicit Adam(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      AdamOptions defaults = {})
-      : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit Adam(std::vector<Tensor> params, AdamOptions defaults = {})
+      : Adam({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

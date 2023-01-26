@@ -1619,28 +1619,29 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.linear = nn.Linear(9, 3)
 
             def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
+                x = self.conv(x)
+                x = x.reshape((1, -1))
+                x = self.linear(x)
                 return x
 
         m = M().eval()
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        example_inputs = (torch.randn(1, 1, 1, 1),)
+        example_inputs = (torch.randn(1, 1, 3, 3),)
         m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         m(*example_inputs)
         m = convert_fx(m)
         m(*example_inputs)
-        # first conv is quantized, second conv is not quantized
+        # conv is quantized, linear is not quantized
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_module(nnq.Conv2d),
             ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
@@ -2891,6 +2892,89 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x0):
                 x1 = self.custom(x0)
                 x2 = self.linear(x0)
+                return x1 + x2
+
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                "static": {
+                    CustomModule: ObservedCustomModule
+                }
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                "static": {
+                    ObservedCustomModule: StaticQuantCustomModule
+                }
+            }
+        }
+        m = M().eval()
+        example_inputs = (torch.randn(3, 3),)
+        m = prepare_fx(
+            m,
+            {"": default_qconfig},
+            example_inputs=example_inputs,
+            prepare_custom_config=prepare_custom_config_dict)
+        # make sure it works
+        m = convert_fx(
+            m,
+            convert_custom_config=convert_custom_config_dict)
+        # make sure it runs
+        m(*example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_custom_module_class_input_has_duplicate_nodes(self):
+        """ Tests that the flow still works when the graph has
+        multiple nodes with the same custom module target.
+        """
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                observed = cls(float_module.linear)
+                observed.qconfig = float_module.qconfig
+                return observed
+
+        class StaticQuantCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.linear.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Linear.from_float(observed_module.linear))
+                return quantized
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom = CustomModule()
+
+            def forward(self, x0):
+                x1 = self.custom(x0)
+                x2 = self.custom(x0)
                 return x1 + x2
 
         prepare_custom_config_dict = {
@@ -7825,8 +7909,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         if torch.backends.quantized.engine not in ('fbgemm', 'qnnpack'):
             return
         qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
-        module_type_strs = ['LSTM']
-        module_types = [torch.nn.LSTM]
+        module_type_strs = ['LSTM', 'GRU']
+        module_types = [torch.nn.LSTM, torch.nn.GRU]
         niter = 10
         sample_input = torch.tensor([[100, -155],
                                      [-155, 100],
