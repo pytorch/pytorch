@@ -368,7 +368,7 @@ def _elementwise_meta(
     device = None
     number = None
     for arg in args_:
-        if isinstance(arg, TensorLike):
+        if isinstance(arg, TensorLike) and not utils.is_cpu_scalar_tensor(arg):
             device = arg.device
             break
 
