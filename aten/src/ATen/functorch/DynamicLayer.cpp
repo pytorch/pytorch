@@ -253,10 +253,10 @@ int64_t initAndPushDynamicLayer(
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
   DynamicLayer new_layer(transform_type, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
-  pushDynamicLayer(std::move(new_layer));
-
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
+  pushDynamicLayer(std::move(new_layer));
+
 
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
