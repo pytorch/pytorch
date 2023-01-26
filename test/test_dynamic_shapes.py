@@ -688,18 +688,21 @@ class TestFloorDiv(TestCase):
 
     @skipIfNoSympy
     def test_floordiv_simplify(self):
-        # Checks that we eval exprs without free vars no matter which
-        # simplify/eval func is called.
-        expr = FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
+        # Tests how we eval FloorDiv exprs and sub-exprs without free vars, no
+        # matter which simplify/eval func is called.
+        expr = 7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
         shape_env = ShapeEnv()
 
         # All these should return the same result.
-        self.assertEqual(expr, 3)  # fully eval'd automatically
-        self.assertEqual(expr.doit(deep=False), 3)
-        self.assertEqual(expr.doit(deep=True), 3)
-        self.assertEqual(sympy.simplify(expr), 3)
-        self.assertEqual(shape_env.simplify(expr), 3)
-        self.assertEqual(shape_env.evaluate_expr(expr), 3)
+        # TODO: sympy.floor fails with inductor. So some of these don't simplify
+        # at the moment since we avoid calling sympy.floor in FloorDiv. Instead,
+        # we wait until the expression needs to be evaluated.
+        self.assertEqual(type(expr), sympy.Mul)
+        self.assertEqual(type(expr.doit(deep=False)), sympy.Mul)
+        self.assertEqual(type(expr.doit(deep=True)), sympy.Mul)
+        self.assertEqual(type(sympy.simplify(expr)), sympy.Mul)
+        self.assertEqual(type(shape_env.simplify(expr)), sympy.Mul)
+        self.assertEqual(shape_env.evaluate_expr(expr), 21)
 
     @skipIfNoSympy
     def test_floordiv_assumptions(self):
