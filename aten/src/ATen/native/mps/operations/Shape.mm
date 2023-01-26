@@ -6,8 +6,7 @@
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // topk
 TORCH_IMPL_FUNC(topk_out_mps)
@@ -375,5 +374,4 @@ TORCH_IMPL_FUNC(cat_out_mps)
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

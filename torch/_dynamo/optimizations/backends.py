@@ -28,6 +28,11 @@ def register_backend(fn):
 
 
 def create_backend(fn):
+    """
+    WARNING: We do not recommend using this for new backends.  This is
+    primarily used to support legacy TorchScript-based backends.
+    """
+
     @functools.wraps(fn)
     def inner(model, example_inputs=None, **kwargs):
         if model is None:
@@ -46,6 +51,14 @@ def create_backend(fn):
 
     BACKENDS[fn.__name__] = inner
     return inner
+
+
+@register_backend
+def inductor(*args, **kwargs):
+    # do import here to avoid loading inductor into memory when it is not used
+    from torch._inductor.compile_fx import compile_fx
+
+    return compile_fx(*args, **kwargs)
 
 
 @create_backend
@@ -759,7 +772,7 @@ def torchxla_trivial(subgraph):
 
 @create_backend
 def torchxla_trace_once(subgraph):
-    import torch._dynamo.optimizations.torchxla_integration as integration
+    import torch_xla.core.dynamo_bridge as bridge  # type: ignore[import]
 
     compiled_graph = None
     model = subgraph.model
@@ -768,7 +781,7 @@ def torchxla_trace_once(subgraph):
         nonlocal subgraph
         nonlocal compiled_graph
         if compiled_graph is None:
-            compiled_graph = integration.extract_compiled_graph(model, args)
+            compiled_graph = bridge.extract_compiled_graph(model, args)
             del subgraph
         return compiled_graph(*args)
 

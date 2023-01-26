@@ -14,19 +14,13 @@
 using ::testing::HasSubstr;
 
 void did_not_fail_diagnostics() {
-#ifdef TORCH_USE_CUDA_DSA
-  std::cerr << "DSA was enabled" << std::endl;
-#else
-  std::cerr << "DSA was not enabled" << std::endl;
-#endif
-
   std::cerr
-      << "c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled = "
-      << c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled
+      << "c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime = "
+      << c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime
       << std::endl;
   std::cerr
-      << "c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().is_enabled() = "
-      << c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().is_enabled()
+      << "c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_compile_time = "
+      << c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_compile_time
       << std::endl;
   std::cerr
       << "c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().do_all_devices_support_managed_memory = "
@@ -92,11 +86,10 @@ void cuda_device_assertions_1_var_test() {
 
 TEST(CUDATest, cuda_device_assertions_1_var_test) {
 #ifdef TORCH_USE_CUDA_DSA
-  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled = true;
-  std::cerr << "BEFORE TEST" << std::endl;
+  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime = true;
   did_not_fail_diagnostics();
   cuda_device_assertions_1_var_test();
 #else
-  GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled.";
+  GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled at compile time.";
 #endif
 }
