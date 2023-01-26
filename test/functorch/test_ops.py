@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
+    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 import torch
 from torch import Tensor
 import functools
@@ -383,8 +383,9 @@ class TestOperators(TestCase):
 
         # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('view_as_complex'),
-        decorate('nn.functional.scaled_dot_product_attention',
-                 decorator=expectedFailureIf(not IS_WINDOWS), device_type='cuda'),
+        # query: last dimension must be contiguous
+        # Fused attention kernels require last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -572,9 +573,8 @@ class TestOperators(TestCase):
         # expects last dim to have stride=1
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
-        # NOTE: This passes on Windows!
-        decorate('nn.functional.scaled_dot_product_attention',
-                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
+        # The fused attention kernels require the last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -1047,7 +1047,6 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
-        xfail('vdot'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1077,7 +1076,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
-        xfail('linalg.vecdot', ''),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1139,7 +1137,6 @@ class TestOperators(TestCase):
         xfail('to_sparse'),
         xfail('unfold'),
         xfail('unfold_copy'),
-        xfail('vdot'),
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
@@ -1183,7 +1180,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
-        xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),

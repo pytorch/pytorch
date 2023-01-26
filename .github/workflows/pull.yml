@@ -306,7 +306,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-rocm5.3-py3.8
-      docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [
