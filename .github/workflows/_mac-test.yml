@@ -106,6 +106,7 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
+        continue-on-error: true
         run: |
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
@@ -180,6 +181,7 @@ jobs:
 
       - name: Upload test statistics
         if: always()
+        continue-on-error: true
         env:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

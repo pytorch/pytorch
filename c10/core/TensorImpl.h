@@ -6,6 +6,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
@@ -21,7 +22,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
-#include <c10/util/strong_type.h>
 
 #include <algorithm>
 #include <atomic>
@@ -207,10 +207,6 @@ struct C10_API NamedTensorMetaInterface {
   };
 };
 
-template <typename T>
-using strong_bool = strong::
-    type<bool, T, strong::regular, strong::iostreamable, strong::boolean>;
-
 // For ease of copy pasting
 #if 0
 is_contiguous
@@ -221,28 +217,17 @@ is_channels_last_3d
 is_non_overlapping_and_dense
 #endif
 
-using bool_is_contiguous = strong_bool<struct bool_is_contiguous_>;
-using bool_is_channels_last_contiguous =
-    strong_bool<struct bool_is_channels_last_contiguous_>;
-using bool_is_channels_last_3d_contiguous =
-    strong_bool<struct bool_is_channels_last_3d_contiguous_>;
-using bool_is_channels_last = strong_bool<struct bool_is_channels_last_>;
-using bool_is_channels_last_3d = strong_bool<struct bool_is_channels_last_3d_>;
-using bool_is_non_overlapping_and_dense =
-    strong_bool<struct bool_is_non_overlapping_and_dense_>;
-
 struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
   SymInt storage_offset_ = 0;
-  // TODO: make these all SymBool
-  bool_is_contiguous is_contiguous_{true};
-  bool_is_channels_last_contiguous is_channels_last_contiguous_{false};
-  bool_is_channels_last_3d_contiguous is_channels_last_3d_contiguous_{false};
-  bool_is_channels_last is_channels_last_{false};
-  bool_is_channels_last_3d is_channels_last_3d_{false};
-  bool_is_non_overlapping_and_dense is_non_overlapping_and_dense_{true};
+  SymBool is_contiguous_{true};
+  SymBool is_channels_last_contiguous_{false};
+  SymBool is_channels_last_3d_contiguous_{false};
+  SymBool is_channels_last_{false};
+  SymBool is_channels_last_3d_{false};
+  SymBool is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
   ExtraMeta() = default;
@@ -252,23 +237,24 @@ struct C10_API ExtraMeta {
       SymDimVector strides,
       SymInt numel,
       SymInt storage_offset,
-      bool_is_contiguous is_contiguous,
-      bool_is_channels_last_contiguous is_channels_last_contiguous,
-      bool_is_channels_last_3d_contiguous is_channels_last_3d_contiguous,
-      bool_is_channels_last is_channels_last,
-      bool_is_channels_last_3d is_channels_last_3d,
-      bool_is_non_overlapping_and_dense is_non_overlapping_and_dense,
+      SymBool is_contiguous,
+      SymBool is_channels_last_contiguous,
+      SymBool is_channels_last_3d_contiguous,
+      SymBool is_channels_last,
+      SymBool is_channels_last_3d,
+      SymBool is_non_overlapping_and_dense,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
         storage_offset_(std::move(storage_offset)),
-        is_contiguous_(is_contiguous),
-        is_channels_last_contiguous_(is_channels_last_contiguous),
-        is_channels_last_3d_contiguous_(is_channels_last_3d_contiguous),
-        is_channels_last_(is_channels_last),
-        is_channels_last_3d_(is_channels_last_3d),
-        is_non_overlapping_and_dense_(is_non_overlapping_and_dense),
+        is_contiguous_(std::move(is_contiguous)),
+        is_channels_last_contiguous_(std::move(is_channels_last_contiguous)),
+        is_channels_last_3d_contiguous_(
+            std::move(is_channels_last_3d_contiguous)),
+        is_channels_last_(std::move(is_channels_last)),
+        is_channels_last_3d_(std::move(is_channels_last_3d)),
+        is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
         named_tensor_meta_(std::move(named_tensor_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
@@ -839,11 +825,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return bool(extra_meta_->is_channels_last_contiguous_);
+        return extra_meta_->is_channels_last_contiguous_.guard_bool(
+            __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return bool(extra_meta_->is_channels_last_3d_contiguous_);
+        return extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
+            __FILE__, __LINE__);
       }
-      return bool(extra_meta_->is_contiguous_);
+      return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -857,9 +845,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return bool(extra_meta_->is_channels_last_);
+        return extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return bool(extra_meta_->is_channels_last_3d_);
+        return extra_meta_->is_channels_last_3d_.guard_bool(__FILE__, __LINE__);
       } else {
         return false;
       }
@@ -876,7 +864,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return bool(extra_meta_->is_non_overlapping_and_dense_);
+      return extra_meta_->is_non_overlapping_and_dense_.guard_bool(
+          __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
     }
@@ -2418,18 +2407,29 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute whether or not a tensor is contiguous based on the sizes and
    * strides of a tensor.
    */
-  bool_is_contiguous compute_contiguous() const;
+  bool compute_contiguous(identity<bool>) const;
 
-  bool_is_channels_last_contiguous compute_channels_last_contiguous_2d() const;
+  bool compute_channels_last_contiguous_2d(identity<bool>) const;
 
-  bool_is_channels_last_3d_contiguous compute_channels_last_contiguous_3d()
-      const;
+  bool compute_channels_last_contiguous_3d(identity<bool>) const;
 
-  bool_is_channels_last compute_strides_like_channels_last_2d() const;
+  bool compute_strides_like_channels_last_2d(identity<bool>) const;
 
-  bool_is_channels_last_3d compute_strides_like_channels_last_3d() const;
+  bool compute_strides_like_channels_last_3d(identity<bool>) const;
 
-  bool_is_non_overlapping_and_dense compute_non_overlapping_and_dense() const;
+  bool compute_non_overlapping_and_dense(identity<bool>) const;
+
+  SymBool compute_contiguous(identity<SymBool>) const;
+
+  SymBool compute_channels_last_contiguous_2d(identity<SymBool>) const;
+
+  SymBool compute_channels_last_contiguous_3d(identity<SymBool>) const;
+
+  SymBool compute_strides_like_channels_last_2d(identity<SymBool>) const;
+
+  SymBool compute_strides_like_channels_last_3d(identity<SymBool>) const;
+
+  SymBool compute_non_overlapping_and_dense(identity<SymBool>) const;
 
  protected:
   /**
@@ -2471,40 +2471,111 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  /**
-   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
-   * or strides.
-   */
-  void refresh_contiguous() {
-    auto set_fields =
-        [&](bool_is_contiguous is_contiguous,
-            bool_is_channels_last_contiguous is_channels_last_contiguous,
-            bool_is_channels_last_3d_contiguous is_channels_last_3d_contiguous,
-            bool_is_channels_last is_channels_last,
-            bool_is_channels_last_3d is_channels_last_3d,
-            bool_is_non_overlapping_and_dense is_non_overlapping_and_dense) {
-          if (has_symbolic_sizes_strides_) {
-            extra_meta_->is_contiguous_ = is_contiguous;
-            extra_meta_->is_channels_last_contiguous_ =
-                is_channels_last_contiguous;
-            extra_meta_->is_channels_last_3d_contiguous_ =
-                is_channels_last_3d_contiguous;
-            extra_meta_->is_channels_last_ = is_channels_last;
-            extra_meta_->is_channels_last_3d_ = is_channels_last_3d;
-            extra_meta_->is_non_overlapping_and_dense_ =
-                is_non_overlapping_and_dense;
-          } else {
-            is_contiguous_ = bool(is_contiguous);
-            is_channels_last_contiguous_ = bool(is_channels_last_contiguous);
-            is_channels_last_3d_contiguous_ =
-                bool(is_channels_last_3d_contiguous);
-            is_channels_last_ = bool(is_channels_last);
-            is_channels_last_3d_ = bool(is_channels_last_3d);
-            is_non_overlapping_and_dense_ = bool(is_non_overlapping_and_dense);
-          }
-        };
+ private:
+  // NB: the TypeId argument prevents confusion where you pass a true/false
+  // literal and pick the wrong overload
 
-    auto is_contiguous = compute_contiguous();
+  void _set_is_contiguous(identity<bool>, bool b) {
+    is_contiguous_ = b;
+  }
+
+  void _set_is_contiguous(identity<SymBool>, SymBool b) {
+    extra_meta_->is_contiguous_ = std::move(b);
+  }
+
+  void _set_is_channels_last_contiguous(identity<bool>, bool b) {
+    is_channels_last_contiguous_ = b;
+  }
+
+  void _set_is_channels_last_contiguous(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_contiguous_ = std::move(b);
+  }
+
+  void _set_is_channels_last_3d_contiguous(identity<bool>, bool b) {
+    is_channels_last_3d_contiguous_ = b;
+  }
+
+  void _set_is_channels_last_3d_contiguous(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_3d_contiguous_ = std::move(b);
+  }
+
+  void _set_is_channels_last(identity<bool>, bool b) {
+    is_channels_last_ = b;
+  }
+
+  void _set_is_channels_last(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_ = std::move(b);
+  }
+
+  void _set_is_channels_last_3d(identity<bool>, bool b) {
+    is_channels_last_3d_ = b;
+  }
+
+  void _set_is_channels_last_3d(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_3d_ = std::move(b);
+  }
+
+  void _set_is_non_overlapping_and_dense(identity<bool>, bool b) {
+    is_non_overlapping_and_dense_ = b;
+  }
+
+  void _set_is_non_overlapping_and_dense(identity<SymBool>, SymBool b) {
+    extra_meta_->is_non_overlapping_and_dense_ = std::move(b);
+  }
+
+  // These are little wrappers over the real compute_ functions that
+  // can make use of other contiguity fields to short circuit.
+  // They need to be implemented separately for SymBool, as SymBool does
+  // not short circuit.
+  // TODO: should the SymBool cases avoid the short circuit?  Need to reason
+  // if its correct, and reason if the simpler expressions are better for
+  // analysis (maybe not!)
+
+  bool compute_is_non_overlapping_and_dense_dim4(identity<bool> type_id) {
+    return is_contiguous_ || is_channels_last_contiguous_ ||
+        compute_non_overlapping_and_dense(type_id);
+  }
+
+  SymBool compute_is_non_overlapping_and_dense_dim4(identity<SymBool> type_id);
+
+  bool compute_channels_last_contiguous_3d_dim5(identity<bool> type_id) {
+    return !is_channels_last_contiguous_ &&
+        compute_channels_last_contiguous_3d(type_id);
+  }
+
+  SymBool compute_channels_last_contiguous_3d_dim5(identity<SymBool> type_id);
+
+  bool compute_channels_last_2d_dim5(identity<bool> type_id) {
+    return !is_channels_last_3d_contiguous_ &&
+        compute_strides_like_channels_last_2d(type_id);
+  }
+
+  SymBool compute_channels_last_2d_dim5(identity<SymBool> type_id);
+
+  bool compute_channels_last_3d_dim5(identity<bool> type_id) {
+    return !is_channels_last_ && compute_strides_like_channels_last_3d(type_id);
+  }
+
+  SymBool compute_channels_last_3d_dim5(identity<SymBool> type_id);
+
+  bool compute_is_non_overlapping_and_dense_dim5(identity<bool> type_id) {
+    return is_contiguous_ || is_channels_last_contiguous_ ||
+        is_channels_last_3d_contiguous_ ||
+        compute_non_overlapping_and_dense(type_id);
+  }
+
+  SymBool compute_is_non_overlapping_and_dense_dim5(identity<SymBool> type_id);
+
+  bool compute_is_non_overlapping_and_dense_anydim(identity<bool> type_id) {
+    return is_contiguous_ || compute_non_overlapping_and_dense(type_id);
+  }
+
+  SymBool compute_is_non_overlapping_and_dense_anydim(
+      identity<SymBool> type_id);
+
+  template <typename T>
+  void _refresh_contiguous() {
+    auto type_id = identity<T>();
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
     // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
@@ -2512,42 +2583,28 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // this point)
     switch (dim()) {
       case 4: {
-        auto is_channels_last_contiguous =
-            compute_channels_last_contiguous_2d();
-        set_fields(
-            is_contiguous,
-            is_channels_last_contiguous,
-            bool_is_channels_last_3d_contiguous(false),
-            compute_strides_like_channels_last_2d(),
-            bool_is_channels_last_3d(false),
-            bool_is_non_overlapping_and_dense(
-                is_contiguous || is_channels_last_contiguous ||
-                compute_non_overlapping_and_dense()));
+        _set_is_contiguous(type_id, compute_contiguous(type_id));
+        _set_is_channels_last_contiguous(
+            type_id, compute_channels_last_contiguous_2d(type_id));
+        _set_is_channels_last_3d_contiguous(type_id, false);
+        _set_is_channels_last(
+            type_id, compute_strides_like_channels_last_2d(type_id));
+        _set_is_channels_last_3d(type_id, false);
+        _set_is_non_overlapping_and_dense(
+            type_id, compute_is_non_overlapping_and_dense_dim4(type_id));
         break;
       }
       case 5: {
-        auto is_channels_last_contiguous =
-            compute_channels_last_contiguous_2d();
-        auto is_channels_last_3d_contiguous =
-            bool_is_channels_last_3d_contiguous(
-                !is_channels_last_contiguous &&
-                compute_channels_last_contiguous_3d());
-        auto is_channels_last = bool_is_channels_last(
-            !is_channels_last_3d_contiguous &&
-            compute_strides_like_channels_last_2d());
-        auto is_channels_last_3d = bool_is_channels_last_3d(
-            !is_channels_last && compute_strides_like_channels_last_3d());
-        auto is_non_overlapping_and_dense = bool_is_non_overlapping_and_dense(
-            is_contiguous || is_channels_last_contiguous ||
-            is_channels_last_3d_contiguous ||
-            compute_non_overlapping_and_dense());
-        set_fields(
-            is_contiguous,
-            is_channels_last_contiguous,
-            is_channels_last_3d_contiguous,
-            is_channels_last,
-            is_channels_last_3d,
-            is_non_overlapping_and_dense);
+        _set_is_contiguous(type_id, compute_contiguous(type_id));
+        _set_is_channels_last_contiguous(
+            type_id, compute_channels_last_contiguous_2d(type_id));
+        _set_is_channels_last_3d_contiguous(
+            type_id, compute_channels_last_contiguous_3d_dim5(type_id));
+        _set_is_channels_last(type_id, compute_channels_last_2d_dim5(type_id));
+        _set_is_channels_last_3d(
+            type_id, compute_channels_last_3d_dim5(type_id));
+        _set_is_non_overlapping_and_dense(
+            type_id, compute_is_non_overlapping_and_dense_dim5(type_id));
         break;
       }
       default:
@@ -2556,14 +2613,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // mean the tensor is strided like channels_last: for strides on channel
         // dimension could suggest desired memory_layout, but it doesn't affect
         // memory storage
-        set_fields(
-            is_contiguous,
-            bool_is_channels_last_contiguous(false),
-            bool_is_channels_last_3d_contiguous(false),
-            bool_is_channels_last(false),
-            bool_is_channels_last_3d(false),
-            bool_is_non_overlapping_and_dense(
-                is_contiguous || compute_non_overlapping_and_dense()));
+        _set_is_contiguous(type_id, compute_contiguous(type_id));
+        _set_is_channels_last_contiguous(type_id, false);
+        _set_is_channels_last_3d_contiguous(type_id, false);
+        _set_is_channels_last(type_id, false);
+        _set_is_channels_last_3d(type_id, false);
+        _set_is_non_overlapping_and_dense(
+            type_id, compute_is_non_overlapping_and_dense_anydim(type_id));
+        break;
+    }
+  }
+
+ protected:
+  /**
+   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
+   * or strides.
+   */
+  void refresh_contiguous() {
+    if (has_symbolic_sizes_strides_) {
+      _refresh_contiguous<SymBool>();
+    } else {
+      _refresh_contiguous<bool>();
     }
   }
 
