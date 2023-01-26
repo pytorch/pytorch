@@ -26,7 +26,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
-from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
@@ -1860,44 +1859,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
             del contiguous_args
+            if CompiledFunction.compiled_bw is None:
+                # TODO - pass in fake tensors ?
+                context = disable_autocast_manager if disable_amp else nullcontext
+                with context(), track_graph_compiling(aot_config, "backward"):
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                        bw_module, all_args
+                    )
 
-            def call_compiled_backward(all_args):
-                all_args_list = list(all_args)
-                if CompiledFunction.compiled_bw is None:
-                    # TODO - pass in fake tensors ?
-                    context = disable_autocast_manager if disable_amp else nullcontext
-                    with context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, all_args_list
-                        )
-
-                ctx.maybe_clear_saved_tensors()
-                out = call_func_with_args(
-                    CompiledFunction.compiled_bw,
-                    all_args_list,
-                    steal_args=True,
-                    disable_amp=disable_amp,
-                )
-                return tuple(out)
-
-            if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
-                # If backward pass was run with create_graph=True, ensure that the graph is
-                # properly connected, but errors when the user performs double backward.
-                # See comment for why once_differentiable is not sufficient:
-                # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
-                class CompiledFunctionBackward(torch.autograd.Function):
-                    @staticmethod
-                    def forward(ctx, *all_args):
-                        return call_compiled_backward(all_args)
-
-                    @staticmethod
-                    def backward(ctx, *args):
-                        raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
-
-                out = CompiledFunctionBackward.apply(*all_args)
-            else:
-                out = call_compiled_backward(all_args)
-            return out
+            ctx.maybe_clear_saved_tensors()
+            out = call_func_with_args(
+                CompiledFunction.compiled_bw,
+                all_args,
+                steal_args=True,
+                disable_amp=disable_amp,
+            )
+            return tuple(out)
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
@@ -2364,8 +2341,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
-    named_params = dict(_named_parameters(mod, remove_duplicate=False))
-    named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
+    named_params = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
         functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
@@ -2429,8 +2406,8 @@ def aot_module_simplified(
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
-        **dict(_named_parameters(mod, remove_duplicate=False)),
-        **dict(_named_buffers(mod, remove_duplicate=False)),
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
     }
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
