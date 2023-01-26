@@ -979,9 +979,9 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   auto values = blocked_layout ? _batch_tile_tensor(self, blocksize, dense_dim) :  self;
   auto not_zero_mask = blocked_layout ? _batch_tile_tensor(self != 0, blocksize, dense_dim) : self != 0;
   if (blocked_layout || dense_dim > 0) {
-    std::vector<int64_t> reduce_dims((blocked_layout ? 2 : 0) + dense_dim);
-    std::iota(reduce_dims.begin(), reduce_dims.end(), n_batch_dim + 2);
-    not_zero_mask = not_zero_mask.sum(reduce_dims) != 0;
+    std::vector<int64_t> reduce_dim((blocked_layout ? 2 : 0) + dense_dim);
+    std::iota(reduce_dim.begin(), reduce_dim.end(), n_batch_dim + 2);
+    not_zero_mask = not_zero_mask.sum(reduce_dim) != 0;
   }
 
   if (is_batched) {
@@ -1181,17 +1181,18 @@ Tensor sparse_compressed_to_flipped(
     values.unsqueeze_(0);
   }
 
-  // NOTE: these sparse_dims are true sparse dims only for CSR/CSC inputs.
-  // And for BSR/BSC these are <true sparse dims> / <blocksize>.
-  // In other words, sparse_dims stores ranges of valid indices in the row/col dims.
-  const auto sparse_dims = [&]() -> at::DimVector {
-    auto sparse_dims = at::DimVector(self.sizes().slice(n_batches, 2));
+  // NOTE: these sparse_dim are true sparse dims only for CSR/CSC
+  // inputs.  And for BSR/BSC these are <true sparse dims> /
+  // <blocksize>.  In other words, sparse_dim stores ranges of valid
+  // indices in the row/col dims.
+  const auto sparse_dim = [&]() -> at::DimVector {
+    auto sparse_dim = at::DimVector(self.sizes().slice(n_batches, 2));
     if (layout == at::kSparseBsr || layout == at::kSparseBsc) {
       auto blocksize = at::sparse_csr::getBlockSize(self);
-      sparse_dims[0] /= blocksize[0];
-      sparse_dims[1] /= blocksize[1];
+      sparse_dim[0] /= blocksize[0];
+      sparse_dim[1] /= blocksize[1];
     }
-    return sparse_dims;
+    return sparse_dim;
   }();
 
   // batch_sizes_nonempty stores at least one, potentially fake, batch dimension.
@@ -1212,7 +1213,7 @@ Tensor sparse_compressed_to_flipped(
   // performance.
   const auto batch_nnz_offset = [&]() -> Tensor {
     const auto wrapped_nnz = at::tensor({nnz}, compressed_indices.options());
-    const auto offset = wrapped_nnz
+    auto offset = wrapped_nnz
       .expand({batch_numel_nonzero})
       .cumsum(-1).sub_(wrapped_nnz)
       .reshape(batch_sizes_nonempty);
@@ -1267,7 +1268,7 @@ Tensor sparse_compressed_to_flipped(
   // To CSC/BSC inputs these indices will appear "transposed".
   const auto is_transposed_indices = layout == at::kSparseCsc || layout == at::kSparseBsc;
   const auto coo_indices_2d_transposed = [&]() -> Tensor {
-    const auto coo_indices_2d = _convert_indices_from_csr_to_coo(
+    auto coo_indices_2d = _convert_indices_from_csr_to_coo(
         compressed_indices_2d,
         plain_indices_2d,
         is_out_int32,
@@ -1282,10 +1283,10 @@ Tensor sparse_compressed_to_flipped(
     // NOTE: we used transposed=true above!
     auto i = coo_indices_2d.select(0, 1);
     auto j = coo_indices_2d.select(0, 0);
-    auto b = i.div(is_transposed_indices ? sparse_dims[1] : sparse_dims[0], "trunc");
+    auto b = i.div(is_transposed_indices ? sparse_dim[1] : sparse_dim[0], "trunc");
     // Modify i, j in-place.
-    i.fmod_(is_transposed_indices ? sparse_dims[1] : sparse_dims[0]);
-    j.add_(b * (is_transposed_indices ? sparse_dims[0] : sparse_dims[1]));
+    i.fmod_(is_transposed_indices ? sparse_dim[1] : sparse_dim[0]);
+    j.add_(b * (is_transposed_indices ? sparse_dim[0] : sparse_dim[1]));
     return coo_indices_2d;
   }();
 
@@ -1297,8 +1298,8 @@ Tensor sparse_compressed_to_flipped(
   // more "weight" (aka stride) placed on the "transposed" dimension.
   const auto coo_indices_2d_transposed_hashed = at::sparse::flatten_indices(
       coo_indices_2d_transposed,
-      is_transposed_indices ? at::DimVector({sparse_dims[0], sparse_dims[1] * batch_numel_nonzero})
-                            : at::DimVector({sparse_dims[1], sparse_dims[0] * batch_numel_nonzero}));
+      is_transposed_indices ? at::DimVector({sparse_dim[0], sparse_dim[1] * batch_numel_nonzero})
+                            : at::DimVector({sparse_dim[1], sparse_dim[0] * batch_numel_nonzero}));
   const auto hash_argsort = std::get<1>(coo_indices_2d_transposed_hashed.sort());
   const auto coo_indices_2d_transposed_sorted = coo_indices_2d_transposed.index_select(1, hash_argsort);
 
@@ -1310,8 +1311,8 @@ Tensor sparse_compressed_to_flipped(
       _convert_indices_from_coo_to_csr(
         new_compressed_indices_coo_2d,
         is_transposed_indices
-          ? batch_numel_nonzero * sparse_dims[0]
-          : batch_numel_nonzero * sparse_dims[1],
+          ? batch_numel_nonzero * sparse_dim[0]
+          : batch_numel_nonzero * sparse_dim[1],
         is_out_int32),
       batch_numel_nonzero,
       is_out_int32)
@@ -1517,47 +1518,47 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  * Modified to ensure sorted BSR column indices.
  */
-template <class I, class T, bool compressed_rows>
+template <class index_t, class scalar_t, bool compressed_rows>
 void _compressed_to_block_compressed_cpu_kernel(
-    const I n_dim_compressed,
-    const I n_dim_plain,
-    const I C,
-    const I P,
-    const I D,
-    const I* input_compressed_indices,
-    const I* input_plain_indices,
-    const T* input_values,
-    I* result_compressed_indices,
-    I* result_plain_indices,
-    T* result_values) {
+    const index_t n_compressed, // Tensor size along compressed dimension
+    const index_t n_plain, // Tensor size along plain dimension
+    const index_t C, // Block size along compressed dimensions
+    const index_t P, // Block size along plain dimension
+    const index_t D, // Number of elements in dense dimensions
+    const index_t* input_compressed_indices,
+    const index_t* input_plain_indices,
+    const scalar_t* input_values,
+    index_t* result_compressed_indices,
+    index_t* result_plain_indices,
+    scalar_t* result_values) {
   // All blocks are possible, that is, may be allocated if a single
   // non-zero value lives within them. Otherwise they're not.
 
   // Allocate pointers for all possible plain blocks plus 1
-  std::vector<T*> blocks(n_dim_plain / P + 1, (T*)0);
+  std::vector<scalar_t*> blocks(n_plain / P + 1, nullptr);
 
-  assert(n_dim_compressed % C == 0);
-  assert(n_dim_plain % P == 0);
+  assert(n_compressed % C == 0);
+  assert(n_plain % P == 0);
 
   // Number of blocks along compressed dim
-  I n_bcompressed = n_dim_compressed / C;
+  index_t n_bcompressed = n_compressed / C;
   // Number of blocks along plain_dim
-  I n_bplain = n_dim_plain / P;
+  index_t n_bplain = n_plain / P;
 
   // Number of elements per block
-  I CPD = C * P * D;
+  index_t CPD = C * P * D;
   // Number of blocks overall
-  I n_blks = 0;
+  index_t n_blks = 0;
 
   result_compressed_indices[0] = 0;
 
   // Iterate over blocks along compressed dim
-  for (I block_c = 0; block_c < n_bcompressed; block_c++) {
+  for (index_t block_c = 0; block_c < n_bcompressed; block_c++) {
     // Iterate over blocks along plain dim to locate non-zero blocks,
     // this guarantees sorted plain dim indices
-    for (I block_p = 0; block_p < n_bplain; block_p ++) {
-      for (I i = input_compressed_indices[C * block_c]; i < input_compressed_indices[C * (block_c + 1)]; i++) {
-        I p = input_plain_indices[i]; // plain dim element index
+    for (index_t block_p = 0; block_p < n_bplain; block_p ++) {
+      for (index_t i = input_compressed_indices[C * block_c]; i < input_compressed_indices[C * (block_c + 1)]; i++) {
+        index_t p = input_plain_indices[i]; // plain dim element index
         if (p / P == block_p) {
           blocks[block_p] = result_values + CPD * n_blks;
           result_plain_indices[n_blks] = block_p;
@@ -1568,15 +1569,15 @@ void _compressed_to_block_compressed_cpu_kernel(
     }
 
     // Iterate over compressed dim within block
-    for (I cb = 0; cb < C; cb++) {
-      I c = C * block_c + cb; // compressed dim index
-      for (I i = input_compressed_indices[c]; i < input_compressed_indices[c + 1]; i++) {
-        I p = input_plain_indices[i]; // plain dim index
+    for (index_t cb = 0; cb < C; cb++) {
+      index_t c = C * block_c + cb; // compressed dim index
+      for (index_t i = input_compressed_indices[c]; i < input_compressed_indices[c + 1]; i++) {
+        index_t p = input_plain_indices[i]; // plain dim index
 
         // Block corresponding to plain dim index
-        I block_p = p / P;
+        index_t block_p = p / P;
         // Plain dim index within block
-        I pb = p % P;
+        index_t pb = p % P;
 
         // Specific blocks entries should not be visited more than
         // once.  Scipy code does an addition here. Why?
@@ -1607,20 +1608,21 @@ void _compressed_to_block_compressed_cpu_kernel(
  * Based on
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  */
-template <class I>
-I compressed_count_blocks(
-    const I n_compressed_dim,
-    const I n_plain_dim,
-    const I C,
-    const I P,
-    const I Ap[],
-    const I Aj[]) {
-  std::vector<I> mask(n_plain_dim / P + 1, -1);
-  I n_blks = 0;
-  for (I c = 0; c < n_compressed_dim; c++) {
-    I bc = c / C;
-    for (I p = Ap[c]; p < Ap[c + 1]; p++) {
-      I bp = Aj[p] / P;
+template <class index_t>
+index_t compressed_count_blocks(
+    const index_t n_compressed, // Tensor size along compressed dimension
+    const index_t n_plain, // Tensor size along plain dimension
+    const index_t C, // Block size along compressed dimensions
+    const index_t P, // Block size along plain dimension
+    const index_t Ac[], // Compressed indices
+    const index_t Ap[] // Plain indices
+  ) {
+  std::vector<index_t> mask(n_plain / P + 1, -1);
+  index_t n_blks = 0;
+  for (index_t c = 0; c < n_compressed; c++) {
+    index_t bc = c / C;
+    for (index_t i = Ac[c]; i < Ac[c + 1]; i++) {
+      index_t bp = Ap[i] / P;
       if (mask[bp] != bc) {
         mask[bp] = bc;
         n_blks++;
@@ -1646,19 +1648,17 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
   // block, if it contains a non-zero element we will allocate values
   // and indices for it.
   int64_t num_blocks;
-  auto compressed_dims = (target_layout == Layout::SparseBsr) ? self.size(0) : self.size(1);
-  auto plain_dims = (target_layout == Layout::SparseBsr) ? self.size(1) : self.size(0);
+  auto compressed_dim = (target_layout == Layout::SparseBsr) ? self.size(0) : self.size(1);
+  auto plain_dim = (target_layout == Layout::SparseBsr) ? self.size(1) : self.size(0);
   auto compressed_blocksize = (target_layout == Layout::SparseBsr) ? blocksize[0] : blocksize[1];
   auto plain_blocksize = (target_layout == Layout::SparseBsr) ? blocksize[1] : blocksize[0];
 
-  auto n_row = self.size(0);
-  auto n_col = self.size(1);
   AT_DISPATCH_INDEX_TYPES(
       input_compressed_indices.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
         num_blocks =
           compressed_count_blocks<index_t>(
-              compressed_dims,
-              plain_dims,
+              compressed_dim,
+              plain_dim,
               compressed_blocksize,
               plain_blocksize,
               input_compressed_indices.data_ptr<index_t>(),
@@ -1670,7 +1670,7 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
 
   Tensor result_values = input_values.new_zeros(values_shape);
   Tensor result_compressed_indices =
-      input_compressed_indices.new_empty({((target_layout == Layout::SparseBsr) ? n_row / blocksize[0] : n_col / blocksize[1]) + 1});
+      input_compressed_indices.new_empty({compressed_dim /compressed_blocksize + 1});
   Tensor result_plain_indices = input_plain_indices.new_empty({num_blocks});
 
   // Next we copy over non-zero elements into the allocated blocks.
@@ -1681,8 +1681,8 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
         AT_DISPATCH_SPARSE_VALUE_TYPES(
             input_values.scalar_type(), "_compressed_to_block_compressed_cpu", [&] {
               _compressed_to_block_compressed_cpu_kernel<index_t, scalar_t, target_layout == Layout::SparseBsr>(
-                  compressed_dims,
-                  plain_dims,
+                  compressed_dim,
+                  plain_dim,
                   compressed_blocksize,
                   plain_blocksize,
                   n_dense,
@@ -1715,7 +1715,7 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
   }
   if (self.layout() == kSparseCsr) {
     if (self.device() != kCPU) {
-      TORCH_WARN("sparse_compressed_to_sparse_bsr executing on the CPU device, as currently this device in the only one supported, the performance may be sub-optimal");
+      TORCH_WARN("sparse_compressed_to_sparse_bsr executing on the CPU device, the performance may be sub-optimal");
     }
     return _compressed_to_block_compressed_cpu<kSparseBsr>(self.cpu(), blocksize).to(self.device());
   }
@@ -1734,7 +1734,7 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
   }
   if (self.layout() == kSparseCsc) {
     if (self.device() != kCPU) {
-      TORCH_WARN("sparse_compressed_to_sparse_bsc executing on the CPU device, as currently this device in the only one supported, the performance may be sub-optimal");
+      TORCH_WARN("sparse_compressed_to_sparse_bsc executing on the CPU device, the performance may be sub-optimal");
     }
     return _compressed_to_block_compressed_cpu<kSparseBsc>(self.cpu(), blocksize).to(self.device());
   }

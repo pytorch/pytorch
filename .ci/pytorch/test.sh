@@ -284,7 +284,7 @@ test_single_dynamo_benchmark() {
   # Feel free to remove --device cuda if you ever decide to need to
   # test CPU as well in CI
   python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --device cuda \
+    --ci --accuracy --timing --explain --device cuda \
     "$@" "${partition_flags[@]}" \
     --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   python benchmarks/dynamo/check_csv.py \
@@ -317,9 +317,8 @@ test_inductor_benchmark() {
   # Check training with --amp
   test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
 
-  # Check training with symbolic shapes (not actually inductor)
-  test_single_dynamo_benchmark "dynamic_aot_eager_training" "$@" \
-    --backend aot_eager --dynamic-shapes --training
+  # Check inference with --dynamic-shapes
+  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes
 }
 
 test_inductor_benchmark_perf() {
@@ -351,9 +350,9 @@ test_inductor_benchmark_perf() {
 # No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
   local exit_status=0
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" || exit_status=$?
-  test_aot_eager_benchmark huggingface "" || exit_status=$?
-  test_aot_eager_benchmark timm_models "" || exit_status=$?
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "$@" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" "$@" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" "$@" || exit_status=$?
   if [[ $exit_status -ne 0 ]]; then
     echo "Some benchmarks failed; scroll up for details"
   fi
@@ -815,7 +814,7 @@ test_executorch() {
 }
 
 test_smoke() {
-  time python test/run_test.py --include test_fx test_jit --verbose
+  time python test/run_test.py --include test_fx test_jit test_schema_check test_foreach test_weak --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
@@ -868,7 +867,42 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   checkout_install_torchbench
   install_huggingface
   install_timm
-  test_aot_eager_all
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    # NB: This code path is currently dead because dynamic shapes takes
+    # too long to run unsharded
+    test_aot_eager_all --dynamic-shapes
+  else
+    test_aot_eager_all
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_huggingface
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark huggingface "" --dynamic-shapes
+  else
+    test_aot_eager_benchmark huggingface ""
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
+  else
+    test_aot_eager_benchmark timm_models "$id"
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
+  else
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
+  fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
