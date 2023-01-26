@@ -403,7 +403,7 @@ void ValueCache::store<CallType::PyModuleCall>(
              recordIfTensor(py::getattr(it.second, "grad", py::none()))});
       }
     }
-    cache.cls_and_parameters_[key] = {cls, params_};
+    cache.cls_and_parameters_[key] = {cls, std::move(params_)};
   }
 }
 
@@ -450,7 +450,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
       }
     }
 
-    cache.cls_and_parameters_[key] = {cls, params};
+    cache.cls_and_parameters_[key] = {cls, std::move(params)};
   }
 }
 
@@ -974,7 +974,10 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     time_t end_time_ns) {
   value_cache_.trimPrefixes();
   PostProcess post_process(
-      time_converter, thread_local_results_, value_cache_, end_time_ns);
+      std::move(time_converter),
+      thread_local_results_,
+      value_cache_,
+      end_time_ns);
   auto out = post_process.run(enters);
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {

@@ -1,4 +1,5 @@
 import torch.nn as nn
+from torch._functorch.utils import exposed_in
 
 
 def batch_norm_without_running_stats(module: nn.Module):
@@ -9,6 +10,7 @@ def batch_norm_without_running_stats(module: nn.Module):
         module.track_running_stats = False
 
 
+@exposed_in("torch.func")
 def replace_all_batch_norm_modules_(root: nn.Module) -> nn.Module:
     """
     In place updates :attr:`root` by setting the ``running_mean`` and ``running_var`` to be None and
