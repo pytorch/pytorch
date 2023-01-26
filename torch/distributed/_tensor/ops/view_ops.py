@@ -3,10 +3,9 @@ from dataclasses import dataclass
 from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
 import torch
-
 from torch import Tensor
 from torch.distributed._tensor.api import Shard
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
     normalize_dim,
     normalize_dims,
@@ -16,7 +15,6 @@ from torch.distributed._tensor.ops.utils import (
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 
-aten = torch.ops.aten
 
 Shape = Tuple[int, ...]
 
@@ -587,11 +585,11 @@ def propagate_shape_and_sharding(
 
 
 def register_prop_rule_map(
-    aten_op_overload: torch._ops.OpOverload, local_op_name: Callable[..., torch.Tensor]
+    aten_op_name: str, local_op_name: Callable[..., torch.Tensor]
 ) -> None:
     spec: Op = ops[local_op_name]
 
-    @register_prop_rule(aten_op_overload)
+    @register_prop_rule(aten_op_name)
     def reshape_prop(op_schema: OpSchema) -> OutputSharding:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_dtensor_spec = op_schema.args_schema[0]
@@ -662,12 +660,13 @@ def register_prop_rule_map(
             )
 
 
-register_prop_rule_map(aten.squeeze.default, torch.squeeze)
-register_prop_rule_map(aten.squeeze.dim, torch.squeeze)
-register_prop_rule_map(aten.view.default, Tensor.view)
-register_prop_rule_map(aten._unsafe_view.default, Tensor.view)
-register_prop_rule_map(aten.unsqueeze.default, torch.unsqueeze)
-register_prop_rule_map(aten.expand.default, Tensor.expand)
-register_prop_rule_map(aten.permute.default, torch.permute)
-register_prop_rule_map(aten.repeat.default, Tensor.repeat)
-register_prop_rule_map(aten.transpose.int, torch.transpose)
+register_prop_rule_map("aten.squeeze.default", torch.squeeze)
+register_prop_rule_map("aten.squeeze.dim", torch.squeeze)
+register_prop_rule_map("aten.view.default", Tensor.view)
+register_prop_rule_map("aten.view.SymInt", Tensor.view)
+register_prop_rule_map("aten._unsafe_view.default", Tensor.view)
+register_prop_rule_map("aten.unsqueeze.default", torch.unsqueeze)
+register_prop_rule_map("aten.expand.default", Tensor.expand)
+register_prop_rule_map("aten.permute.default", torch.permute)
+register_prop_rule_map("aten.repeat.default", Tensor.repeat)
+register_prop_rule_map("aten.transpose.int", torch.transpose)
