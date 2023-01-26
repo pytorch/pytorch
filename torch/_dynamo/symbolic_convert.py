@@ -976,7 +976,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ):
             self.push(left.compare(self, op, right, **options))
         else:
-            import pdb; pdb.set_trace()
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
     def GET_ITER(self, inst):
