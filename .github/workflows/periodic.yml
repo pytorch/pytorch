@@ -19,7 +19,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: parallelnative-linux-focal-py3.7-gcc7
-      docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.8-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },

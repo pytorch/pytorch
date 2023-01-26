@@ -22,7 +22,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3.7-gcc7
-      docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.8-gcc7
 
   docs-push:
     name: docs push
