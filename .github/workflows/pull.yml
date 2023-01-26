@@ -124,8 +124,8 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
@@ -146,8 +146,6 @@ jobs:
       docker-image-name: pytorch-linux-bionic-py3.11-clang9
       test-matrix: |
         { include: [
-          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "smoke", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
