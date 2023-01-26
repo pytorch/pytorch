@@ -71,7 +71,7 @@ void ThreadPool::run(std::function<void()> func) {
 
 void ThreadPool::waitWorkComplete() {
   std::unique_lock<std::mutex> lock(mutex_);
-  completed_.wait(lock,[&](){return complete_;});
+  completed_.wait(lock, [&]() { return complete_; });
 }
 
 void ThreadPool::main_loop(std::size_t index) {
@@ -79,7 +79,7 @@ void ThreadPool::main_loop(std::size_t index) {
   while (running_) {
     // Wait on condition variable while the task is empty and
     // the pool is still running.
-    condition_.wait(lock,[&](){return !tasks_.empty() || !running_;});
+    condition_.wait(lock, [&]() { return !tasks_.empty() || !running_; });
     // If pool is no longer running, break out of loop.
     if (!running_) {
       break;
