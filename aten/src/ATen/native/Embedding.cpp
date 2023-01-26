@@ -68,7 +68,7 @@ Tensor embedding_backward_symint(
       scale_grad_by_freq);
   } else {
     return at::embedding_dense_backward_symint(
-      grad, indices, std::move(num_weights), padding_idx, scale_grad_by_freq);
+      grad, indices, std::move(num_weights), std::move(padding_idx), scale_grad_by_freq);
   }
 }
 
