@@ -4413,6 +4413,21 @@ class TestSparseAny(TestCase):
                 r2 = explicit_to_sparse(t)
                 self.assertEqual(r2, r)
 
+                # Check inverse conversion from sparse compressed block tensors
+                if from_layout == torch.sparse_bsr:
+                    batch_ndim = t.crow_indices().dim() - 1
+                    from_blocksize = t.values().shape[batch_ndim + 1:batch_ndim + 3]
+                elif from_layout == torch.sparse_bsc:
+                    batch_ndim = t.ccol_indices().dim() - 1
+                    from_blocksize = t.values().shape[batch_ndim + 1:batch_ndim + 3]
+                else:
+                    continue
+                if r.ndim != 2:
+                    continue
+
+                t2 = r.to_sparse(layout=from_layout, blocksize=from_blocksize)
+                self.assertEqual(t2, t)
+
         # extra tests
         if (from_layout, to_layout) == (torch.sparse_csr, torch.sparse_bsr):
             # See gh-90910
