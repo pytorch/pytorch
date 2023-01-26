@@ -4,6 +4,8 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 #pragma once
 
 namespace at {
@@ -93,7 +95,7 @@ inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
 
 inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
     c10::SymInt inputSize, c10::SymInt kernelSize, int64_t stride, int64_t dilation) {
-  return _pooling_same_mode_padding_lr(inputSize, kernelSize, stride, dilation);
+  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), stride, dilation);
 }
 
 // AveragePool2d/DilatedMaxPool2d (forward)
