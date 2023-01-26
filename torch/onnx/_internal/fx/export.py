@@ -32,8 +32,10 @@ def prims_convert_element_type(tensor, dtype: int):
 
 @onnxscript.script(opset=TORCH_ONNX_OPSET)
 def aten_getitem(self, i):
-    i = opset18.Unsqueeze(i, opset18.Constant(value_ints=[0]))
-    return opset18.Gather(self, i, axis=0)
+    # TODO(justinchuby): Support
+    # i = opset18.Unsqueeze(i, opset18.Constant(value_ints=[0]))
+    # return opset18.Gather(self, i, axis=0)
+    return opset18.SequenceAt(self, i)
 
 
 # A simple lookup table for atenlib functions
@@ -351,7 +353,8 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
                 fx_name_to_onnxscipt_value[node.args[0].name], tuple
             ):
                 onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
-                output = onnx_tensor_tuple[node.args[1]]
+                index = node.args[1]
+                output = onnx_tensor_tuple[index]
                 assert (
                     output is not None
                 ), f"Node creates None with target={node.target} and name={node.name}"
@@ -362,10 +365,8 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
                 fx_name_to_onnxscipt_value[node.name] = output
                 continue
 
-            if node.target == operator.getitem and not isinstance(
-                fx_name_to_onnxscipt_value[node.args[0].name], tuple
-            ):
-                # __getitem__ on Tensor
+            if node.target == operator.getitem:
+                # __getitem__ on Tensor or Sequence of tensors. Not tuple.
                 exporter_key = "getitem"
             elif (
                 isinstance(node.target, torch._ops.OpOverload)
