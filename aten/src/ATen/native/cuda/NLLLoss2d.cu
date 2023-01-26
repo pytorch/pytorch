@@ -22,8 +22,7 @@
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -526,5 +525,4 @@ Tensor nll_loss2d_backward_cuda(
   return grad_input;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

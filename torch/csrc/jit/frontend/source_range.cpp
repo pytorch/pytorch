@@ -2,8 +2,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // A stringlike class backed by a vector of string_view
 // the string represented are logically the concatenation of  the string_views
@@ -333,5 +332,4 @@ void SourceRange::print_with_context(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
