@@ -7,10 +7,6 @@
 #include <string>
 #include <vector>
 
-#ifdef USE_CUDA
-#define TORCH_USE_CUDA_DSA
-#endif
-
 /// Number of assertion failure messages we can store. If this is too small
 /// threads will fail silently.
 constexpr int C10_CUDA_DSA_ASSERTION_COUNT = 10;
