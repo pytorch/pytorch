@@ -8410,6 +8410,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
 ]
