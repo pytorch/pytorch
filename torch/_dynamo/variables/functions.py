@@ -264,6 +264,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         if op not in supported_const_comparison_ops:
             unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
+        if not isinstance(right, UserFunctionVariable):
+            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
         return ConstantVariable(
             supported_const_comparison_ops[op](self.fn, right.fn), **options
         )
