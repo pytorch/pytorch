@@ -200,7 +200,7 @@ inline bool is_std_inner_dim_fast_path(
   auto all_dims = std::vector<int64_t>(self.dim());
   std::iota(all_dims.begin(), all_dims.end(), 0);
   dims = dims.empty() ? all_dims : dims;
-  bool is_unbiased = unbiased.has_value() ? unbiased.value() : 0;
+  bool is_unbiased = unbiased.has_value() ? unbiased.value() : false;
   int64_t num_ele = 1;
   for (auto d : dims) {
     num_ele *= self.size(d);
