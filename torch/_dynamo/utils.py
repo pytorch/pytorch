@@ -766,6 +766,7 @@ def dup_guard_decayed_equality_debug(t1, t2):
         print(f"{t1} is not {t2}, hashes different, but it is equal")
         return True
     
+    print(f"{t1} is not {t2}")
     return False
 
 def rename_implicit(v):
