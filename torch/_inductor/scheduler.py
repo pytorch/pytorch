@@ -302,11 +302,13 @@ class SchedulerNode(BaseSchedulerNode):
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
-
+            # this code may work or need tweaks to allow inplacing of allreduce
+            # when users is 1
             for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
+                # may need to handle externkernel here
                 if input_node and V.graph.wrapper_code.can_reuse(input_node):
                     remaining_uses = [
                         x
@@ -328,6 +330,7 @@ class SchedulerNode(BaseSchedulerNode):
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
                         )
+                        # expect trouble here
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )

@@ -158,23 +158,24 @@ class TestCollectives(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     """
-    async_compile.wait(globals())                                         
-    del async_compile   
+    async_compile.wait(globals())
+    del async_compile
 
-    def call(args):  
-        arg0_1, = args                                                            
+    def call(args):
+        arg0_1, = args
         args.clear()
         with torch.cuda._DeviceGuard(0):
             torch.cuda.set_device(0) # no-op to ensure context
             buf0 = dist.all_reduce(arg0_1, async_op=True, group=0, op=ReduceOp.SUM)
             buf0.wait()
             del arg0_1
-            return (buf1, )    
-        
+            return (buf1, )
+
     """
     # @unittest.skip("inductor lowering isn't quite right, buffer isn't allocated")
     def test_inductor_single_op(self):
         torch._inductor.config.debug = True
+
         def func(inp, *, pg_id):
             ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
             return ar
@@ -202,6 +203,7 @@ AssertionError: the MutationLayout's real layout shouldn't be FlexibleLayout
         that isn't going to be used again
         """
         torch._inductor.config.debug = True
+
         def func(inp, *, pg_id):
             x = inp + 1
             ar = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
@@ -222,9 +224,16 @@ AssertionError: the MutationLayout's real layout shouldn't be FlexibleLayout
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
         """
         torch._inductor.config.debug = True
+
         def func(inp, *, pg_id):
             x = inp + 1
+            # x is buf0
+
+            # i mutate buf0
+            # looks functional, takes an input, returns a new output
             ar = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
+
+            # i want to read pre-mutated x
             y = x + 2
             return ar, y
 

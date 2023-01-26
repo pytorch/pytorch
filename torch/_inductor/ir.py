@@ -1892,6 +1892,8 @@ class Buffer(IRNode):
         return self.layout.make_indexer()
 
     def get_name(self):
+        if not self.name:
+            breakpoint()
         assert self.name
         return self.name
 
@@ -3000,11 +3002,19 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
+# tells current node how to allocate its outputs
+# doens't do any allocations
+# would need to extend to allocate
+#  - do the alloc inside external call
+#  - or extend to support allocations
+#    MOL have list of bufs to alloc, wrapper.allocate iterate and alloc them
 @dataclasses.dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
 
+# fake node. unpacks the input. input to MultiOutput is a reference to
+# an element inside the MultiOutputLayout
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
         wrapper.writeline(
@@ -4017,7 +4027,7 @@ class LoopBodyBlock:
         )
 
 
-class Wait(ExternKernelAlloc):
+class Wait(ExternKernel):
     """
     Wait should not be used by itself.  It should always be constructed in tandem
     with a collective op that produces a work to wait on.
@@ -4029,26 +4039,34 @@ class Wait(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
+        # Hacky, assign input collective buf name as my name
+        # since i don't  have a buf and anyone 'consuming' me really wants their buf
+        super().__init__(inputs[0].get_name(), layout, inputs, constant_args)
+
+    def should_allocate(self):
+        return False
 
     def codegen(self, wrapper):
-        (x, work) = [t.codegen_reference() for t in self.inputs]
-        wrapper.writeline(f"{work}.wait()  # {work} is a Work object")
-        wrapper.writeline(f"{self.get_name()} = {x}  # The 'output' name from Wait op really aliases an earlier buffer")
-
-    def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        (all_reduce,) = [t.codegen_reference() for t in self.inputs]
+        work = f"{all_reduce}_work"  # hacky way to name work objs..
+        wrapper.writeline(f"{work}.wait()")
 
 
-class AllReduce(ExternKernelAlloc):
+# should treat this as a functional op first.
+# make it alloc an output buf and call the inplace extern kernel into that buf
+# then, make scheduler try to find opportunities to inplace
+class AllReduce(ExternKernel):
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
 
     @classmethod
     def create(
@@ -4057,35 +4075,46 @@ class AllReduce(ExternKernelAlloc):
         group_id: int,
         reduce_op: str,
     ):
-        # Force input to become a materialized buffer (compile a kernel if needed)
-        # breakpoint()
+        """
+        # Desired:
+        1) if the input buffer is used by any other kernels, we need to make a copy
+        2) regardless, make sure it has a fixed layout
+        3) signal that we're mutating the buffer we grabbed.
+
+        # Actual:
+        - copy doesn't seem to really work (#reuse)
+        - marking the mutation doesn't seem to prevent unsafe reuse of mutated input
+        """
         x = cls.realize_input(x)
-        
-        # If x had a flexible layout, I couldn't build a MutationLayout on top 
-        # TODO: is this harmful to call if x is already a FixedLayout?
+        # this is..  useless? because i'm not copying the input into my newly allocated buffer,
+        # and, probably inductor will skip the copy noting it is pointless
+        # x = cls.copy_input(x)
+        # x = cls.realize_input(x)
+
         if isinstance(x.data.layout, FlexibleLayout):
+            # needed to make a fixed layout for AllReduce if I were to return
+            # the allreduce op from the compiled graph (test_inductor_doesnt_mutate_shared)
+            #
+            # was hoping to inplace if in/out layouts same;
+            # thought it was going to be ok to leave flex here;
+            # needs to match w/ input for reuse pass, probably
             x.decide_layout()
-        
+        #
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
         # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         all_reduce = AllReduce(
-            layout=MutationLayout(x),
+            layout=x.data.layout,
             inputs=[x],
             constant_args=[group_id, reduce_op],
         )
 
         # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
         # and waits on it, also producing a buffer which is really the input buffer to AllReduce.
-
-        # Nit: currently the codegen for Wait produces an unnecessary but harmless line such as
-        #      buf4 = buf2, where buf2 was the input to AllReduce, and buf4 will be used by any consumers
-        # Update: i think 'Wait' still has a new name (E.g. buf4) but downstream ops still refer to 'buf2',
-        #      meaning I can just delete the codegen for `buf4=buf2` -- not sure i'm totally in the clear here.
         return Wait(
-            layout=MutationLayout(x),
-            inputs=[x, all_reduce],
+            layout=x.data.layout,
+            inputs=[all_reduce],
         )
 
     def codegen(self, wrapper):
@@ -4095,6 +4124,11 @@ class AllReduce(ExternKernelAlloc):
         group_id = f"{repr(self.constant_args[0])}"
         reduce_op = self.constant_args[1]
         c10d_op = {"sum": "ReduceOp.SUM"}
+        wrapper.writeline(f"{self.get_name()}.copy_({x})")
         wrapper.writeline(
-            f"{self.get_name()} = dist.all_reduce({x}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
+            f"{self.get_name()}_work = dist.all_reduce({self.get_name()}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
         )
+
+    # def get_mutation_names(self):
+    #     assert isinstance(self.layout, MutationLayout)
+    #     return (self.layout.target.get_name(),)

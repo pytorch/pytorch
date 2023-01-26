@@ -178,7 +178,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "1") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
@@ -199,7 +199,7 @@ class trace:
     output_code = True
 
     # SVG figure showing post-fusion graph
-    graph_diagram = False
+    graph_diagram = True
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
