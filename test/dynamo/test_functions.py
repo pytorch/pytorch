@@ -719,6 +719,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         independent = torch.distributions.Independent(normal, 1)
         return independent.log_prob(x)
 
+    @make_test
+    def test_context_wrapping_nested_functions_no_closure(x):
+        @torch.no_grad()
+        def augment(x: torch.Tensor) -> torch.Tensor:
+            return (x + 1) * 2
+
+        return augment(x)
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
