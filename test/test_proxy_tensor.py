@@ -856,6 +856,23 @@ def forward(self, x_1, y_1):
         # not currently being done yet
         assert len(gm.shape_env.guards) == 1, "\n" + gm.shape_env.format_guards()
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_cpu_scalar_cuda(self):
+        # Extracted from wave2vec2
+        def f(a, b):
+            return (a * b) @ b
+
+        r = str(
+            make_fx(f, tracing_mode="symbolic")(
+                torch.tensor(1.0), torch.randn(2, 2, device='cuda')
+            ).code
+        ).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1, b_1):
+    mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
+    mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
+    return mm""")
+
     def test_binary_broadcast(self):
         def f(a, b):
             c = a * b
