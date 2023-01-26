@@ -13,8 +13,8 @@ from torch.ao.quantization.backend_config import (
     DTypeWithConstraints,
     ObservationType,
 )
-from torch.ao.quantization.fuser_method_mappings import _reverse_sequential_wrapper2
-from torch.ao.quantization.fx.quantization_patterns import _default_root_node_getter
+from torch.ao.quantization.fuser_method_mappings import _sequential_wrapper2
+from torch.ao.quantization.fx.quantize_handler import _default_root_node_getter
 
 
 class TestBackendConfig(QuantizationTestCase):
@@ -104,7 +104,7 @@ class TestBackendConfig(QuantizationTestCase):
     #  BackendPatternConfig
     # ======================
 
-    _fuser_method = _reverse_sequential_wrapper2(nni.LinearReLU)
+    _fuser_method = _sequential_wrapper2(nni.LinearReLU)
 
     _num_tensor_args_to_observation_type = {
         0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
@@ -121,7 +121,7 @@ class TestBackendConfig(QuantizationTestCase):
         return (torch.rand(3, 3),)
 
     def _get_backend_op_config1(self):
-        return BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear)) \
+        return BackendPatternConfig((torch.nn.Linear, torch.nn.ReLU)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(self.dtype_config1) \
             .add_dtype_config(self.dtype_config2) \
@@ -142,7 +142,7 @@ class TestBackendConfig(QuantizationTestCase):
 
     def _get_backend_pattern_config_dict1(self):
         return {
-            "pattern": (torch.nn.ReLU, torch.nn.Linear),
+            "pattern": (torch.nn.Linear, torch.nn.ReLU),
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
             "dtype_configs": [self.dtype_config_dict1, self.dtype_config_dict2],
             "root_module": torch.nn.Linear,
@@ -198,19 +198,19 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(conf.reference_quantized_module, nnqr.Linear)
 
     def test_backend_op_config_set_fused_module(self):
-        conf = BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
+        conf = BackendPatternConfig((torch.nn.Linear, torch.nn.ReLU))
         self.assertTrue(conf.fused_module is None)
         conf.set_fused_module(nni.LinearReLU)
         self.assertEqual(conf.fused_module, nni.LinearReLU)
 
     def test_backend_op_config_set_fuser_method(self):
-        conf = BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
+        conf = BackendPatternConfig((torch.nn.Linear, torch.nn.ReLU))
         self.assertTrue(conf.fuser_method is None)
         conf.set_fuser_method(self._fuser_method)
         self.assertEqual(conf.fuser_method, self._fuser_method)
 
     def test_backend_op_config_set_root_node_getter(self):
-        conf = BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
+        conf = BackendPatternConfig((torch.nn.Linear, torch.nn.ReLU))
         self.assertTrue(conf._root_node_getter is None)
         conf._set_root_node_getter(_default_root_node_getter)
         self.assertEqual(conf._root_node_getter, _default_root_node_getter)
@@ -242,7 +242,7 @@ class TestBackendConfig(QuantizationTestCase):
     def test_backend_op_config_from_dict(self):
         conf_dict1 = self._get_backend_pattern_config_dict1()
         conf1 = BackendPatternConfig.from_dict(conf_dict1)
-        self.assertEqual(conf1.pattern, (torch.nn.ReLU, torch.nn.Linear))
+        self.assertEqual(conf1.pattern, (torch.nn.Linear, torch.nn.ReLU))
         self.assertEqual(conf1.observation_type, ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
         self.assertEqual(conf1.root_module, torch.nn.Linear)
         self.assertEqual(conf1.qat_module, nnqat.Linear)
@@ -294,11 +294,11 @@ class TestBackendConfig(QuantizationTestCase):
         backend_op_config1 = self._get_backend_op_config1()
         backend_op_config2 = self._get_backend_op_config2()
         conf.set_backend_pattern_config(backend_op_config1)
-        self.assertEqual(conf.configs, {
+        self.assertEqual(conf._pattern_complex_format_to_config, {
             (torch.nn.ReLU, torch.nn.Linear): backend_op_config1,
         })
         conf.set_backend_pattern_config(backend_op_config2)
-        self.assertEqual(conf.configs, {
+        self.assertEqual(conf._pattern_complex_format_to_config, {
             (torch.nn.ReLU, torch.nn.Linear): backend_op_config1,
             torch.add: backend_op_config2
         })
@@ -317,10 +317,10 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(len(conf.configs), 2)
         key1 = (torch.nn.ReLU, torch.nn.Linear)
         key2 = torch.add
-        self.assertTrue(key1 in conf.configs)
-        self.assertTrue(key2 in conf.configs)
-        self.assertEqual(conf.configs[key1].to_dict(), op_dict1)
-        self.assertEqual(conf.configs[key2].to_dict(), op_dict2)
+        self.assertTrue(key1 in conf._pattern_complex_format_to_config)
+        self.assertTrue(key2 in conf._pattern_complex_format_to_config)
+        self.assertEqual(conf._pattern_complex_format_to_config[key1].to_dict(), op_dict1)
+        self.assertEqual(conf._pattern_complex_format_to_config[key2].to_dict(), op_dict2)
 
     def test_backend_config_to_dict(self):
         op1 = self._get_backend_op_config1()

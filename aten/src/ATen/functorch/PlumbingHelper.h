@@ -26,6 +26,8 @@
 
 namespace at { namespace functorch {
 
+void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what);
+
 // Create a BatchedTensor given a tensor, bdim, and level
 TORCH_API Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level);
 
@@ -33,7 +35,7 @@ TORCH_API Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64
 // If `tensor` is not a BatchedTensor, or is a BatchedTensor but the level
 // doesn't match, then this returns (tensor, nullopt).
 // Otherwise, it returns (unwrap(tensor), bdim).
-TORCH_API std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
+TORCH_API std::tuple<Tensor, c10::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
 
 // Creates a vector of BatchedTensor
 TORCH_API std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level);

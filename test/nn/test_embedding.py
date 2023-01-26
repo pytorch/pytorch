@@ -222,6 +222,21 @@ class TestEmbeddingNN(NNTestCase):
             self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
             self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
+    def test_embeddingbag_include_last_offset(self):
+        # Test case from https://github.com/pytorch/pytorch/issues/89677
+        embeddingbag = nn.EmbeddingBag(100, 3, include_last_offset=True, padding_idx=61)
+        input = torch.tensor([0, 1, 2, 3])
+        out = embeddingbag(input, torch.tensor([0, 3, 3]))
+        out2 = embeddingbag(input, torch.tensor([0, 3, 4]))
+
+        weight = embeddingbag.weight
+        row0 = weight[0:3].mean(0)
+        row1 = weight[3]
+        ref_out = torch.stack([row0, row1])
+
+        self.assertEqual(ref_out, out)
+        self.assertEqual(ref_out, out2)
+
 class TestEmbeddingNNDeviceType(NNTestCase):
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
@@ -675,6 +690,38 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 torch.nn.functional.embedding_bag(idx, weight,
                                                   per_sample_weights=p_s_weights, padding_idx=padding_idx,
                                                   mode=mode)
+
+    def test_embedding_bag_dimension_errors(self, device):
+        weight = torch.full((2, 0, 0, 6, 6,), 0, dtype=torch.float64, device=device)
+        indices = torch.full((2, 0, 0, 6, 6,), 2, dtype=torch.int64, device=device)
+        offsets = torch.full((2, 0, 0, 6, 6), 0, dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(ValueError, r'input has to be 1D or 2D Tensor'):
+            torch.nn.functional.embedding_bag(indices, weight, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'input has to be a 1D or 2D Tensor'):
+            torch.embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'input has to be a 1D or 2D Tensor'):
+            torch._embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'input has to be a 1D or 2D Tensor'):
+            torch._embedding_bag_forward_only(weight, indices, offsets)
+
+        weight = torch.full((2,), 0, dtype=torch.float64, device=device)
+        indices = torch.full((2,), 2, dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(ValueError, r'offsets has to be a 1D Tensor'):
+            torch.nn.functional.embedding_bag(indices, weight, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'offsets has to be a 1D Tensor'):
+            torch.embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'offsets has to be a 1D Tensor'):
+            torch._embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'offsets has to be a 1D Tensor'):
+            torch._embedding_bag_forward_only(weight, indices, offsets)
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/frontend/name_mangler.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
   static const std::string manglePrefix = "___torch_mangle_";
@@ -34,5 +33,4 @@ c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
   return c10::QualifiedName(atoms);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

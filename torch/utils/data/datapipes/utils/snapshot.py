@@ -47,9 +47,9 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
         try:
             next(it)
             remainder -= 1
-        except StopIteration:
+        except StopIteration as e:
             raise RuntimeError(f"Fast-forward {datapipe} by {n_iterations} iterations "
-                               "exceeds the number of samples available.")
+                               "exceeds the number of samples available.") from e
     datapipe._fast_forward_iterator = it
     # While the DataPipe has `_fast_forward_iterator`, `next()` will get result from there instead of elsewhere.
 

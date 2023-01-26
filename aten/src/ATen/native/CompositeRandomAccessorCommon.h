@@ -1,3 +1,5 @@
+#include <utility>
+
 #pragma once
 
 namespace at { namespace native {
@@ -60,7 +62,7 @@ public:
 
   C10_HOST_DEVICE
   references_holder(references refs)
-    : refs{refs}
+    : refs{std::move(refs)}
   {}
 
   C10_HOST_DEVICE
