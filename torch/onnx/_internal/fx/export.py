@@ -2,9 +2,7 @@ import copy
 import inspect
 import itertools
 import operator
-from typing import Any, Callable, Dict, Optional, Tuple, Union
-
-import onnx
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C
@@ -418,7 +416,7 @@ def _export(
     *args,
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
     use_binary_format: bool = True,
-) -> Union[Any, bytes]:
+) -> bytes:
     # Export FX graph to ONNX ModelProto.
     if decomposition_table is None:
         # Use default decomposition table.
@@ -433,12 +431,8 @@ def _export(
     onnx_model = _ts_graph_to_onnx_model_in_protobuf(
         ts_graph, ts_initializers, opset_version
     )
-    if use_binary_format:
-        # Return ModelProto in binary format.
-        return onnx_model
-    # Return ModelProto in readable format (printable).
-    model_proto = onnx.ModelProto.FromString(onnx_model)
-    return model_proto
+    # Return ModelProto in binary format.
+    return onnx_model
 
 
 def export(
@@ -446,7 +440,7 @@ def export(
     opset_version,
     *args,
     use_binary_format: bool = True,
-) -> Union[Any, bytes]:
+) -> bytes:
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -474,7 +468,7 @@ def export_without_kwargs(
     *args,
     use_binary_format: bool = True,
     **kwargs,
-) -> Union[Any, bytes]:
+) -> bytes:
     if isinstance(fn, torch.nn.Module):
         signature = inspect.signature(fn.forward)
     else:
