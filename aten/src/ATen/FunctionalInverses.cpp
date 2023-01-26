@@ -172,7 +172,7 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
 
 Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.select_scatter_symint(mutated_view, dim, index);
+    return base.select_scatter_symint(mutated_view, dim, std::move(index));
 }
 
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {

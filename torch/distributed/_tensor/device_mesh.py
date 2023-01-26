@@ -312,6 +312,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if output.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
@@ -359,6 +365,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if tensor.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
