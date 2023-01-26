@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import Optional, List, Sequence, Tuple, cast
+from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -27,10 +27,10 @@ class Placement(object):
         return isinstance(self, _Partial)
 
 
-@dataclass
 class Shard(Placement):
     # shard placement, shard on a dim
-    dim: int
+    def __init__(self, dim):
+        self.dim = dim
 
     def _split_tensor(
         self,
@@ -60,11 +60,7 @@ class Shard(Placement):
         if with_padding or contiguous:
             shard_list = []
             for i, shard in enumerate(tensor_list):
-                if (
-                    with_padding
-                    and idx_start_to_pad != 0
-                    and i >= idx_start_to_pad
-                ):
+                if with_padding and idx_start_to_pad != 0 and i >= idx_start_to_pad:
                     shard = self._pad_tensor(shard)
                 # input tensors are expected to be congtiguous by the collective backend
                 shard = shard.contiguous() if contiguous else shard
@@ -81,9 +77,7 @@ class Shard(Placement):
 
     def _unpad_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         # unpad tensor by 1 on the shard dim
-        return tensor.narrow(
-            self.dim, start=0, length=tensor.size(self.dim) - 1
-        )
+        return tensor.narrow(self.dim, start=0, length=tensor.size(self.dim) - 1)
 
     def _local_shard_size_on_dim(
         self,
@@ -214,14 +208,33 @@ class Shard(Placement):
             ]
         return torch.cat(gathered_list, dim=self.dim)  # type: ignore[arg-type]
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Shard):
+            return False
+        return self.dim == other.dim
 
-@dataclass
+    def __hash__(self) -> int:
+        return hash(self.dim)
+
+    def __repr__(self) -> str:
+        return f"Shard(dim={self.dim})"
+
+
 class Replicate(Placement):
     # replicate placement
-    pass
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Replicate):
+            return False
+        return True
+
+    def __hash__(self) -> int:
+        # every replicate placement is the same
+        return -1
+
+    def __repr__(self) -> str:
+        return "Replicate()"
 
 
-@dataclass
 class _Partial(Placement):
     # This is a default partial placement with element-wise reduce op
     # when doing reduction it follows the contract of `_to_replicate`
@@ -230,18 +243,18 @@ class _Partial(Placement):
     #
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.RedOpType.SUM  # type: ignore[attr-defined]
+
+    def __init__(self, reduce_op: c10d.ReduceOp = c10d.ReduceOp.SUM):  # type: ignore[assignment]
+        self.reduce_op: c10d.ReduceOp = reduce_op
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         # out-of-place all_reduce to replicate, since the current partial DTensor
         # might get used by other ops as well, so we can't inplace modify it
-        cloned_local = CommTensor(
-            tensor.clone(memory_format=torch.contiguous_format)
-        )
+        cloned_local = CommTensor(tensor.clone(memory_format=torch.contiguous_format))
         mesh.all_reduce(
-            cloned_local, c10d.ReduceOp(self.reduce_op), mesh_dim=mesh_dim  # type: ignore[call-arg]
+            cloned_local, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
         )
         return cloned_local
 
@@ -255,8 +268,19 @@ class _Partial(Placement):
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(
-            tensor, mesh, c10d.ReduceOp(self.reduce_op), mesh_dim  # type: ignore[call-arg]
+            tensor, mesh, self.reduce_op, mesh_dim  # type: ignore[call-arg]
         )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _Partial):
+            return False
+        return self.reduce_op == other.reduce_op
+
+    def __hash__(self) -> int:
+        return hash(self.reduce_op)
+
+    def __repr__(self) -> str:
+        return f"_Partial(reduce_op={self.reduce_op})"
 
 
 # used internally to propagate the placements
@@ -277,6 +301,17 @@ class DTensorSpec(object):
     def __post_init__(self) -> None:
         if self.ndim == -1:
             self.ndim = len(self.shape)
+
+    def __hash__(self) -> int:
+        return hash((self.mesh, tuple(self.placements), self.shape))
+
+    def __eq__(self, __o: object) -> bool:
+        return (
+            isinstance(__o, DTensorSpec)
+            and self.mesh == __o.mesh
+            and self.placements == __o.placements
+            and self.shape == __o.shape
+        )
 
     @property
     def dim_map(self) -> List[int]:
@@ -334,9 +369,7 @@ class DTensorSpec(object):
         Compute the shape of a local shard of the given DTensor on its current
         coordinate of the mesh.
         """
-        assert (
-            self.shape is not None
-        ), "DTensorSpec does not contain global shape."
+        assert self.shape is not None, "DTensorSpec does not contain global shape."
         local_shape = list(self.shape)  # start with global shape
         for idx, placement in enumerate(self.placements):
             mesh_dim_size = self.mesh.size(idx)
@@ -361,9 +394,7 @@ class DTensorSpec(object):
         global rank. This is mostly used by distributed checkpointing to know the
         exact offsets of the local shard.
         """
-        assert (
-            self.shape is not None
-        ), "DTensorSpec does not contain global shape."
+        assert self.shape is not None, "DTensorSpec does not contain global shape."
         local_offsets = [0] * self.ndim
         local_shape = list(self.shape)
 

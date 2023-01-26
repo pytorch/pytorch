@@ -63,6 +63,21 @@ jobs:
         run: |
           git config --global core.symlinks true
 
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
+            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -74,18 +89,13 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Start monitoring script
         id: monitor-script
         shell: bash
+        continue-on-error: true
         run: |
-          python3 -m pip install psutil==5.9.1
-          python3 -m pip install pynvml==11.4.1
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
@@ -123,7 +133,7 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          TORCH_CUDA_ARCH_LIST: "7.0"
+          TORCH_CUDA_ARCH_LIST: "8.6"
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
@@ -143,6 +153,12 @@ jobs:
 
           .jenkins/pytorch/win-test.sh
 
+      - name: Print remaining test logs
+        shell: bash
+        if: always()
+        run: |
+          cat test/**/*.log || true
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
@@ -161,7 +177,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
@@ -171,6 +187,7 @@ jobs:
 
       - name: Upload test statistics
         if: always()
+        continue-on-error: true
         env:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -189,9 +206,8 @@ jobs:
         shell: bash
         run: |
           set -x
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

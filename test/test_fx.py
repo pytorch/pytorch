@@ -18,8 +18,8 @@ import typing
 import types
 import warnings
 import unittest
-import torch.nn.utils._stateless as _stateless
 from math import sqrt
+from functorch.experimental import control_flow
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -312,6 +312,18 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    def test_control_flow_tracing(self):
+        def true(x, y):
+            return x + y
+
+        def false(x, y):
+            return x - y
+
+        def f(x, y):
+            x = control_flow.cond(x[0] == 0, true, false, [x, y])
+
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
+            _ = symbolic_trace(f)
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -1678,6 +1690,36 @@ class TestFX(JitTestCase):
             # node is channels-last
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
+
+    def test_nn_module_stack(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(64, 64, (3, 3), padding=1, bias=False)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub_mod = SubModule()
+
+            def forward(self, x):
+                return self.sub_mod(x)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        mod_stack = {}
+        expected_stack = [('sub_mod', type(m.sub_mod)),
+                          ('sub_mod.conv_mod', type(m.sub_mod.conv_mod))]
+        for node in gm.graph.nodes:
+            mod_stack = node.meta.get('nn_module_stack', {})
+            if mod_stack:
+                break
+        stack_list = list(mod_stack.items())
+        self.assertEqual(stack_list, expected_stack)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -3065,7 +3107,7 @@ class TestFX(JitTestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         fx_module = torch.fx.symbolic_trace(module)
-        res = _stateless.functional_call(fx_module, parameters, x)
+        res = torch.func.functional_call(fx_module, parameters, x)
         res.backward()
         self.assertIsNotNone(weight.grad)
         self.assertIsNotNone(bias.grad)
@@ -3294,6 +3336,7 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
@@ -3553,6 +3596,13 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(str(tracer.graph), str(tracer_after.graph))
         self.assertTrue(not hasattr(tracer_before, 'graph') or str(tracer.graph) != str(tracer_before.graph))
 
+    def test_deepcopy_graphmodule(self):
+        m = symbolic_trace(SimpleTest())
+        m.meta['hello'] = 'world'
+        copy_m = copy.deepcopy(m)
+        self.assertEqual(copy_m.meta['hello'], 'world')
+
+
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
@@ -3805,7 +3855,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                   f"unintended, please revert it. If it was intended, check with the FX " \
                   f"team to ensure that the proper deprecation protocols have been followed " \
                   f"and subsequently --accept the change."
-            raise AssertionError(msg)
+            raise AssertionError(msg) from e
 
     def test_public_api_surface(self):
         non_back_compat_objects = {}
@@ -3906,6 +3956,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,
         "threshold_": BUILT_IN_FUNC,
@@ -4068,7 +4119,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 12):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)

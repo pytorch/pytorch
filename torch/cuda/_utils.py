@@ -20,6 +20,8 @@ def _get_device_index(device: Any, optional: bool = False,
     If :attr:`device` is ``None``, this will return the current default CUDA
     device if :attr:`optional` is ``True``.
     """
+    if isinstance(device, int):
+        return device
     if isinstance(device, str):
         device = torch.device(device)
     if isinstance(device, torch.device):
@@ -35,8 +37,13 @@ def _get_device_index(device: Any, optional: bool = False,
 
 
 def _dummy_type(name: str) -> type:
-    def init_err(self):
-        class_name = self.__class__.__name__
-        raise RuntimeError(
-            "Tried to instantiate dummy base class {}".format(class_name))
-    return type(name, (object,), {"__init__": init_err})
+    def get_err_fn(is_init: bool):
+        def err_fn(obj, *args, **kwargs):
+            if is_init:
+                class_name = obj.__class__.__name__
+            else:
+                class_name = obj.__name__
+            raise RuntimeError(
+                "Tried to instantiate dummy base class {}".format(class_name))
+        return err_fn
+    return type(name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)})

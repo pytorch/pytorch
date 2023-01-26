@@ -517,26 +517,26 @@ std::unique_ptr<ObserverContext> onFunctionEnter(const RecordFunction& fn) {
 
 inline std::string json_str_escape(const std::string& str) {
   std::ostringstream ostream;
-  for (auto ch = str.cbegin(); ch != str.cend(); ch++) {
-    if (*ch == '"') {
+  for (char ch : str) {
+    if (ch == '"') {
       ostream << "\\\"";
-    } else if (*ch == '\\') {
+    } else if (ch == '\\') {
       ostream << "\\\\";
-    } else if (*ch == '\b') {
+    } else if (ch == '\b') {
       ostream << "\\b";
-    } else if (*ch == '\f') {
+    } else if (ch == '\f') {
       ostream << "\\f";
-    } else if (*ch == '\n') {
+    } else if (ch == '\n') {
       ostream << "\\n";
-    } else if (*ch == '\r') {
+    } else if (ch == '\r') {
       ostream << "\\r";
-    } else if (*ch == '\t') {
+    } else if (ch == '\t') {
       ostream << "\\t";
-    } else if ('\x00' <= *ch && *ch <= '\x1f') {
+    } else if ('\x00' <= ch && ch <= '\x1f') {
       ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-              << static_cast<int>(*ch);
+              << static_cast<int>(ch);
     } else {
-      ostream << *ch;
+      ostream << ch;
     }
   }
   return ostream.str();

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 if(NOT MSVC)
@@ -56,7 +56,7 @@ if(NOT BUILD_CAFFE2 AND NOT BUILD_LITE_INTERPRETER)
   EXCLUDE(ATen_CORE_TEST_SRCS "${ATen_CORE_TEST_SRCS}" ${ATen_CORE_EXCLUDED_TEST_SRCS})
 endif()
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
@@ -172,6 +172,7 @@ if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_cu})
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${mem_eff_attention_cuda_cpp})
+  list(APPEND MEM_EFF_ATTENTION_CUDA_SOURCES ${native_transformers_cuda_cu} ${mem_eff_attention_cuda_cu} ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
 # XNNPACK
@@ -621,3 +622,4 @@ set(ATen_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
+set(MEM_EFF_ATTENTION_CUDA_SOURCES ${MEM_EFF_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)

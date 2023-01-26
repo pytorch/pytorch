@@ -2,14 +2,14 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
     with_comms,
 )
-from torch.distributed._tensor import distribute_tensor, DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import Shard, Replicate, _Partial
 
 
 class DistTensorOpsTest(DTensorTestBase):
@@ -92,9 +92,7 @@ class DistTensorOpsTest(DTensorTestBase):
         shard_spec = [Shard(0)]
         partial_spec = [_Partial()]
         dt_to_inplace_add = distribute_tensor(input_tensor, mesh, shard_spec)
-        partial_grad = DTensor.from_local(
-            torch.randn(12, 3), mesh, partial_spec
-        )
+        partial_grad = DTensor.from_local(torch.randn(12, 3), mesh, partial_spec)
         res = dt_to_inplace_add.add_(partial_grad)
         self.assertTrue(res is dt_to_inplace_add)
         self.assertTrue(res.placements == shard_spec)
@@ -191,9 +189,7 @@ class DistTensorOpsTest(DTensorTestBase):
         assert dist_tensor.shape == (4, 8)
 
         torch.fill_(dist_tensor, 42)
-        fill_expected = torch.full(
-            dist_tensor.shape, 42, dtype=input_tensor.dtype
-        )
+        fill_expected = torch.full(dist_tensor.shape, 42, dtype=input_tensor.dtype)
         self.assertEqual(
             fill_expected,
             dist_tensor.redistribute(device_mesh, [Replicate()]).to_local(),
@@ -252,9 +248,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_index(self):
         meshes = [
-            DeviceMesh(
-                self.device_type, list(range(self.world_size))
-            ),  # 1D mesh
+            DeviceMesh(self.device_type, list(range(self.world_size))),  # 1D mesh
             # TODO(@azzolini): un-comment when DTensorConverter supports N-D mesh
             # DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, -1)), # 2D mesh
         ]

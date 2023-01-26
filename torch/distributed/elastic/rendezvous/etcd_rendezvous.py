@@ -464,10 +464,10 @@ class EtcdRendezvous(object):
             version_counter = self.client.get(self.get_path("/rdzv/version_counter"))
             version_counter.value = str(int(version_counter.value) + 1)
             self.client.update(version_counter)
-        except (etcd.EtcdKeyNotFound, etcd.EtcdCompareFailed):
+        except (etcd.EtcdKeyNotFound, etcd.EtcdCompareFailed) as e:
             raise RendezvousError(
                 "Unexpected state of EtcdRendezvousHandler, worker needs to die."
-            )
+            ) from e
 
         # Any failure below results in declaring a retryable rendezvous failure.
         # The ephemeral /rdzv/active_version will expire and someone can then

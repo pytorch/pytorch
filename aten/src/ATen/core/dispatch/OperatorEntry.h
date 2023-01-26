@@ -40,7 +40,7 @@ struct AnnotatedKernel final {
     , inferred_function_schema(std::move(s))
     , debug(std::move(d))
     {}
-  AnnotatedKernel() {}
+  AnnotatedKernel() = default;
   KernelFunction kernel;
   std::unique_ptr<FunctionSchema> inferred_function_schema;
   // A little debug string to help us identify the kernel in question.

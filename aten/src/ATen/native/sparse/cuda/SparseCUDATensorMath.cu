@@ -832,7 +832,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 
   // See Note [Enabling Deterministic Operations]
   bool deterministic =  globalContext().deterministicAlgorithms();
-  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
+  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_SPMM_COO_ALG2 : CUSPARSE_SPMM_COO_ALG1;
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each

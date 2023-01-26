@@ -7,9 +7,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 #ifdef C10_MOBILE
 extern "C" {
@@ -3301,6 +3299,4 @@ const static RegisterNNCExternalFunction nnc_linalg_solve(
 } // extern "C"
 #endif
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

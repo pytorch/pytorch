@@ -492,6 +492,7 @@ if(BUILD_LITE_INTERPRETER)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 else()
   append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   if(BUILD_LAZY_TS_BACKEND)
     append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
   endif()
@@ -564,6 +565,7 @@ if(NOT INTERN_DISABLE_MOBILE_INTERP)
      ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
      ${TORCH_SRC_DIR}/csrc/jit/mobile/train/sequential.cpp
      ${TORCH_SRC_DIR}/csrc/jit/mobile/upgrader_mobile.cpp
+     ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
      )
   list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
@@ -599,7 +601,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer_jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
@@ -835,13 +836,9 @@ endif()
 
 # Pass path to PocketFFT
 if(AT_POCKETFFT_ENABLED)
-  if(CMAKE_VERSION VERSION_LESS "3.11")
-    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
-  else()
-    set_source_files_properties(
-        "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
-        PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
-  endif()
+  set_source_files_properties(
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
+      PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
@@ -1125,6 +1122,12 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
+  if(BUILD_EXECUTORCH)
+    add_subdirectory(
+            ${TORCH_ROOT}/test/edge
+            ${CMAKE_BINARY_DIR}/test_edge_op_registration
+    )
+  endif()
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
@@ -1809,6 +1812,20 @@ if(BUILD_TEST)
       target_link_libraries(mpi_gpu_test ${MPI_CXX_LIBRARIES})
     endif()
   endif()
+endif()
+
+if(MSVC)
+  # This is used to enable the conforming lambda processor in MSVC
+  # Which allows us to capture constexpr in lambdas
+  # Note that this will be turned on by default for std=c++20 and above
+  # This should be applied globally when https://github.com/pytorch/pytorch/issues/92600 is fixed
+  foreach(tmp ${MEM_EFF_ATTENTION_CUDA_SOURCES})
+    # MEM_EFF_ATTENTION_CUDA is populated in pytorch/aten/src/ATen/CMakeLists.txt
+    # We iterate over these files, updating paths and adding the compile flag
+    FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
+    SET(tmp_path "../${tmp_path}")
+    set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
+  endforeach()
 endif()
 
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
