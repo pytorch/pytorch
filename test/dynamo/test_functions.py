@@ -372,6 +372,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return m + b.type(m.type())
 
     @make_test
+    def test_tensor_type3(a, b):
+        m = a.type(torch.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
+    def test_tensor_type4(a, b):
+        m = a.type("torch.HalfTensor")
+        return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type5(a, b):
+        m = a.type(torch.cuda.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
