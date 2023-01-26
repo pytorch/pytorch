@@ -8,6 +8,8 @@
 #else
 #include <ATen/ops/view_as_real_native.h>
 #include <ATen/ops/view_as_complex_native.h>
+
+#include <utility>
 #endif
 
 // WARNING: this header contains non-inline functions and should be only
@@ -47,7 +49,7 @@ Tensor _view_as_real_physical(const Tensor& self) {
   auto new_strides = computeStrideForViewAsReal(self.sym_strides());
   auto new_storage_offset = self.sym_storage_offset() * 2;
   const auto float_type = c10::toRealValueType(self.scalar_type());
-  auto real_tensor = view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
+  auto real_tensor = view_tensor(self, float_type, std::move(new_storage_offset), new_sizes, new_strides);
   return real_tensor;
 }
 

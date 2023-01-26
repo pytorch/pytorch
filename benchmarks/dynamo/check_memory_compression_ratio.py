@@ -27,7 +27,12 @@ def main(args):
             status = "FAIL"
             failed.append(name)
         print(
-            f"{name:34} actual_memory_compression={actual_memory_compression:.2f}, expected_memory_compression={expected_memory_compression:.2f}, {status}"
+            f"""
+            {name:34}:
+                actual_memory_compression={actual_memory_compression:.2f},
+                expected_memory_compression={expected_memory_compression:.2f},
+                {status}
+            """
         )
 
     if failed:
