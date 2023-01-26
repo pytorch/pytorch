@@ -86,7 +86,7 @@ def save_state_dict(
     def local_step():
         assert planner is not None
         planner.set_up_planner(state_dict, distW.is_coordinator)
-        storage_writer.init(distW.is_coordinator)
+        storage_writer.set_up_storage_writer(distW.is_coordinator)
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan
