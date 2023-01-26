@@ -5,7 +5,6 @@ from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
 from collections import defaultdict
 from copy import copy
-from future.utils import viewitems
 
 
 def _merge_node_kwargs(a, b):
@@ -276,7 +275,7 @@ class TaskGroup(context.Managed):
             return tasks_by_node
 
         # now we have report_steps. report_net is deprecated
-        for node, (net, interval) in viewitems(self._report_nets):
+        for node, (net, interval) in self._report_nets.items():
             self.report_step(net, node=node, interval_ms=interval * 1000)
         self._report_nets = {}
 
@@ -290,7 +289,7 @@ class TaskGroup(context.Managed):
             report_steps_by_node[node_map[original_node]].append(step)
 
         grouped_by_node = TaskGroup()
-        for node, tasks in viewitems(tasks_by_node):
+        for node, tasks in tasks_by_node.items():
             report_steps = report_steps_by_node[node]
             node_inits, node_exits = get_setup_nets(
                 TaskGroup.LOCAL_SETUP,
