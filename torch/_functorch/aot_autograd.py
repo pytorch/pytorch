@@ -737,7 +737,10 @@ def run_functionalized_fw_and_collect_metadata(
     return inner
 
 
-def unpack_synthetic_bases(primals: List[Any], synthetic_base_info) -> List[Any]:
+def unpack_synthetic_bases(
+    primals: List[Any],
+    synthetic_base_info: Optional[List[Union[int, Tuple[int, torch.Tensor]]]],
+) -> List[Any]:
     # This is only not None if our graph mutates a graph input that aliases another graph input.
     if synthetic_base_info is None:
         return primals
