@@ -6,9 +6,8 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 import onnx
 import onnxscript
-from onnxscript import evaluator
+from onnxscript import evaluator, opset18
 from onnxscript.function_libs.torch_aten import graph_building, ops
-from onnxscript import opset18
 
 import torch
 import torch._C
@@ -20,16 +19,18 @@ from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
 from torch.onnx import _type_utils
-from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.utils import _pytree
 
 
-@onnxscript.script()
+TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
+
+
+@onnxscript.script(opset=TORCH_ONNX_OPSET)
 def aten_prim_convert_element_type(tensor, dtype: int):
     return opset18.Cast(tensor, to=dtype)
 
 
-@onnxscript.script()
+@onnxscript.script(opset=TORCH_ONNX_OPSET)
 def aten_getitem(self, i):
     i = opset18.Unsqueeze(i, opset18.Constant(value_ints=[0]))
     return opset18.Gather(self, i, axis=0)
@@ -296,7 +297,9 @@ def _fill_tensor_meta(onnxscript_values, expected_values):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
-    for onnxscript_value, expected_value in zip(flat_onnxscript_values, flat_expected_values):
+    for onnxscript_value, expected_value in zip(
+        flat_onnxscript_values, flat_expected_values
+    ):
         # Only set shape for now as we don't need type information.
         onnxscript_value.shape = tuple(expected_value.size())
 
