@@ -195,6 +195,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
     "USE_CUDA" OFF)
+cmake_dependent_option(
+    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
+    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -714,7 +717,7 @@ include(cmake/Dependencies.cmake)
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 if(USE_FLASH_ATTENTION)
     ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
 ENDIF()
