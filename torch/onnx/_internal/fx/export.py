@@ -328,7 +328,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
     # Similar to fx_name_to_onnxscipt_value, we need a mapping fo real tensors (usually tensor parameters
     # in nn.Module). Note that TorchScript's cannot store real tensors; TorchScript values are all
     # symbolic. This is passed into ONNX ModelProto as the initializers.
-    ts_name_to_real_tensor: Dict[
+    onnxscript_value_name_to_real_tensor: Dict[
         str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
     ] = {}
     # fx_module_with_metadata.print_readable()
@@ -414,7 +414,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
                 for arg in flat_args:
                     assert isinstance(
                         arg, torch.fx.Node
-                    ), f"ts_output must be a torch.fx.Node, not {type(arg)}"
+                    ), f"arg must be a torch.fx.Node, not {type(arg)}"
                     onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[arg.name]
                     onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
         elif node.op == "call_method":
@@ -437,16 +437,13 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
                     )
                 current_attr = getattr(current_attr, sub_attr_name)
 
-            output = onnxscript_graph.add_input(
+            input_ = onnxscript_graph.add_input(
                 input_name=node.name, input_value=current_attr
             )
-            assert (
-                output is not None
-            ), f"Node creates None with target={node.target} and name={node.name}"
-            assert isinstance(output, graph_building.TorchScriptTensor)
-            assert isinstance(output, onnxscript.tensor.Tensor)
-            fx_name_to_onnxscipt_value[node.name] = output
-            ts_name_to_real_tensor[output.symbolic_value().debugName()] = current_attr
+            assert isinstance(input_, graph_building.TorchScriptTensor)
+            assert isinstance(input_, onnxscript.tensor.Tensor)
+            fx_name_to_onnxscipt_value[node.name] = input_
+            onnxscript_value_name_to_real_tensor[input_.name] = current_attr
         else:
             # TODO(wechi): Support get_attr, call_module, call_method.
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
@@ -472,7 +469,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
     #         opset_version=opset_version,
     #     )
 
-    return onnxscript_graph, ts_name_to_real_tensor
+    return onnxscript_graph, onnxscript_value_name_to_real_tensor
 
 
 def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
@@ -526,12 +523,12 @@ def _export(
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
-    onnxscript_graph, ts_initializers = _export_fx_to_onnxscript(
+    onnxscript_graph, initializers = _export_fx_to_onnxscript(
         decomposed_module, opset_version
     )
     print(onnxscript_graph.torch_graph)
     # Export TorchScript graph to ONNX ModelProto.
-    onnx_model = onnxscript_graph.to_model_proto(ts_initializers, opset_version)
+    onnx_model = onnxscript_graph.to_model_proto(initializers, opset_version)
     onnx.save_model(onnx_model, "gpt2.onnx")
     if use_binary_format:
         # Return ModelProto in binary format.
