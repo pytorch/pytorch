@@ -47,7 +47,7 @@ class TORCH_API FileStore : public Store {
   int64_t addHelper(const std::string& key, int64_t i);
 
   std::string path_;
-  off_t pos_;
+  off_t pos_{0};
 
   int numWorkers_;
   const std::string cleanupKey_;
