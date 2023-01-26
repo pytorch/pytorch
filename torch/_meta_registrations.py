@@ -2640,7 +2640,7 @@ def activate_meta():
 
 @register_meta(aten.all_reduce)
 def all_reduce_meta(self, group_id, reduce_op):
-    return self
+    return torch.empty_like(self)
 
 
 activate_meta()
