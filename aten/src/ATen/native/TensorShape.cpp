@@ -3548,6 +3548,7 @@ std::vector<Tensor> meshgrid(TensorList tensors,
     shape[i] = tensor_refs[i].get().sym_numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
+  grids.reserve(size);
   std::vector<c10::SymInt> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
     view_shape[i] = -1;  // select this dimension to infer
