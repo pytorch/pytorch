@@ -3,7 +3,6 @@ import logging
 import math
 import re
 import types
-from collections import OrderedDict
 from typing import Dict, List
 
 import torch._C
@@ -714,9 +713,6 @@ class TorchPyOperator(VariableTracker):
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
-                    # Meh (problem is the nodes don't compare equal;
-                    # maybe nub out outputs only)
-                    name_to_input=OrderedDict(),
                     # Unused in branches
                     graphargs=[],
                 )
