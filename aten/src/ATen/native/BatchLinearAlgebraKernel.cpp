@@ -16,7 +16,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #endif
-#include <iostream>
 namespace at { namespace native {
 
 namespace {
