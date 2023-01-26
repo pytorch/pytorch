@@ -393,9 +393,7 @@ struct C10_API VariableVersion {
         version_counter_,
         "Tried to call torch.autograd._unsafe_set_version() on a tensor "
         "that does not have a version counter. Was it created it in inference mode?");
-    TORCH_CHECK(
-        i >= 0,
-        "Cannot set a version_counter to a value below 0: ", i);
+    TORCH_CHECK(i >= 0, "Cannot set a version_counter to a value below 0: ", i);
     version_counter_->version_ = i;
   }
 

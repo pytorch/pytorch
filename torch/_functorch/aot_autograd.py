@@ -837,7 +837,7 @@ def create_forward_or_joint_functionalized(
 
         # Case 1: We are just tracing the forward; not the joint forward + backward.
         if maybe_tangents is None:
-            return mutated_inputs_to_return, outs
+            return *mutated_inputs_to_return, *outs
         else:
             tangents = maybe_tangents
 
@@ -1149,13 +1149,14 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
             args_with_synthetic_bases = new_inputs
         else:
             args_with_synthetic_bases = args
-        updated_inputs, fw_outs = call_func_with_args(compiled_fw, args_with_synthetic_bases, disable_amp=disable_amp)
+        all_outs = call_func_with_args(compiled_fw, args_with_synthetic_bases, disable_amp=disable_amp)
 
-        assert len(updated_inputs) == _num_mutated_inputs
-        assert len(fw_outs) == _num_outputs
+        assert len(all_outs) == _num_mutated_inputs + _num_outputs
 
         if _num_mutated_inputs > 0:
             assert len(_fw_metadata.mutated_inp_indices) == _num_mutated_inputs
+            updated_inputs = all_outs[:_num_mutated_inputs]
+            fw_outs = all_outs[_num_mutated_inputs:]
             for i, inpt_idx in enumerate(_fw_metadata.mutated_inp_indices):
                 meta = _input_info[inpt_idx]
                 original_inpt = args[inpt_idx]
@@ -1175,6 +1176,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
                     )
                 if meta.mutates_data:
                     original_inpt.copy_(updated_inpt)
+        else:
+            fw_outs = all_outs
         return fw_outs
 
     new_fn._boxed_call = True
