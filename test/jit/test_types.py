@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 from collections import namedtuple
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
@@ -247,11 +247,15 @@ class TestTypesAndAnnotation(JitTestCase):
 
     def test_ignoring_fn_with_nonscriptable_types(self):
         class CFX(object):
-            def __init__(self, a: torch.Tensor) -> None:
+            def __init__(self, a: List[torch.Tensor]) -> None:
                 self.a = a
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return torch.sin(x)
+
+            @torch.jit.ignore
+            def __iter__(self) -> Iterator[torch.Tensor]:
+                return iter(self.a)
 
             @torch.jit.ignore
             def __fx_create_arg__(self, tracer: torch.fx.Tracer) -> torch.fx.node.Argument:
