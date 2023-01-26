@@ -1,8 +1,7 @@
 import torch
 from torch.library import Library, impl
-from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
+from torch.ao.quantization import MinMaxObserver
 from typing import Tuple
-
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
 # name is not too long
@@ -183,8 +182,8 @@ quantized_decomposed_lib.define(
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "CompositeExplicitAutograd")
 def choose_qparams_tensor(
         input: torch.Tensor,
-        qmin: int,
-        qmax: int,
+        quant_min: int,
+        quant_max: int,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """ Given an input Tensor, derive the per tensor affine quantization parameter
@@ -201,14 +200,16 @@ def choose_qparams_tensor(
        zero_point (int): quantization parameter for the target quantized Tensor
     """
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-    validate_qmin_qmax(qmin, qmax)
+    assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: {quant_min} max: {quant_max}"
 
-    min_val, max_val = torch.aminmax(input)
-
-    # Future QSchemes like per_tensor_symmetric will be supported in a different op 'choose_qparams_symmetric.
-    # Customized qrange is unused for non symmetric quant so just ignore and set to false here
-    return determine_qparams(
-        min_val, max_val, qmin, qmax, input.dtype, torch.Tensor([torch.finfo(torch.float32).eps]), False)
+    # Its weird to create an observer manually just to calculate qparams. I tried refactoring this functionality out of observer
+    # into a util and then use that util directly, but I kept running into jit typing errors related to torch.qscheme not
+    # being recognized as a type. TODO: properly refactor this out to avoid observer overhead
+    tensor_dtype_to_observer_dtype = {torch.uint8: torch.quint8, torch.int8: torch.qint8}
+    observer = MinMaxObserver(quant_min=quant_min, quant_max=quant_max, dtype=tensor_dtype_to_observer_dtype[dtype])
+    observer(input)
+    scale, zero_point = observer.calculate_qparams()
+    return (scale, zero_point)
 
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "Meta")
 def choose_qparams_tensor_meta(
