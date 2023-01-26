@@ -921,7 +921,7 @@ void codegenOutputQuery(
 
 // TODO: another copy paste from jit, refactor so it's usable from both
 // TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
-void __inline__ initializeCudaContext() {
+void initializeCudaContext() {
   // lazily construct context if non-existing yet;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
@@ -1655,6 +1655,5 @@ void launch_jitted_pwise_function(
     args,
     nullptr));
 }
-
 
 } // at::cuda::jit
