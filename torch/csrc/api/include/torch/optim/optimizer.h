@@ -134,7 +134,7 @@ class TORCH_API Optimizer {
   void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
-  void zero_grad();
+  void zero_grad(bool set_to_none = true);
 
   /// Provides a const reference to the parameters in the first param_group this
   /// optimizer holds.
