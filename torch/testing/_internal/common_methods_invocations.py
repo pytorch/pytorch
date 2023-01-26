@@ -3014,6 +3014,46 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
                      error_regex="Trying to create tensor with negative dimension")
 
 
+def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
+    layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
+    op_supports_layout = getattr(op_info, 'supports_' + layout_name)
+    if not op_supports_layout:
+        return
+
+    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
+        if sample_input.input.ndim == 0:
+            # scalar sparse tensors are not supported
+            continue
+
+        yield SampleInput(
+            sample_input.input.detach().to_sparse(layout=layout,
+                                                  blocksize=blocksize).requires_grad_(requires_grad),
+            args=sample_input.args,
+            kwargs=sample_input.kwargs)
+
+        if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
+            # uncoalesced samples
+            inp = sample_input.input.detach().to_sparse(layout=layout)
+            inp = torch.sparse_coo_tensor(inp.indices().repeat(1, 2),
+                                          inp.values().repeat(2),
+                                          inp.shape,
+                                          dtype=inp.dtype,
+                                          device=inp.device)
+            assert not inp.is_coalesced()
+            yield SampleInput(inp.requires_grad_(requires_grad),
+                              args=sample_input.args,
+                              kwargs=sample_input.kwargs)
+
+        if sample_input.input.ndim > 2:
+            # hybrid samples
+            yield SampleInput(
+                sample_input.input.detach().to_sparse(layout=layout,
+                                                      blocksize=blocksize,
+                                                      dense_dim=sample_input.input.ndim - 2).requires_grad_(requires_grad),
+                args=sample_input.args,
+                kwargs=sample_input.kwargs)
+
+
 class _TestParamsMaxPoolBase(object):
 
     def __init__(self):
@@ -17123,10 +17163,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        supports_sparse=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
+        sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_coo),
+        sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csr),
+        sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csc),
+        sample_inputs_sparse_bsr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsr),
+        sample_inputs_sparse_bsc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsc),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
