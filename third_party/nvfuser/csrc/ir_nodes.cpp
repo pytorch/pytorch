@@ -1331,9 +1331,9 @@ MmaOp::MmaOp(
 
 std::string MmaOp::toString(int indent_size) const {
   std::stringstream ss;
-  indent(ss, indent_size) << out()->toString() << " = mma(" << inA()->toString()
-                          << "," << inB()->toString();
-  ss << ")\n";
+  indent(ss, indent_size) << out()->toString() << "\n";
+  indent(ss, indent_size + 1) << " = mma(" << inA()->toString() << ",\n";
+  indent(ss, indent_size + 1) << "       " << inB()->toString() << ")\n";
   return ss.str();
 }
 
@@ -1647,8 +1647,9 @@ LoadStoreOp::LoadStoreOp(
 
 std::string LoadStoreOp::toString(int indent_size) const {
   std::stringstream ss;
-  indent(ss, indent_size) << out()->toString() << " = " << opType() << "( "
-                          << in()->toString() << " )\n";
+  indent(ss, indent_size) << out()->toString() << "\n";
+  indent(ss, indent_size + 1)
+      << " = " << opType() << "( " << in()->toString() << " )\n";
   return ss.str();
 }
 
