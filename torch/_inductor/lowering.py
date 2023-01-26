@@ -3739,13 +3739,13 @@ def _realize(x):
 
 @register_lowering(aten.all_reduce)
 def allreduce(inputs, group_id, reduce_op):
-    return TensorBox.create(
-        ir.AllReduce.create(
-            inputs,
-            group_id,
-            reduce_op,
-        )
+    # return TensorBox.create(
+    return ir.AllReduce.create(
+        inputs,
+        group_id,
+        reduce_op,
     )
+    # )
 
 
 def _import_kernels():

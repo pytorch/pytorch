@@ -3764,7 +3764,7 @@ class StorageBox(MutableBox):
         )
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
-        return self.data.name
+        # return self.data.name
 
     def realize_hint(self):
         """
@@ -4039,9 +4039,8 @@ class Wait(ExternKernel):
         inputs,
         constant_args=(),
     ):
-        # Hacky, assign input collective buf name as my name
-        # since i don't  have a buf and anyone 'consuming' me really wants their buf
-        super().__init__(inputs[0].get_name(), layout, inputs, constant_args)
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
 
     def should_allocate(self):
         return False
@@ -4050,6 +4049,12 @@ class Wait(ExternKernel):
         (all_reduce,) = [t.codegen_reference() for t in self.inputs]
         work = f"{all_reduce}_work"  # hacky way to name work objs..
         wrapper.writeline(f"{work}.wait()")
+
+        # largely symbolic from the runtime perspective, but we must ensure from scheduler
+        # perspective that Wait's buffer is the one being consumed by consumers, to ensure
+        # wait op gets scheduled at all.  And as a side effect, wait's buffer name needs to actually
+        # point to something in the codegen output
+        wrapper.writeline(f"{self.get_name()} = {all_reduce}; del {all_reduce}")
 
 
 # should treat this as a functional op first.
@@ -4075,37 +4080,30 @@ class AllReduce(ExternKernel):
         group_id: int,
         reduce_op: str,
     ):
-        """
-        # Desired:
-        1) if the input buffer is used by any other kernels, we need to make a copy
-        2) regardless, make sure it has a fixed layout
-        3) signal that we're mutating the buffer we grabbed.
-
-        # Actual:
-        - copy doesn't seem to really work (#reuse)
-        - marking the mutation doesn't seem to prevent unsafe reuse of mutated input
-        """
         x = cls.realize_input(x)
         # this is..  useless? because i'm not copying the input into my newly allocated buffer,
         # and, probably inductor will skip the copy noting it is pointless
         # x = cls.copy_input(x)
         # x = cls.realize_input(x)
 
-        if isinstance(x.data.layout, FlexibleLayout):
-            # needed to make a fixed layout for AllReduce if I were to return
-            # the allreduce op from the compiled graph (test_inductor_doesnt_mutate_shared)
-            #
-            # was hoping to inplace if in/out layouts same;
-            # thought it was going to be ok to leave flex here;
-            # needs to match w/ input for reuse pass, probably
-            x.decide_layout()
+        # if isinstance(x.data.layout, FlexibleLayout):
+        # needed to make a fixed layout for AllReduce if I were to return
+        # the allreduce op from the compiled graph (test_inductor_doesnt_mutate_shared)
         #
+        # was hoping to inplace if in/out layouts same;
+        # thought it was going to be ok to leave flex here;
+        # needs to match w/ input for reuse pass, probably
+        # x.decide_layout()
+
+        # I added this to see if it would help the issue of test_inductor_doesnt_mutate_shared
+        # new_layout = x.data.layout
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
         # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         all_reduce = AllReduce(
-            layout=x.data.layout,
+            layout=new_layout,
             inputs=[x],
             constant_args=[group_id, reduce_op],
         )
@@ -4113,7 +4111,7 @@ class AllReduce(ExternKernel):
         # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
         # and waits on it, also producing a buffer which is really the input buffer to AllReduce.
         return Wait(
-            layout=x.data.layout,
+            layout=new_layout,
             inputs=[all_reduce],
         )
 
@@ -4128,7 +4126,3 @@ class AllReduce(ExternKernel):
         wrapper.writeline(
             f"{self.get_name()}_work = dist.all_reduce({self.get_name()}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
         )
-
-    # def get_mutation_names(self):
-    #     assert isinstance(self.layout, MutationLayout)
-    #     return (self.layout.target.get_name(),)
