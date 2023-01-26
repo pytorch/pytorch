@@ -4052,7 +4052,10 @@ class Wait(ExternKernel):
         # perspective that Wait's buffer is the one being consumed by consumers, to ensure
         # wait op gets scheduled at all.  And as a side effect, wait's buffer name needs to actually
         # point to something in the codegen output
-        wrapper.writeline(f"{self.get_name()} = {all_reduce}; del {all_reduce}")
+
+        # this 'del' is screwing up scheduler 'reuse' of this buf. which i'm not sure should even be allowed
+        # wrapper.writeline(f"{self.get_name()} = {all_reduce}; del {all_reduce}")
+        wrapper.writeline(f"{self.get_name()} = {all_reduce}")
 
 
 # should treat this as a functional op first.
@@ -4105,13 +4108,29 @@ class AllReduce(ExternKernel):
         )
 
     def codegen(self, wrapper):
+        # these header lines just get output once
         wrapper.header.writeline("import torch.distributed as dist")
         wrapper.header.writeline("from torch._C._distributed_c10d import ReduceOp")
-        (x,) = [t.codegen_reference() for t in self.inputs]
+
+        # extract references to our args in string form for codegen output
+        (input_name,) = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
         group_id = f"{repr(self.constant_args[0])}"
         reduce_op = self.constant_args[1]
+        # TODO make this real
         c10d_op = {"sum": "ReduceOp.SUM"}
-        wrapper.writeline(f"{self.get_name()}.copy_({x})")
+
+        # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
+        # where we can skip the copy because we can reuse the input buffer.  (This requires no other
+        # users of the input buffer)
+        sched_node = V.graph.scheduler.name_to_node[output_name]
+        input_read = next(iter(sched_node.read_writes.reads))
+        if not sched_node.can_inplace(input_read):
+            wrapper.writeline(f"{output_name}.copy_({input_name})")
+
+        # We've ensured that our output buffer is either
+        # (1) the input buffer, which we're allowed to inplace modify
+        # (2) a fresh buffer, which we've copied the input into above
         wrapper.writeline(
-            f"{self.get_name()}_work = dist.all_reduce({self.get_name()}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
+            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
         )

@@ -296,7 +296,7 @@ AssertionError: the MutationLayout's real layout shouldn't be FlexibleLayout
         # wait.. why does this work? I didn't implement a meta and i didn't expect my
         # normal impl to be supported.  oh, the c++ impl i thought wasn't being used?
         out = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
-        assert x.size == out.size
+        assert x.size() == out.size()
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

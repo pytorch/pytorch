@@ -490,7 +490,6 @@ class GraphLowering(torch.fx.Interpreter):
         from .scheduler import Scheduler
 
         self.init_wrapper_code()
-
         self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
