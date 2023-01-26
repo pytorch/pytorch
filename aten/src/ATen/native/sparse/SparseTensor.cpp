@@ -38,7 +38,6 @@
 #include <ATen/ops/_sparse_mask_helper_native.h>
 #include <ATen/ops/_validate_sparse_coo_tensor_args_native.h>
 #include <ATen/ops/_values_native.h>
-#include <ATen/ops/cat.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/coalesce_native.h>
 #include <ATen/ops/copy_native.h>
