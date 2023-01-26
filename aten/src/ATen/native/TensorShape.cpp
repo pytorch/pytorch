@@ -1804,7 +1804,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
 
 Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
-  grad_input.select_symint(dim, index).copy_(grad);
+  grad_input.select_symint(dim, std::move(index)).copy_(grad);
   return grad_input;
 }
 
@@ -3879,7 +3879,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   auto nbytes = self.storage().sym_nbytes();
   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
   auto numel = nbytes / dtype_size;
-  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto self_full_size = self.as_strided_symint({std::move(numel)}, {1}, 0);
   auto clone = self_full_size.clone();
   auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
   return out;
@@ -3896,7 +3896,7 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
 }
 at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
     auto output = clone_preserve_strides(self);
-    auto slice = output.select_symint(dim, index);
+    auto slice = output.select_symint(dim, std::move(index));
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
@@ -4039,7 +4039,7 @@ at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef siz
 
 
 at::Tensor& select_copy_symint_out(const at::Tensor & self, int64_t dim, c10::SymInt index, at::Tensor & out) {
-  auto tmp = self.select_symint(dim, index);
+  auto tmp = self.select_symint(dim, std::move(index));
   out.copy_(tmp);
   return out;
 }
