@@ -60,6 +60,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -78,9 +79,14 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import DynamicShapeVariable, TensorVariable
+from .variables.tensor import (
+    DynamicShapeVariable,
+    supported_const_comparison_ops,
+    supported_tensor_comparison_ops,
+    TensorVariable,
+)
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +283,30 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                state = self.copy_graphstate()
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
+                    self.output.guards.update(result.guards)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    # rollback to the state before the __bool__ inline
+                    self.restore_graphstate(state)
+                    unimplemented(
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
+                    )
+            # __bool__ is non-function or not existed in the user defined object
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -306,7 +336,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -873,22 +903,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
-        supported_is_const = {
-            "is": operator.is_,
-            "is not": operator.is_not,
-            "==": operator.eq,
-            "!=": operator.ne,
-        }
-        supported_tensors = {
-            ">": operator.gt,
-            "<": operator.lt,
-            ">=": operator.ge,
-            "<=": operator.le,
-            "==": operator.eq,
-            "!=": operator.ne,
-        }
         supported_any = dict(
-            itertools.chain(supported_tensors.items(), supported_is_const.items())
+            itertools.chain(
+                supported_tensor_comparison_ops.items(),
+                supported_const_comparison_ops.items(),
+            )
         )
         if (
             isinstance(
@@ -905,12 +924,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             and isinstance(right, ConstantVariable)
             and right.value is None
-            and op in supported_is_const
+            and op in supported_const_comparison_ops
         ):
             # <non-None> is None
             self.push(
                 ConstantVariable(
-                    supported_is_const[op](object(), right.value), **options
+                    supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
         elif (
@@ -927,96 +946,37 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     **options,
                 )
             )
-        elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                wrap_fx_proxy(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
-            isinstance(left, DynamicShapeVariable)
-            or isinstance(right, DynamicShapeVariable)
-        ) and op in supported_tensors:
-            self.push(
-                DynamicShapeVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    dyn_shape=None,
-                    **options,
-                )
-            )
-        elif (
-            isinstance(left, BaseListVariable)
-            and all(
-                isinstance(l, (ConstantVariable, DynamicShapeVariable))
-                for l in left.items
-            )
-            and isinstance(right, BaseListVariable)
-            and all(
-                isinstance(r, (ConstantVariable, DynamicShapeVariable))
-                for r in right.items
-            )
-            and len(left.items) == len(right.items)
-            and op in supported_tensors
-        ):
-            # Invariant: at least one of the variables in the two lists being compared is a DynamicShape.
-            # If all were constants, then we would have hit the `left.is_python_constant() and right.is_python_constant()`
-            # case further up.
-            # This means that the output here will always be a DynamicShapeVariable.
-
-            # Special case lists, which are not represented directly as proxies.
-            # Instead, we need to take our list of proxies and manually reduce it.
-            if isinstance(left, ListVariable) and isinstance(right, ListVariable):
-                list_variable = [
-                    DynamicShapeVariable.create(
-                        self,
-                        supported_tensors[op](l.as_proxy(), r.as_proxy()),
-                        dyn_shape=None,
-                        **options,
-                    )
-                    for l, r in zip(left.items, right.items)
-                ]
-                # list_variable represents a pointwise comparison of our list elements.
-                # Now reduce across the list.
-                dyn_variable = functools.reduce(
-                    lambda a, b: DynamicShapeVariable.create(
-                        self,
-                        # TODO: morally, this should be "a and b",
-                        # but we don't have SymBool yet,
-                        # and we don't have "and" implemented on SymInts.
-                        # + should give us the same output though.
-                        operator.and_(a.as_proxy(), b.as_proxy()),
-                        dyn_shape=None,  # TODO: what's this do / do I need to mess with it
-                        **options,
-                    ),
-                    list_variable,
-                )
-            else:
-                dyn_variable = DynamicShapeVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    dyn_shape=None,  # TODO: what's this do / do I need to mess with it
-                    **options,
-                )
-
-            self.push(dyn_variable)
         elif op in ("in", "not in"):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
         elif (
-            isinstance(left, UserFunctionVariable)
-            and isinstance(right, UserFunctionVariable)
-            and op in supported_is_const
-        ):
-            self.push(
-                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            # TODO: feels like we should be able to refactor so that VariableTracker.compare()
+            # covers more cases. However some of the cases are simpler to leave in the current function.
+            # (for example, if both left an right are python constants, always return a constant
+            # instead of re-writing that logic for every type of VariableTracker that can be constant)
+            isinstance(
+                left,
+                (
+                    TensorVariable,
+                    DynamicShapeVariable,
+                    BaseListVariable,
+                    UserFunctionVariable,
+                ),
             )
+            or isinstance(
+                right,
+                (
+                    TensorVariable,
+                    DynamicShapeVariable,
+                    BaseListVariable,
+                    UserFunctionVariable,
+                ),
+            )
+        ):
+            self.push(left.compare(self, op, right, **options))
         else:
+            import pdb; pdb.set_trace()
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
     def GET_ITER(self, inst):
@@ -1802,7 +1762,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         _step_logger()(
