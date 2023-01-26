@@ -12,7 +12,6 @@ from typing import (
     Iterator,
     Tuple,
     Dict,
-    Optional,
     List,
     Sequence,
     TypeVar,
@@ -145,15 +144,10 @@ class DTensorTestBase(MultiProcessTestCase):
                 )
 
 
+TestFunc = Callable[[object], object]
+
 # wrapper to initialize comms (processgroup)
-def with_comms(
-    func: Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-        Callable
-    ] = None,
-    backend: Optional[str] = None,
-) -> Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-    Callable
-]:
+def with_comms(func: TestFunc) -> TestFunc:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
@@ -161,13 +155,17 @@ def with_comms(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
         # if backend not specified, and cuda available, then use nccl, else gloo
+        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
+            self.device_type = "cuda"
+        else:
+            self.device_type = "cpu"
+
         pg_backend = (
-            "nccl" if backend is None and torch.cuda.is_available() else "gloo"
+            "nccl" if self.device_type == "cuda" else "gloo"
         )
         if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        self.device_type = "cuda" if pg_backend == "nccl" else "cpu"
         self.init_pg(backend=pg_backend)
         func(self)  # type: ignore[misc]
         self.destroy_pg()
