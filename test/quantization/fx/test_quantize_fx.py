@@ -1912,6 +1912,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 
+    @override_qengines
     def test_qconfig_dict_with_fused_modules(self):
         class LinearReLUModel(torch.nn.Module):
             def __init__(self, relu):
@@ -1951,7 +1952,8 @@ class TestQuantizeFx(QuantizationTestCase):
         for model in [LinearReLUModel, ConvReLUModel, ConvBnReLUModel]:
             for relu in [torch.nn.ReLU(), torch.nn.functional.relu, torch.relu]:
                 m = model(relu).eval()
-                qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping("fbgemm")
+                qengine = torch.backends.quantized.engine
+                qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping(qengine)
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
 
@@ -5796,6 +5798,16 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
+        # TODO Currently it's required that separate ops in a fused op/module have the same qconfig.
+        #      Need to be able to support fusion of ops with different qconfigs
+        # Since tanh must have 'fixed_qparams_qconfig' while linear should use
+        # the global qconfig, we need to set qconfigs for them manually here for
+        # fusion and cannot put such configs in onednn's default qconfig_mapping.
+        # Known issue:
+        # Cannot fuse linear - tanh and quantize standalone tanh at the same time.
+        qconfig = get_default_qconfig('onednn')
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig)
+        qconfig_mapping.set_object_type(torch.nn.Tanh, qconfig)
         with override_quantized_engine('onednn'):
             m = LinearTanhModel()
             self._test_linear_activation_fusion_lowering_helper(
