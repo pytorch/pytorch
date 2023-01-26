@@ -37,7 +37,6 @@ class StatefulDataLoader : public DataLoaderBase<
   /// Constructs the `StatefulDataLoader` from a `dataset` and some `options`.
   StatefulDataLoader(Dataset dataset, DataLoaderOptions options)
       : super(
-            // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(options),
             torch::make_unique<Dataset>(std::move(dataset))) {
     for (const auto w : c10::irange(this->options_.workers)) {
