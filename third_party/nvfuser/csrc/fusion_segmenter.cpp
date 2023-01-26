@@ -729,7 +729,7 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 TensorView* castIntermediateValueInCompleteFusion(
     Fusion* fusion,
     TensorView* original_tv,
-    std::unordered_set<Expr*> exprs_to_keep,
+    const std::vector<Expr*>& exprs_to_modify,
     DataType dtype) {
   FusionGuard fg(fusion);
 
@@ -759,11 +759,7 @@ TensorView* castIntermediateValueInCompleteFusion(
 
   // replace uses of original tv with fp32_tv in the complete
   //  fusion
-  for (auto expr : fusion->unordered_uses(original_tv)) {
-    // Don't modify internal uses of buffers, only cast for outputs.
-    if (exprs_to_keep.find(expr) != exprs_to_keep.end()) {
-      continue;
-    }
+  for (auto expr : exprs_to_modify) {
     if (fp32_tv == nullptr) {
       fp32_tv = make_consumer_tv(original_tv, DataType::Float);
     }
@@ -841,8 +837,9 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
           std::inserter(merged_group_exprs, merged_group_exprs.end()));
     }
 
-    // Gather exprs that should not be altered
-    std::unordered_set<Expr*> uses_to_keep;
+    // Gather exprs that should be modified. Start with all use
+    // exprs.
+    auto uses_to_modify = edge_tv->uses();
 
     const bool is_from_merged_groups =
         std::find(groups_to_merge.begin(), groups_to_merge.end(), edge->from) !=
@@ -864,13 +861,14 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
         : std::unordered_set<Expr*>{
               edge->from->exprs().begin(), edge->from->exprs().end()};
 
-    // All uses of the edge val.
-    for (auto edge_val_use_expr : edge_tv->uses()) {
-      if (from_group_exprs.count(edge_val_use_expr)) {
-        // Find uses in the to group of the val
-        uses_to_keep.emplace(edge_val_use_expr);
-      }
-    }
+    uses_to_modify.erase(
+        std::remove_if(
+            uses_to_modify.begin(),
+            uses_to_modify.end(),
+            [&](Expr* edge_val_use_expr) {
+              return from_group_exprs.count(edge_val_use_expr);
+            }),
+        uses_to_modify.end());
 
     // When this edge is an edge to the groups_to_merge groups, the
     // associated TV will be cast to lower precision. Only modify the
@@ -881,11 +879,32 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
     // in the merged groups to test if they can indeed be merged.
     if (std::find(groups_to_merge.begin(), groups_to_merge.end(), edge->to) !=
         groups_to_merge.end()) {
-      for (auto edge_val_use_expr : edge_tv->uses()) {
-        if (!merged_group_exprs.count(edge_val_use_expr)) {
-          uses_to_keep.emplace(edge_val_use_expr);
-        }
-      }
+      uses_to_modify.erase(
+          std::remove_if(
+              uses_to_modify.begin(),
+              uses_to_modify.end(),
+              [&](Expr* edge_val_use_expr) {
+                return !merged_group_exprs.count(edge_val_use_expr);
+              }),
+          uses_to_modify.end());
+    }
+
+    // Some of SelectOp-like expressions have the limitation that
+    // input tensors must be fusion inputs, so even just cast
+    // shouldn't be inserted.
+    uses_to_modify.erase(
+        std::remove_if(
+            uses_to_modify.begin(),
+            uses_to_modify.end(),
+            [&](Expr* edge_val_use_expr) {
+              return edge_val_use_expr
+                         ->isOneOf<SelectOp, IndexSelectOp, TorchGatherOp>() &&
+                  edge_val_use_expr->input(0) == edge_tv;
+            }),
+        uses_to_modify.end());
+
+    if (uses_to_modify.empty()) {
+      continue;
     }
 
     auto cast_tv_it = fp32_to_half_cast_map.find(edge->val->as<TensorView>());
@@ -895,7 +914,7 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
       cast_tv = castIntermediateValueInCompleteFusion(
           complete_fusion_.get(),
           edge_tv,
-          uses_to_keep,
+          uses_to_modify,
           force_half_precision_type_);
       TORCH_INTERNAL_ASSERT(cast_tv != nullptr);
       fp32_to_half_cast_map[edge->val->as<TensorView>()] = cast_tv;
