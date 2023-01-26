@@ -297,7 +297,7 @@ def register_module_full_backward_pre_hook(
     receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
     of each Tensor returned by the Module's forward function.
 
-    Global hooks are called before hooks registered with `register_backward_pre_hook`
+    Global hooks are called before hooks registered with `register_full_backward_pre_hook`
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
