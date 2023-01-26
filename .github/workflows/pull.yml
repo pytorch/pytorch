@@ -138,25 +138,45 @@ jobs:
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.test-matrix }}
 
-  linux-vulkan-bionic-py3_7-clang9-build:
-    name: linux-vulkan-bionic-py3.7-clang9
+  linux-bionic-py3_11-clang9-build:
+    name: linux-bionic-py3.11-clang9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-vulkan-bionic-py3.7-clang9
-      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      build-environment: linux-bionic-py3.11-clang9
+      docker-image-name: pytorch-linux-bionic-py3.11-clang9
+      test-matrix: |
+        { include: [
+          { config: "smoke", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-bionic-py3_11-clang9-test:
+    name: linux-bionic-py3.11-clang9
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-py3_11-clang9-build
+    with:
+      build-environment: linux-bionic-py3.11-clang9
+      docker-image: ${{ needs.linux-bionic-py3_11-clang9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-py3_11-clang9-build.outputs.test-matrix }}
+
+  linux-vulkan-bionic-py3_11-clang9-build:
+    name: linux-vulkan-bionic-py3.11-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-vulkan-bionic-py3.11-clang9
+      docker-image-name: pytorch-linux-bionic-py3.11-clang9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-vulkan-bionic-py3_7-clang9-test:
-    name: linux-vulkan-bionic-py3.7-clang9
+  linux-vulkan-bionic-py3_11-clang9-test:
+    name: linux-vulkan-bionic-py3.11-clang9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-vulkan-bionic-py3_7-clang9-build
+    needs: linux-vulkan-bionic-py3_11-clang9-build
     with:
-      build-environment: linux-vulkan-bionic-py3.7-clang9
-      docker-image: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.test-matrix }}
+      build-environment: linux-vulkan-bionic-py3.11-clang9
+      docker-image: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_6-py3_10-gcc7-build:
     name: linux-bionic-cuda11.6-py3.10-gcc7
