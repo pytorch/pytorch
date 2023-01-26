@@ -1097,7 +1097,7 @@ Tensor sparse_compressed_to_flipped(
   // performance.
   const auto batch_nnz_offset = [&]() -> Tensor {
     const auto wrapped_nnz = at::tensor({nnz}, compressed_indices.options());
-    const auto offset = wrapped_nnz
+    auto offset = wrapped_nnz
       .expand({batch_numel_nonzero})
       .cumsum(-1).sub_(wrapped_nnz)
       .reshape(batch_sizes_nonempty);
@@ -1152,7 +1152,7 @@ Tensor sparse_compressed_to_flipped(
   // To CSC/BSC inputs these indices will appear "transposed".
   const auto is_transposed_indices = layout == at::kSparseCsc || layout == at::kSparseBsc;
   const auto coo_indices_2d_transposed = [&]() -> Tensor {
-    const auto coo_indices_2d = _convert_indices_from_csr_to_coo(
+    auto coo_indices_2d = _convert_indices_from_csr_to_coo(
         compressed_indices_2d,
         plain_indices_2d,
         is_out_int32,
@@ -1415,7 +1415,7 @@ void _csr_to_block_csr_cpu_kernel(
   // value lives within them. Otherwise they're not.
 
   // Allocate pointers for all possible column blocks plus 1
-  std::vector<T*> blocks(n_col / C + 1, (T*)0);
+  std::vector<T*> blocks(n_col / C + 1, nullptr);
 
   assert(n_row % R == 0);
   assert(n_col % C == 0);

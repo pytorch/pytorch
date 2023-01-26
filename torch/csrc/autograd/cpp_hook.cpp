@@ -57,7 +57,7 @@ CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
 
 variable_list CppFunctionSingleTensorPreHook::operator()(
     const variable_list& values) {
-  auto value = values[value_idx_];
+  const auto& value = values[value_idx_];
   auto res = hook_(value);
   TORCH_INTERNAL_ASSERT(
       !res.defined(),
