@@ -22,9 +22,14 @@ from torch.onnx import _type_utils
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.utils import _pytree
 
+
 @onnxscript.script()
 def aten_prim_convert_element_type(tensor, dtype: int):
     return opset18.Cast(tensor, to=dtype)
+
+
+# TODO: Implement getitem
+
 
 # A simple lookup table for atenlib functions
 _ATENLIB_FUNCTIONS = {
@@ -133,8 +138,8 @@ _ATENLIB_FUNCTIONS = {
     "aten::xlogy": ops.special.aten_special_xlogy,
     "aten::zeros": ops.core.aten_zeros,
     "aten::zeros_like": ops.core.aten_zeros_like,
+    "aten::native_layer_norm": ops.core.aten_native_layer_norm,
 }
-
 
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
@@ -229,13 +234,17 @@ def _filter_incompatible_kwargs(kwargs):
         }:
             continue
         if key == "dtype":
-            filtered["dtype"] = int(_type_utils.JitScalarType.from_dtype(value).onnx_type())
+            filtered["dtype"] = int(
+                _type_utils.JitScalarType.from_dtype(value).onnx_type()
+            )
             continue
         filtered[key] = value
     return filtered
 
 
-def _wrap_fx_args_as_onnxscript_args(node, fx_name_to_onnxscipt_tensor) -> Tuple[tuple, dict]:
+def _wrap_fx_args_as_onnxscript_args(
+    node, fx_name_to_onnxscipt_tensor
+) -> Tuple[tuple, dict]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     # This function assumes the order of arguments in FX op is the
@@ -345,8 +354,9 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 # _fill_tensor_types(v, node.meta["val"])
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScriptTensors.
-                assert isinstance(output, graph_building.TorchScriptTensor)
-                assert isinstance(output, onnxscript.tensor.Tensor)
+                assert isinstance(
+                    output, (graph_building.TorchScriptTensor, tuple)
+                ), type(output)
                 fx_name_to_onnxscipt_tensor[node.name] = output
             elif node.target == operator.getitem and isinstance(node.args, tuple):
                 onnx_tensor_tuple = fx_name_to_onnxscipt_tensor[node.args[0].name]
@@ -355,8 +365,10 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     assert (
                         output is not None
                     ), f"Node creates None with target={node.target} and name={node.name}"
-                    assert isinstance(output, graph_building.TorchScriptTensor)
-                    assert isinstance(output, onnxscript.tensor.Tensor)
+                    assert isinstance(
+                        output, (graph_building.TorchScriptTensor, tuple)
+                    ), type(output)
+
                     fx_name_to_onnxscipt_tensor[node.name] = output
                 else:
                     # TODO(justinchuby): Implement this function
