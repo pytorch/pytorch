@@ -31,23 +31,3 @@ jobs:
           echo
           echo "Once the jobs are deemed stable enough (% red signal < 20% and TTS < 3h),"
           echo " they can graduate and move back to pull or trunk."
-
-  linux-bionic-py3_7-clang8-xla-build:
-    name: linux-bionic-py3_7-clang8-xla
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-py3_7-clang8-xla
-      docker-image-name: xla_base
-      test-matrix: |
-        { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
-        ]}
-
-  linux-bionic-py3_7-clang8-xla-test:
-    name: linux-bionic-py3_7-clang8-xla
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_7-clang8-xla-build
-    with:
-      build-environment: linux-bionic-py3_7-clang8-xla
-      docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
