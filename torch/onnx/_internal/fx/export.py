@@ -227,7 +227,7 @@ def _retrieve_or_adapt_input(fx_node_arg, fx_name_to_onnxscipt_value):
         #    in TorchScript graph.
         onnx_tensor = fx_name_to_onnxscipt_value[onnx_tensor.name]
     elif isinstance(onnx_tensor, torch.dtype):
-        onnx_tensor = _type_utils.JitScalarType.from_dtype(onnx_tensor)
+        onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
 
     return onnx_tensor
 
@@ -298,9 +298,9 @@ def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
-    for i, (onnxscript_value, expected_value) in enumerate(zip(
-        flat_onnxscript_values, flat_expected_values
-    )):
+    for i, (onnxscript_value, expected_value) in enumerate(
+        zip(flat_onnxscript_values, flat_expected_values)
+    ):
         # Only set shape for now as we don't need type information.
         onnxscript_value.shape = tuple(expected_value.size())
         if i > 0:
