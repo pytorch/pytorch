@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Tuple, Dict
+from typing import Callable, Dict, Tuple
 
 import torch
 import torch.distributed._tensor.api as dtensor
