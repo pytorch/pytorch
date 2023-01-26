@@ -195,6 +195,7 @@ def operator_dispatch(
     if str(op_call) in custom_dispatch_ops:
         # dispatch to user defined custom distributed tensor ops
         return custom_dispatch_ops[str(op_call)](*args, **kwargs)
+
     target_schema, redistribute, output_sharding = propagate_input_sharding(
         op_call, args, kwargs, op_to_rules
     )
