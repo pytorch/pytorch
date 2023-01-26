@@ -368,9 +368,14 @@ def _elementwise_meta(
     device = None
     number = None
     for arg in args_:
-        if isinstance(arg, TensorLike) and not utils.is_cpu_scalar_tensor(arg):
-            device = arg.device
-            break
+        if isinstance(arg, TensorLike):
+            if utils.is_cpu_scalar_tensor(arg):
+                if device is None:
+                    device = arg.device
+                # keep going, in case there is a cuda tensor later
+            else:
+                device = arg.device
+                break
 
         elif isinstance(arg, Number):
             if number is None:
