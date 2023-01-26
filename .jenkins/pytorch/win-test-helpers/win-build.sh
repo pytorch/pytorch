@@ -55,7 +55,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-python "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
+python "$SCRIPT_HELPERS_DIR"/build_pytorch.py
 
 env
 
