@@ -3,11 +3,12 @@
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
-from torch.distributed.tensor.parallel.api import _parallelize_linear, _parallelize_mlp
+from torch.distributed.tensor.parallel.api import parallelize_module, _parallelize_linear, _parallelize_mlp
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     make_input_replicate_1d,
     make_output_replicate_1d,
+    make_output_tensor,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
@@ -25,11 +26,19 @@ class MLPModule(torch.nn.Module):
         torch.manual_seed(5)
         self.net1 = torch.nn.Linear(10, 16, device=device)
         self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 12, device=device)
+        self.net2 = torch.nn.Linear(16, 24, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
 
+class ColwiseParallelOutputTensor(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, make_output_tensor)
 
 class TensorParallelAPITests(DTensorTestBase):
     @property
@@ -77,6 +86,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self,
         local_module,
         dist_module,
+        rank0_only,
         skip_rowwise_bias=False,
         compare_grad=False,
     ):
@@ -85,7 +95,7 @@ class TensorParallelAPITests(DTensorTestBase):
             dist_param = dist_module.get_parameter(name)
             param = param.grad if compare_grad else param
             dist_param = dist_param.grad if compare_grad else dist_param
-            if self.rank == 0 or (
+            if (not rank0_only) or (self.rank == 0) or (
                 name not in ["net2.bias"]
                 and not skip_rowwise_bias
                 or name not in ["bias", "net2.bias"]
@@ -95,15 +105,16 @@ class TensorParallelAPITests(DTensorTestBase):
                     dist_param.redistribute(
                         device_mesh=dist_param.device_mesh, placements=replicate
                     ).to_local(),
+                    f"{name} not equal between dist and non-dist"
                 )
 
-    def _compare_module(self, local_module, dist_module, inp_size, rowwise=False):
+    def _compare_module(self, local_module, dist_module, inp_size, rank0_only=True, rowwise=False):
         LR = 0.25  # the learning rate we use for testing
         local_optim = torch.optim.SGD(local_module.parameters(), lr=LR)
         dist_optim = torch.optim.SGD(dist_module.parameters(), lr=LR)
         torch.manual_seed(0)
         inp = torch.rand(*inp_size, device=self.device_type)
-        self._compare_params(local_module, dist_module)
+        self._compare_params(local_module, dist_module, rank0_only)
 
         # check forward correctness
         local_output = local_module(inp)
@@ -118,11 +129,11 @@ class TensorParallelAPITests(DTensorTestBase):
         dist_output.sum().backward()
 
         # check backward and ensure gradients are same
-        self._compare_params(local_module, dist_module, rowwise, True)
+        self._compare_params(local_module, dist_module, rank0_only, rowwise, True)
 
         local_optim.step()
         dist_optim.step()
-        self._compare_params(local_module, dist_module, rowwise)
+        self._compare_params(local_module, dist_module, rank0_only, rowwise)
 
     @with_comms
     def test_parallelize_mlp(self):
@@ -140,6 +151,23 @@ class TensorParallelAPITests(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         model_tp = _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
         self._compare_module(model, model_tp, inp_size)
+
+    @with_comms
+    def test_parallelize_mlp_with_module_api(self):
+        inp_size = [12, 10]
+        model = MLPModule(self.device_type)
+        model_tp = MLPModule(self.device_type)
+
+        # Ensure model are initialized the same way.
+        self.assertEqual(model.net1.weight, model_tp.net1.weight)
+        self.assertEqual(model.net1.bias, model_tp.net1.bias)
+        self.assertEqual(model.net2.weight, model_tp.net2.weight)
+        self.assertEqual(model.net2.bias, model_tp.net2.bias)
+
+        # Parallelize module.
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model_tp = parallelize_module(model_tp, device_mesh, {"net1": ColwiseParallel(), "net2": ColwiseParallel()})
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
     def test_parallelize_mlp_error(self):

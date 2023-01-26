@@ -102,7 +102,7 @@ def parallelize_module(  # type: ignore[return]
                     sub_module, device_mesh, parallelize_style  # type: ignore[arg-type] # pyre-ignore[6]
                 ),
             )
-            return module
+        return module
     else:
         raise RuntimeError(  # pyre-ignore[7]
             "Expect Union[ParallelStyle, Dict[str, ParallelStyle]] for"
