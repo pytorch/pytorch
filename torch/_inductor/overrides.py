@@ -4,6 +4,7 @@ import random
 import weakref
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
 from torch._dynamo.utils import fake_mode_from_tensors
@@ -87,7 +88,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
-    gm = mkldnn_fuse_fx(gm, example_inputs)
+    if not dynamo_config.dynamic_shapes:
+        gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
 
