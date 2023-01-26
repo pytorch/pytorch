@@ -33,14 +33,12 @@ def register_impl(func):
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
-def register_prop_rule(op):
+def register_prop_rule(func):
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def wrapper(impl):
-        overloads = op if isinstance(op, list) else [op]
-        for overload in overloads:
-            DTensor._propagator.register_sharding_prop_rule(overload, impl)
+        DTensor._op_to_rules[func] = impl
         return impl
 
     return wrapper
