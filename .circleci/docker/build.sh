@@ -160,6 +160,16 @@ case "$image" in
     SWIFTSHADER=yes
     CONDA_CMAKE=yes
     ;;
+  pytorch-linux-bionic-py3.11-clang9)
+    ANACONDA_PYTHON_VERSION=3.11
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
+    CONDA_CMAKE=yes
+    ;;
   pytorch-linux-bionic-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
