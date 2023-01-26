@@ -6,9 +6,11 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+from torch._dynamo.utils import dynamo_timed
+
 from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
-from ..utils import cache_on_self, dynamo_utils, has_triton, sympy_dot, sympy_product
+from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
@@ -469,7 +471,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
@@ -547,9 +549,9 @@ class WrapperCodeGen(CodeGen):
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
-                f"""
-                from {config.dynamo_import}.testing import rand_strided
-                from {config.inductor_import}.utils import print_performance
+                """
+                from torch._dynamo.testing import rand_strided
+                from torch._inductor.utils import print_performance
                 """,
                 strip=True,
             )

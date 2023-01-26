@@ -345,18 +345,16 @@ class FileSystemWriter(StorageWriter):
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
 
-    def init(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        # There's no storage input in the local plan
+        self.path.mkdir(parents=True, exist_ok=True)
         return plan
 
     def prepare_global_plan(
         self, global_plan: List[SavePlan]
     ) -> List[SavePlan]:
-        self.path.mkdir(parents=True, exist_ok=True)
-
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(global_plan)
@@ -515,7 +513,7 @@ class FileSystemReader(StorageReader):
         with (self.path / ".metadata").open("rb") as metadata_file:
             return pickle.load(metadata_file)
 
-    def init(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data
         assert self.storage_data is not None
 

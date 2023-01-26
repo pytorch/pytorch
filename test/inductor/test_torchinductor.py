@@ -21,7 +21,7 @@ import torch
 
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, same
+from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
@@ -48,7 +48,7 @@ try:
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
     from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
-    from torch._inductor.ir import IndexingDiv, ModularIndexing
+    from torch._inductor.ir import ModularIndexing
     from torch._inductor.overrides import (
         linear_permute_fusion,
         linear_transpose,
@@ -60,6 +60,7 @@ try:
     )
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, timed
+    from torch.fx.experimental.symbolic_shapes import FloorDiv
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -552,7 +553,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
-        # if there are negative terms in ModularIndexing base, we cannot replace it with IndexingDiv
+        # if there are negative terms in ModularIndexing base, we cannot replace it with FloorDiv
         expr = ModularIndexing(i1 - 15, 1, 64)
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges),
@@ -560,8 +561,8 @@ class TestIndexingSimplification(TorchTestCase):
         )
         # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
-            sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
-            IndexingDiv(r3 + i2 + i1, 32),
+            sizevars.simplify_with_ranges(FloorDiv(r3 + i2 + i1, 32), var_ranges),
+            FloorDiv(r3 + i2 + i1, 32),
         )
 
         expr = ModularIndexing(2 * i2 + r3, 1, 64)
@@ -569,7 +570,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
 
         # check the same thing but with symbolic divisor
-        self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
+        self.assertEqual(FloorDiv(r3 * i0, r3), i0)
         self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
 
         # (10*i) % 10 is always zero and should get optimized away
@@ -597,7 +598,7 @@ class TestIndexingSimplification(TorchTestCase):
 
         # Constant fold from divisor into base
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
-        self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
+        self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
 
         # Nested modular indexing is correctly simplified
         var_ranges = {"i1": 13, "i2": 121}
@@ -607,7 +608,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {"i2": 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = IndexingDiv(ModularIndexing(i2, 1, 28), 7)
+        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
@@ -654,8 +655,8 @@ class TestIndexingSimplification(TorchTestCase):
             ModularIndexing(i0, 10, i1 * i2) + 10,
         )
 
-        # works for ModularIndexing + IndexingDiv
-        expr5 = 197 * IndexingDiv(i0, 197) + ModularIndexing(i0, 1, 197)
+        # works for ModularIndexing + FloorDiv
+        expr5 = 197 * FloorDiv(i0, 197) + ModularIndexing(i0, 1, 197)
         simplified = sizevars.simplify_with_ranges(expr5, {})
         self.assertEqual(simplified, i0)
         self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
@@ -667,19 +668,13 @@ class TestIndexingSimplification(TorchTestCase):
         )
 
         # divisor != 1
-        expr6 = 197 * IndexingDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
+        expr6 = 197 * FloorDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
         simplified = sizevars.simplify_with_ranges(expr6, {})
-        self.assertEqual(simplified, IndexingDiv(i0, 3))
+        self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
 class CommonTemplate:
-    @classmethod
-    def install(my_cls, other_cls, suffix):  # noqa: B902
-        for name, value in my_cls.__dict__.items():
-            if name.startswith("test_"):
-                setattr(other_cls, f"{name}_{suffix}", value)
-
     def test_bool(self):
         def fn(a, b):
             return (
@@ -704,7 +699,7 @@ class CommonTemplate:
 
     def test_add_const_int(self):
         def fn(a):
-            return (a + 1,)
+            return (a + 1, torch.add(a, 1, alpha=2))
 
         self.common(fn, (torch.randn(32),))
 
@@ -734,6 +729,16 @@ class CommonTemplate:
             return torch.sgn(a), torch.sgn(a + 1) - 1
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
+
+    def test_randn_generator(self):
+        def fn(a, generator):
+            torch.randn([20, 20], generator=generator, device=a.device)
+
+        self.common(fn, (torch.linspace(-10, 10, 41), None))
+
+        # generator not yet supported in dynamo
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
+            self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
 
     def test_sgn_extremal(self):
         def fn(a):
@@ -1117,6 +1122,12 @@ class CommonTemplate:
     def test_exp(self):
         def fn(a, b):
             return (torch.exp(a), torch.exp(a + b))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_exp2(self):
+        def fn(a, b):
+            return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -1547,9 +1558,11 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
-    # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
+        # For gpu path, there is an accuracy issue
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv bn test")
+
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         bn_modules = {
@@ -1603,9 +1616,11 @@ class CommonTemplate:
                         (v,),
                     )
 
-    # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_functional_bn_fuse(self):
+        # For gpu path, there is an accuracy issue
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv bn test")
+
         # Define a BatchNorm using functional BN.
         class BatchNorm(torch.nn.BatchNorm2d):
             def __init__(
@@ -1685,8 +1700,10 @@ class CommonTemplate:
                 (v,),
             )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_packed(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d packed test")
+
         x_shape = (1, 3, 56, 56)
         mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
         v = torch.randn(x_shape, dtype=torch.float32)
@@ -1696,10 +1713,12 @@ class CommonTemplate:
                 (v,),
             )
 
-    # For gpu path, there has a accurcy issue,
-    # see https://github.com/pytorch/pytorch/issues/87745.
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_unary(self):
+        # For gpu path, there is an accuracy issue
+        # see https://github.com/pytorch/pytorch/issues/87745
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d unary test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1767,10 +1786,12 @@ class CommonTemplate:
                     (v,),
                 )
 
-    # For gpu path, there has a accurcy issue,
-    # see https://github.com/pytorch/pytorch/issues/87745.
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d binary test")
     def test_conv2d_binary(self):
+        # For gpu path, there is an accuracy issue
+        # see https://github.com/pytorch/pytorch/issues/87745
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d binary test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -2114,6 +2135,36 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
+    @requires_multigpu()
+    def test_recompile_on_index(self):
+        torch.set_float32_matmul_precision("high")
+
+        def gemm(x, y):
+            return x @ y
+
+        failed_guard = None
+
+        def fail(guard):
+            nonlocal failed_guard
+            failed_guard = guard
+
+        gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
+
+        x0 = torch.randn(1024, 1024, device="cpu:0")
+        y0 = torch.randn(1024, 1024, device="cpu:0")
+
+        gemm_opt(x0, y0)
+
+        x1 = torch.randn(1024, 1024, device="cpu:1")
+        y1 = torch.randn(1024, 1024, device="cpu:1")
+
+        gemm_opt(x1, y1)
+        self.assertTrue(failed_guard is not None)
+        self.assertTrue(
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
+            in failed_guard.reason
+        )
+
     def test_unbind(self):
         def fn(a):
             return torch.unbind(a), torch.unbind(a, -1)
@@ -2155,8 +2206,10 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv2d channels_last")
+
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
             ToTuple(),
@@ -2208,8 +2261,10 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv3d_channels_last(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv3d channels_last")
+
         m = torch.nn.Sequential(
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
@@ -2425,6 +2480,15 @@ class CommonTemplate:
             return aten.elu(x, 1.6732632423543772, 1.0507009873554805) + 2, aten.elu(
                 x + 1, 2, 3, 4
             )
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_tan(self):
+        def fn(x):
+            return aten.tan(x) + 2, aten.tan(x + 1)
 
         self.common(
             fn,
@@ -3544,6 +3608,27 @@ class CommonTemplate:
         out = fn(*inputs)
         self.assertTrue(same(out, inp_clone + inputs[1]))
         self.assertTrue(out is inputs[0])
+
+    # The following 2 tests are meant to check the logic that drops
+    # xmask from triton load/store if xnumel = 1
+    @requires_cuda()
+    def test_single_elem(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        self.common(fn, (torch.randn(1),))
+
+    @requires_cuda()
+    def test_single_elem_indirect(self):
+        def fn(a, b):
+            c = a[b] + 1
+            return (c,)
+
+        a = torch.randn(1)
+        b = (torch.tensor([0], dtype=torch.int64),)
+
+        self.common(fn, (a, b))
 
     def test_inplace_mixed_dtype_ops(self):
         @torch._dynamo.optimize("inductor")
@@ -5004,8 +5089,10 @@ class CommonTemplate:
         res = torch._dynamo.optimize("inductor")(fn)(x)
         self.assertEqual(res, res_ref)
 
-    @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
     def test_kwargs(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("histogramdd only supports cpu")
+
         def fn(x, y):
             return torch.histogramdd(
                 x,
@@ -5035,8 +5122,10 @@ class CommonTemplate:
         )
 
     @patch.object(config, "cpp_wrapper", True)
-    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
     def test_cpp_wrapper(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("cpp_wrapper only supports cpu")
+
         device = "cpu"
         for name in [
             "test_as_strided",  # buffer reuse
@@ -5074,6 +5163,196 @@ class CommonTemplate:
         )
 
 
+test_skips = {
+    "test_add_inplace_permuted_dynamic_shapes": ("cuda",),
+    "test_addmm_dynamic_shapes": ("cuda",),
+    "test_alexnet_prefix_dynamic_shapes": ("cpu", "cuda"),
+    "test_any_dynamic_shapes": ("cuda",),
+    "test_argmax_argmin2_dynamic_shapes": ("cuda",),
+    "test_as_strided_dynamic_shapes": ("cuda",),
+    "test_as_strided_scatter_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d1_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d2_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d3_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d4_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d5_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d6_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d_backward2_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d_backward3_dynamic_shapes": ("cuda",),
+    "test_avg_pool2d_backward_dynamic_shapes": ("cuda",),
+    "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
+    "test_batch_norm_2d_dynamic_shapes": ("cuda",),
+    "test_cat_dynamic_shapes": ("cuda",),
+    "test_cat_extern_kernel_dynamic_shapes": ("cuda",),
+    "test_cat_upcasting_dynamic_shapes": ("cuda",),
+    "test_cauchy_dynamic_shapes": ("cuda",),
+    "test_clamp_dynamic_shapes": ("cuda",),
+    "test_clone_dynamic_shapes": ("cuda",),
+    "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
+    "test_cos_dynamic_shapes": ("cuda",),
+    "test_cpp_wrapper_dynamic_shapes": ("cpu",),
+    "test_cudnn_rnn_dynamic_shapes": ("cuda",),
+    "test_div1_dynamic_shapes": ("cuda",),
+    "test_div2_dynamic_shapes": ("cuda",),
+    "test_div3_dynamic_shapes": ("cuda",),
+    "test_div4_dynamic_shapes": ("cuda",),
+    "test_div5_dynamic_shapes": ("cuda",),
+    "test_div6_dynamic_shapes": ("cuda",),
+    "test_div7_dynamic_shapes": ("cuda",),
+    "test_elu_dynamic_shapes": ("cuda",),
+    "test_exp2_dynamic_shapes": ("cuda",),
+    "test_exp_dynamic_shapes": ("cuda",),
+    "test_expand_as_dynamic_shapes": ("cuda",),
+    "test_expanded_reduction_dynamic_shapes": ("cuda",),
+    "test_fill1_dynamic_shapes": ("cuda",),
+    "test_fill2_dynamic_shapes": ("cuda",),
+    "test_flip_dynamic_shapes": ("cuda",),
+    "test_fuse_tiled_dynamic_shapes": ("cuda",),
+    "test_gather_scatter_dynamic_shapes": ("cuda",),
+    "test_gelu_dynamic_shapes": ("cuda",),
+    "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
+    "test_horizonal_fusion1_dynamic_shapes": ("cuda",),
+    "test_index1_dynamic_shapes": ("cuda",),
+    "test_index2_dynamic_shapes": ("cuda",),
+    "test_index_put1_dynamic_shapes": ("cuda",),
+    "test_index_put2_dynamic_shapes": ("cuda",),
+    "test_index_put3_dynamic_shapes": ("cuda",),
+    "test_index_select_dynamic_shapes": ("cuda",),
+    "test_indirect_load_broadcast_dynamic_shapes": ("cpu", "cuda"),
+    "test_inplace_add_dynamic_shapes": ("cpu", "cuda"),
+    "test_inplace_mixed_dtype_ops_dynamic_shapes": ("cpu", "cuda"),
+    "test_input_mutation2_dynamic_shapes": ("cpu", "cuda"),
+    "test_invalid_operand_issue1_dynamic_shapes": ("cpu", "cuda"),
+    "test_kwargs_dynamic_shapes": ("cpu",),
+    "test_l1_loss_dynamic_shapes": ("cuda",),
+    "test_leaky_relu_dynamic_shapes": ("cuda",),
+    "test_lgamma_dynamic_shapes": ("cuda",),
+    "test_linear_binary_dynamic_shapes": ("cpu",),
+    "test_linear_packed_dynamic_shapes": ("cpu",),
+    "test_linear_unary_dynamic_shapes": ("cpu",),
+    "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
+    "test_log_softmax_dynamic_shapes": ("cuda",),
+    "test_logsumexp_dynamic_shapes": ("cuda",),
+    "test_long_tensor_dynamic_shapes": ("cuda",),
+    "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
+    "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
+    "test_masked_fill_dynamic_shapes": ("cuda",),
+    "test_masked_fill_promotion_dynamic_shapes": ("cuda",),
+    "test_max_pool2d1_dynamic_shapes": ("cuda",),
+    "test_max_pool2d2_dynamic_shapes": ("cuda",),
+    "test_max_pool2d3_dynamic_shapes": ("cuda",),
+    "test_max_pool2d4_dynamic_shapes": ("cuda",),
+    "test_max_pool2d5_dynamic_shapes": ("cuda",),
+    "test_max_pool2d_with_indices_backward2_dynamic_shapes": ("cuda",),
+    "test_max_pool2d_with_indices_backward3_dynamic_shapes": ("cuda",),
+    "test_max_pool2d_with_indices_backward4_dynamic_shapes": ("cuda",),
+    "test_max_pool2d_with_indices_backward_dynamic_shapes": ("cuda",),
+    "test_mean_dynamic_shapes": ("cuda",),
+    "test_min_max_reduction_dynamic_shapes": ("cuda",),
+    "test_move_arange_dynamic_shapes": ("cpu", "cuda"),
+    "test_narrow_dynamic_shapes": ("cuda",),
+    "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
+    "test_output_strides_dynamic_shapes": ("cpu", "cuda"),
+    "test_permute1_dynamic_shapes": ("cuda",),
+    "test_permute2_dynamic_shapes": ("cpu", "cuda"),
+    "test_pixel_shuffle_channels_last_dynamic_shapes": ("cpu",),
+    "test_pow1_dynamic_shapes": ("cuda",),
+    "test_pow2_dynamic_shapes": ("cuda",),
+    "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
+    "test_recompile_on_index_dynamic_shapes": ("cpu", "cuda"),
+    "test_reduction4_dynamic_shapes": ("cuda",),
+    "test_relu_dynamic_shapes": ("cuda",),
+    "test_repeat_dynamic_shapes": ("cuda",),
+    "test_roi_align_dynamic_shapes": ("cpu",),
+    "test_roll_dynamic_shapes": ("cuda",),
+    "test_round_dynamic_shapes": ("cuda",),
+    "test_scatter4_dynamic_shapes": ("cuda",),
+    "test_scatter_add2_dynamic_shapes": ("cuda",),
+    "test_scatter_reduce2_dynamic_shapes": ("cuda",),
+    "test_scheduler_vertical_fusion1_dynamic_shapes": ("cuda",),
+    "test_select_scatter_dynamic_shapes": ("cuda",),
+    "test_sigmoid_dynamic_shapes": ("cuda",),
+    "test_silu_dynamic_shapes": ("cuda",),
+    "test_simplify_loops_dynamic_shapes": ("cuda",),
+    "test_sin_dynamic_shapes": ("cuda",),
+    "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
+    "test_slice1_dynamic_shapes": ("cuda",),
+    "test_slice2_dynamic_shapes": ("cuda",),
+    "test_slice_mutation1_dynamic_shapes": ("cuda",),
+    "test_slice_scatter_dynamic_shapes": ("cuda",),
+    "test_softmax_dynamic_shapes": ("cuda",),
+    "test_softmax_one_kernel_dynamic_shapes": ("cuda",),
+    "test_split_with_sizes_dynamic_shapes": ("cuda",),
+    "test_squeeze2_dynamic_shapes": ("cuda",),
+    "test_std_dynamic_shapes": ("cuda",),
+    "test_strided_inputs_dynamic_shapes": ("cpu", "cuda"),
+    "test_sum1_dynamic_shapes": ("cuda",),
+    "test_sum2_dynamic_shapes": ("cuda",),
+    "test_sum3_dynamic_shapes": ("cuda",),
+    "test_sum4_dynamic_shapes": ("cuda",),
+    "test_sum5_dynamic_shapes": ("cuda",),
+    "test_sum_dtype_dynamic_shapes": ("cuda",),
+    "test_sum_keepdims_dynamic_shapes": ("cuda",),
+    "test_tanh_dynamic_shapes": ("cuda",),
+    "test_tmp_not_defined_issue1_dynamic_shapes": ("cuda",),
+    "test_tmp_not_defined_issue2_dynamic_shapes": ("cpu", "cuda"),
+    "test_to_memory_format_dynamic_shapes": ("cuda",),
+    "test_transpose_add_dynamic_shapes": ("cuda",),
+    "test_transpose_dynamic_shapes": ("cuda",),
+    "test_transposed_propagates_dynamic_shapes": ("cuda",),
+    "test_triu_dynamic_shapes": ("cuda",),
+    "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
+    "test_unspec_inputs_dynamic_shapes": ("cpu", "cuda"),
+    "test_unsqueeze_dynamic_shapes": ("cuda",),
+    "test_unsqueeze_inplace_dynamic_shapes": ("cuda",),
+    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest2d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest3d_dynamic_shapes": ("cpu", "cuda"),
+    "test_var_mean_dynamic_shapes": ("cuda",),
+    "test_vertical_fusion1_dynamic_shapes": ("cuda",),
+    "test_views1_dynamic_shapes": ("cuda",),
+    "test_views3_dynamic_shapes": ("cpu",),
+}
+
+
+def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
+    for name, value in my_cls.__dict__.items():
+        if name.startswith("test_"):
+            # You cannot copy functions in Python, so we use lambdas here to
+            # create objects with different ids. Otherwise, unittest.skip
+            # would modify all methods sharing the same object id. Also, by
+            # using a default argument in a lambda, we create a copy instead of
+            # a reference. Otherwise, we would lose access to the value.
+            skips = test_skips.get(name)
+            if skips and suffix in skips:
+                setattr(
+                    other_cls,
+                    f"{name}_{suffix}",
+                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
+                )
+            else:
+                setattr(
+                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
+                )
+
+
+def make_dynamic_cls(cls):
+    return make_test_cls_with_patches(
+        cls,
+        "DynamicShapes",
+        "_dynamic_shapes",
+        (config, "dynamic_shapes", True),
+        (torch._dynamo.config, "dynamic_shapes", True),
+        (functorch_config, "use_dynamic_shapes", True),
+    )
+
+
+DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
+
+
 if HAS_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
@@ -5085,7 +5364,8 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    CommonTemplate.install(CpuTests, "cpu")
+    copy_tests(CommonTemplate, CpuTests, "cpu")
+    copy_tests(DynamicShapesCommonTemplate, CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
         def test_conv_stride_constraints(self):
@@ -5615,7 +5895,7 @@ if HAS_CPU:
                         opt_fn = torch._dynamo.optimize("inductor")(m)
                         same(m(x), opt_fn(x))
                         if simdlen != 1:
-                            assert metrics.generated_cpp_vec_kernel_count == 7
+                            assert metrics.generated_cpp_vec_kernel_count == 6
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -5644,7 +5924,7 @@ if HAS_CPU:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
     import triton.language as tl
 
@@ -5817,7 +6097,8 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
-    CommonTemplate.install(CudaTests, "cuda")
+    copy_tests(CommonTemplate, CudaTests, "cuda")
+    copy_tests(DynamicShapesCommonTemplate, CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
         common = check_model_cuda
@@ -6396,6 +6677,25 @@ class ExprPrinterTests(TestCase):
         for expr, result in cases:
             self.assertEqual(cexpr(expr), result)
             self.assertEqual(texpr(expr), result)
+
+
+if HAS_CUDA and not TEST_WITH_ASAN:
+
+    class RNNTest(TestCase):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gru = torch.nn.GRU(16, 16, batch_first=True)
+
+            def forward(self, x):
+                return self.gru(x)
+
+        def test_rnn_compile_safe(self):
+            device = torch.device("cuda")
+            model = RNNTest.Model().to(device)
+            model = torch._dynamo.optimize("inductor")(model)
+            x = torch.rand(1024, 20, 16).to(device)
+            model(x)
 
 
 if __name__ == "__main__":
