@@ -11,6 +11,7 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 
 from ..utils import (
+    fqn,
     get_fake_value,
     get_real_value,
     HAS_NUMPY,
@@ -272,6 +273,25 @@ class TensorVariable(VariableTracker):
                 constant_result = ConstantVariable(
                     f"torch.{tensortype.__name__}", **options
                 )
+        elif (
+            name == "type"
+            and len(args) == 1
+            and fqn(type(args[0].as_python_constant())) == "torch.tensortype"
+        ):
+            # torch.FloatTensor, etc. are all of type "torch.tensortype".
+            # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
+            # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
+            tensor_type = args[0].as_python_constant()
+            tensor_type_const = ConstantVariable(fqn(tensor_type), **options)
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self, tensor_type_const], kwargs),
+                ),
+                **options,
+            )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
