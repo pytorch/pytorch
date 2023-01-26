@@ -26,7 +26,7 @@ TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
 
 
 @onnxscript.script(opset=TORCH_ONNX_OPSET)
-def aten_prim_convert_element_type(tensor, dtype: int):
+def prims_convert_element_type(tensor, dtype: int):
     return opset18.Cast(tensor, to=dtype)
 
 
@@ -39,7 +39,7 @@ def aten_getitem(self, i):
 # A simple lookup table for atenlib functions
 _ATENLIB_FUNCTIONS = {
     "getitem": aten_getitem,
-    "prim::convert_element_type": aten_prim_convert_element_type,
+    "prims::convert_element_type": prims_convert_element_type,
     "aten::abs": ops.core.aten_abs,
     "aten::acos": ops.core.aten_acos,
     "aten::acosh": ops.core.aten_acosh,
@@ -153,31 +153,32 @@ _ATENLIB_FUNCTIONS = {
 def _create_op_overload_to_exporter_key_table() -> Dict[
     Union[torch._ops.OpOverload, Callable], str
 ]:
+    # TODO(justinchuby): Improve how the table is constructed.
     table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
 
-    for attr_name in dir(torch.ops.aten):
-        op_overload_packet = getattr(torch.ops.aten, attr_name)
-        if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
-            continue
+    for op_namespace in (torch.ops.aten, torch.ops.prims):
+        for attr_name in dir(op_namespace):
+            op_overload_packet = getattr(op_namespace, attr_name)
 
-        exporter_look_up_key = op_overload_packet._qualified_op_name
-        if _ATENLIB_FUNCTIONS.get(exporter_look_up_key) is None:
-            # This aten op doesn't have ONNX exporter.
-            continue
+            if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
+                continue
+            exporter_look_up_key = op_overload_packet._qualified_op_name
+            if _ATENLIB_FUNCTIONS.get(exporter_look_up_key) is None:
+                # This aten op doesn't have ONNX exporter.
+                continue
 
-        for overload_name in op_overload_packet.overloads():
-            op_overload = getattr(op_overload_packet, overload_name)
-            # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
-            # to "aten::add". This means the exporter for "aten::add" is used for all overloads of "aten::add".
-            # This is applied to all ops under torch.ops.aten.
-            #
-            # TODO(wechi): in the future, we might want to write individual exporter for each overload, if,
-            # for example, they have different type promotion rules. If so, just map different overloads to
-            # different exporter keys.
+            for overload_name in op_overload_packet.overloads():
+                op_overload = getattr(op_overload_packet, overload_name)
+                # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
+                # to "aten::add". This means the exporter for "aten::add" is used for all overloads of "aten::add".
+                # This is applied to all ops under torch.ops.aten.
+                #
+                # TODO(wechi): in the future, we might want to write individual exporter for each overload, if,
+                # for example, they have different type promotion rules. If so, just map different overloads to
+                # different exporter keys.
 
-            table[op_overload] = op_overload_packet._qualified_op_name
+                table[op_overload] = op_overload_packet._qualified_op_name
 
-    table[torch.ops.prims.convert_element_type.default] = "prim::convert_element_type"
     return table
 
 
