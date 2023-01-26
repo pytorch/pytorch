@@ -1629,7 +1629,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
-        with enable_python_dispatcher(), torch.autograd._force_original_view_tracking(True):
+        with enable_python_dispatcher():
             flattened_joints, _ = pytree.tree_flatten(joint_inputs)
             fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
                 *joint_inputs
