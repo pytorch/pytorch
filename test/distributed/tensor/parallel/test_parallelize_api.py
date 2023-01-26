@@ -8,7 +8,6 @@ from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     make_input_replicate_1d,
     make_output_replicate_1d,
-    make_output_tensor,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
@@ -26,19 +25,11 @@ class MLPModule(torch.nn.Module):
         torch.manual_seed(5)
         self.net1 = torch.nn.Linear(10, 16, device=device)
         self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 24, device=device)
+        self.net2 = torch.nn.Linear(16, 12, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
 
-class ColwiseParallelOutputTensor(ParallelStyle):
-    """
-    Partitioning the column of a tensor or module.
-    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, make_output_tensor)
 
 class TensorParallelAPITests(DTensorTestBase):
     @property
@@ -205,7 +196,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # let each rank generate unique local input
         torch.manual_seed(self.rank)
-        self._compare_module(model, model_tp, inp_size, True)
+        self._compare_module(model, model_tp, inp_size, rowwise=True)
 
     @with_comms
     def test_linear_col_wise_parallel(self):
