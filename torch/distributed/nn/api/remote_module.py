@@ -367,7 +367,10 @@ class _RemoteModule(nn.Module):
 
     def register_forward_pre_hook(  # type: ignore[return]
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
         prepend: bool = False,
         with_kwargs: bool = False,
     ) -> RemovableHandle:
@@ -375,7 +378,10 @@ class _RemoteModule(nn.Module):
 
     def register_forward_hook(  # type: ignore[return]
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
         prepend: bool = False,
         with_kwargs: bool = False,
     ) -> RemovableHandle:
@@ -441,7 +447,7 @@ class _RemoteModule(nn.Module):
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
     def share_memory(self: T) -> T:  # type: ignore[return]

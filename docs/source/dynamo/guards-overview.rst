@@ -193,7 +193,7 @@ instruction and doing *something* with it.
 .. note:: These are real instructions processed by TorchDynamo’s
    ``transform_code_object``, and it is pretty cool.
 
-.. note:: This section purposly skips the details of
+.. note:: This section purposely skips the details of
    `dis.get_instructions <https://docs.python.org/3/library/dis.html>`__.
 
 For the example above, here is a snippet of a what a few
@@ -275,7 +275,7 @@ mind:
 
 -  It stores the variable ``source`` of type ``Source``, from
    ``torchdynamo/source.py``. This source type is a relatively self
-   contained class that helps us organize and bookeep where the original
+   contained class that helps us organize and bookkeep where the original
    source came from, and helps provide convenience methods for things
    like getting the name, and importantly for us, producing guards.
 
@@ -317,7 +317,7 @@ Here is what this code does:
    the only thing pushed onto and popped from our stack are
    ``VariableTracker``\ s.
 
-3) The function calls ``VariableTracker.propogate``. This
+3) The function calls ``VariableTracker.propagate``. This
    takes the guards from every single item popped off the stack in 2,
    and recursively traverses it and combines all the guards into
    ``options``: ``py  return {      "guards": guards,  }``

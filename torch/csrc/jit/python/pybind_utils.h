@@ -549,6 +549,21 @@ inline bool isTraceableType(const TypePtr& type) {
 inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.success()) {
+    auto object = py::cast<py::object>(input);
+    if (auto mod = as_module(object)) {
+      // if obj is already a ScriptModule, just return its ivalue
+      auto ptr = mod.value()._ivalue();
+      // explict copy semantics for strong ownership of the resource.
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
+
+    // Check if the obj is a ScriptObject.
+    if (auto script_obj = as_object(object)) {
+      auto ptr = script_obj.value()._ivalue();
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
