@@ -565,7 +565,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            self.assertEqual(p.grad, torch.zeros_like(p))
+            assert p.grad is None, "zero_grad defaults to setting grads to None"
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
