@@ -126,17 +126,6 @@ inline Tensor embedding_bag(
     TORCH_CHECK(
         offsets_.defined(), "offsets has to be a 1D Tensor but got null");
     TORCH_CHECK(offsets_.dim() == 1, "offsets has to be a 1D Tensor");
-    TORCH_CHECK(
-        offsets_[0].item<int64_t>() == 0,
-        "offsets[0] has to be 0, i.e., the first sequence in the mini-batch has to start from position 0. However, got ",
-        offsets_[0].item<int64_t>());
-    TORCH_CHECK(
-        offsets_[-1].item<int64_t>() <= input_.size(0),
-        "offsets[-1] can not be greater than input's length({",
-        input_.size(0),
-        "}), but got offsets[-1] of {",
-        offsets_[-1].item<int64_t>(),
-        "}");
   } else {
     TORCH_CHECK(
         false,

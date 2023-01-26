@@ -153,7 +153,7 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.set_current_meta(node.meta):
+        with fx_traceback.append_stack_trace(node.stack_trace), fx_traceback.set_current_meta(node.meta):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -477,7 +477,7 @@ class Transformer(Interpreter):
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
         """
-        with fx_traceback.preserve_node_meta():
+        with fx_traceback.override_stack_trace():
             result = super().run(enable_io_processing=False)
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:

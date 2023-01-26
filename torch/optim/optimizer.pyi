@@ -4,6 +4,9 @@ from torch.utils.hooks import RemovableHandle
 
 _params_t = Union[Iterable[Tensor], Iterable[Dict[str, Any]]]
 
+def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle: ...
+
+def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle: ...
 
 class Optimizer:
     defaults: Dict[str, Any]
