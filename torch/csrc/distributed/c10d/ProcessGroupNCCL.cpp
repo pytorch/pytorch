@@ -356,7 +356,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
   exception_ = w.exception_;
 }
 
-ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
+ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   checkAndSetException();

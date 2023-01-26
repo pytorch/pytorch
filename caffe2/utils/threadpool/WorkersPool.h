@@ -213,8 +213,8 @@ class BlockingCounter {
 
 // A workload for a worker.
 struct Task {
-  Task() {}
-  virtual ~Task() {}
+  Task() = default;
+  virtual ~Task() = default;
   virtual void Run() = 0;
 };
 
