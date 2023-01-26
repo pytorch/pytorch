@@ -11,7 +11,9 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import unittest
 from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.jit_utils import RUN_CUDA_HALF
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -380,3 +382,21 @@ class TestMisc(JitTestCase):
         scripted = torch.jit.script(foo)
         actual = scripted(x, 0)
         torch.testing.assert_close(expected, actual)
+
+    @unittest.skipIf(not RUN_CUDA_HALF, "need CUDA half support")
+    def test_pow_multiple_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/75476
+        def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
+            p = torch.sigmoid(p)
+            result = p ** gamma
+            return result
+
+        x = torch.rand((2, 2), dtype=torch.half, device='cuda')
+
+        ref = fn(x)
+
+        script_fn = torch.jit.script(fn)
+        for i in range(4):
+            res = script_fn(x)
+
+        self.assertEqual(ref, res)

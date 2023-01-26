@@ -388,9 +388,7 @@ class TestFSDPStateDict(FSDPTest):
             ):
                 if torch.count_nonzero(tensor) == 0:
                     with torch.no_grad():
-                        tensor.add_(
-                            torch.ones_like(tensor)
-                        )
+                        tensor.add_(torch.ones_like(tensor))
         with self._get_state_dict_mgr(fsdp_model, "state_dict", True):
             state_dict = deepcopy(_get_state_dict(fsdp_model))
         # Initialize a non-wrapped model on all ranks

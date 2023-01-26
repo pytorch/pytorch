@@ -144,7 +144,7 @@ Features described in this documentation are classified by release status:
    TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   PyTorch on XLA Devices <http://pytorch.org/xla/>
+   PyTorch on XLA Devices <https://pytorch.org/xla/>
 
 Indices and tables
 ==================
