@@ -729,6 +729,16 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    def test_randn_generator(self):
+        def fn(a, generator):
+            torch.randn([20, 20], generator=generator, device=a.device)
+
+        self.common(fn, (torch.linspace(-10, 10, 41), None))
+
+        # generator not yet supported in dynamo
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
+            self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
+
     def test_sgn_extremal(self):
         def fn(a):
             return (torch.sgn(a),)
@@ -2496,6 +2506,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_tan(self):
+        def fn(x):
+            return aten.tan(x) + 2, aten.tan(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_tanh(self):
         def fn(x):
             return aten.tanh(x) + 2, aten.tanh(x + 1)
@@ -3609,6 +3628,27 @@ class CommonTemplate:
         out = fn(*inputs)
         self.assertTrue(same(out, inp_clone + inputs[1]))
         self.assertTrue(out is inputs[0])
+
+    # The following 2 tests are meant to check the logic that drops
+    # xmask from triton load/store if xnumel = 1
+    @requires_cuda()
+    def test_single_elem(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        self.common(fn, (torch.randn(1),))
+
+    @requires_cuda()
+    def test_single_elem_indirect(self):
+        def fn(a, b):
+            c = a[b] + 1
+            return (c,)
+
+        a = torch.randn(1)
+        b = (torch.tensor([0], dtype=torch.int64),)
+
+        self.common(fn, (a, b))
 
     def test_inplace_mixed_dtype_ops(self):
         @torch._dynamo.optimize("inductor")
@@ -5168,10 +5208,6 @@ test_skips = {
     "test_cauchy_dynamic_shapes": ("cuda",),
     "test_clamp_dynamic_shapes": ("cuda",),
     "test_clone_dynamic_shapes": ("cuda",),
-    "test_conv2d_binary_dynamic_shapes": ("cpu",),
-    "test_conv2d_packed_dynamic_shapes": ("cpu",),
-    "test_conv2d_unary_dynamic_shapes": ("cpu",),
-    "test_conv_bn_fuse_dynamic_shapes": ("cpu",),
     "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
     "test_cos_dynamic_shapes": ("cuda",),
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
@@ -5908,7 +5944,7 @@ if HAS_CPU:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
     import triton.language as tl
 
@@ -6663,7 +6699,7 @@ class ExprPrinterTests(TestCase):
             self.assertEqual(texpr(expr), result)
 
 
-if HAS_CUDA:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):

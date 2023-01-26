@@ -407,8 +407,8 @@ class SchedulerNode(BaseSchedulerNode):
             return None
 
         def loop_reorder(ir_node: ir.ComputedBuffer):
-            reindex = ir.inverse_reorder(order)
-            inv_reindex = ir.same_reorder(order)
+            reindex = ir.same_reorder(order)
+            inv_reindex = ir.inverse_reorder(order)
 
             new_sizes = inv_reindex(self._sizes[0]), self._sizes[1]
             (
@@ -423,9 +423,7 @@ class SchedulerNode(BaseSchedulerNode):
                 [reindex(iter_vars), reduce_vars],
                 var_ranges,
             )
-            iter_ranges = new_sizes
-            reduce_ranges = []
-            return (iter_ranges, reduce_ranges), body
+            return new_sizes, body
 
         new_node = SchedulerNode(
             self.scheduler,
@@ -436,6 +434,7 @@ class SchedulerNode(BaseSchedulerNode):
         new_node.users = self.users
         new_node.inverse_users = self.inverse_users
         new_node.recursive_predecessors = self.recursive_predecessors
+        new_node.unmet_dependencies = self.unmet_dependencies
         new_node.min_order = self.min_order
         new_node.max_order = self.max_order
         new_node.last_usage = self.last_usage
@@ -559,7 +558,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             if not isinstance(n, SchedulerNode):
                 return None
 
-            new_node = n.reorder_loop(order, ndim)
+            new_node = n.reorder_loop(order)
             if new_node is None:
                 return None
 
