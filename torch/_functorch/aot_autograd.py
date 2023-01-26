@@ -1886,15 +1886,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     @staticmethod
-                    def forward(ctx, unused):
-                        del unused
+                    def forward(ctx, *unused_args):
                         return call_compiled_backward()
 
                     @staticmethod
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
-                # Pass a tensor that requires grad so autograd Function knows to create the graph
-                out = CompiledFunctionBackward.apply(torch.empty([], requires_grad=True))
+                # Pass args even though they're unused, so that the graph is built
+                out = CompiledFunctionBackward.apply(*all_args)
             else:
                 out = call_compiled_backward()
             return out
