@@ -211,7 +211,9 @@ class TimmRunnner(BenchmarkRunner):
                 tries += 1
                 if tries <= total_allowed_tries:
                     wait = tries * 30
-                    print(f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s")
+                    print(
+                        "Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
                     time.sleep(wait)
 
         if model is None:
