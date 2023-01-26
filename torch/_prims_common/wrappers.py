@@ -10,16 +10,30 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Union, Tuple, NamedTuple
+from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
 from functools import wraps
 import warnings
 from itertools import chain
 
+@overload
+def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    pass
+
+@overload
+def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
+    pass
+
+@overload
+def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
+    pass
+
+@overload
+def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
+    pass
+
 # TODO: implement ref.cast with an option to enforce safe casting
-def _maybe_convert_to_dtype(
-    a: Union[TensorLikeType, NumberType, Sequence, None], dtype: torch.dtype
-) -> Union[TensorLikeType, NumberType, Sequence, None]:
+def _maybe_convert_to_dtype(a, dtype):
     import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
@@ -28,7 +42,7 @@ def _maybe_convert_to_dtype(
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type_ctor(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)  # type: ignore[arg-type]
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
     # Passthrough None because some functions wrapped with type promotion
