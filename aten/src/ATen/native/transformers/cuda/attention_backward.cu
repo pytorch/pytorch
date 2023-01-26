@@ -363,6 +363,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
+
   int64_t Nnz_q{batch_size * max_seqlen_batch_q};
   int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
 

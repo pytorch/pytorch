@@ -1306,12 +1306,13 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
-    def test_sdp_flash_attention_grad_against_math(self, contiguous_inputs: bool, is_causal: bool):
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_sdp_flash_attention_grad_against_math(self, contiguous_inputs: bool, is_causal: bool, dtype: torch.dtype):
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
         rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
-        qkv_lp = qkv.detach().clone().to(torch.float16).requires_grad_()
+        qkv_lp = qkv.detach().clone().to(dtype).requires_grad_()
 
         query, key, value = qkv.chunk(3, dim=-1)
         query_lp, key_lp, value_lp = qkv_lp.chunk(3, dim=-1)
@@ -1341,14 +1342,17 @@ class TestSDPA(NNTestCase):
                 query_lp, key_lp, value_lp, None, 0.0, is_causal)
 
         rand_upward = torch.rand_like(out)
-        rand_upward_lp = rand_upward.to(torch.float32)
+        rand_upward_lp = rand_upward.to(dtype)
 
         out.backward(rand_upward)
         out_lp.backward(rand_upward_lp)
 
         # Cast up and compare
         # Since we are doing the compute on fp16 we have to bump the tolerance
-        self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=7e-4, rtol=7e-4)
+        # Bump down the tolearnce for blfoat16
+        atol = 7e-4 if dtype == torch.float16 else 7e-3
+        rtol = 7e-4 if dtype == torch.float16 else 7e-3
+        self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, type: str):
