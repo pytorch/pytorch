@@ -1129,8 +1129,8 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   bool keyword_only = false;
   bool done = false;
   while (!done) {
-    auto next_offset = last_offset;
     auto offset = fmt.find(", ", last_offset);
+    auto next_offset = offset + 2;
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
       done = true;
@@ -1140,8 +1140,6 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
         last_offset = next_offset;
         break;
       }
-    } else {
-      next_offset = offset + 2;
     }
     if (offset == std::string::npos) {
       throw std::runtime_error("missing closing parenthesis: " + fmt);
