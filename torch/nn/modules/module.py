@@ -1537,6 +1537,10 @@ class Module:
                     result = hook_result
 
         if bw_hook:
+            if not isinstance(result, (torch.Tensor, tuple)):
+                warnings.warn("For backward hooks to be called,"
+                              " module output should be a Tensor or a tuple of Tensors"
+                              f" but received {type(result)}")
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
@@ -1598,11 +1602,6 @@ class Module:
             type(self).__name__, name))
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
-        # Check if a property setter exists. If it does, use it.
-        class_attr = getattr(self.__class__, name, None)
-        if isinstance(class_attr, property) and class_attr.fset is not None:
-            return class_attr.fset(self, value)
-
         def remove_from(*dicts_or_sets):
             for d in dicts_or_sets:
                 if name in d:
@@ -2320,7 +2319,7 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         r"""Sets gradients of all model parameters to zero. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
