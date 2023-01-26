@@ -14,9 +14,6 @@ import collections
 import textwrap
 import logging
 import ctypes
-import numba
-import cffi
-import os
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
@@ -35,6 +32,7 @@ try:
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
     from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
+    from sympy.printing.c import C11CodePrinter  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -48,16 +46,6 @@ __all__ = [
 ]
 
 SYM_FUNCTION_MODE = None
-
-_FFI = cffi.FFI()
-_FFI.cdef("""
-
-const int64_t* CABI_get_tensor_size(int8_t* tensor_ptr);
-const int64_t* CABI_get_tensor_stride(int8_t* tensor_ptr);
-const int64_t CABI_get_tensor_storage_offset(int8_t* tensor_ptr);
-
-""")
-_LIB = _FFI.dlopen(os.path.join(os.path.dirname(torch.__file__), "lib", "libtorch_python.so"))
 
 # We don't bother with the metaclass as all of the dispatching logic happens
 # entirely from Python
@@ -475,6 +463,13 @@ if HAS_SYMPY:
 
         # Automatic evaluation.
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
+        def _ccode(self, printer):
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer.parenthesize(lhs, self.precedence)
+            rhs_str = printer.parenthesize(rhs, self.precedence)
+            return f"floor({lhs_str}/{rhs_str})"
+
         @classmethod
         def eval(cls, base, divisor):
             def check_supported_type(x):
@@ -912,7 +907,7 @@ if HAS_SYMPY:
             return self
 
 
-    class ShapeGuardPrinter(StrPrinter):
+    class ShapeGuardPrinter(C11CodePrinter):
         def __init__(
             self,
             symbol_to_source,
@@ -922,18 +917,9 @@ if HAS_SYMPY:
             self.symbol_to_source = symbol_to_source
             self.source_ref = source_ref
 
-        def _print_Relational(self, expr) -> str:
-            lhs, rhs = self._print(expr.lhs), self._print(expr.rhs)
-            return f"({lhs}) {expr.rel_op} ({rhs})"
-
-        def _print_And(self, expr) -> str:
-            args = [f"({self._print(a)})" for a in expr.args]
-            return " and ".join(args)
-
         def _print_Mod(self, expr) -> str:
-            assert len(expr.args) == 2
             lhs, rhs = self._print(expr.args[0]), self._print(expr.args[1])
-            return f"(({lhs}) % ({rhs}))"
+            return f"(((int64_t) ({lhs})) % ((int64_t) ({rhs})))"
 
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, Symbol), str(type(expr))
@@ -1184,15 +1170,18 @@ class ShapeEnv:
         source_name_to_types = {}
         source_name_to_infos = collections.defaultdict(lambda: SourceInfo(base=None, sources=[]))
 
-        def split_source_ref(source: Source) -> Tuple[str, str]:
-            ref = source_ref(source)
-            if isinstance(source, TensorPropertySource) and source.idx is not None:
-                end_position = -(1 + len(str(source.idx)) + 1)
-                return ref[0:end_position], ref[end_position:]
-            else:
-                return ref, ""
+        # Used when generating a new name for a given source.
+        # Avoids dupplicated parameter names.
+        unique_names = set()
 
-        def flat_var_name(var_name: str) -> str:
+        # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
+        # SourceInfo holds the mapped unique name, original source, and type.
+        source_expr_to_info = {}
+
+        # Keeps track of the SourceInfo that are the actual parameters.
+        parameter_source_infos = []
+
+        def flat_name(var_name: str) -> str:
             var_name = var_name.replace(" ", "_")
             var_name = var_name.replace("-", "_Neg_")
             var_name = var_name.replace("[", "_LBr_").replace("]", "_RBr_")
@@ -1201,16 +1190,40 @@ class ShapeEnv:
             var_name = var_name.replace(".", "_D_").replace(",", "_C_")
             return var_name
 
-        def flat_source_ref(source: Source) -> str:
-            name, position = split_source_ref(source)
-            return f"{flat_var_name(name)}{position}"
+        def flat_source_name(source: Source, with_index: bool = True) -> str:
+            if isinstance(source, TensorPropertySource):
+                base_name = f"{flat_name(source.base.name())}_{source.prop.name.lower()}"
+                if with_index and source.idx is not None:
+                    return f"{base_name}[{source.idx}]"
+                else:
+                    return base_name
+            else:
+                return flat_name(source.name())
 
-        def source_name_to_numba_type(source_name: str) -> str:
-            type = source_name_to_types[source_name]
-            if type == int:
-                return "int64"
+        def flat_source_ref(source: Source) -> str:
+            # We need to call 'source_ref' here due to its side effects.
+            ref = source_ref(source)
+            return source_expr_to_info[source.name()].name
+
+        def get_unique_name(source: Source) -> str:
+            source_name = flat_source_name(source)
+            unique_source_name = source_name
+
+            # Makes sure there are no repeated names.
+            # It's very unlikely the loop-body will be executed more than once.
+            counter = 0
+            while unique_source_name in unique_names:
+                unique_source_name = source_name + str(counter)
+                counter += 1
+
+            unique_names.add(unique_source_name)
+            return unique_source_name
+
+        def type_to_cpp_argtype(type: Type) -> str:
+            if type == SymInt:
+                return "int64_t"
             assert type == torch.Tensor
-            return "CPointer(int8)"
+            return "void*"
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1229,11 +1242,9 @@ class ShapeEnv:
         # not be available to inner levels.  For example, Dynamo can guard on
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
-        def track_symint(source, val, base=None):
-            base = source if base is None else base
-            base_name = flat_source_ref(base)
-            info = source_name_to_infos.setdefault(base_name, SourceInfo(base=base, sources=[]))
-            info.sources.append(source)
+        def track_symint(source, val, type=None):
+            source_expr_to_info[source.name()] = \
+                SourceInfo(get_unique_name(source), source, type=type)
 
             if isinstance(val, SymInt):
                 s = val.node.expr
@@ -1255,21 +1266,22 @@ class ShapeEnv:
             if t is None:
                 continue
 
-            source_name = flat_source_ref(source)
+            source_name = get_unique_name(source)
 
             if isinstance(t, SymInt):
-                source_name_to_types[source_name] = int
-                track_symint(source, t)
+                track_symint(source, t, type=type(t))
+                parameter_source_infos.append(source_expr_to_info[source.name()])
                 continue
 
             assert isinstance(t, torch.Tensor)
-            source_name_to_types[source_name] = torch.Tensor
+            source_expr_to_info[source.name()] = SourceInfo(source_name, source, torch.Tensor)
+            parameter_source_infos.append(source_expr_to_info[source.name()])
 
             for i, s in enumerate(t.size()):
-                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s, base=source)
+                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
             for i, s in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s, base=source)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset(), base=source)
+                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
+            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         exprs = []
 
@@ -1307,63 +1319,58 @@ class ShapeEnv:
                 assert sources
                 # We must assert that each symbol is not zero or one, as we make
                 # negative inferences on shape variables
-                exprs.append(f"{flat_source_ref(sources[0])} != 0 and {flat_source_ref(sources[0])} != 1")
+                exprs.append(f"{flat_source_ref(sources[0])} != 0")
+                exprs.append(f"{flat_source_ref(sources[0])} != 1")
 
         if exprs:
             fn_name = "___symbolic_shape_fn"
-            fn_generator_name = "___gen_symbolic_shape_fn"
 
-            closure_vars = collections.OrderedDict([
-                ("___lib", _LIB),
-                ("___math", math)
-            ])
-
-            CABI_fn_name = {
-                TensorProperty.SIZE: "CABI_get_tensor_size",
-                TensorProperty.STRIDE: "CABI_get_tensor_stride",
-                TensorProperty.STORAGE_OFFSET: "CABI_get_tensor_storage_offset",
-            }
-
-            source_name_to_infos_sequence = sorted(source_name_to_infos.items(), key=lambda pair: pair[0])
-            call_arguments = ", ".join([info.base.name() for _, info in source_name_to_infos_sequence])
+            call_arguments = ", ".join([info.source.name() for info in parameter_source_infos])
             call_expression = f"{fn_name}({call_arguments})"
 
-            guard_parameters = ", ".join([name for name, _ in source_name_to_infos_sequence])
-            guard_expression = " and ".join(exprs)
-            guard_signature_parameters = [source_name_to_numba_type(name) for name, _ in source_name_to_infos_sequence]
-            guard_signature = f"""boolean({", ".join(guard_signature_parameters)})"""
+            guard_parameters = ", ".join([
+                f"{type_to_cpp_argtype(info.type)} {info.name}"
+                for info in parameter_source_infos
+            ])
+            guard_expression = " && ".join(exprs)
 
             source_creation = []
-            for name, info in source_name_to_infos_sequence:
-                tensor_properties = [s for s in info.sources if isinstance(s, TensorPropertySource)]
-                for prop, sources in itertools.groupby(tensor_properties, key=lambda s: s.prop):
-                    source = next(sources)
-                    prop_expr, _ = split_source_ref(source)
-                    prop_name = flat_var_name(prop_expr)
-                    source_creation.append(f"{prop_name} = {CABI_fn_name[prop]}({name})")
-            source_creation_str = "\n".join(" " * 8 + line for line in source_creation)
+            for info in parameter_source_infos:
+                if info.type != torch.Tensor:
+                    continue
 
-            py_code = f"""\
-def {fn_generator_name}({", ".join(closure_vars.keys())}):
-    CABI_get_tensor_size = ___lib.CABI_get_tensor_size
-    CABI_get_tensor_stride = ___lib.CABI_get_tensor_stride
-    CABI_get_tensor_storage_offset = ___lib.CABI_get_tensor_storage_offset
-    floor = ___math.floor
-    ceiling = ___math.ceil
-    def {fn_name}({guard_parameters}) -> bool:
+                variable_name = f"{info.name}_variable"
+                source_creation.append(f"auto {variable_name} = reinterpret_cast<THPVariable*>({info.name});")
+
+                for tensor_property in TensorProperty:
+                    if tensor_property == TensorProperty.STORAGE_OFFSET:
+                        tensor_property_str = "storage_offset"
+                        tensor_property_source = TensorPropertySource(info.source, tensor_property)
+                    else:
+                        tensor_property_str = f"{tensor_property.name.lower()}s"
+                        tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
+
+                    source_creation.append(
+                        f"auto {flat_source_name(tensor_property_source, with_index=False)} = "
+                        f"{variable_name}->cdata->{tensor_property_str}();"
+                    )
+
+            source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
+
+            cpp_code = f"""\
+#include <torch/python.h>
+#include <cmath>
+#include <iostream>
+extern "C" int guard({guard_parameters}) {{
 {source_creation_str}
-        return ({guard_expression})
-    return {fn_name}
+    return {guard_expression};
+}}
 """
-            out = {}
-
             try:
-                exec(py_code, dict(), out)
-                fn = out[fn_generator_name](*closure_vars.values())
-                numba_compiled_fn = numba.cfunc(guard_signature)(fn)
+                from torch._inductor.codecache import CppCodeCache
+                fn = CppCodeCache.load(cpp_code).guard
             except Exception:
-                print(f"Signature: {guard_signature}")
-                print(f"Code: \n{py_code}")
+                print(f"Code: \n{cpp_code}")
                 raise
 
             # Before actually executing the compiled function, we need to
@@ -1373,10 +1380,10 @@ def {fn_generator_name}({", ".join(closure_vars.keys())}):
             # cpython, that can be done by calling the id function.
             def wrapper_fn(*args):
                 args = [
-                    ctypes.cast(id(a), ctypes.POINTER(ctypes.c_int8))
+                    ctypes.cast(id(a), ctypes.c_void_p)
                     for a in args
                 ]
-                return numba_compiled_fn.ctypes(*args)
+                return bool(fn(*args))
 
             return SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
         else:
