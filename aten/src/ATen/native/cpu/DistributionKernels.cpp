@@ -109,6 +109,8 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<G
 }
 #else
 void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<Generator> gen) {
+  TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
+
   Tensor self = iter.tensor(0);
   if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda)) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
