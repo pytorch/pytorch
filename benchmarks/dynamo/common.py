@@ -174,7 +174,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
     "vision_maskrcnn",  # cannot determine truth value of Relational
     # timm_models
-    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
 ]
 
@@ -1518,9 +1517,15 @@ class BenchmarkRunner:
             )
             print(status)
         if self.args.timing:
-            from torch._dynamo.utils import print_time_report
+            from torch._dynamo.utils import op_count, print_time_report
+            from torch.utils._stats import simple_call_counter
 
             print_time_report()
+            stats = f"STATS: call_* op count: {op_count}"
+            stats = stats + " | ".join(
+                f"{key}:{value}" for key, value in simple_call_counter.items()
+            )
+            print(stats)
 
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
