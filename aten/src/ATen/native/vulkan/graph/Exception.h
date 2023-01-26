@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <exception>
+#include <ostream>
 
 namespace at {
 namespace native {
@@ -26,17 +27,18 @@ class Error : public std::exception {
  public:
   // Constructors
   Error(SourceLocation location, std::string msg);
-  Error(std::string msg, std::string backtrace);
 
  private:
+  // The source location of the exception
+  SourceLocation location_;
   // The actual error message
   std::string msg_;
-  // The source location of the exception
-  std::string backtrace_;
+
+  std::string what_;
 
  public:
   const char* what() const noexcept override {
-    return msg_.c_str();
+    return what_.c_str();
   }
 
   const std::string& msg() const {
@@ -45,14 +47,15 @@ class Error : public std::exception {
 
  private:
   void refresh_what();
-  std::string compute_what(bool include_backtrace) const;
+  std::string compute_what(bool include_source) const;
 };
 
 } // namespace vulkan
 } // namespace native
 } // namespace at
 
-#define VKGRAPH_THROW(...) \
-  throw ::at::native::vulkan::Error(__VA_ARGS__);
+#define VKGRAPH_THROW(...)           \
+  throw ::at::native::vulkan::Error( \
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, __VA_ARGS__);
 
 #endif /* USE_VULKAN_API */
