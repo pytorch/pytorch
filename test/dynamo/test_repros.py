@@ -1476,8 +1476,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    # Bug with storage meta - torch.BoolStorage is becoming torch.storage._LegacyStorageMeta
-    @unittest.expectedFailure
     def test_isinstance_storage(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
@@ -1600,6 +1598,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.stride()
 
         self.assertEqual(f(), torch._dynamo.optimize("eager")(f)())
+
+    def test_out_none(self):
+        # https://github.com/pytorch/pytorch/issues/92814
+        def fn(input):
+            return torch.nn.functional.normalize(input, dim=0, out=None)
+
+        x = torch.rand([1])
+        self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
     @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
