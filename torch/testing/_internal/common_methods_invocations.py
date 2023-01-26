@@ -3015,11 +3015,9 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
 
 
 def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    if (((layout is torch.sparse_coo and not op_info.supports_sparse)
-         or (layout is torch.sparse_csr and not op_info.supports_sparse_csr)
-         or (layout is torch.sparse_csc and not op_info.supports_sparse_csc)
-         or (layout is torch.sparse_bsr and not op_info.supports_sparse_bsr)
-         or (layout is torch.sparse_bsc and not op_info.supports_sparse_bsc))):
+    layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
+    op_supports_layout = getattr(op_info, 'supports_' + layout_name)
+    if not op_supports_layout:
         return
 
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
