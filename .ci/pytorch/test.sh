@@ -349,7 +349,7 @@ test_inductor_benchmark_perf() {
         --only $test --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
       cat "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
       python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
-        "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+        "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv \
         --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
     done
   else
