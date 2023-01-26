@@ -345,8 +345,8 @@ test_inductor_benchmark_perf() {
     # Check memory compression ratio for a few models
     for test in hf_Albert timm_efficientdet timm_vision_transformer; do
       python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
-        --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only $test \
-        --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+        --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
+        --only $test --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
       cat "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
       python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
         "$TEST_REPORTS_DIR"/inductor_performance_$1_$test.csv \
