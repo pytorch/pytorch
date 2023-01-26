@@ -224,6 +224,65 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def is_extern(self):
         return True
 
+    def allocate(self):
+        # TODO copied from SchedulerNode.allocate() -- should find a way to share code instead.
+        #   should this be moved to BaseSchedulerNode, or would that break something?
+
+        # what does V.kernel mutations mean/imply?
+        # if config.inplace_buffers and getattr(V.kernel, "mutations", None) is not None:
+        if config.inplace_buffers:
+            from .codegen.wrapper import buffer_reuse_key
+
+            ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+            for read in ordered_reads:
+                input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
+                    read.name
+                )
+                if input_node and V.graph.wrapper_code.can_reuse(input_node):
+                    remaining_uses = [
+                        x
+                        for x in input_node.users
+                        if x.node.get_name()
+                        not in self.scheduler.available_buffer_names
+                    ]
+                    if (
+                        len(remaining_uses) == 1
+                        and remaining_uses[0].can_inplace
+                        and remaining_uses[0].node is self
+                        and not isinstance(
+                            input_node.node.get_layout(),
+                            (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout),
+                        )
+                        and buffer_reuse_key(input_node.node)
+                        == buffer_reuse_key(self.node)
+                    ):
+                        V.graph.wrapper_code.codegen_inplace_reuse(
+                            input_node.node, self.node
+                        )
+                        # TODO - i skipped steps relating to mutation tracking here (compare to SchedulerNode.allocate).
+                        # what am I missing this way?
+                        return
+        super().allocate()
+
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        if self.get_aliases() or self.is_template():
+            return False
+
+        if read_dep.name not in self.scheduler.name_to_node:
+            # don't allow reuse of an 'input' buffer, we don't own it
+            # (would this have been fixed if I tracked mutations properly above?)
+            return False
+
+        if not isinstance(self.node, torch._inductor.ir.AllReduce):
+            # TODO make this a property of the IR
+            return False
+
+        if len(self.read_writes.writes) == 1:
+            write_dep = next(iter(self.read_writes.writes))
+            return read_dep.numbytes_hint() == write_dep.numbytes_hint()
+
+        return False
+
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
@@ -302,7 +361,6 @@ class SchedulerNode(BaseSchedulerNode):
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
-
             for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
@@ -331,7 +389,6 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
-                        # mutations not tracked in cpp kernels
                         if isinstance(
                             V.kernel, torch._inductor.codegen.triton.TritonKernel
                         ):
