@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
+    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 import torch
 from torch import Tensor
 import functools
@@ -383,8 +383,9 @@ class TestOperators(TestCase):
 
         # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('view_as_complex'),
-        decorate('nn.functional.scaled_dot_product_attention',
-                 decorator=expectedFailureIf(not IS_WINDOWS), device_type='cuda'),
+        # query: last dimension must be contiguous
+        # Fused attention kernels require last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -572,9 +573,8 @@ class TestOperators(TestCase):
         # expects last dim to have stride=1
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
-        # NOTE: This passes on Windows!
-        decorate('nn.functional.scaled_dot_product_attention',
-                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
+        # The fused attention kernels require the last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),

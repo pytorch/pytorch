@@ -7,13 +7,12 @@ import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.op_schema import (
     ArgsType,
     KwargsType,
-    OpSchema,
     OutputSpecType,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import redistribute_dtensor
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 """
@@ -120,6 +119,7 @@ def operator_dispatch(
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
     # tensors before calling the local op
+    assert output_sharding.schema_suggestions is not None
     needs_redistribute = output_sharding.schema_suggestions[0] is not op_schema
     suggested_input_schema = output_sharding.schema_suggestions[0]
 

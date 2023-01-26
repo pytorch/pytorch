@@ -856,6 +856,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    def test_func_default_torch_args(self):
+        """
+        Tests other types of torch types as function default (size, dtype, device)
+        """
+
+        def func_with_default_torch_args(
+            dt=torch.float16, ds=torch.Size((1, 2, 3)), dd=torch.device("cpu")
+        ):
+            return torch.ones(ds, dtype=dt, device=dd)
+
+        def func():
+            return func_with_default_torch_args()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_func = torch.compile(func, backend=cnts)
+        out = func()
+        compiled_out = compiled_func()
+        self.assertEqual(out.dtype, compiled_out.dtype)
+        self.assertEqual(out.device, compiled_out.device)
+        self.assertEqual(out.size(), compiled_out.size())
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
