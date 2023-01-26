@@ -4,6 +4,7 @@ import itertools
 import operator
 from typing import Callable, Dict, Optional, Tuple, Union
 
+import onnx
 import onnxscript
 from onnxscript import evaluator
 from onnxscript.function_libs.torch_aten import graph_building, ops
@@ -456,12 +457,12 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
     # shape type inference, and could be a bug. node/graph level inference should be both applied.
     # TODO(titaiwang): If onnx shape type inference is intended to be deprecated in converter.
     # node-level shape type inference should be also deprecated as well in g.op
-    if ONNX_GLOBALS.onnx_shape_inference:
-        onnxscript_graph.apply(
-            torch._C._jit_pass_onnx_graph_shape_type_inference,
-            params_dict={},
-            opset_version=opset_version,
-        )
+    # if ONNX_GLOBALS.onnx_shape_inference:
+    #     onnxscript_graph.apply(
+    #         torch._C._jit_pass_onnx_graph_shape_type_inference,
+    #         params_dict={},
+    #         opset_version=opset_version,
+    #     )
 
     return onnxscript_graph, ts_name_to_real_tensor
 
@@ -523,6 +524,7 @@ def _export(
     print(onnxscript_graph.torch_graph)
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = onnxscript_graph.to_model_proto(ts_initializers, opset_version)
+    onnx.save_model(onnx_model, "gpt2.onnx")
     if use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()
