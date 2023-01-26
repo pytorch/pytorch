@@ -71,7 +71,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
+FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -92,8 +92,6 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     python_versions = FULL_PYTHON_VERSIONS
     if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
-    elif os == "macos-arm64":
-        python_versions = list_without(python_versions, ["3.7"])
     for python_version in python_versions:
         # We don't currently build conda packages for rocm
         for arch_version in arches:
@@ -180,8 +178,6 @@ def generate_wheels_matrix(os: str,
     if python_versions is None:
         # Define default python version
         python_versions = list(FULL_PYTHON_VERSIONS)
-        if os == "macos-arm64":
-            python_versions = list_without(python_versions, ["3.7"])
 
         if os == "linux":
             # NOTE: We only build 3.11 wheel on linux as 3.11 is not
