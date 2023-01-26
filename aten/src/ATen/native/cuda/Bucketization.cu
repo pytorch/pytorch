@@ -15,8 +15,7 @@
 #include <ATen/ops/searchsorted_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Implement a numpy like searchsorted and a TF like bucketize function running on cuda
 // See details in ATen/nativate/Bucketization.cpp
@@ -219,4 +218,4 @@ Tensor bucketize_cuda(const Scalar& self, const Tensor& boundaries, bool out_int
   return bucketize_cuda(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
-}} // namespace at::native
+} // namespace at::native

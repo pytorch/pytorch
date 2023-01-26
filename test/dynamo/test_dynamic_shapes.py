@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
@@ -26,7 +27,7 @@ import unittest
 
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
-        cls, "DynamicShapes", "_dynamic_shapes", ("dynamic_shapes", True)
+        cls, "DynamicShapes", "_dynamic_shapes", (config, "dynamic_shapes", True)
     )
 
 
@@ -37,18 +38,6 @@ DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
 DynamicShapesUnspecTests = make_dynamic_cls(test_unspec.UnspecTests)
 DynamicShapesExportTests = make_dynamic_cls(test_export.ExportTests)
 DynamicShapesSubGraphTests = make_dynamic_cls(test_subgraphs.SubGraphTests)
-
-
-# DynamicShapesFunctionTests
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_len_tensor_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_tensor_len_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
 
 
 unittest.expectedFailure(
@@ -85,7 +74,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )
-unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
 
 # DynamicShapesUnspecTests
 # Missing decomp

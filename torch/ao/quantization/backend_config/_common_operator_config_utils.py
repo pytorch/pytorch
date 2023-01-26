@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 from collections import namedtuple
 from typing import Callable, Dict, List, Union
 from .backend_config import (
@@ -580,7 +580,8 @@ def _get_rnn_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
             (nn.GRUCell, nnqr.GRUCell),
             (nn.LSTMCell, nnqr.LSTMCell),
             (nn.RNNCell, nnqr.RNNCell),
-            (nn.LSTM, nnqr.LSTM)
+            (nn.LSTM, nnqr.LSTM),
+            (nn.GRU, nnqr.GRU)
     ]:
         rnn_op_configs.append(
             BackendPatternConfig(rnn_op)
