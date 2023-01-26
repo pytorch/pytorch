@@ -527,7 +527,7 @@ def _export(
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()
     # Return ModelProto
-    return model_proto
+    return onnx_model
 
 
 def export(
