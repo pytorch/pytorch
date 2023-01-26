@@ -202,7 +202,8 @@ def align_inputs(model, inputs, static_input_idxs=()):
     check_inputs = [
         i
         for i in range(len(inputs))
-        if isinstance(i, torch.Tensor) and (
+        if isinstance(i, torch.Tensor)
+        and (
             i not in static_input_idxs
             or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
         )

@@ -451,15 +451,15 @@ class SizeVarAllocator(object):
             return isinstance(x[1], sympy.Expr)
 
         graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
-        graph_inputs_tensors = list(filter(lambda x: not is_expr(x), graph_inputs.items()))
+        graph_inputs_tensors = list(
+            filter(lambda x: not is_expr(x), graph_inputs.items())
+        )
 
         for name, shape in graph_inputs_expr:
             shape = self.simplify(shape)
             if shape in needed:
                 needed.remove(shape)
-                code.writeline(
-                    f"{self.declare}{shape} = {name}{self.ending}"
-                )
+                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
