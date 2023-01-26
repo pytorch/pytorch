@@ -2463,6 +2463,24 @@ class TestTEFuser(JitTestCase):
 
             self.assertEqual(res, f(x, y))
 
+    @unittest.skipIf(not RUN_CUDA_HALF, "half-precision NNC fusion requires CUDA")
+    def test_pow_multiple_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/75476
+        def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
+            p = torch.sigmoid(p)
+            result = p ** gamma
+            return result
+
+        x = torch.rand((2, 2), dtype=torch.half, device='cuda')
+
+        ref = fn(x)
+
+        script_fn = torch.jit.script(fn)
+        for i in range(4):
+            res = script_fn(x)
+
+        self.assertEqual(ref, res)
+
 
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
@@ -2789,4 +2807,7 @@ instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("c
 
 
 if __name__ == '__main__':
-    run_tests()
+    if os.getenv("PYTORCH_TEST_WITH_DYNAMO", "0") == "1":
+        print("Crashes with Dynamo, see  https://github.com/pytorch/pytorch/issues/92942")
+    else:
+        run_tests()

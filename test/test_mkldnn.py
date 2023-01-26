@@ -1257,6 +1257,106 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    def _lstm_params_list(self):
+        params_dict = {
+            "input_size": [1, 5],
+            "hidden_size": [5, 16],
+            "num_layers": [1, 3],
+            "bidirectional": [False, True],
+            "bias": [False, True],
+            "batch_first": [False, True],
+            "dropout": [0, 0.4, 0.7, 1],
+            "batch_size": [1, 2],
+            "seq_len": [1, 3],
+            "training": [False, True]
+        }
+
+        params_list = []
+        for _, value in params_dict.items():
+            params_list.append(value)
+        return params_list
+
+    def _cast_dtype(self, input, bf16):
+        if bf16:
+            input = input.to(torch.bfloat16)
+        return input
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_lstm(self):
+        seed = 2023
+        torch.manual_seed(seed)
+
+        params_list = self._lstm_params_list()
+        for dtype in types:
+            bf16 = True if dtype == torch.bfloat16 and has_bf16_support() else False
+            rtol = 1.3e-6
+            atol = 1e-5
+            if bf16:
+                rtol = 0.02
+                atol = 0.02
+            for input_size, hidden_size, num_layers, bidirectional, bias, batch_first, dropout, batch_size, seq_len, training \
+                    in itertools.product(*params_list):
+                num_directions = 2 if bidirectional else 1
+                if batch_first:
+                    input = torch.randn(batch_size, seq_len, input_size, dtype=torch.float32)
+                else:
+                    input = torch.randn(seq_len, batch_size, input_size, dtype=torch.float32)
+                h = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
+                c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
+
+                model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
+                                      bias=bias, dropout=dropout, batch_first=batch_first).float()
+                model.train() if training else model.eval()
+                input1 = input.clone().requires_grad_(training)
+                input2 = input.clone().requires_grad_(training)
+
+                h1 = h.clone().requires_grad_(training)
+                h2 = h.clone().requires_grad_(training)
+                c1 = c.clone().requires_grad_(training)
+                c2 = c.clone().requires_grad_(training)
+
+                model1 = copy.deepcopy(model)
+                model2 = copy.deepcopy(model)
+                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
+                    with torch.backends.mkldnn.flags(enabled=False):
+                        torch.manual_seed(seed)
+                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
+                                                                             (self._cast_dtype(h1, bf16),
+                                                                             self._cast_dtype(c1, bf16)))
+
+                    torch.manual_seed(seed)
+                    output2, (hn2, cn2) = model2(input2, (h2, c2))
+                    self.assertEqual(output1, output2, rtol=rtol, atol=atol)
+                    self.assertEqual(hn1, hn2, rtol=rtol, atol=atol)
+                    self.assertEqual(cn1, cn2, rtol=rtol, atol=atol)
+
+                    if training:
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            output1.sum().backward(retain_graph=True)
+
+                        torch.manual_seed(seed)
+                        output2.sum().backward(retain_graph=True)
+
+                        self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
+                        for name, para in model1.named_parameters():
+                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16))
+                            self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
+
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            hn1.sum().backward(retain_graph=True)
+                        torch.manual_seed(seed)
+                        hn2.sum().backward(retain_graph=True)
+                        self.assertEqual(h1.grad, h2.grad, rtol=rtol, atol=atol)
+
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            cn1.sum().backward(retain_graph=True)
+                        torch.manual_seed(seed)
+                        cn2.sum().backward(retain_graph=True)
+                        self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
+
 
 if __name__ == '__main__':
     run_tests()

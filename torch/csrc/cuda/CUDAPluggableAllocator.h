@@ -27,15 +27,23 @@ getCurrentAllocator();
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, cudaStream_t)> free_fn);
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
 void changeCurrentAllocator(
     std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
+
+struct _AllocationMetadata {
+  _AllocationMetadata();
+  _AllocationMetadata(size_t size, int device_idx, cudaStream_t stream);
+  size_t size;
+  int device_idx;
+  cudaStream_t stream;
+};
 
 struct CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
       std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-      std::function<void(void*, size_t, cudaStream_t)> free_fn);
+      std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
 
@@ -112,7 +120,7 @@ struct CUDAPluggableAllocator
 
  protected:
   std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
-  std::function<void(void*, size_t, cudaStream_t)> free_fn_;
+  std::function<void(void*, size_t, int, cudaStream_t)> free_fn_;
   std::function<void(int)> init_fn_;
   std::function<void()> reset_fn_;
   std::function<void(double, int)> memory_fraction_fn_;
@@ -125,8 +133,7 @@ struct CUDAPluggableAllocator
   std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators
-  std::unordered_map<void*, std::pair<size_t, cudaStream_t>>
-      allocation_metadata_;
+  std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
 
   bool initialized_ = false;
 };

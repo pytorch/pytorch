@@ -7,7 +7,7 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 /*
@@ -36,4 +36,4 @@ void zeta_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(zeta_stub, &zeta_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native
