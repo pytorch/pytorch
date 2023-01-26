@@ -1486,9 +1486,7 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape or (
-                param.dtype != view.dtype and not self.uses_sharded_strategy
-            ):
+            if param.shape != view.shape or param.dtype != view.dtype:
                 # NOTE: This is a hack using `.data` to side step the
                 # check that parameter/gradient sizes and dtypes match. Here,
                 # `param` can have the sharded size, and `grad` can have the

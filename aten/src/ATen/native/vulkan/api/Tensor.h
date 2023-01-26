@@ -101,11 +101,16 @@ class vTensor final {
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
-  // Copy Constructor and Assignment
+  // Copy Constructor and Assignment; Ideally copying  would be disabled
+  // (see the reasoning for move assignment below) but it is required for
+  // compatibility with OpaqueTensorImpl
   vTensor(const vTensor& other) noexcept;
   vTensor& operator=(const vTensor& other) noexcept;
 
-  // Move Constructor
+  // Move Constructor; Move Assignment is deliberately not defined because
+  // 1. It is not required for vTensor to be used in container classes
+  // 2. Enforce a usage pattern where memory owned by vTensor cannot be changed
+  // once constructed
   vTensor(vTensor&& other) noexcept;
 
   // Used for passing buffer sizes and strides data to shaders

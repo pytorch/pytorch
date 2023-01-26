@@ -10,11 +10,10 @@ CopyNode::CopyNode(ValueRef from, ValueRef to) {
 }
 
 void CopyNode::encode(ComputeGraph* graph) {
-  std::cout << "Recording image copy" << std::endl;
   api::PipelineBarrier pipeline_barrier{};
 
-  vTensor& from_tensor = graph->get_val(inputs_[0]).toStaging().tensor;
-  vTensor& to_tensor = graph->get_val(outputs_[0]).toStaging().tensor;
+  vTensor& from_tensor = graph->tensor_at(inputs_[0]);
+  vTensor& to_tensor = graph->tensor_at(outputs_[0]);
 
   graph->context()->submit_copy<api::VulkanImage, api::VulkanImage>(
       // pipeline barrier

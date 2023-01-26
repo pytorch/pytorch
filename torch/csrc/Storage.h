@@ -4,7 +4,6 @@
 #include <torch/csrc/Types.h>
 
 #define THPStorageStr "torch.UntypedStorage"
-#define THPStorageBaseStr "StorageBase"
 
 struct THPStorage {
   PyObject_HEAD c10::StorageImpl* cdata;
