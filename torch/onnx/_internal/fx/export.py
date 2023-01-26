@@ -294,15 +294,19 @@ def _wrap_fx_args_as_onnxscript_args(
     )
 
 
-def _fill_tensor_meta(onnxscript_values, expected_values):
+def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
-    for onnxscript_value, expected_value in zip(
+    for i, (onnxscript_value, expected_value) in enumerate(zip(
         flat_onnxscript_values, flat_expected_values
-    ):
+    )):
         # Only set shape for now as we don't need type information.
         onnxscript_value.shape = tuple(expected_value.size())
+        if i > 0:
+            onnxscript_value.name = f"{name}_{i}"
+        else:
+            onnxscript_value.name = name
 
 
 def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
@@ -388,7 +392,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
             # TODO(justinchuby): Assign tensor name and add diagnostic information.
             # Assign type and shape obtained from FakeTensorProp.
-            _fill_tensor_meta(output, node.meta["val"])
+            _fill_tensor_meta(output, node.name, node.meta["val"])
             # One fx node could produce multiple outputs (e.g., tuple of tensors); in
             # that case, v is a tuple of TorchScriptTensors.
             assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
