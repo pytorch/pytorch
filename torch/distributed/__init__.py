@@ -80,6 +80,7 @@ if is_available():
 
     set_debug_level_from_env()
 
+
 else:
     # This stub is sufficient to get
     #   python test/test_public_bindings.py -k test_correct_module_names

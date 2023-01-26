@@ -226,6 +226,25 @@ void _register_builtin_comm_hook(
   reducer.register_builtin_comm_hook(comm_hook_type);
 }
 
+std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>>& get_process_group_table() {
+  static std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> _pg_table;
+  return _pg_table;
+}
+
+int64_t _register_process_group(
+    const c10::intrusive_ptr<::c10d::ProcessGroup>& pg) {
+  auto& pg_table = get_process_group_table();
+  int64_t id = pg_table.size();
+  pg_table.push_back(pg);
+  return id;
+}
+
+c10::intrusive_ptr<::c10d::ProcessGroup> _lookup_process_group(
+    int64_t group_id) {
+  auto& pg_table = get_process_group_table();
+  // TODO safety checks.  And.. make this a map and use a better ID scheme
+  return pg_table[group_id];
+}
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
 // https://github.com/pytorch/pytorch/pull/84243 changed ::c10d::ReduceOp to
 // struct from enum, sacrificing some of the Python built-in function supports
@@ -312,7 +331,15 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           "_register_builtin_comm_hook",
           &_register_builtin_comm_hook,
           py::arg("reducer"),
-          py::arg("comm_hook_type"));
+          py::arg("comm_hook_type"))
+      .def(
+          "_register_process_group",
+          &_register_process_group,
+          py::arg("process_group"))
+      .def(
+          "_lookup_process_group",
+          &_lookup_process_group,
+          py::arg("process_group"));
 
   shared_ptr_class_<::c10d::GradBucket>(
       module,
@@ -2405,6 +2432,24 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
+
+namespace ops {
+
+c10::intrusive_ptr<::c10d::ProcessGroup> lookup_pg(
+    at::Tensor const& useless_tensor_so_dispatch_works,
+    int64_t group_id) {
+  auto& pg_table = get_process_group_table();
+  return pg_table[group_id];
+}
+
+} // namespace ops
+namespace {
+
+TORCH_LIBRARY_IMPL(c10d, BackendSelect, m) {
+  m.impl("lookup_pg", ops::lookup_pg);
+}
+
+} // namespace
 
 } // namespace c10d
 } // namespace distributed
