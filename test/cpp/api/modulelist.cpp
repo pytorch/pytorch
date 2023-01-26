@@ -302,6 +302,7 @@ TEST_F(ModuleListTest, RangeBasedForLoop) {
 }
 
 TEST_F(ModuleListTest, InvalidAt) {
-  torch::nn::ModuleList m( torch::nn::Linear(1,2) );
-  ASSERT_THROWS_WITH(m->at<torch::nn::Dropout2dImpl>(0), "Unable to cast module");
+  torch::nn::ModuleList m(torch::nn::Linear(1, 2));
+  ASSERT_THROWS_WITH(
+      m->at<torch::nn::Dropout2dImpl>(0), "Unable to cast module");
 }
