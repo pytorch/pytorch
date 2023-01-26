@@ -1352,11 +1352,6 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     PrimitiveCacheKey cache_key = std::make_tuple(
         input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads, sum_scale, sum_zero_point);
     c10::call_once(*cache_initialized_flag, [&](){
-        src.set_zero_point(src_zero_points);
-        if (!has_accum) {
-          // For the conv add case, the dst will use the zero point as accm, which has been set previously.
-          dst.set_zero_point(dst_zero_points);
-        }
         ConvParams params;
         ideep::convolution_forward::prepare(
             params, src, weights, b, dst_dims, dst,
@@ -1375,11 +1370,6 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       auto& expected_bias = get_conv_cache().get_bias();
       ideep::convolution_forward::compute<false, false>(params, src, weights, expected_bias, dst);
     } else {
-      src.set_zero_point(src_zero_points);
-      if (!has_accum) {
-        // For the conv add case, the dst will use the zero point as accm, which has been set previously.
-        dst.set_zero_point(dst_zero_points);
-      }
       ideep::convolution_forward::compute(
           src, weights, b, dst_dims, dst,
           strides, dilates, padding_l, padding_r, groups(),
