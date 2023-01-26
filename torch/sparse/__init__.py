@@ -467,17 +467,6 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
 
 
 # Triton registrations
-def _has_triton():
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
-
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
-
-
 def _register_impls(lib):
     """This function is called from torch/__init__.py to do any dynamic registrations. """
 
