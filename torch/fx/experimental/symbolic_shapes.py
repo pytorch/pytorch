@@ -269,6 +269,12 @@ if HAS_SYMPY:
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
+            if isinstance(base, sympy.Add):
+                for a in base.args:
+                    gcd = sympy.gcd(a, divisor)
+                    if gcd == divisor:
+                        return FloorDiv(base - a, divisor) + a / gcd
+
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(
@@ -291,6 +297,7 @@ if HAS_SYMPY:
                 ))
             return None
 
+@lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         return sympy.expand(r)
