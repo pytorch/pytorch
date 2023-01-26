@@ -157,6 +157,13 @@ class _BufferCommHook:
     buffer_comm_hook_location: _BufferCommHookLocation
 
 
+def _enqueue_delay_allreduce(ddp_instance, *args):
+    print("RV: running hook to enqueue delay allreduce")
+    assert ddp_instance.static_graph and ddp_instance.num_iterations == 1
+    Variable._execution_engine.queue_callback(
+        ddp_instance.reducer._delay_all_reduce,
+    )
+
 # Add a DDPSink to run various functions when backwards starts, such as
 # queueing call back of out-most backward/graph task,
 # this helps call back is fired after all gradients' calculation
@@ -1181,9 +1188,13 @@ class DistributedDataParallel(Module, Joinable):
 
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
-        if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
-        ):
+        if self.static_graph and self.num_iterations == 1:
+            self._bwd_hook_handle = self.register_full_backward_pre_hook(
+                hook=_enqueue_delay_allreduce
+            )
+        elif self.static_graph and self.num_iterations == 2:
+            self._bwd_hook_handle.remove()
+        elif self.find_unused_parameters and not self.static_graph:
             state_dict = {
                 "static_graph": self.static_graph,
                 "num_iterations": self.num_iterations,
