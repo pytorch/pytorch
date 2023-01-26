@@ -89,6 +89,16 @@ print_cmake_info() {
   CONDA_INSTALLATION_DIR=$(dirname "$CMAKE_EXEC")
   # Print all libraries under cmake rpath for debugging
   ls -la "$CONDA_INSTALLATION_DIR/../lib"
+
+  export CMAKE_EXEC
+  # Explicitly add conda env lib folder to cmake rpath to address the flaky issue
+  # where cmake dependencies couldn't be found. This seems to point to how conda
+  # links $CMAKE_EXEC to its package cache when cloning a new environment
+  install_name_tool -add_rpath @executable_path/../lib "${CMAKE_EXEC}" || true
+  # Adding the rpath will invalidate cmake signature, so signing it again here
+  # to trust the executable. EXC_BAD_ACCESS (SIGKILL (Code Signature Invalid))
+  # with an exit code 137 otherwise
+  codesign -f -s - "${CMAKE_EXEC}" || true
 }
 
 test_custom_backend() {
@@ -99,7 +109,7 @@ test_custom_backend() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
   make VERBOSE=1
   popd
 
@@ -122,7 +132,7 @@ test_custom_script_ops() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
   make VERBOSE=1
   popd
 
@@ -144,7 +154,7 @@ test_jit_hooks() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
   make VERBOSE=1
   popd
 
