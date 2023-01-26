@@ -773,7 +773,7 @@ def is_ignored_fn(fn) -> bool:
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 
-def is_exact_ignored_fn(fn) -> bool:
+def _is_exact_ignored_fn(fn) -> bool:
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.IGNORE
 
