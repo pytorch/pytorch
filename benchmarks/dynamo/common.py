@@ -70,6 +70,9 @@ class CI(NamedTuple):
 
 CI_SKIP = collections.defaultdict(list)
 
+
+# Skips for dynamic=False
+
 CI_SKIP[CI("aot_eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
@@ -117,12 +120,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
-CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
-    *CI_SKIP[CI("aot_eager", training=True)],
-    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "twins_pcpvt_base",  # timeout
-]
-
 CI_SKIP[CI("inductor", training=False)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # TorchBench
@@ -167,6 +164,58 @@ CI_SKIP[CI("inductor", training=True)] = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     "xcit_large_24_p8_224",  # fp64_OOM
+]
+
+# Skips for dynamic=True
+
+CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # cannot determine truth value of Relational
+    # timm_models
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
+]
+
+CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=True)],
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "twins_pcpvt_base",  # timeout
+]
+
+CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False)],
+    # torchbench
+    "Background_Matting",  # accuracy
+    "LearningToPaint",  # accuracy
+    "functorch_dp_cifar10",  # timeout
+    "opacus_cifar10",  # timeout
+    "pytorch_unet",  # ValueError: floor is not defined
+    # The size of tensor a (320) must match the size of tensor b (512) at
+    # non-singleton dimension 2
+    "speech_transformer",
+    # huggingface
+    "MBartForConditionalGeneration",  # OOM
+    "OPTForCausalLM",  # OOM
+    # timm_models
+    "eca_halonext26ts",  # 'Pointwise' object has no attribute 'get_stride'
+    "hrnet_w18",  # name 'floor' is not defined
+    "jx_nest_base",  # sym_sqrt() missing 1 required positional argument: 'a'
+    "pnasnet5large",  # ceiling is not defined
+    "swin_base_patch4_window7_224",  # floor is not defined
+    "twins_pcpvt_base",  # timeout
+    "volo_d1_224",  # ceiling is not defined
+    "xcit_large_24_p8_224",  # ceiling is not defined
+]
+
+CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
+    # NB: Intentionally omitting for symmetry with dynamic=False
+    # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=True)],
+    # TODO: Fill this in
 ]
 
 
@@ -1888,6 +1937,7 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
+        torch._inductor.config.dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True

@@ -44,6 +44,7 @@
 #include <thread>
 #include <typeinfo>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace autograd {
@@ -1008,7 +1009,7 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
            << "th output.";
@@ -1211,10 +1212,11 @@ auto Engine::execute(
         input_stream,
         opt_next_stream);
 
-    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
+    execute_with_graph_task(
+        graph_task, std::move(graph_root), std::move(input_buffer));
   } else {
     execute_with_graph_task(
-        graph_task, graph_root, InputBuffer(variable_list()));
+        graph_task, std::move(graph_root), InputBuffer(variable_list()));
   }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
