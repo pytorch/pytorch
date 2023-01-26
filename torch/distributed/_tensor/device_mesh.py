@@ -123,7 +123,7 @@ class DeviceMesh(object):
         world_size = get_world_size()
         if self.mesh.size > world_size:
             raise RuntimeError(
-                f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
+                f"Mesh should not be bigger than default world size, but found {self.mesh.size} ranks!"
             )
 
         unique_mesh_values = np.unique(self.mesh)
@@ -215,7 +215,7 @@ class DeviceMesh(object):
             if self.mesh.size < world_size:
                 raise RuntimeError(
                     "DeviceMesh must include every process in WORLD, "
-                    f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
+                    f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.size})"
                 )
 
             unique_mesh_values = np.unique(self.mesh)
@@ -262,7 +262,7 @@ class DeviceMesh(object):
             return False
         if id(self) == id(other):
             return True
-        return np.equal(self.mesh, other.mesh)
+        return np.array_equal(self.mesh, other.mesh)
 
     def get_dim_groups(self) -> List[ProcessGroup]:
         return self._dim_groups
