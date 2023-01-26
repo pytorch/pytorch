@@ -181,6 +181,7 @@ jobs:
 
       - name: Upload test statistics
         if: always()
+        continue-on-error: true
         env:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
