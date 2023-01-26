@@ -102,7 +102,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         self.optim.step()
         self.averager.average_parameters(params=self.param_groups)
 
-    def zero_grad(self, set_to_none: bool = False):  # type: ignore[override]
+    def zero_grad(self, set_to_none: bool = True):  # type: ignore[override]
         self.optim.zero_grad(set_to_none=set_to_none)
 
     def add_param_group(self, param_group):
