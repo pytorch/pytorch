@@ -49,13 +49,19 @@ bool GlobalInit(int* pargc, char*** pargv) {
   internal::State& init_state = internal::GlobalInitState();
   static StaticLinkingProtector g_protector;
   bool success = true;
+  // Only call GFLags if it's not already initialized so we won't reprocess --flagfile, etc.
+  bool initFlags = !c10::CommandLineFlagsHasBeenParsed() || *pargc > 1;
 
   // NOTE: if init_state == internal::State::Initializing at this point, do
   // nothing because that indicates a re-entrant call
   if (init_state == internal::State::Initialized) {
-    VLOG(1) << "GlobalInit has already been called: re-parsing gflags only.";
-    // Reparse command line flags
-    success &= c10::ParseCommandLineFlags(pargc, pargv);
+    if (initFlags) {
+      VLOG(1) << "GlobalInit has already been called: re-parsing gflags only.";
+      success &= c10::ParseCommandLineFlags(pargc, pargv);
+    } else {
+      VLOG(1)
+          << "GlobalInit has already been called, and no new flags to parse.";
+    }
     UpdateLoggingLevelsFromFlags();
   } else if (init_state == internal::State::Uninitialized) {
     init_state = internal::State::Initializing;
@@ -70,7 +76,9 @@ bool GlobalInit(int* pargc, char*** pargv) {
                    ->RunRegisteredEarlyInitFunctions(pargc, pargv);
     CAFFE_ENFORCE(
         success, "Failed to run some early init functions for caffe2.");
-    success &= c10::ParseCommandLineFlags(pargc, pargv);
+    if (initFlags) {
+      success &= c10::ParseCommandLineFlags(pargc, pargv);
+    }
     success &= InitCaffeLogging(pargc, *pargv);
     // Print out the current build version. Using cerr as LOG(INFO) might be off
     if (FLAGS_caffe2_version) {

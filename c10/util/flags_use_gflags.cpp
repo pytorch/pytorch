@@ -30,8 +30,8 @@ C10_EXPORT bool ParseCommandLineFlags(int* pargc, char*** pargv) {
 }
 
 C10_EXPORT bool CommandLineFlagsHasBeenParsed() {
-  // There is no way we query gflags right now, so we will simply return true.
-  return true;
+  // GetArgvs() is only empty if command line args have not been parsed.
+  return !gflags::GetArgvs().empty();
 }
 
 } // namespace c10
