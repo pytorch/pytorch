@@ -75,6 +75,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
     GetAttrVariable,
@@ -321,6 +322,11 @@ class VariableBuilder:
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
+            if (
+                isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
+                and not config.allow_rnn
+            ):
+                unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
             if mutation_guard.is_dynamic_nn_module(value):
                 # created dynamically, don't specialize on it
                 result = UnspecializedNNModuleVariable(
@@ -479,6 +485,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.autograd.function.FunctionCtx):
+            # The autograd.function context
+            return AutogradFunctionContextVariable()
         elif (
             isinstance(value, types.MethodType)
             and type(getattr(value, "__self__", None))
