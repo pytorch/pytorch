@@ -33,6 +33,11 @@ C10_HOST_DEVICE inline constexpr T frac_1_sqrt_pi() {
 }
 
 template <typename T>
+C10_HOST_DEVICE inline constexpr T frac_sqrt_2() {
+  return static_cast<T>(0.707106781186547524400844362104849);
+}
+
+template <typename T>
 C10_HOST_DEVICE inline constexpr T frac_sqrt_3() {
   return static_cast<T>(0.577350269189625764509148780501957);
 }
@@ -102,6 +107,9 @@ constexpr T frac_1_pi = c10::detail::frac_1_pi<T>();
 
 template <typename T>
 constexpr T frac_1_sqrt_pi = c10::detail::frac_1_sqrt_pi<T>();
+
+template <typename T>
+constexpr T frac_sqrt_2 = c10::detail::frac_sqrt_2<T>();
 
 template <typename T>
 constexpr T frac_sqrt_3 = c10::detail::frac_sqrt_3<T>();

@@ -65,7 +65,6 @@ class C10_API SmallVectorBase {
     return std::numeric_limits<Size_T>::max();
   }
 
-  SmallVectorBase() = delete;
   SmallVectorBase(void* FirstEl, size_t TotalCapacity)
       : BeginX(FirstEl), Capacity(TotalCapacity) {}
 
@@ -80,6 +79,7 @@ class C10_API SmallVectorBase {
   void grow_pod(void* FirstEl, size_t MinSize, size_t TSize);
 
  public:
+  SmallVectorBase() = delete;
   size_t size() const {
     return Size;
   }
