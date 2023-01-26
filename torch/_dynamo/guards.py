@@ -39,6 +39,7 @@ from .utils import (
     rename_implicit,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    dup_guard_decayed_equality_debug
 )
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
+        ("___dup_guard_decayed_equality_debug", dup_guard_decayed_equality_debug),
         ("inf", float("inf")),
     ]
 )
@@ -613,7 +615,7 @@ class CheckFunctionManager:
                     pos_b
                 ].is_tensor, "Deduped arg must be a tensor"
 
-                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                code_part = f"___dup_guard_decayed_equality_debug({self.output_graph.graphargs[pos_a].source.name()}, {self.output_graph.graphargs[pos_b].source.name()})"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:

@@ -751,6 +751,22 @@ def dict_const_keys(value):
 def global_key_name(key):
     return f"__dict_key_{id(key)}"
 
+def dup_guard_decayed_equality_debug(t1, t2):
+    if t1 is t2:
+        print(f"{t1} is {t2}")
+        return True
+    
+    hack_set = set()
+    hack_set.add(t1)
+    
+    if t2 in hack_set:
+        print(f"{t1} is not {t2}, but hashes the same")
+        return True
+    if torch.equal(t1, t2):
+        print(f"{t1} is not {t2}, hashes different, but it is equal")
+        return True
+    
+    return False
 
 def rename_implicit(v):
     """
