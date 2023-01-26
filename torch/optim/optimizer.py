@@ -59,12 +59,12 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
 # it is faster than the for-loop implementation. However, the foreach
 # implementation is not differentiable, so we must check differentiable=False.
 def _default_to_foreach(tensorlists: List[List[torch.Tensor]], differentiable: bool = False) -> bool:
+    if torch.jit.is_scripting() or differentiable:
+        return False
     all_tensors = []
     for tensorlist in tensorlists:
         all_tensors.extend(tensorlist)
-    return not torch.jit.is_scripting() and not differentiable and all(
-        p.is_cuda for p in all_tensors
-    )
+    return all(p is None or (p.is_cuda and type(p) == torch.Tensor) for p in all_tensors)
 
 
 # Common doc strings among optimizers
@@ -405,7 +405,7 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none: bool = False):
+    def zero_grad(self, set_to_none: bool = True):
         r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Args:
