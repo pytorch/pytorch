@@ -196,6 +196,7 @@ BLOCKED_OPS = frozenset(
         "unfold_copy",
         "alias_copy",
         "_triton_multi_head_attention",
+        "_triton_bsr_dense_mm",
         "special_airy_ai",
         "special_bessel_j0",
         "special_bessel_j1",
