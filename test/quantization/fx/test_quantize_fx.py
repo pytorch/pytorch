@@ -8528,11 +8528,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
             model = EmbeddingBagLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
-            print("after prepare:", prepared_fx_model)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
                                      qconfig_mapping=qconfig_dict)
-            print("quant model:", quant_model)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.

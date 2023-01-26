@@ -1174,6 +1174,22 @@ def insert_observers_for_model(
             is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
                 pattern, matched_node_pattern, qconfig, backend_config)
 
+            # if not supported by backend, we need to restore the default target_dtype setting
+            # TODO: maybe we can create another field to store real dtype for each node
+            # it is confusing to store both target and real dtype in the same field
+            # TODO: this is pretty hacky, it should be gone after we refactor the
+            # logic to validate the target_dtype based on backend_config, one thing
+            # we can do is to validate the dtype when we set them so that
+            # target_dtype is set correctly after one pass
+            if node.op != "output" and not is_supported_by_backend:
+                if node.meta["target_dtype_info"]["output_activation_dtype"] \
+                   is not None and \
+                   node.meta["target_dtype_info"]["output_activation_dtype"][0] not in [int, float, torch.bool]:
+                    node.meta["target_dtype_info"] = {
+                        "input_activation_dtype": (torch.float, False),
+                        "output_activation_dtype": (torch.float, False),
+                    }
+
             if not skip_inserting_observers and is_supported_by_backend:
                 named_modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
