@@ -50,7 +50,6 @@ log = logging.getLogger(__name__)
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
 
-
 timer_counter = itertools.count()
 
 
@@ -103,6 +102,14 @@ def reset_frame_count():
     curr_frame = 0
 
 
+op_count = 0
+
+
+def increment_op_count(cnt):
+    global op_count
+    op_count += cnt
+
+
 # Print a report of time spent so far
 # Ex:
 # TIMING:
@@ -111,7 +118,6 @@ def reset_frame_count():
 def print_time_report():
     total = 0
     total_by_key = {}
-    print("TIMING:")
     for frame, timings in frame_phase_timing.items():
         for key, timing in timings.items():
             total += timing
@@ -120,7 +126,7 @@ def print_time_report():
             else:
                 total_by_key[key] += timing
 
-    out = ""
+    out = "TIMING:"
     for key, value in total_by_key.items():
         out = f"{out} {key}:{round(value, 5)}"
 
@@ -859,13 +865,16 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
-                return torch.allclose(
+                r = torch.allclose(
                     ref.to(dtype=torch.uint8),
                     res.to(dtype=torch.uint8),
                     atol=tol,
                     rtol=tol,
                     equal_nan=equal_nan,
                 )
+                if not r:
+                    log.error("Accuracy failed: uint8 tensor did not match")
+                return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -910,15 +919,25 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
+            log.error(f"Accuracy failed: allclose not within tol={tol}")
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
-        return ref == res
+        r = ref == res
+        if not r:
+            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+        return r
     elif isinstance(ref, float):
-        return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        if not r:
+            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+        return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
             ref = ref.item()
-        return (type(ref) is type(res)) and (ref == res)
+        r = (type(ref) is type(res)) and (ref == res)
+        if not r:
+            log.error("Accuracy failed (numpy): {ref} != {res}")
+        return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (

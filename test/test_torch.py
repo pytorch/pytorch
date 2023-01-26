@@ -6360,7 +6360,6 @@ class TestTorch(TestCase):
                                "missing 1 required positional arguments",
                                lambda: torch.tensor().new_zeros((5, 5), 0))
 
-    @skipIfTorchDynamo("will be re-enabled after #90892")
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
@@ -8659,6 +8658,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
             torch.cuda.graphs.CUDAGraph()
+
+    def test_tensor_where_scalar(self):
+
+        a = torch.arange(4.0)
+        not_zero = 0.001
+
+        # b is generated through torch.where function with not_zero being a scalar parameter
+        b = torch.where(a != 0, a, not_zero)
+        # c is generated through Tensor.where method with not_zero being a scalar parameter
+        c = a.where(a != 0, not_zero)
+
+        self.assertEqual(b, c)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

@@ -16,6 +16,7 @@
 #include <ostream>
 #include <sstream>
 #include <type_traits>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -239,7 +240,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -906,7 +907,7 @@ struct TORCH_API ListType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->annotation_str(printer) << "]";
+    ss << "List[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -1001,7 +1002,7 @@ struct TORCH_API DictType : public SharedType {
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
     ss << "Dict[" << getKeyType()->annotation_str(printer) << ", "
-       << getValueType()->annotation_str(printer) << "]";
+       << getValueType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 
@@ -1046,7 +1047,7 @@ struct TORCH_API FutureType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Future[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -1078,7 +1079,7 @@ struct TORCH_API RRefType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
