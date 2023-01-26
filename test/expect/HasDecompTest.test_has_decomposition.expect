@@ -509,6 +509,8 @@ aten::_triton_multi_head_attention
 aten::_triton_multi_head_attention.out
 aten::_triton_scaled_dot_attention
 aten::_triton_scaled_dot_attention.out
+aten::_triton_bsr_dense_mm
+aten::_triton_bsr_dense_mm.out
 aten::_unique
 aten::_unique.out
 aten::_unique2
