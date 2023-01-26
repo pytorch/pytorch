@@ -1892,8 +1892,6 @@ class Buffer(IRNode):
         return self.layout.make_indexer()
 
     def get_name(self):
-        if not self.name:
-            breakpoint()
         assert self.name
         return self.name
 
@@ -3764,7 +3762,7 @@ class StorageBox(MutableBox):
         )
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
-        # return self.data.name
+        return self.data.name
 
     def realize_hint(self):
         """
@@ -4081,22 +4079,13 @@ class AllReduce(ExternKernel):
         reduce_op: str,
     ):
         x = cls.realize_input(x)
-        # this is..  useless? because i'm not copying the input into my newly allocated buffer,
-        # and, probably inductor will skip the copy noting it is pointless
-        # x = cls.copy_input(x)
-        # x = cls.realize_input(x)
 
-        # if isinstance(x.data.layout, FlexibleLayout):
-        # needed to make a fixed layout for AllReduce if I were to return
-        # the allreduce op from the compiled graph (test_inductor_doesnt_mutate_shared)
-        #
-        # was hoping to inplace if in/out layouts same;
-        # thought it was going to be ok to leave flex here;
-        # needs to match w/ input for reuse pass, probably
-        # x.decide_layout()
+        # TODO
+        # need to make a fixed layout for AllReduce if it happens to be returned from the program
+        # (test_inductor_doesnt_mutate_shared)
 
-        # I added this to see if it would help the issue of test_inductor_doesnt_mutate_shared
-        # new_layout = x.data.layout
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
