@@ -1398,7 +1398,9 @@ def aot_wrapper_dedupe(
         ok = True
 
         for i, a in enumerate(flat_args):
-            if a not in args_set:
+            if not isinstance(a, torch.Tensor):
+                leaf_flat_args.append(a)
+            elif a not in args_set:
                 args_set.add(a)
                 leaf_flat_args.append(a)
             elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
@@ -1860,12 +1862,30 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             )
             del contiguous_args
             if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
-                context = disable_autocast_manager if disable_amp else nullcontext
-                with context(), track_graph_compiling(aot_config, "backward"):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
-                    )
+                all_args_list = list(all_args)
+                CompiledFunction.compiled_bw = create_aot_dispatcher_function(bw_module, all_args_list, AOTConfig(aot_config.bw_compiler, None, None, aot_config.decompositions, 0, aot_config.aot_id))
+
+                # if config.use_dynamic_shapes:
+                #     with context():
+                #         # Retrace backwards with a new shape environment
+                #         local_bw_module = make_fx(bw_module, tracing_mode="symbolic")(*all_args)
+                #         with track_graph_compiling(aot_config, "backward"):
+                #             CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                #                 # NB: The None case is for when we
+                #                 # have SymInt tangents, which are
+                #                 # always passed with None
+                #                 local_bw_module,
+                #                 [
+                #                     n.meta['val'] if 'val' in n.meta else None
+                #                     for n in local_bw_module.graph.nodes
+                #                     if n.op == "placeholder"
+                #                 ]
+                #             )
+                # else:
+                #     with context(), track_graph_compiling(aot_config, "backward"):
+                #         CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                #             bw_module, all_args_list
+                #         )
 
             ctx.maybe_clear_saved_tensors()
             out = call_func_with_args(
@@ -2114,8 +2134,11 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
-
                 def convert(idx, x):
+                    if config.use_dynamic_shapes:
+                        from torch._dynamo.source import ConstantSource
+                        if isinstance(x, int):
+                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")))
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):

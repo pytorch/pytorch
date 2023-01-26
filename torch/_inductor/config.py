@@ -187,7 +187,7 @@ class trace:
     info_log = False
 
     # Save input FX graph (post decomps)
-    fx_graph = True
+    fx_graph = False
 
     # Save TorchInductor IR before fusion pass
     ir_pre_fusion = True

@@ -533,7 +533,8 @@ class ProxySymDispatchMode(SymDispatchMode):
             get_proxy_slot(a.node, self.tracer)().node if isinstance(a, py_sym_types) else a
             for a in args
         )
-
+        if len(out.node.expr.free_symbols) == 0:
+            breakpoint()
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
         n_out = self.tracer.create_node("call_function", func, n_args, {})
