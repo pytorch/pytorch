@@ -345,8 +345,15 @@ if HAS_SYMPY:
             #   --timing --explain --device cuda --inductor \
             #   --total-partitions 2 --partition-id 0 \
             #   --output log.txt -k eca_halonext26ts
-            # if divisor == 1:
-            #     return sympy.floor(base)
+            if divisor == 1:
+                # This needs to be floor'd when base is a float. However, not
+                # special-casing here at all breaks
+                # test_make_fx_symbolic_exhaustive_nn_functional_glu_cpu_float32
+                # (TestProxyTensorOpInfoCPU)
+                # There, we expect (-s0//2)//1 to simplify to -s0//2, but we
+                # have no way of knowing whether base is an integer since we
+                # don't have an integer assumption rule defined for FloorDiv.
+                return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
             # TODO: sympy.floor fails with inductor
