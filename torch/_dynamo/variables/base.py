@@ -163,6 +163,14 @@ class VariableTracker(object, metaclass=HasPostInit):
         """
         return self
 
+    def compare(self, tx, op, right, **options):
+        """
+        Used to implement comparison operators for different types.
+        For example, list1 < list2 is implemented differently from tuple1 < tuple2
+        """
+        import pdb; pdb.set_trace()
+        unimplemented(f"COMPARE_OP {typestr(self)} {op} {typestr(right)}")
+
     def can_make_guard(self):
         try:
             self.make_guard(None)

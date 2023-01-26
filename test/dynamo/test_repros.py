@@ -5,6 +5,7 @@ import inspect
 import itertools
 import random
 import unittest
+import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
@@ -1475,8 +1476,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    # Bug with storage meta - torch.BoolStorage is becoming torch.storage._LegacyStorageMeta
-    @unittest.expectedFailure
     def test_isinstance_storage(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
@@ -1599,6 +1598,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.stride()
 
         self.assertEqual(f(), torch._dynamo.optimize("eager")(f)())
+
+    def test_out_none(self):
+        # https://github.com/pytorch/pytorch/issues/92814
+        def fn(input):
+            return torch.nn.functional.normalize(input, dim=0, out=None)
+
+        x = torch.rand([1])
+        self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
     @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
@@ -1761,7 +1768,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return (add_2,)
 
         mod = MockModule()
-        opt_mod = torch._dynamo.optimize("aot_inductor_debug")(mod)
+        opt_mod = torch._dynamo.optimize("aot_eager_decomp_partition")(mod)
 
         args = [
             ((2, 512), (2048, 4), torch.int64, "cpu", False),
@@ -1903,7 +1910,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
 
-        opt_foo = torch._dynamo.optimize("aot_inductor_debug")(foo)
+        opt_foo = torch._dynamo.optimize("aot_eager_decomp_partition")(foo)
         with torch.cuda.amp.autocast(enabled=True):
             ref = foo(*args)[0]
             res = foo(*args)[0]
@@ -2251,7 +2258,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         m_ref = Repro()
         m_test = deepcopy(m_ref)
 
-        @torch._dynamo.optimize("aot_inductor_debug")
+        @torch._dynamo.optimize("aot_eager_decomp_partition")
         def compiled_fn(x):
             return m_test(x)
 
@@ -2327,6 +2334,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
+
+    def test_grad_references_cleared(self):
+        model = torch.nn.Linear(2048, 2048, bias=False)
+        x = torch.ones(2048)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        def opt_step():
+            optimizer.step()
+
+        compiled_opt_step = torch._dynamo.optimize("eager")(opt_step)
+
+        def compiled_model_step(x):
+            optimizer.zero_grad(True)
+            y = model(x)
+            torch.sum(y).backward()
+            compiled_opt_step()
+
+        compiled_model_step(x)
+        param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
+        optimizer.zero_grad(True)
+        self.assertIsNone(param_grad_ref())
 
 
 if __name__ == "__main__":
