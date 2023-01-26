@@ -19,7 +19,7 @@ from torch.utils import _pytree as pytree
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
-        self.opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+        self.opset_version = 17
 
     def _run_ort(
         self, onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
@@ -77,6 +77,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         self.run_test_with_fx_to_onnx_exporter(MNISTModel(), (tensor_x,))
 
+
     # test single op with no kwargs
     def test_sigmoid(self):
         x = torch.randn(1, 4, 2, 3)
@@ -101,7 +102,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 self.sigmoid = torch.nn.Sigmoid()
 
             def forward(self, x):
-                x = torch.ops.aten.add(x, 1, alpha=2)
+                x = torch.ops.aten.add(x, 1.0, alpha=2.0)
                 return self.sigmoid(x)
 
         self.run_test_with_fx_to_onnx_exporter(SigmoidAddModel(), (x,))
