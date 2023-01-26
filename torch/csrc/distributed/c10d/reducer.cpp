@@ -1805,8 +1805,6 @@ void Reducer::ensure_prior_reduction_finished() {
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
     TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
-    const std::string unmarkedParamIndices =
-        c10::Join(", ", unmarked_param_indices);
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "

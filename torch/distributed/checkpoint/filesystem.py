@@ -345,7 +345,7 @@ class FileSystemWriter(StorageWriter):
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
 
-    def init(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -513,7 +513,7 @@ class FileSystemReader(StorageReader):
         with (self.path / ".metadata").open("rb") as metadata_file:
             return pickle.load(metadata_file)
 
-    def init(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data
         assert self.storage_data is not None
 
