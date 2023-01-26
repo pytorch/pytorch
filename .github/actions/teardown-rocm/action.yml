@@ -14,13 +14,20 @@ runs:
         docker stop $(docker ps -q) || true
         # Prune all stopped containers.
         docker container prune -f
-        # Prune everything docker if there are more than 10 images (~200GB).
-        # This is easier than using a time filter, e.g., "until=24h".
-        # Might fail if a prune is already in progress by another runner.
-        image_count=$(docker images | wc -l)
-        if [[ ${image_count} -gt 10 ]]; then
-            echo "Purging all docker caches"
-            docker system prune -af || true
-        else
-            echo "Will not purge docker, only ${image_count} images found"
+        #Prune docker if you don't have enough diskspace.
+        diskspace_cutoff=70
+        diskspace=$(df -H / --output=pcent | sed -n 2p | sed 's/%//' | sed 's/ //')
+        msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+        if [[ $diskspace -ge diskspace_cutoff ]] ; then
+            docker system prune -af
+            diskspace_new=$(df -H / --output=pcent | sed -n 2p | sed 's/%//' | sed 's/ //')
+            if [[ $diskspace_new -gt diskspace_cutoff ]] ; then
+                echo "Error: Available diskspace is less than ${diskspace_cutoff} percent. Not enough diskspace."
+                echo "$msg"
+                exit 1
+            else
+                difference=$((diskspace - diskspace_new))
+                echo "Diskspace saved: ${difference} percent"
+            fi
         fi
+
