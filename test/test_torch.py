@@ -2509,7 +2509,6 @@ else:
         for inp in (x, x2d):
             actual = inp.logcumsumexp(axis)
             expected = logcumsumexp(inp, axis)
-            print(actual, expected)
             self.assertEqual(expected, actual)
 
         # Check that out is actually inplace
@@ -8660,6 +8659,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
             torch.cuda.graphs.CUDAGraph()
+
+    def test_tensor_where_scalar(self):
+
+        a = torch.arange(4.0)
+        not_zero = 0.001
+
+        # b is generated through torch.where function with not_zero being a scalar parameter
+        b = torch.where(a != 0, a, not_zero)
+        # c is generated through Tensor.where method with not_zero being a scalar parameter
+        c = a.where(a != 0, not_zero)
+
+        self.assertEqual(b, c)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
