@@ -1126,11 +1126,10 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
 
   auto last_offset = open_paren + 1;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto next_offset = last_offset;
   bool keyword_only = false;
   bool done = false;
   while (!done) {
+    auto next_offset = last_offset;
     auto offset = fmt.find(", ", last_offset);
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
