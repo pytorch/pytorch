@@ -1527,7 +1527,8 @@ def _all_gather_optim_state(
     for state_name, value in sorted_items(optim_state):
         if torch.is_tensor(value):
             if value.dim() == 0:
-                processed_state.scalar_tensors[state_name] = value
+                # Ensure that `step` is on CPU.
+                processed_state.scalar_tensors[state_name] = value.cpu()
             else:
                 processed_state.tensors[state_name] = _PosDimTensorInfo(
                     value.shape, value.dtype
@@ -1558,6 +1559,7 @@ def _all_gather_optim_state(
             torch.empty, dtype=dtype, device=fsdp_state.compute_device
         )
         local_state = optim_state.get(name, empty_func(0))
+        local_state = local_state.to(fsdp_state.compute_device)
         tensors = [
             empty_func(numel) if rank != fsdp_state.rank else local_state
             for rank, numel in enumerate(numels)
