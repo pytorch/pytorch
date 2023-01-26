@@ -920,7 +920,7 @@ def convert(
         modules_copy = copy.deepcopy(modules)
 
         if model._is_qat:
-            _update_qconfig_for_qat(qconfig_mapping, {})
+            _update_qconfig_for_qat(qconfig_mapping, backend_config)
         _update_qconfig_for_fusion(model, qconfig_mapping)
 
         _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]

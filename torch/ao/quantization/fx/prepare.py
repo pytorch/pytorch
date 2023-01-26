@@ -355,33 +355,32 @@ def _get_target_activation_dtype_for_node(
             }
 
         # get qconfig to determine the eventual dtype of this node
-        if qconfig is not None:
-            if qhandler is not None and qhandler.input_output_observed():
-                act_dtype, weight_dtype, input_act_is_dynamic = \
-                    get_qconfig_dtypes(qconfig)
+        if qconfig is not None and qhandler is not None:
+            act_dtype, weight_dtype, input_act_is_dynamic = \
+                get_qconfig_dtypes(qconfig)
 
-                # Currently `QConfig` only has one `activation` field.
-                # For static quantization, it is reused for both input
-                # and output activation. For dynamic quantization, this
-                # field is currently only used for the input activation,
-                # with the output activation being in fp32.
-                # In the future this may change as we add more fields
-                # to the `QConfig` object.
-                output_act_dtype = act_dtype \
-                    if (not input_act_is_dynamic) else torch.float
+            # Currently `QConfig` only has one `activation` field.
+            # For static quantization, it is reused for both input
+            # and output activation. For dynamic quantization, this
+            # field is currently only used for the input activation,
+            # with the output activation being in fp32.
+            # In the future this may change as we add more fields
+            # to the `QConfig` object.
+            output_act_dtype = act_dtype \
+                if (not input_act_is_dynamic) else torch.float
 
-                bias_dtype = torch.float16 \
-                    if (
-                        act_dtype == torch.float16
-                        and weight_dtype == torch.float16
-                        and (not input_act_is_dynamic)
-                    ) else torch.float
-                return {
-                    "input_activation_dtype": (act_dtype, input_act_is_dynamic),
-                    "weight_dtype": (weight_dtype, False),
-                    "bias_dtype": (bias_dtype, False),
-                    "output_activation_dtype": (output_act_dtype, False),
-                }
+            bias_dtype = torch.float16 \
+                if (
+                    act_dtype == torch.float16
+                    and weight_dtype == torch.float16
+                    and (not input_act_is_dynamic)
+                ) else torch.float
+            return {
+                "input_activation_dtype": (act_dtype, input_act_is_dynamic),
+                "weight_dtype": (weight_dtype, False),
+                "bias_dtype": (bias_dtype, False),
+                "output_activation_dtype": (output_act_dtype, False),
+            }
         return {
             "input_activation_dtype": (torch.float, False),
             "output_activation_dtype": (torch.float, False),
@@ -1175,6 +1174,22 @@ def insert_observers_for_model(
             is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
                 pattern, matched_node_pattern, qconfig, backend_config)
 
+            # if not supported by backend, we need to restore the default target_dtype setting
+            # TODO: maybe we can create another field to store real dtype for each node
+            # it is confusing to store both target and real dtype in the same field
+            # TODO: this is pretty hacky, it should be gone after we refactor the
+            # logic to validate the target_dtype based on backend_config, one thing
+            # we can do is to validate the dtype when we set them so that
+            # target_dtype is set correctly after one pass
+            if node.op != "output" and not is_supported_by_backend:
+                if node.meta["target_dtype_info"]["output_activation_dtype"] \
+                   is not None and \
+                   node.meta["target_dtype_info"]["output_activation_dtype"][0] not in [int, float, torch.bool]:
+                    node.meta["target_dtype_info"] = {
+                        "input_activation_dtype": (torch.float, False),
+                        "output_activation_dtype": (torch.float, False),
+                    }
+
             if not skip_inserting_observers and is_supported_by_backend:
                 named_modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
@@ -1468,7 +1483,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         _qat_swap_modules(model, module_to_qat_module)
-        _update_qconfig_for_qat(qconfig_mapping, {})
+        _update_qconfig_for_qat(qconfig_mapping, backend_config)
 
     # mapping from fully qualified module name to module instance
     # for example,

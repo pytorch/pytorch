@@ -258,16 +258,15 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
                 .set_dtype_configs(dtype_configs)
                 .set_qat_module(qat_embedding_op)
                 .set_root_module(embedding_op)
-                .set_reference_quantized_module(ref_embedding_op)
-                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+                .set_reference_quantized_module(ref_embedding_op))
         # config for qat op
         embedding_op_configs.append(
             BackendPatternConfig(qat_embedding_op)
                 .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
                 .set_dtype_configs(dtype_configs)
                 .set_root_module(embedding_op)
-                .set_reference_quantized_module(ref_embedding_op)
-                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+                .set_reference_quantized_module(ref_embedding_op))
+
         # config for functional embedding
         embedding_op_configs.append(
             BackendPatternConfig(torch.nn.functional.embedding)
