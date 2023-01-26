@@ -7,7 +7,7 @@ import contextlib
 import functools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
@@ -36,7 +36,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -467,6 +467,24 @@ def wrap_key(f, tensors, tracer):
 
     return wrapped
 
+import time
+
+from collections import defaultdict
+import random
+
+op_cnt = defaultdict(int)
+
+@contextmanager
+def counter(op):
+    begin = time.time()
+    yield
+    op_cnt[op] += time.time() - begin
+    if random.random() < 1e-4:
+        print(sorted(op_cnt.items(), key=lambda x: x[1], reverse=True)[:10])
+        print(sum(op_cnt.values()))
+        pass
+
+
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, tracing_mode):
@@ -478,6 +496,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # with counter(func):
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 

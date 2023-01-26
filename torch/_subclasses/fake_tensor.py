@@ -19,10 +19,10 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils.pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils.weak import WeakIdRef
 
-pytree = torch.utils._pytree
+pytree = torch.utils.pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
@@ -732,6 +732,23 @@ class FakeTensor(torch.Tensor):
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly incraese.
 
+import time
+
+from collections import defaultdict
+import random
+from contextlib import contextmanager, nullcontext
+
+op_cnt = defaultdict(int)
+
+@contextmanager
+def counter(op):
+    begin = time.time()
+    yield
+    op_cnt[op] += time.time() - begin
+    if random.random() < 1e-4:
+        print(sorted(op_cnt.items(), key=lambda x: x[1], reverse=True)[:10])
+        print(sum(op_cnt.values()))
+        pass
 
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
@@ -769,6 +786,10 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        with counter(func):
+            return self.inner_dispatch(func, types, args, kwargs)
+
+    def inner_dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:

@@ -436,14 +436,15 @@ def _make_node_magic(method, func):
         assert isinstance(other, SymNode)
         other_expr = other.expr
         # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
-        other_expr = self.shape_env.replace(other_expr)
+        expr = self.expr
+        # expr = self.shape_env.replace(self.expr)
+        # other_expr = self.shape_env.replace(other_expr)
         try:
             out = func(expr, other_expr)
         except Exception:
             log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
-        out = safe_expand(out)
+        # out = safe_expand(out)
         pytype: Type
         if method in always_float_magic_methods:
             pytype = float
