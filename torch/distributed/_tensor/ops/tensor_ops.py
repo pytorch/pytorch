@@ -12,7 +12,7 @@ from torch.distributed._tensor.api import (
 )
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
-from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.ops.utils import register_prop_rule, normalize_dim
 
 
 # NOTE: the default propagation rule should apply for
@@ -161,15 +161,10 @@ def unshard_tensor_dim(
 
 
 def is_tensor_dim_sharded(
-    placements: Sequence[Placement], dim: int
+    spec: DTensorSpec, dim: int
 ) -> bool:
     """Return True if tensor dim is sharded"""
-    return any(
-        tuple(
-            True if (isinstance(p, Shard) and p.dim == dim) else False
-            for p in placements
-        )
-    )
+    return (dim < spec.ndim) and spec.dim_map[dim] >= 0
 
 
 def _prop_all_but_dim(
@@ -497,17 +492,15 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
 
     dim = 0  # default dim = 0
     if (len(op_schema.args_schema) > 1):
-        dim = op_schema.args_schema[1]
-    # normalize arguments
-    if dim < 0:
-        dim += ndim
+        dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, ndim)
 
     # Unshard all input tensors on cat dim before running einop rule
     # to avoid _Partial in result.
     need_reshard = False
     tensor_list_specs_after = []
     for spec in tensor_list_specs:
-        if is_tensor_dim_sharded(spec.placements, dim=dim):
+        if is_tensor_dim_sharded(spec, dim=dim):
             need_reshard = True
             tensor_list_specs_after.append(
                 DTensorSpec(
@@ -572,7 +565,6 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
             return _update_schema_suggestion_for_cat(
                 output_sharding,
                 op_schema,
-                dim,
             )
         else:
             return output_sharding
@@ -594,7 +586,6 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
 def _update_schema_suggestion_for_cat(
     output_sharding: OutputSharding,
     op_schema: OpSchema,
-    dim: int,
 ) -> OutputSharding:
     assert output_sharding.schema_suggestions is not None
     suggestion_specs = output_sharding.schema_suggestions[0].args_spec
