@@ -16,7 +16,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #endif
-
+#include <iostream>
 namespace at { namespace native {
 
 namespace {
@@ -915,11 +915,30 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   auto n = input.size(-1);
   auto leading_dimension = std::max<int64_t>(1, m);
 
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
-    int* infos_working_ptr = &infos_data[i];
-    lapackLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
+  std::function<void(int64_t, int64_t)> loop = [](int64_t, int64_t) {};
+  loop = [&](int64_t start, int64_t end) {
+    for (const auto i : c10::irange(start, end)) {
+      scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+      int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+      int* infos_working_ptr = &infos_data[i];
+      lapackLu<scalar_t>(
+          m,
+          n,
+          input_working_ptr,
+          leading_dimension,
+          pivots_working_ptr,
+          infos_working_ptr);
+    }
+  };
+  int64_t matrix_size = std::min(m, n);
+  int64_t computational_complexity =
+      batch_size * matrix_size * matrix_size * matrix_size;
+  // A threshold test out on 32 core/socket ICX system
+  bool do_parallel = computational_complexity >= 102400;
+  if (do_parallel) {
+    at::parallel_for(0, batch_size, 0, loop);
+  } else {
+    loop(0, batch_size);
   }
 #endif
 }
