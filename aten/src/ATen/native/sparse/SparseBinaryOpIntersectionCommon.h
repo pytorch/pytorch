@@ -442,7 +442,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
     res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
     res_sparse_impl->set_nnz_and_narrow(res_nnz);
-    res._coalesced_(y_.is_coalesced() || !not_commutes_with_sum);
+    res._coalesced_(y_.is_coalesced() || !commutes_with_sum);
     return;
   }
 
