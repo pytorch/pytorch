@@ -87,6 +87,24 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
+import time
+
+from collections import defaultdict
+import random
+
+op_cnt = defaultdict(lambda: [0, 0])
+
+@contextmanager
+def counter(op):
+    begin = time.time()
+    yield
+    op_cnt[op][0] += time.time() - begin
+    op_cnt[op][1] += 1
+    if random.random() < 1e-4:
+        print(sorted(op_cnt.items(), key=lambda x: x[1], reverse=True)[:10])
+        print(sum([i[0] for i in op_cnt.values()]))
+        pass
+
 def _handle_sym_dispatch(func, args, kwargs):
     global SYM_FUNCTION_MODE
     mode = SYM_FUNCTION_MODE
@@ -424,27 +442,23 @@ def _make_node_magic(method, func):
         method_attr = method
 
     def binary_magic_impl(self, other):
-        if method in magic_methods_on_submodule:
-            op = getattr(sys.modules[__name__], method_attr)
-        else:
-            assert method not in magic_methods_on_math
-            op = getattr(operator, method_attr)
+        # with counter(func):
         if SYM_FUNCTION_MODE:
+            if method in magic_methods_on_submodule:
+                op = getattr(sys.modules[__name__], method_attr)
+            else:
+                assert method not in magic_methods_on_math
+                op = getattr(operator, method_attr)
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, SymTypes), type(r)
             return r.node
         assert isinstance(other, SymNode)
         other_expr = other.expr
         # TODO: consider constant prop here
-        expr = self.expr
-        # expr = self.shape_env.replace(self.expr)
-        # other_expr = self.shape_env.replace(other_expr)
-        try:
-            out = func(expr, other_expr)
-        except Exception:
-            log.warning(f"failed to eval {method}({expr}, {other_expr})")
-            raise
-        # out = safe_expand(out)
+        expr = self.shape_env.replace(self.expr)
+        other_expr = self.shape_env.replace(other_expr)
+        out = func(expr, other_expr)
+        out = safe_expand(out)
         pytype: Type
         if method in always_float_magic_methods:
             pytype = float
@@ -456,33 +470,34 @@ def _make_node_magic(method, func):
         return SymNode(out, self.shape_env, pytype)
 
     def unary_magic_impl(self):
-        if SYM_FUNCTION_MODE:
-            if method in magic_methods_on_math:
-                op = getattr(math, method_attr)
-            elif method in magic_methods_on_submodule:
-                op = getattr(sys.modules[__name__], method_attr)
+        with counter(func):
+            if SYM_FUNCTION_MODE:
+                if method in magic_methods_on_math:
+                    op = getattr(math, method_attr)
+                elif method in magic_methods_on_submodule:
+                    op = getattr(sys.modules[__name__], method_attr)
+                else:
+                    op = getattr(operator, method_attr)
+                r = _handle_sym_dispatch(op, (wrap_node(self),), {})
+                assert isinstance(r, SymTypes), type(r)
+                return r.node
+            # TODO: consider constant prop here
+            expr = self.shape_env.replace(self.expr)
+            try:
+                out = func(expr)
+            except Exception:
+                log.warning(f"failed to eval {method}({expr})")
+                raise
+            out = safe_expand(out)
+            pytype: Type
+            if method in always_int_magic_methods:
+                pytype = int
+            elif method in always_float_magic_methods:
+                pytype = float
             else:
-                op = getattr(operator, method_attr)
-            r = _handle_sym_dispatch(op, (wrap_node(self),), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
-        # TODO: consider constant prop here
-        expr = self.shape_env.replace(self.expr)
-        try:
-            out = func(expr)
-        except Exception:
-            log.warning(f"failed to eval {method}({expr})")
-            raise
-        out = safe_expand(out)
-        pytype: Type
-        if method in always_int_magic_methods:
-            pytype = int
-        elif method in always_float_magic_methods:
-            pytype = float
-        else:
-            pytype = self.pytype
+                pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype)
+            return SymNode(out, self.shape_env, pytype)
 
     if method in unary_magic_methods:
         setattr(SymNode, method_attr, unary_magic_impl)

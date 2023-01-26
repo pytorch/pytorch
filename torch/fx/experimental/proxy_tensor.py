@@ -99,7 +99,7 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     return transform(tracker[obj])
 
 def snapshot_fake(val):
-    return val.detach()
+    return val
 
 def unwrap_proxy(proxy_mode, e):
     if isinstance(e, torch.Tensor):
@@ -472,16 +472,17 @@ import time
 from collections import defaultdict
 import random
 
-op_cnt = defaultdict(int)
+op_cnt = defaultdict(lambda: [0, 0])
 
 @contextmanager
 def counter(op):
     begin = time.time()
     yield
-    op_cnt[op] += time.time() - begin
+    op_cnt[op][0] += time.time() - begin
+    op_cnt[op][1] += 1
     if random.random() < 1e-4:
         print(sorted(op_cnt.items(), key=lambda x: x[1], reverse=True)[:10])
-        print(sum(op_cnt.values()))
+        print(sum([i[0] for i in op_cnt.values()]))
         pass
 
 
