@@ -67,7 +67,7 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -129,6 +129,7 @@ jobs:
 
       - name: Test
         id: test
+        timeout-minutes: 240
         env:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
