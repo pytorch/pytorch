@@ -8880,6 +8880,11 @@ class DistributedTest:
         def test_ddp_new_tensor_in_fwd(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=False)
 
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
         def test_ddp_static_graph_dataclass_no_grad_sync(self):
             """
             When static_graph=True, currently DDP has a bug where modules with
@@ -8910,7 +8915,8 @@ class DistributedTest:
             ddp(torch.randn(2, 10)).tensor.sum().backward()
 
             grads = [
-                torch.empty_like(ddp.module.m.weight.grad) for _ in range(dist.get_world_size())
+                torch.empty_like(ddp.module.m.weight.grad)
+                for _ in range(dist.get_world_size())
             ]
             dist.all_gather(tensor_list=grads, tensor=ddp.module.m.weight.grad)
             g, rest = grads[0], grads[1:]
