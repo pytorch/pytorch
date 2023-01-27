@@ -42,7 +42,6 @@ from torch.ao.quantization.backend_config import (
 )
 from torch.ao.quantization.observer import _is_activation_post_process
 from .graph_module import (
-    QuantizedGraphModule,
     _is_observed_module,
     _is_observed_standalone_module,
 )

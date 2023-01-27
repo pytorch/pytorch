@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Set, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 
 import torch
@@ -24,7 +24,8 @@ from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.utils import get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
 
-def attach_preserved_attrs_to_model(model: GraphModule, preserved_attrs: Dict[str, Any]):
+def attach_preserved_attrs_to_model(
+        model: Union[GraphModule, torch.nn.Module], preserved_attrs: Dict[str, Any]):
     """ Store preserved attributes to the model.meta so that it can be preserved during deepcopy
     """
     for attr_name, attr in preserved_attrs.items():
@@ -40,6 +41,17 @@ def _check_is_graph_module(model: torch.nn.Module) -> None:
             + "sure to follow the tutorials."
         )
 
+def _attach_meta_to_node_if_not_exist(model: GraphModule):
+    """ Attach meta field to all nodes of the graph if it does not exist,
+    meta field is a field stores some meta information about the node, such
+    as dtype and shape information for output of the node, this only exists
+    if the program is captured by make_fx (used in quantize_pt2e flow), if
+    the program is captured by torch.fx symbolic tracing, this field may not exist,
+    so we add it here to avoid checking this all over the places
+    """
+    for node in model.graph.nodes:
+        if not hasattr(node, "meta"):
+            node.meta = {}
 
 def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
     r""" Swap FloatFunctional with FXFloatFunctional
@@ -57,7 +69,7 @@ def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
 
 
 def _fuse_fx(
-    graph_module: GraphModule,
+    model: GraphModule,
     is_qat: bool,
     fuse_custom_config: Union[FuseCustomConfig, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
@@ -65,11 +77,11 @@ def _fuse_fx(
     r""" Internal helper function to fuse modules in preparation for quantization
 
     Args:
-        graph_module: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
+        model: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
     """
-    _check_is_graph_module(graph_module)
+    _check_is_graph_module(model)
     return fuse(
-        graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
+        model, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
 def _prepare_fx(
     model: torch.nn.Module,
@@ -113,6 +125,8 @@ forward graph of the parent module,
     # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
+    _attach_meta_to_node_if_not_exist(graph_module)
+
     fuse_custom_config = FuseCustomConfig().set_preserved_attributes(prepare_custom_config.preserved_attributes)
     graph_module = _fuse_fx(
         graph_module,
@@ -207,14 +221,15 @@ def fuse_fx(
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
-    preserved_attr_names = prepare_custom_config.preserved_attributes
+    preserved_attr_names = fuse_custom_config.preserved_attributes
     preserved_attrs = {attr: getattr(model, attr) for attr in preserved_attr_names if hasattr(model, attr)}
 
     graph_module = torch.fx.symbolic_trace(model)
+    _attach_meta_to_node_if_not_exist(graph_module)
     graph_module = _fuse_fx(graph_module, False, fuse_custom_config, backend_config)
+
     attach_preserved_attrs_to_model(graph_module, preserved_attrs)
     return graph_module
-
 
 def prepare_fx(
     model: torch.nn.Module,
