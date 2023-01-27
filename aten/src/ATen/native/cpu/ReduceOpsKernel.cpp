@@ -115,14 +115,12 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
 // custom min and max to be used in logcumsumexp for complex arguments
 template <typename scalar_t, bool min>
 c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
-  auto xr = x.real();
-  auto yr = y.real();
-  if (std::isnan(yr) || (std::isnan(std::imag(y)))) {
+  if (std::isnan(y)) {  // either real is nan or imag is nan
     return y;
-  } else if (std::isnan(xr) || (std::isnan(std::imag(x)))) {
+  } else if (std::isnan(x)) {  // either real is nan or imag is nan
     return x;
   } else {
-    return ((xr < yr) == min) ? x : y;  // logical xnor
+    return ((x.real() < y.real()) == min) ? x : y;  // logical xnor
   }
 }
 
@@ -147,7 +145,7 @@ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, cons
   auto min_real = std::real(min);
   auto max_real = std::real(max);
 
-  if (std::isnan(min_real) || std::isnan(std::imag(min))) {
+  if (std::isnan(min)) {  // either real is nan or imag is nan
     // handling the "infectious" NaNs
     return {std::numeric_limits<scalar_t>::quiet_NaN(), std::numeric_limits<scalar_t>::quiet_NaN()};
   } else if ((!std::isfinite(min_real)) && (min_real == max_real)) {
