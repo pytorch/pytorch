@@ -18,7 +18,8 @@ import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
+from torch.fx.experimental.symbolic_shapes import \
+    FloorDiv, ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymInt
 
@@ -479,9 +480,6 @@ expected_failure_sym_magic_methods = {
     ('floordiv', 'SymFloat', 'int'),  # Scalars are not close!
     ('floordiv', 'float', 'SymInt'),  # Scalars are not close!
     ('floordiv', 'SymFloat', 'SymInt'),  # Scalars are not close!
-    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to float
-    ('floordiv', 'int', 'SymFloat'),  # Cannot convert complex to float
-    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to float
 }
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -610,6 +608,44 @@ class TestSymNumberMagicMethods(TestCase):
         self._do_test(fn, inp1, inp2, shape_env, is_unary_fn)
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
+
+class TestFloorDiv(TestCase):
+    @skipIfNoSympy
+    def test_floordiv_simplify(self):
+        # Tests how we simplify or evaluate FloorDiv without free variables
+        shape_env = ShapeEnv()
+        exprs = (
+            # expr, is_auto, is_eval
+            (7 * FloorDiv(6, 2), True, True),
+            (7 * FloorDiv(6.28, 2), False, True),
+            (7 * FloorDiv(6.28, 2.0), False, True),
+            (7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))), False, True),
+        )
+
+        for expr, is_auto, is_eval in exprs:
+            def identity(x):
+                return x
+
+            if is_auto:
+                auto_wrapper = identity
+                auto_result = 21
+            else:
+                auto_wrapper = type
+                auto_result = sympy.Mul
+
+            if is_eval:
+                eval_wrapper = identity
+                eval_result = 21
+            else:
+                eval_wrapper = type
+                eval_result = sympy.Mul
+
+            self.assertEqual(auto_wrapper(expr), auto_result)
+            self.assertEqual(auto_wrapper(expr.doit(deep=False)), auto_result)
+            self.assertEqual(auto_wrapper(expr.doit(deep=True)), auto_result)
+            self.assertEqual(auto_wrapper(sympy.simplify(expr)), auto_result)
+            self.assertEqual(auto_wrapper(shape_env.simplify(expr)), auto_result)
+            self.assertEqual(eval_wrapper(shape_env.evaluate_expr(expr)), eval_result)
 
 if __name__ == '__main__':
     run_tests()

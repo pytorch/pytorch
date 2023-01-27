@@ -1011,7 +1011,9 @@ class ShapeEnv(object):
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
+        # NB: we use subs and not xreplace to simplify all FloorDiv sub-exprs,
+        # like: FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
+        new_expr = safe_expand(new_expr.subs(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -1144,7 +1146,8 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if len(expr.free_symbols) == 0:
+        # NB: FloorDiv currently needs to be evaluated in _maybe_evaluate_static
+        if not expr.has(FloorDiv) and len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
         static_expr = self._maybe_evaluate_static(expr)
