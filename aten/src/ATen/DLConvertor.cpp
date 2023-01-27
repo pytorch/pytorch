@@ -60,6 +60,13 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QUInt2x4:
       TORCH_CHECK(false, "QUInt/QInt types are not supported by dlpack");
       break;
+    case ScalarType::Bits1x8:
+    case ScalarType::Bits2x4:
+    case ScalarType::Bits4x2:
+    case ScalarType::Bits8:
+    case ScalarType::Bits16:
+      TORCH_CHECK(false, "Bit types are not supported by dlpack");
+      break;
     case ScalarType::Undefined:
       TORCH_CHECK(false, "Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
