@@ -123,7 +123,7 @@ void RRefContext::handleExceptionSilent(const JitFuture& jitFuture) {
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)), destroyed_(false) {}
+    : agent_(std::move(agent)) {}
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
