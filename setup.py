@@ -52,6 +52,7 @@
 #
 #   USE_STATIC_MKL
 #     Prefer to link with MKL statically - Unix only
+#
 #   USE_ITT=0
 #     disable use of Intel(R) VTune Profiler's ITT functionality
 #
