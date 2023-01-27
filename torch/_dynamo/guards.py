@@ -601,8 +601,11 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = guard.input_pos_a
-                pos_b = guard.input_pos_b
+                pos_a = guard.input_pos_a - self.output_graph.param_buffer_cnt
+                pos_b = guard.input_pos_b - self.output_graph.param_buffer_cnt
+                
+                assert pos_b >= 0 and pos_a >=0, "Deduped args out of bounds, cannot be negative"
+
                 assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
                     self.output_graph.graphargs
                 ), "Deduped args out of bounds"

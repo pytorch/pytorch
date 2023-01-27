@@ -241,6 +241,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        self.param_buffer_cnt = 0
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -375,6 +376,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         if isinstance(target, torch.Tensor):
+            self.param_buffer_cnt += 1
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
