@@ -198,9 +198,21 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
     check_randomness(randomness); // if we are in eval mode, we don't use about randomness
   }
 
-  if ((train.has_value() && !train) || randomness == RandomnessType::Different) {
-    auto res = at::native_dropout(tensor_value, p, train);
-    return std::make_tuple(makeBatched(std::get<0>(res), 0, cur_level), makeBatched(std::get<1>(res), 0, cur_level));
+  if ((train.has_value() && !train) ||
+      randomness == RandomnessType::Different) {
+    if (!tensor_bdim) {
+      // if tensor is unbatched, add batch dim before
+      // calling dropout.
+      auto shape = tensor_value.sizes();
+      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      shapeVec.reserve(shape.size() + 1);
+      shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
+      tensor_value = tensor_value.expand(shapeVec);
+    }
+    auto [output, mask] = at::native_dropout(tensor_value, p, train);
+    return std::make_tuple(
+        makeBatched(std::move(output), 0, cur_level),
+        makeBatched(std::move(mask), 0, cur_level));
   }
 
   // repeated code from the CPU kernel since the CUDA one doesn't call bernoulli_ explicitly
