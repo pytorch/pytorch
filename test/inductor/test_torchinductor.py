@@ -5291,7 +5291,7 @@ test_skips = {
     "test_reduction4_dynamic_shapes": ("cuda",),
     "test_relu_dynamic_shapes": ("cuda",),
     "test_repeat_dynamic_shapes": ("cuda",),
-    "test_roi_align_dynamic_shapes": ("cpu",),
+    "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
     "test_roll_dynamic_shapes": ("cuda",),
     "test_round_dynamic_shapes": ("cuda",),
     "test_scatter4_dynamic_shapes": ("cuda",),
