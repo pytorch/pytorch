@@ -1040,9 +1040,7 @@ void PeepholeOptimizeONNX(
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
   hackFixupPadPackedShapes(graph->block());
-  GRAPH_DUMP("Before pushPackingPastRnn", graph);
   pushPackingPastRnn(graph->block());
-  GRAPH_DUMP("After pushPackingPastRnn", graph);
   removeNopPacking(graph->block());
   // we only need to fix the size of hidden state and cell state if the batch
   // size is variable
