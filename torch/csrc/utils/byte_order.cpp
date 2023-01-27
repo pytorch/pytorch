@@ -9,6 +9,12 @@
 #include <stdlib.h>
 #endif
 
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <machine/endian.h>
+#elif !defined(_WIN32) && !defined(_WIN64)
+#include <endian.h>
+#endif
+
 namespace {
 
 static inline uint16_t decodeUInt16LE(const uint8_t* data) {
@@ -56,8 +62,21 @@ namespace torch {
 namespace utils {
 
 THPByteOrder THP_nativeByteOrder() {
+#if defined(_WIN32) || defined(_WIN64)
+  return THP_LITTLE_ENDIAN;
+#elif defined(__BYTE_ORDER__)
+  #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return THP_LITTLE_ENDIAN;
+  #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    return THP_BIG_ENDIAN;
+  #else
+    uint32_t x = 1;
+    return *(uint8_t*)&x ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
+  #endif
+#else
   uint32_t x = 1;
   return *(uint8_t*)&x ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
+#endif
 }
 
 void THP_decodeInt16Buffer(
