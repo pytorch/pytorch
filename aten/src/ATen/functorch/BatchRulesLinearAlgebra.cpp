@@ -620,8 +620,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
-  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_tensor, matrix_rank_atol_rtol_tensor_batch_rule);
-  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_float, matrix_rank_atol_rtol_float_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);

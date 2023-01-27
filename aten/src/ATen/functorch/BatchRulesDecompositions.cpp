@@ -317,6 +317,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(multiply_, Tensor)
   OP_DECOMPOSE2(multiply, Scalar)
   OP_DECOMPOSE2(multiply_, Scalar)
+
+  OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_tensor);
+  OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_float);
+
 }
 
 }}

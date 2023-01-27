@@ -735,7 +735,7 @@ Tensor& matrix_rank_impl(
 
   Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
 
-  result = at::sum_out(result, S > tol, /*dim=*/-1);
+  result = at::sum(S > tol, /*dim=*/-1);
   return result;
 }
 
