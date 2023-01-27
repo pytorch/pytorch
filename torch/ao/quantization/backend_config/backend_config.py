@@ -63,6 +63,11 @@ class ObservationType(Enum):
     example: torch.cat, maxpool
     """
 
+    INPUT_OUTPUT_NOT_OBSERVED = 2
+    """this means the input and output are never observed
+    example: x.shape, x.size
+    """
+
 
 @dataclass
 class DTypeWithConstraints:
