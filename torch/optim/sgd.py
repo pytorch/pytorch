@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, required, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc
+from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_foreach,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -137,10 +138,9 @@ SGD.__doc__ = r"""\
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
         {maximize}
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {differentiable}
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc) + r"""
+    """.format(maximize=_maximize_doc, foreach=_foreach_doc, differentiable=_differentiable_doc) + r"""
 
     Example:
         >>> # xdoctest: +SKIP
@@ -190,7 +190,7 @@ def sgd(params: List[Tensor],
         # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
         # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
         has_sparse_grad: bool = None,
-        foreach: bool = None,
+        foreach: Optional[bool] = None,
         *,
         weight_decay: float,
         momentum: float,
@@ -204,8 +204,12 @@ def sgd(params: List[Tensor],
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        # why must we be explicit about an if statement for torch.jit.is_scripting here?
+        # because JIT can't handle Optionals nor fancy conditionals when scripting
+        if not torch.jit.is_scripting():
+            foreach = _default_to_foreach([params, d_p_list, momentum_buffer_list])
+        else:
+            foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')

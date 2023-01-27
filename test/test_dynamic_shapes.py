@@ -591,123 +591,165 @@ class TestSymNumberMagicMethods(TestCase):
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
-# Checks that we correctly implement Python floordiv semantics with FloorDiv.
-# See NOTE [ SymPy eval and assumptions ]
 class TestFloorDiv(TestCase):
+    @staticmethod
+    def python_floordiv(x, y):
+        return x // y
+
+    @staticmethod
+    def torch_floordiv(x, y):
+        # Note: we fully evaluate here since FloorDiv might not always do
+        # that.
+        shape_env = ShapeEnv()
+        return shape_env.evaluate_expr(FloorDiv(x, y))
+
+    @staticmethod
+    def yield_test_cases(values, negate=True):
+        for x, y in values:
+            yield (x, y)
+            if negate:
+                yield (-x, y)
+                yield (x, -y)
+                yield (-x, -y)
+
     @skipIfNoSympy
-    def test_floordiv(self):
+    def test_floordiv_float_int(self):
         values = (
-            # complex is parsed as SymPy Add by FloorDiv (even when created with
-            # the complex constructor) and complex is not supported by Python
-            # floordiv.
-            1.5 + 2.5j,
-            # These test type-promotion and flooring behavior:
-            2.9,
-            2.5,
-            2.1,
-            2.0,
-            7,
-            # These make sure we handle various short-circuits properly:
-            1.0,
-            0.0,
-            1,
-            0,
-            # Note: booleans cannot be passed directly to FloorDiv and cannot
-            # be directly used in arithmetic exprs in SymPy, but we make an
-            # attempt to test them anyway.
-            True,
-            False,
+            (2.5, 2.1),
+            (2.1, 2.5),
+            (2.0, 2.1),
+            (7, 2.5),
+            (2.1, 7),
+            (7, 2),
         )
 
-        # This helps catch issues when flooring.
-        neg_values = tuple(-x for x in values)
+        for x, y in TestFloorDiv.yield_test_cases(values):
+            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
-        def python_func(x, y):
-            return x // y
-
-        def torch_func(x, y):
-            # Note: we fully evaluate here since FloorDiv might not always do
-            # that.
-            shape_env = ShapeEnv()
-            return shape_env.evaluate_expr(FloorDiv(x, y))
-
-        def other_func(func, x, y):
-            if func is python_func:
-                return torch_func(x, y)
-            else:
-                return python_func(x, y)
-
-        funcs = (
-            python_func,
-            torch_func,
+    @skipIfNoSympy
+    def test_floordiv_bool(self):
+        values = (
+            (False, True),
+            (True, 2.5),
+            (2.5, True),
+            (False, 7),
+            (7, True),
         )
 
-        # We do not check error messages on the Python side to avoid depending
-        # on an interpreter version.
-        for func, (x, y) in itertools.product(funcs, itertools.chain(
-            itertools.product(values, values),
-            itertools.product(neg_values, values),
-            itertools.product(values, neg_values),
-            itertools.product(neg_values, neg_values),
-        )):
-            def assert_unsupported_error(func, x, y):
-                if func is torch_func:
-                    # makes sure we use the SymPy types
-                    x = sympy.sympify(x)
-                    y = sympy.sympify(y)
-                    err = (
-                        rf"unsupported operand type\(s\) for //: "
-                        rf"'{type(x).__name__}' and '{type(y).__name__}'"
-                        rf", expected integer or real"
-                    )
-                else:
-                    err = ""
-                self.assertRaisesRegex(TypeError, err, lambda: func(x, y))
+        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
+            # Compares to int since our FloorDiv has no bool support
+            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(int(x), int(y)))
+            # Tests that our impl throws
+            self.assertRaisesRegex(
+                TypeError,
+                (rf"unsupported operand type\(s\) for //: "
+                 rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
+                 rf", expected integer or real"),
+                lambda: TestFloorDiv.torch_floordiv(x, y))
 
-            if type(x) is complex or type(y) is complex:
-                # complex is not supported by floordiv
-                assert_unsupported_error(func, x, y)
-            elif (type(x) is bool or type(y) is bool) and func is torch_func:
-                # bools are not supported in arithmetic exprs in SymPy
-                assert_unsupported_error(func, x, y)
-            elif y == 1:
-                # TODO: sympy.floor fails with inductor, so we do not floor in
-                # FloorDiv, but this is wrong if base is a float. Remove this
-                # skip when fixed
-                pass
-            elif (type(x) is bool or type(y) is bool) and y != 0:
-                # test bools against SymPy ints unless it's a div by zero
-                int_x = int(x) if type(x) is bool else x
-                int_y = int(y) if type(y) is bool else y
-                self.assertEqual(func(x, y), other_func(func, int_x, int_y))
-            elif y == 0:
-                # div by zero
-                if func is torch_func:
-                    err = "division by zero"
-                else:
-                    err = ""
-                self.assertRaisesRegex(ZeroDivisionError, err, lambda: func(x, y))
+    @skipIfNoSympy
+    def test_floordiv_complex(self):
+        values = (
+            (1.5 + 2.5j, 1.3 + 3.5j),
+            (1.5 + 2.5j, 2.5),
+            (2.5, 1.5 + 2.5j),
+            (1.5 + 2.5j, 7),
+            (7, 1.5 + 2.5j),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values):
+            # We don't test error messages to avoid depending on Python
+            # interpreter version
+            self.assertRaises(TypeError, lambda: TestFloorDiv.python_floordiv(x, y))
+            self.assertRaisesRegex(
+                TypeError,
+                (rf"unsupported operand type\(s\) for //: "
+                 rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
+                 rf", expected integer or real"),
+                lambda: TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_div_by_zero(self):
+        values = (
+            (2.5, 0),
+            (2.1, 0.0),
+            (2.3, sympy.Symbol("s", zero=True)),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
+            # We don't test error messages to avoid depending on Python
+            # interpreter version
+            if type(y) is not sympy.Symbol:
+                self.assertRaises(ZeroDivisionError, lambda: TestFloorDiv.python_floordiv(x, y))
+            self.assertRaisesRegex(
+                ZeroDivisionError,
+                "division by zero",
+                lambda: TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_zero_base(self):
+        values = (
+            (0, 2.5),
+            (0.0, 2.1),
+            (sympy.Symbol("s", zero=True), 2.3),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
+            if type(x) is not sympy.Symbol:
+                self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
             else:
-                # otherwise, compare results
-                self.assertEqual(func(x, y), other_func(func, x, y))
+                self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
+
+    # TODO: inductor fails with sympy.floor, so we don't floor base as Python
+    @unittest.expectedFailure
+    @skipIfNoSympy
+    def test_floordiv_div_by_one(self):
+        values = (
+            (2.5, 1),
+            (2.1, 1.0),
+            (2, 1.0),
+            (2, 1),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values):
+            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
     @skipIfNoSympy
     def test_floordiv_simplify(self):
-        # Tests how we eval FloorDiv exprs and sub-exprs without free vars, no
-        # matter which simplify/eval func is called.
-        expr = 7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
+        # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
+        exprs = (
+            # expr, is_auto, is_eval
+            (7 * FloorDiv(6, 2), True, True),
+            (7 * FloorDiv(6.28, 2), False, True),
+            (7 * FloorDiv(6.28, 2.0), False, True),
+            (7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))), False, True),
+        )
 
-        # All these should return the same result.
-        # TODO: sympy.floor fails with inductor. So some of these don't simplify
-        # at the moment since we avoid calling sympy.floor in FloorDiv. Instead,
-        # we wait until the expression needs to be evaluated.
-        self.assertEqual(type(expr), sympy.Mul)
-        self.assertEqual(type(expr.doit(deep=False)), sympy.Mul)
-        self.assertEqual(type(expr.doit(deep=True)), sympy.Mul)
-        self.assertEqual(type(sympy.simplify(expr)), sympy.Mul)
-        self.assertEqual(type(shape_env.simplify(expr)), sympy.Mul)
-        self.assertEqual(shape_env.evaluate_expr(expr), 21)
+        for expr, is_auto, is_eval in exprs:
+            def identity(x):
+                return x
+
+            if is_auto:
+                auto_wrapper = identity
+                auto_result = 21
+            else:
+                auto_wrapper = type
+                auto_result = sympy.Mul
+
+            if is_eval:
+                eval_wrapper = identity
+                eval_result = 21
+            else:
+                eval_wrapper = type
+                eval_result = sympy.Mul
+
+            self.assertEqual(auto_wrapper(expr), auto_result)
+            self.assertEqual(auto_wrapper(expr.doit(deep=False)), auto_result)
+            self.assertEqual(auto_wrapper(expr.doit(deep=True)), auto_result)
+            self.assertEqual(auto_wrapper(sympy.simplify(expr)), auto_result)
+            self.assertEqual(auto_wrapper(shape_env.simplify(expr)), auto_result)
+            self.assertEqual(eval_wrapper(shape_env.evaluate_expr(expr)), eval_result)
 
     @skipIfNoSympy
     def test_floordiv_assumptions(self):
@@ -745,8 +787,6 @@ class TestFloorDiv(TestCase):
             # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
             # always returns an integer 1 when both args are the same object.
             # This even works for Symbols with no assumptions specified.
-            # Otherwise, we only state that the result is a real. We DO NOT
-            # assert anything about integers because it makes SymPy too eager.
             if base is divisor:
                 self.assertTrue(op.is_integer)
                 self.assertTrue(op.is_real)
