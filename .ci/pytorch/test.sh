@@ -335,7 +335,7 @@ test_inductor_benchmark_perf() {
   # Not checking accuracy for perf test for now
   # shellcheck disable=SC2086
   if [[ "$1" == *smoketest* ]]; then
-    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
+    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
       --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
       --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
     # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
