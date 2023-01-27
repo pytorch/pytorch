@@ -744,7 +744,7 @@ def _short_circuit_binary_broadcasting_op(a, b):
 
 
 def _short_circuit_unary_op(a):
-    if isinstance(a, torch.FakeTensor):
+    if isinstance(a, FakeTensor):
         return FakeTensor(
             a.fake_mode, torch.empty(a.shape, device="meta"), device=a.device
         )
