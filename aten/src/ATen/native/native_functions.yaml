@@ -14611,3 +14611,10 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
+
+# Collectives
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int stride) -> Tensor
+  python_module: distributed.functional
+  dispatch:
+    CompositeExplicitAutograd: all_reduce
+  variants: function
