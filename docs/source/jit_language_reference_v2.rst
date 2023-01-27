@@ -209,7 +209,7 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
 ::
 
     TSStructuralType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                        TSOptional | TSUnion | TSFuture | TSRRef
+                        TSOptional | TSUnion | TSFuture | TSRRef | TSAwait
 
     TSTuple          ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple     ::= "namedtuple" "(" (TSType ",")* TSType ")"
@@ -218,6 +218,7 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
     TSUnion          ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture         ::= "Future" "[" TSType "]"
     TSRRef           ::= "RRef" "[" TSType "]"
+    TSAwait          ::= "Await" "[" TSType "]"
     TSDict           ::= "Dict" "[" KeyType "," TSType "]"
     KeyType          ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 
@@ -226,6 +227,7 @@ Where:
 * ``Tuple``, ``List``, ``Optional``, ``Union``, ``Future``, ``Dict`` represent Python type class names that are defined in the module ``typing``. To use these type names, you must import them from ``typing`` (e.g., ``from typing import Tuple``).
 * ``namedtuple`` represents the Python class ``collections.namedtuple`` or ``typing.NamedTuple``.
 * ``Future`` and ``RRef`` represent the Python classes ``torch.futures`` and ``torch.distributed.rpc``.
+* ``Await`` represent the Python class ``torch._awaits._Await``
 
 **Compared to Python**
 
@@ -828,8 +830,8 @@ TorchScript Type System Definition
     TSMetaType      ::= "Any"
     TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
-    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                         TSOptional | TSUnion | TSFuture | TSRRef
+    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict | TSOptional |
+                         TSUnion | TSFuture | TSRRef | TSAwait
     TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
     TSList          ::= "List" "[" TSType "]"
@@ -837,6 +839,7 @@ TorchScript Type System Definition
     TSUnion         ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture        ::= "Future" "[" TSType "]"
     TSRRef          ::= "RRef" "[" TSType "]"
+    TSAwait         ::= "Await" "[" TSType "]"
     TSDict          ::= "Dict" "[" KeyType "," TSType "]"
     KeyType         ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
 

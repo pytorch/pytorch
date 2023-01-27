@@ -113,6 +113,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           to_process.emplace_back(std::move(elem));
         }
       } break;
+      case AwaitType::Kind: {
+        auto aw = w.value.toAwait();
+        if (aw->completed()) {
+          Work elem = {w.type->containedType(0), aw->wait()};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
       case OptionalType::Kind: {
         if (!w.value.isNone()) {
           Work elem = {w.type->containedType(0), w.value};
