@@ -1134,7 +1134,7 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            if not config.dynamic_shapes:
+            if not dynamo_config.dynamic_shapes:
                 self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
@@ -1166,7 +1166,7 @@ class TritonKernel(Kernel):
                     code.writeline(
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}"
                     )
-                elif not config.dynamic_shapes:
+                elif not dynamo_config.dynamic_shapes:
                     code.writeline(
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
@@ -1398,7 +1398,7 @@ class TritonScheduling:
                     stack.close()
                 else:
                     # TODO - mostly works but needs a couple fixes
-                    if not config.dynamic_shapes:
+                    if not dynamo_config.dynamic_shapes:
                         # TODO - use split ranges ?
                         indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
