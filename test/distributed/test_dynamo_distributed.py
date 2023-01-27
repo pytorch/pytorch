@@ -104,6 +104,43 @@ def get_custom_model(device):
     correct_outputs = m(*inputs)
     return m, inputs, correct_outputs
 
+def get_duplicates_model(device):
+
+    class MyLinear(torch.nn.Module):
+        def __init__(self):
+            super(MyLinear, self).__init__()
+            self.linear = torch.nn.Linear(512, 512)
+
+        def forward(self, x):
+            return self.linear(x)
+
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super(MyModule, self).__init__()
+            mods = [
+                (MyLinear(), torch.nn.ReLU()),
+                # sandwich the custom in the middle so it comes before and after
+                (MyCustomLinear(), torch.nn.ReLU()),
+                (MyLinear(), torch.nn.ReLU()),
+            ]
+            self.reused_param = torch.nn.Parameter(512, 512)
+            self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
+
+        def forward(self, x, y):
+            # test special case where the 0th bucket (layers close to graph input) is at capacity, which would
+            # trigger a new bucket, but there are only trivial ops without parameters to put into the new bucket.
+            # optimize this case by fusing that 'empty bucket' back together with the previous full one
+            return self.seq(x + y)
+
+    m = MyModule().to(device)
+    m.apply(init_weights)
+    inputs = torch.rand((512, 512)).to(device)
+    # test duplicated inputs
+    inputs = (inputs, inputs)
+    correct_outputs = m(*inputs)
+    return m, inputs, correct_outputs
+
+
 def get_hf_bert(rank):
     # Note: use @import_transformers_or_skip on your test case if you use this
     # in a multiprocessing test
@@ -568,7 +605,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize(ddp_optimizer.compile_fn)
         def opt_fn(inputs):
-            return ddp_m(inputs)
+            return ddp_m(*inputs)
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
