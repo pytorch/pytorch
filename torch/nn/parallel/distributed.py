@@ -1,6 +1,7 @@
 import copy
 import inspect
 import itertools
+import functools
 import logging
 import os
 import sys
@@ -61,6 +62,7 @@ def _tree_unflatten_with_rref(output, treespec, output_is_rref):
     if output_is_rref:
         output = RRef(output)
     return output
+
 
 
 def _find_tensors(obj):
@@ -157,12 +159,20 @@ class _BufferCommHook:
     buffer_comm_hook_location: _BufferCommHookLocation
 
 
-def _enqueue_delay_allreduce(ddp_instance, *args):
-    print("RV: running hook to enqueue delay allreduce")
-    assert ddp_instance.static_graph and ddp_instance.num_iterations == 1
-    Variable._execution_engine.queue_callback(
-        ddp_instance.reducer._delay_all_reduce,
+def _enqueue_delay_allreduce_hook(
+    ddp_weakref, *args,
+):
+    assert (
+        ddp_weakref().num_iterations == 1 and ddp_weakref().static_graph,
+    ), (
+        "Incorrect backward hook registeration: "
+        f"iter: {ddp_weakref().num_iterations} static_graph: {ddp_weakref().static_graph}"
     )
+    # Remove the handle to prevent hook from firing for future
+    # iterations.
+    ddp_weakref()._bwd_hook_handle.remove()
+    # Enqueue delay allreduce for DDP static graph.
+    Variable._execution_engine.queue_callback(ddp_weakref().reducer._delay_all_reduce)
 
 # Add a DDPSink to run various functions when backwards starts, such as
 # queueing call back of out-most backward/graph task,
@@ -1162,6 +1172,13 @@ class DistributedDataParallel(Module, Joinable):
                     is_joined_rank=False
                 )
 
+            if self.static_graph and self.num_iterations == 1:
+                self._bwd_hook_handle = self.module.register_full_backward_pre_hook(
+                    hook=functools.partial(
+                        _enqueue_delay_allreduce_hook, weakref.ref(self)
+                    )
+                )
+
             output = self._run_ddp_forward(*inputs, **kwargs)
 
             # sync params according to location (before/after forward) user
@@ -1186,15 +1203,8 @@ class DistributedDataParallel(Module, Joinable):
             else:
                 self.require_forward_param_sync = False
 
-        # TODO: DDPSink is currently enabled for unused parameter detection and
-        # static graph training for first iteration.
-        if self.static_graph and self.num_iterations == 1:
-            self._bwd_hook_handle = self.register_full_backward_pre_hook(
-                hook=_enqueue_delay_allreduce
-            )
-        elif self.static_graph and self.num_iterations == 2:
-            self._bwd_hook_handle.remove()
-        elif self.find_unused_parameters and not self.static_graph:
+        # TODO: DDPSink is currently enabled for unused parameter detection
+        if self.find_unused_parameters and not self.static_graph:
             state_dict = {
                 "static_graph": self.static_graph,
                 "num_iterations": self.num_iterations,
