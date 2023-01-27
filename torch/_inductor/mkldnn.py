@@ -8,8 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch import sym_int
-
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
@@ -353,9 +351,7 @@ class PackedLinear(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = sym_int(
-            reduce(lambda x, y: x * y, input_size) / input_size[-1]
-        )
+        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
