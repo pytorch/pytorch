@@ -630,7 +630,7 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
     torch.polar : {f64, f32},
-    torch.segment_reduce : {f64, f16, bf16, f32},
+    torch._segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},

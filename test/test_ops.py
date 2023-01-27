@@ -1984,7 +1984,7 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
-    xfail("segment_reduce", "lengths"),
+    xfail("_segment_reduce", "lengths"),
     xfail("norm", "nuc"),
     xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),

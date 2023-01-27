@@ -1165,6 +1165,9 @@ for name in dir(_C._VariableFunctions):
     if not name.startswith("_"):
         __all__.append(name)
 
+# Hide some APIs that should not be public
+globals()['_segment_reduce'] = globals().pop('segment_reduce')
+
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
