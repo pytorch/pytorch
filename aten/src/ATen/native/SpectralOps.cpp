@@ -155,7 +155,7 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   }
 
   // Only call pad if necessary since pad copies the entire tensor
-  return must_copy ? at::constant_pad_nd(x, pad_amount) : std::move(x);
+  return must_copy ? at::constant_pad_nd(x, pad_amount) : x;
 }
 
 Tensor fft_r2c_maybe_out(
