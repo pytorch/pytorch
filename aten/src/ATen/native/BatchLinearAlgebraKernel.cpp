@@ -914,8 +914,7 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   auto n = input.size(-1);
   auto leading_dimension = std::max<int64_t>(1, m);
 
-  std::function<void(int64_t, int64_t)> loop = [](int64_t, int64_t) {};
-  loop = [&](int64_t start, int64_t end) {
+  const auto loop = [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
       int* pivots_working_ptr = &pivots_data[i * pivots_stride];
@@ -931,9 +930,9 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   };
   int64_t matrix_size = std::min(m, n);
   int64_t computational_complexity =
-      batch_size * matrix_size * matrix_size * matrix_size;
+      std::log(batch_size) + 3 * std::log(matrix_size);
   // A threshold test out on 32 core/socket ICX system
-  bool do_parallel = computational_complexity >= 102400;
+  bool do_parallel = computational_complexity >= std::log(102400);
   if (do_parallel) {
     at::parallel_for(0, batch_size, 0, loop);
   } else {
