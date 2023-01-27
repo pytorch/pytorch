@@ -215,6 +215,8 @@ class SymNode:
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
+        if len(self.expr.free_symbols) == 0:
+            return int(self.expr)
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
     # You can manually trigger a guard with this function
@@ -267,6 +269,12 @@ if HAS_SYMPY:
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
+            if isinstance(base, sympy.Add):
+                for a in base.args:
+                    gcd = sympy.gcd(a, divisor)
+                    if gcd == divisor:
+                        return FloorDiv(base - a, divisor) + a / gcd
+
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(
@@ -289,6 +297,7 @@ if HAS_SYMPY:
                 ))
             return None
 
+@lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         return sympy.expand(r)
@@ -1107,26 +1116,28 @@ class ShapeEnv(object):
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        try:
-            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
-            if len(solutions) != 1:
-                return
-            solution = solutions[0][free[0]]
-            if all(t.is_integer for t in sympy.preorder_traversal(solution)):
-                new_var = self._find(solution)
-                self.replacements[cast(sympy.Symbol, free[0])] = new_var
-        except NotImplementedError:
-            if expr.has(sympy.Mod):
-                mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                try:
-                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
-                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
-                        self.divisible.add(mod_expr)
-                except NotImplementedError:
-                    pass
-            return
-        except RecursionError:
-            log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+        if not expr.has(sympy.Mod):
+            try:
+                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+                if len(solutions) != 1:
+                    return
+                solution = solutions[0][free[0]]
+                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                    new_var = self._find(solution)
+                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
+            except NotImplementedError:
+                pass
+            except RecursionError:
+                log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+        if expr.has(sympy.Mod):
+            mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+            try:
+                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                    self.divisible.add(mod_expr)
+            except NotImplementedError:
+                pass
+        return
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):

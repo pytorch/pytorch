@@ -50,6 +50,7 @@ from common_utils import (
 )
 import types
 from collections import namedtuple
+import contextlib
 
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
@@ -3456,7 +3457,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('unique', ''),  # dynamic op
@@ -3634,13 +3635,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
-        xfail('vdot'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3731,7 +3731,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('special.scaled_modified_bessel_k1'),
         xfail('special.modified_bessel_k0'),
-        xfail('linalg.vecdot', ''),
         xfail('linalg.ldl_factor', ''),
         xfail('special.modified_bessel_i1'),
         xfail('special.chebyshev_polynomial_t'),
@@ -3740,14 +3739,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # AssertionError: Tensor-likes are not equal!
+        # Issue: https://github.com/pytorch/pytorch/issues/70904
+        xfail('bitwise_left_shift', device_type='cpu'),
+        decorate('bitwise_right_shift', device_type='cpu',
+                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
@@ -4264,6 +4266,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
             torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
+
+    def test_vmap_with_anomaly_detection(self):
+        with torch.autograd.set_detect_anomaly(True):
+            x = torch.zeros(3) - 1
+
+            def fn(x):
+                return x.sum()
+
+            per_sample_grad = vmap(grad(fn))(x)
+            self.assertEqual(per_sample_grad, torch.ones_like(x))
+
+            def bad_fn(x):
+                return x.sqrt().sum()
+
+            err_msg = "Function 'SqrtBackward0' returned nan values in its 0th output."
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                vmap(grad(bad_fn))(x)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
@@ -4908,6 +4927,21 @@ class TestRandomness(TestCase):
         jacfwd(torch.bernoulli, randomness="same")(x)
         jacfwd(torch.bernoulli, randomness="different")(x)
 
+    @parametrize('randomness', ['error', 'same', 'different'])
+    def test_dropout_unbatched(self, device, randomness):
+        x = torch.randn(3, device=device)
+        y = torch.randn(1, 3, device=device)
+
+        def fn(x, y):
+            # output from dropout should be a Tensor[B, 1, 3] (B=3)
+            return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
+
+        # We just verify that this doesn't raise an error for
+        # `same` and `different` randomness.
+        # Ref: https://github.com/pytorch/pytorch/issues/92283
+        context = self.assertRaises(RuntimeError) if randomness == 'error' else contextlib.nullcontext()
+        with context:
+            vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
 
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
