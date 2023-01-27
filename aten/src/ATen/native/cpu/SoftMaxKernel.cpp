@@ -72,7 +72,7 @@ inline void _vec_log_softmax_lastdim(
       for (const auto j : c10::irange(loop_end)) {
         int64_t i = ii + j;
         scalar_t* input_data = input_data_base + i * dim_size;
-        max_input_arr.get()[j] = vec::reduce_all<scalar_t>(
+        max_input_arr[j] = vec::reduce_all<scalar_t>(
             [](Vec& x, Vec& y) { return vec::maximum(x, y); },
             input_data,
             dim_size);
@@ -81,7 +81,7 @@ inline void _vec_log_softmax_lastdim(
         int64_t i = ii + j;
         scalar_t* input_data = input_data_base + i * dim_size;
         scalar_t max_input = max_input_arr[j];
-        tmp_sum_scalar.get()[j] = vec::map_reduce_all<scalar_t>(
+        tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
             [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
             [](Vec x, Vec y) { return x + y; },
             input_data,
