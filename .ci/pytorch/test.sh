@@ -480,7 +480,7 @@ test_libtorch() {
 
     # Make test_reports directory
     # NB: the ending test_libtorch must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
@@ -528,7 +528,7 @@ test_aot_compilation() {
 
   # Make test_reports directory
   # NB: the ending test_libtorch must match the current function name for the current
-  # test reporting process (in print_test_stats.py) to function as expected.
+  # test reporting process to function as expected.
   TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
   mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
@@ -542,7 +542,7 @@ test_vulkan() {
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
     LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
@@ -559,7 +559,7 @@ test_distributed() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     # NB: the ending test_distributed must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
     "$TORCH_BIN_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
@@ -583,7 +583,7 @@ test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
