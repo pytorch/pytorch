@@ -185,10 +185,11 @@ class TimmRunnner(BenchmarkRunner):
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
-        retries = 1
+        tries = 1
         success = False
         model = None
-        while not success and retries < 6:
+        total_allowed_tries = 5
+        while not success and tries <= total_allowed_tries:
             try:
                 model = create_model(
                     model_name,
@@ -206,10 +207,14 @@ class TimmRunnner(BenchmarkRunner):
                     # drop_block_rate=kwargs.pop('drop_block', None),
                 )
                 success = True
-            except Exception:
-                wait = retries * 30
-                time.sleep(wait)
-                retries += 1
+            except Exception as e:
+                tries += 1
+                if tries <= total_allowed_tries:
+                    wait = tries * 30
+                    print(
+                        "Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
+                    time.sleep(wait)
 
         if model is None:
             raise RuntimeError(f"Failed to load model '{model_name}'")
