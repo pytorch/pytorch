@@ -194,7 +194,7 @@ void run_fmha_fwd(Launch_params<FMHA_fprop_params> &launch_params) {
 // out will get populated the output attention
 // First return value is softmax_logsumexp
 // Second return value is the random generator state
-std::tuple<at::Tensor, at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -207,12 +207,9 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const float softmax_scale,
         const bool zero_tensors,
         const bool is_causal,
+        const bool return_softmax,
         const int num_splits,
         c10::optional<at::Generator> gen_) {
-    // return_softmax is a parameter for flash attention
-    // but for the in core api though we are removing this parameter.
-    constexpr bool return_softmax = false;
-
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
@@ -283,9 +280,13 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
     // auto softmax_lse = torch::full({batch_size, num_heads, max_seqlen_k}, -std::numeric_limits<float>::infinity(), opts.dtype(at::kFloat));
 
+    at::Tensor flash_softmax;
+    if (return_softmax) {flash_softmax = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts); }
+
     if( zero_tensors ) {
         out.zero_();
         softmax_lse.fill_(-std::numeric_limits<float>::infinity());
+        if (return_softmax) {flash_softmax.zero_();}
     }
 
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
@@ -301,7 +302,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
                      cu_seqlens_q.data_ptr(),
                      cu_seqlens_k.data_ptr(),
                      loop ? o_tmp.data_ptr() : nullptr,
-                     nullptr,
+                     return_softmax ? flash_softmax.data_ptr() : nullptr,
                      softmax_lse.data_ptr(),
                      p_dropout,
                      softmax_scale,
@@ -324,7 +325,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
 
     run_fmha_fwd(launch_params);
 
-    return {softmax_lse, generator_state};
+    return {softmax_lse, generator_state, flash_softmax};
 }
 
 void run_fmha_bwd(FMHA_dgrad_params &params, cudaStream_t stream, const bool configure) {

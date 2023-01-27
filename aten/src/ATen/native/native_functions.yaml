@@ -13793,7 +13793,7 @@
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> (Tensor, Tensor)
   variants: function
 
-- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor rng_state)
+- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor rng_state, Tensor debug_attn_mask)
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
@@ -13817,7 +13817,7 @@
   dispatch:
     CUDA: _chunk_grad_outputs_efficient_attention
 
-- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state)
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, bool return_debug_mask) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor debug_attn_mask)
   variants: function
   dispatch:
     CUDA: _flash_attention_forward

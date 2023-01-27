@@ -679,12 +679,13 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool is_causal) {
+    bool is_causal,
+    bool return_debug_mask) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -728,8 +729,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor> _scaled_dot
   Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  Tensor attention, log_sumexp, rng_state;
-  std::tie(attention, log_sumexp, rng_state) =
+  Tensor attention, log_sumexp, rng_state, debug_attn_mask;
+  std::tie(attention, log_sumexp, rng_state, debug_attn_mask) =
       at::_flash_attention_forward(
           query_reshaped,
           key_reshaped,
@@ -739,12 +740,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor> _scaled_dot
           max_seqlen_batch_q,
           max_seqlen_batch_k,
           dropout_p,
-          is_causal);
+          is_causal,
+          return_debug_mask);
   // Reshape output to convert nnz to batch_size and seq_len
   attention =
       attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
 
-  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, rng_state);
+  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, rng_state, debug_attn_mask);
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -806,7 +808,7 @@ bool _chunk_grad_outputs_efficient_attention(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -815,7 +817,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_k,
     double dropout_p,
-    bool is_causal) {
+    bool is_causal,
+    bool return_debug_mask) {
 #if defined(USE_FLASH_ATTENTION)
   /*
   num_splits determines how much to parallelize over the seqlen_q dimension
@@ -827,8 +830,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
   auto softmax_scale = std::pow(query.size(-1), -0.5);
   at::Tensor output = at::empty_like(query);
 
-  Tensor logsumexp, rng_state;
-  std::tie(logsumexp, rng_state) = fmha::mha_fwd(
+  Tensor logsumexp, rng_state, debug_attn_mask;
+  std::tie(logsumexp, rng_state, debug_attn_mask) = fmha::mha_fwd(
       query,
       key,
       value,
@@ -841,12 +844,15 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
       softmax_scale,
       false, /*zero_tensors = false for all calls here*/
       is_causal,
+      return_debug_mask, /*return_softmax = false(this is used for debugging)*/
       num_splits,
       c10::nullopt);
-  return std::make_tuple(output, logsumexp, rng_state);
+
+  debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
+  return std::make_tuple(output, logsumexp, rng_state, debug_attn_mask);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor(), Tensor(), Tensor());
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(

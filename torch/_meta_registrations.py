@@ -2050,6 +2050,7 @@ def meta__scaled_dot_product_flash(
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
+    return_debug_mask: bool = False,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
@@ -2089,11 +2090,27 @@ def meta__scaled_dot_product_flash(
         # pytorch/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp:154
         # where sizeof(4120) will equal 4 bytes for all systems that are
         # expected to run this meta function :hope:
-        rng_state_size = torch.empty(
+        rng_state_tensor = torch.empty(
             DEFAULT_RNG_STATE_SIZE, dtype=torch.uint8, device="meta"
         )
     else:
-        rng_state_size = torch.empty(0, dtype=query.dtype, device=query.device)
+        rng_state_tensor = torch.empty(0, dtype=query.dtype, device=query.device)
+
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+            dtype=query.dtype,
+            device=query.device,
+        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+
     return (
         ouput,
         logsumexp,
@@ -2101,7 +2118,8 @@ def meta__scaled_dot_product_flash(
         cumulative_sequence_length_k,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        rng_state_size,
+        rng_state_tensor,
+        debug_mask,
     )
 
 
