@@ -1466,7 +1466,7 @@ class DistributedDataParallelTest(
             return c10d.distributed_c10d._get_default_group()
         except RuntimeError:
             store = self._get_store()
-            c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
+            c10d.init_process_group("gloo", store=store, rank=self.rank, world_size=self.world_size)
             return c10d.distributed_c10d._get_default_group()
 
     def _test_gloo_backend(
