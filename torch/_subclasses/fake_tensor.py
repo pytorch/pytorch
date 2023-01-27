@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
+from torch import SymFloat, SymInt
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import is_float_dtype, is_integer_dtype
@@ -726,6 +727,40 @@ class FakeTensor(torch.Tensor):
     __torch_function__ = torch._C._disabled_torch_function_impl
 
 
+def _short_circuit_binary_broadcasting_op(a, b):
+    if isinstance(a, (int, float, SymInt, SymFloat)):
+        return b
+    if isinstance(b, (int, float, SymInt, SymFloat)):
+        return a
+    import torch._refs as refs
+
+    a, b = refs._maybe_broadcast(a, b)
+    return FakeTensor(
+        a.fake_mode,
+        torch.empty(a.shape, device="meta"),
+        device=a.device,
+    )
+    return None
+
+
+def _short_circuit_unary_op(a):
+    if isinstance(a, torch.FakeTensor):
+        return FakeTensor(
+            a.fake_mode, torch.empty(a.shape, device="meta"), device=a.device
+        )
+    return None
+
+
+short_circuit_binary_ops = {
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.mul.Tensor,
+    aten.sub.Tensor,
+    aten.div.Tensor,
+}
+
+short_circuit_unary_ops = {aten.relu.default, aten.rsqrt.default}
+
 # We keep one instantiation of `fake_tensor_converter` active
 # for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
@@ -882,6 +917,11 @@ class FakeTensorMode(TorchDispatchMode):
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
+
+        if func in short_circuit_binary_ops and len(kwargs) == 0:
+            return _short_circuit_binary_broadcasting_op(*args)
+        elif func in short_circuit_unary_ops and len(kwargs) == 0:
+            return _short_circuit_unary_op(*args)
 
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
