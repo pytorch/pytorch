@@ -16,7 +16,7 @@
         return __VA_ARGS__();                                        \
       default:                                                       \
         AT_ERROR(                                                    \
-            #NAME,                                                   \
+            NAME,                                                    \
             " expected sparse compressed tensor layout but got ",    \
             the_layout);                                             \
     }                                                                \
@@ -35,7 +35,7 @@
         return (COLUMN_DIM_ACTION)();                             \
       default:                                                    \
         AT_ERROR(                                                 \
-            #NAME,                                                \
+            NAME,                                                 \
             " expected sparse compressed tensor layout but got ", \
             the_layout);                                          \
     }                                                             \
@@ -54,7 +54,7 @@
         return (BLOCK_ACTION)();                                  \
       default:                                                    \
         AT_ERROR(                                                 \
-            #NAME,                                                \
+            NAME,                                                 \
             " expected sparse compressed tensor layout but got ", \
             the_layout);                                          \
     }                                                             \
@@ -70,7 +70,7 @@
         return (ROW_DIM_ACTION)();                                    \
       default:                                                        \
         AT_ERROR(                                                     \
-            #NAME,                                                    \
+            NAME,                                                     \
             " expected sparse row compressed tensor layout but got ", \
             the_layout);                                              \
     }                                                                 \
@@ -86,7 +86,7 @@
         return (COL_DIM_ACTION)();                                       \
       default:                                                           \
         AT_ERROR(                                                        \
-            #NAME,                                                       \
+            NAME,                                                        \
             " expected sparse column compressed tensor layout but got ", \
             the_layout);                                                 \
     }                                                                    \
@@ -101,7 +101,7 @@
         return (ACTION)();                                                    \
       default:                                                                \
         AT_ERROR(                                                             \
-            #NAME,                                                            \
+            NAME,                                                             \
             " expected sparse compressed (non-block) tensor layout but got ", \
             the_layout);                                                      \
     }                                                                         \
@@ -116,7 +116,7 @@
         return (ACTION)();                                                \
       default:                                                            \
         AT_ERROR(                                                         \
-            #NAME,                                                        \
+            NAME,                                                         \
             " expected sparse compressed block tensor layout but got ",   \
             the_layout);                                                  \
     }                                                                     \

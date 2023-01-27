@@ -1140,13 +1140,13 @@ class TestSparseCSR(TestCase):
             # error on a strided
             a_strided = a.to_dense()
             with self.assertRaisesRegex(
-                    RuntimeError, r'"resize_as_sparse_compressed_: src " expected sparse compressed tensor layout'):
+                    RuntimeError, r'resize_as_sparse_compressed_: src  expected sparse compressed tensor layout'):
                 b.resize_as_sparse_(a_strided)
 
             # error on b strided
             b_strided = b.to_dense()
             with self.assertRaisesRegex(
-                    RuntimeError, r'"resize_as_sparse_compressed_: self " expected sparse compressed tensor layout'):
+                    RuntimeError, r'resize_as_sparse_compressed_: self  expected sparse compressed tensor layout'):
                 b_strided.resize_as_sparse_(a)
 
             # error if layout does not match, transpose induces layout flip

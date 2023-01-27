@@ -6739,6 +6739,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: is_coalesced_sparse
+    CompositeExplicitAutograd: is_coalesced_default
   device_check: NoCheck
   device_guard: False
 
@@ -6771,6 +6772,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: indices_sparse
+    CompositeExplicitAutograd: indices_default
   device_check: NoCheck
   device_guard: False
 
@@ -6780,6 +6782,7 @@
     SparseCPU, SparseCUDA, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: values_nested
+    CompositeExplicitAutograd: values_default
   device_check: NoCheck
   device_guard: False
 
@@ -6787,6 +6790,7 @@
   variants: method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA: crow_indices_sparse_csr
+    CompositeExplicitAutograd: crow_indices_default
   device_check: NoCheck
   device_guard: False
 
@@ -6794,6 +6798,7 @@
   variants: method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA: col_indices_sparse_csr
+    CompositeExplicitAutograd: col_indices_default
   device_check: NoCheck
   device_guard: False
 
@@ -6801,6 +6806,7 @@
   variants: method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA: ccol_indices_sparse_csr
+    CompositeExplicitAutograd: ccol_indices_default
   device_check: NoCheck
   device_guard: False
 
@@ -6808,6 +6814,7 @@
   variants: method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA: row_indices_sparse_csr
+    CompositeExplicitAutograd: row_indices_default
   device_check: NoCheck
   device_guard: False
 

@@ -86,6 +86,11 @@ bool is_coalesced_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->coalesced();
 }
 
+bool is_coalesced_default(const Tensor& self) {
+  TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
+  return false;
+}
+
 int64_t _nnz_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->nnz();
 }
@@ -114,11 +119,19 @@ Tensor indices_sparse(const Tensor& self) {
   return get_sparse_impl(self)->indices().alias();
 }
 
+Tensor indices_default(const Tensor& self) {
+  TORCH_CHECK(false, "indices expected sparse coordinate tensor layout but got ", self.layout());
+}
+
 Tensor values_sparse(const Tensor& self) {
   TORCH_CHECK(
       self.is_coalesced(),
       "Cannot get values on an uncoalesced tensor, please call .coalesce() first");
   return get_sparse_impl(self)->values().alias();
+}
+
+Tensor values_default(const Tensor& self) {
+  TORCH_CHECK(false, "values expected sparse tensor layout but got ", self.layout());
 }
 
 /******************************************************************************
@@ -632,6 +645,7 @@ SparseTensor& copy_sparse_(
 }
 
 SparseTensor coalesce(const SparseTensor& self) {
+  TORCH_CHECK(self.layout() == kSparse, "coalesce expected sparse coordinate tensor layout but got ", self.layout());
   // See NOTE: [ coalesce autograd ]
   if (self.is_coalesced()) {
     return self;
