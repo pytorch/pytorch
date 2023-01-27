@@ -30,7 +30,8 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
-    Work
+    Work,
+    _lookup_process_group
 )
 from torch._six import string_classes
 from torch.autograd.profiler import record_function
@@ -1605,6 +1606,7 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     else:
         work.wait()
 
+
 @exception_handler
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -1655,6 +1657,8 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     """
     _check_single_tensor(tensor, "tensor")
+    if isinstance(group, int):
+        group = _lookup_process_group(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
         return
@@ -3753,3 +3757,11 @@ def new_subgroups_by_enumeration(
                 logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups
+
+# from torch.library import Library, impl
+# aten_cpu_lib = Library("aten", "IMPL", "CPU")
+# aten_cuda_lib = Library("aten", "IMPL", "CUDA")
+
+# @impl(aten_cpu_lib, 'all_reduce')
+# def all_reduce_cpu(self, group_id, reduce_op):
+#     return self

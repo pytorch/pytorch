@@ -14730,3 +14730,10 @@
   dispatch:
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam, _fused_adam.out
+
+# Collectives
+# TODO: add reduce_op and add some form of ranks instead of processgroup obj
+- func: all_reduce(Tensor self, int group_id, str reduce_op) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: all_reduce
+  variants: function

@@ -2649,4 +2649,9 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
+@register_meta(aten.all_reduce)
+def all_reduce_meta(self, group_id, reduce_op):
+    return self
+
+
 activate_meta()
