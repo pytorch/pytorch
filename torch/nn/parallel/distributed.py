@@ -1,7 +1,6 @@
 import copy
 import inspect
 import itertools
-import functools
 import logging
 import os
 import sys
