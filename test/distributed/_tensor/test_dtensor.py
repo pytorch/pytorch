@@ -2,6 +2,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+import torch.nn.functional as F
+from torch.distributed.tensor.parallel import (
+    PairwiseParallel,
+    parallelize_module,
+)
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 
@@ -11,22 +16,24 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
+class DummyMLP(torch.nn.Module):
+    def __init__(self, device):
+        super(DummyMLP, self).__init__()
+        self.net1 = torch.nn.Linear(5, 1024, device=device)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(1024, 4, device=device)
+
+    def forward(self, x):
+        return self.net2(F.relu(self.net1(x)))
+
+    def reset_parameters(self, *args, **kwargs):
+        with torch.no_grad():
+            self.net1.weight.fill_(0.5)
+            self.net2.weight.fill_(1)
+            self.net1.bias.fill_(1.5)
+            self.net2.bias.fill_(1.2)
 
 class DTensorTest(DTensorTestBase):
-    # @with_comms
-    # def test_tensor_constructor(self):
-    #     import torch.distributed._tensor as dist_tensor
-    #     shard_spec = PlacementSpec(device_mesh, strategies=[Shard(0)])
-    #     empty_tensor = dist_tensor.empty((12, 10), placement_spec=shard_spec)
-    #     zero_tensor = dist_tensor.zeros((12, 10), placement_spec=shard_spec)
-    #     one_tensor = dist_tensor.ones((12, 10), placement_spec=shard_spec)
-
-    #     zero_cuda_tensor = dist_tensor.zeros((12, 10), device="cuda", placement_spec=shard_spec)
-
-    #     dist_tensor.empty_like(empty_tensor)
-    #     dist_tensor.zero_like(empty_tensor)
-    #     dist_tensor.one_like(empty_tensor)
-
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -54,6 +61,58 @@ class DTensorTest(DTensorTestBase):
                 size=dist_tensor_shape,
                 requires_grad=True,
             )
+
+    @with_comms
+    def test_meta_dtensor(self):
+        device_mesh = self.build_device_mesh()
+        dist_specs = [[Shard(0)], [Replicate()]]
+        meta_tensor = torch.randn(1024, 2048, device="meta")
+        for dist_spec in dist_specs:
+            # Test distribute_tensor on meta tensor
+            meta_dtensor = distribute_tensor(meta_tensor, device_mesh, dist_spec)
+            self.assertTrue(meta_dtensor.is_meta)
+            meta_dtensor = torch.empty_like(meta_dtensor, device=self.device_type)
+            torch.nn.init.constant_(meta_dtensor, 1.2)
+            value_tensor = torch.empty_like(meta_dtensor.to_local()).fill_(1.2)
+            self.assertFalse(meta_dtensor.is_meta)
+            self.assertEqual(meta_dtensor.device.type, self.device_type)
+            self.assertEqual(meta_dtensor.to_local(), value_tensor)
+            # Test from_local on meta tensor
+            meta_dtensor = DTensor.from_local(meta_tensor, device_mesh, dist_spec)
+            meta_dtensor = torch.empty_like(meta_dtensor, device=self.device_type)
+            torch.nn.init.constant_(meta_dtensor, 1.5)
+            self.assertEqual(meta_dtensor.device.type, self.device_type)
+            value_tensor = torch.empty_like(meta_dtensor.to_local()).fill_(1.5)
+            self.assertEqual(meta_dtensor.to_local(), value_tensor)
+
+    @with_comms
+    def test_modules_w_meta_dtensor(self):
+        model = DummyMLP("meta")
+        device_mesh = self.build_device_mesh()
+        model_tp = parallelize_module(model, device_mesh, PairwiseParallel())
+        model_tp.to_empty(device=self.device_type)
+        model_tp.reset_parameters()
+        optim = torch.optim.SGD(model_tp.parameters(), lr=0.1)
+        model_regular = DummyMLP(self.device_type)
+        model_regular_tp = parallelize_module(model_regular, device_mesh, PairwiseParallel())
+        optim_regular = torch.optim.SGD(model_regular_tp.parameters(), lr=0.1)
+        model_regular_tp.reset_parameters()
+        torch.manual_seed(0)
+        inp = torch.randn(20, 5, device=self.device_type)
+
+        output = model_tp(inp)
+        output_regular = model_regular_tp(inp)
+        self.assertEqual(output, output_regular)
+
+        output.sum().backward()
+        output_regular.sum().backward()
+
+        optim.step()
+        optim_regular.step()
+
+        torch.manual_seed(1)
+        inp = torch.randn(20, 5, device=self.device_type)
+        self.assertEqual(model_tp(inp), model_regular_tp(inp))
 
     @with_comms
     def test_dtensor_stride(self):
