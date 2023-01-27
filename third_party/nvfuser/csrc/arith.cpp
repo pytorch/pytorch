@@ -644,6 +644,36 @@ TensorView* normal(
   return out;
 }
 
+TensorView* randn(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::NormalStandard, out, dtype);
+  return out;
+}
+
+TensorView* randn_like(TensorView* tv) {
+  TORCH_CHECK(
+      isFloatingPointType(tv->dtype()),
+      "input must have floating point type, but got ",
+      tv->dtype());
+  std::vector<Val*> shape;
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return randn(shape, tv->dtype());
+}
+
+Val* randn_like(Val* v) {
+  return randn_like(v->as<TensorView>());
+}
+
 TensorView* rand_like(TensorView* tv) {
   TORCH_CHECK(
       isFloatingPointType(tv->dtype()),

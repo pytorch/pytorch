@@ -151,6 +151,11 @@ TORCH_CUDA_CU_API TensorView* rand(
     DataType dtype);
 TORCH_CUDA_CU_API Val* rand_like(Val*);
 TORCH_CUDA_CU_API TensorView* rand_like(TensorView*);
+TORCH_CUDA_CU_API TensorView* randn(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API Val* randn_like(Val*);
+TORCH_CUDA_CU_API TensorView* randn_like(TensorView*);
 
 TORCH_CUDA_CU_API TensorView* uniform(
     const std::vector<Val*>& shape,

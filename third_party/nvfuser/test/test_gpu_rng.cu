@@ -411,8 +411,12 @@ TEST_F(NVFuserTest, FusionNormal_CUDA) {
   fusion->addInput(std);
   TensorView* tv0 = normal({size_val}, mean, std, DataType::Float);
   TensorView* tv1 = normal({size_val}, mean, std, DataType::Double);
+  TensorView* tv2 = randn({size_val}, DataType::Double);
+  TensorView* tv3 = randn_like(tv2);
   fusion->addOutput(tv0);
   fusion->addOutput(tv1);
+  fusion->addOutput(tv2);
+  fusion->addOutput(tv3);
 
   FusionExecutorCache fec(std::move(fusion_ptr));
 
@@ -423,12 +427,14 @@ TEST_F(NVFuserTest, FusionNormal_CUDA) {
     at::manual_seed(0);
     auto ref0 = generate_normal(size, kFloat) * 0.5f + 1.0f;
     auto ref1 = generate_normal(size, kDouble) * 0.5 + 1.0;
+    auto ref2 = generate_normal(size, kDouble);
+    auto ref3 = generate_normal(size, kDouble);
 
     testValidate(
         fec.fusion(),
         cg_outputs,
         {size, 1.0, 0.5},
-        {ref0, ref1},
+        {ref0, ref1, ref2, ref3},
         __LINE__,
         __FILE__);
   }
