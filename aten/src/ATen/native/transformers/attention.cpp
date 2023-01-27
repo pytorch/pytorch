@@ -758,7 +758,8 @@ Tensor scaled_dot_product_attention(
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal) {
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
+        const c10::optional<Tensor>& dropout_mask) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -801,8 +802,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-      attn = at::dropout(attn, dropout_p, true);
+      if (dropout_mask.has_value()) {
+        auto attn_dropout_masked = attn.masked_fill(dropout_mask->logical_not(), 0.0);
+        auto dropout_scaling = 1.0 / (1 - dropout_p);
+        return std::make_tuple(at::matmul(attn_dropout_masked, value * dropout_scaling), attn);
+      } else {
+        attn = at::dropout(attn, dropout_p, true);
+      }
     }
+
     return std::make_tuple(at::matmul(attn, value), attn);
 }
 
