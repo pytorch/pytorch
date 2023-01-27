@@ -74,6 +74,9 @@ jobs:
     outputs:
       build-outcome: ${{ steps.build.outcome }}
     steps:
+      - name: Clean up disk space before running MacOS workflow
+        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -85,9 +88,6 @@ jobs:
           if [ -n "${XCODE_VERSION}" ]; then
             echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "${GITHUB_ENV}"
           fi
-
-      - name: Clean up disk space before running MacOS workflow
-        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job
 
       - name: Setup miniconda
         if: inputs.environment-file == ''
