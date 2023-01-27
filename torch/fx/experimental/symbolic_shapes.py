@@ -260,8 +260,8 @@ if HAS_SYMPY:
 
         @classmethod
         def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
+            if base.is_zero:
+                return sympy.S.Zero
             if divisor == 1:
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
