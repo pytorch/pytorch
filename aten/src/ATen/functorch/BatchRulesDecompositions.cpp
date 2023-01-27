@@ -18,6 +18,10 @@ namespace at { namespace functorch {
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
 
+
+#define OP_DECOMPOSE2_BIM2(op, overload) m.impl(#op"."#overload, EXISTING_BDIM_BATCH_RULE(ATEN_FN2(op, overload)));
+
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(alpha_dropout_);
   OP_DECOMPOSE(dropout_);
@@ -317,6 +321,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(multiply_, Tensor)
   OP_DECOMPOSE2(multiply, Scalar)
   OP_DECOMPOSE2(multiply_, Scalar)
+
+  OP_DECOMPOSE2_BIM2(upsample_bicubic2d, vec);
+  OP_DECOMPOSE2_BIM2(upsample_bilinear2d, vec);
+  OP_DECOMPOSE2_BIM2(upsample_linear1d, vec);
+  OP_DECOMPOSE2_BIM2(upsample_nearest1d, vec);
+  OP_DECOMPOSE2_BIM2(upsample_nearest2d, vec);
+  OP_DECOMPOSE2_BIM2(upsample_nearest3d, vec);
+  OP_DECOMPOSE2_BIM2(upsample_trilinear3d, vec);
 }
 
 }}
