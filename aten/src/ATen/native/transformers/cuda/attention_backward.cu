@@ -96,6 +96,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   auto softmax_scale = std::pow(query.size(-1), -0.5);
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
+  auto contiguous_out = out.contiguous();
   Tensor dq = at::empty_like(query);
   Tensor dk = at::empty_like(key);
   Tensor dv = at::empty_like(value);
@@ -117,7 +118,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           query,
           key,
           value,
-          out,
+          contiguous_out,
           logsumexp,
           dq,
           dk,
