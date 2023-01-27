@@ -898,7 +898,7 @@ Tensor, where the value of the Tensor is taken to be its value at the time backw
 
 However, if you register hooks to a Tensor, and then modify that Tensor in-place, hooks
 registered before in-place modification similarly receive gradients of the outputs with
-respect to the Tensor. However, the value of the Tensor is taken to be its value before
+respect to the Tensor, but the value of the Tensor is taken to be its value before
 in-place modification.
 
 If you prefer the behavior in the former case,
