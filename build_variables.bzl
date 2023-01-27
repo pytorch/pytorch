@@ -620,6 +620,7 @@ libtorch_lite_eager_symbolication = [
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
+    "torch/csrc/utils/byte_order.cpp",
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
