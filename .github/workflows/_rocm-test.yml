@@ -26,6 +26,12 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 300
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
 
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
@@ -64,7 +70,7 @@ jobs:
     needs: filter
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
-    timeout-minutes: 300
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     strategy:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
@@ -102,6 +108,14 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Test
         id: test
         env:
@@ -120,7 +134,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
-        timeout-minutes: 270
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           set -x
 
