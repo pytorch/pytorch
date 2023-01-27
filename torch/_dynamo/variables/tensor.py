@@ -299,7 +299,7 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
-        elif name == "item":
+        elif name == "item" and not config.dynamic_shapes:
             if config.capture_scalar_outputs:
                 example_value = get_fake_value(self.proxy.node, tx)
                 return wrap_fx_proxy(
