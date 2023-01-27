@@ -896,11 +896,12 @@ Behavior of Tensor hooks when Tensor is modified in-place
 Usually hooks registered to a Tensor fire when gradients are computed for that Tensor, i.e.,
 they fire when the autograd engine reaches the grad_fn of that Tensor during backward, and
 they receive the gradient of the outputs with respect to that Tensor, where the value of the
-Tensor is considered at the time backward is computed.
+Tensor is taken to be its value at the time backward is computed.
 
 However, if you register hooks to a Tensor, and then modify that Tensor in-place, hooks
-registered before in-place modification also receive gradients of with respect to the Tensor
-but the value of the Tensor is taken to be its value before in-place modification.
+registered before in-place modification similarly receive gradients of the outputs with
+respect to the Tensor. However, the value of the Tensor is taken to be its value before
+in-place modification.
 
 If you prefer the behavior in the former case,
 you should register them to the Tensor after all in-place modifications to it have been made.
