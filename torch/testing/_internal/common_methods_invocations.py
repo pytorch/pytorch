@@ -16093,9 +16093,9 @@ op_db: List[OpInfo] = [
            )
            ),
     OpInfo('logcumsumexp',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           backward_dtypes=floating_types_and(torch.bfloat16),
+           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.bfloat16),
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
