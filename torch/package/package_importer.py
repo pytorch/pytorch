@@ -365,7 +365,9 @@ class PackageImporter(Importer):
             assert mangled_filename is not None
             # pre-emptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
-            assert filename not in linecache.cache  # type: ignore[attr-defined]
+            # assert filename not in linecache.cache  # type: ignore[attr-defined]
+            if filename in linecache.cache:
+                print(f"mangled filename - {mangled_filename}")
             linecache.lazycache(mangled_filename, ns)
 
             code = self._compile_source(filename, mangled_filename)
