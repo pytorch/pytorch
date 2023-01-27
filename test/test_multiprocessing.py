@@ -276,6 +276,7 @@ class TestMultiprocessing(TestCase):
             # parent accordingly
             while total_waiting_time <= MAX_WAITING_TIME_IN_SECONDS and not is_set:
                 time.sleep(waiting_time)
+                total_waiting_time += waiting_time
                 is_set = e.is_set()
 
             self.assertTrue(is_set)
