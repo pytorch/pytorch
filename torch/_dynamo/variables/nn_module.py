@@ -220,11 +220,15 @@ class NNModuleVariable(VariableTracker):
                 )
                 class_source = AttrSource(self.source, "__class__")
                 if is_lazy:
-                    fn = mod.__class__.__call__
-                    fn_source = AttrSource(class_source, "__call__")
+                    fn = mod.__call__.__func__
+                    fn_source = AttrSource(
+                        AttrSource(self.source, "__call__"), "__func__"
+                    )
                 else:
-                    fn = mod.__class__.forward
-                    fn_source = AttrSource(class_source, "forward")
+                    fn = mod.forward.__func__
+                    fn_source = AttrSource(
+                        AttrSource(self.source, "forward"), "__func__"
+                    )
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
