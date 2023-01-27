@@ -1229,7 +1229,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(index_add, index_add_batch_rule);
   VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
   VMAP_SUPPORT(gather, gather_batch_rule);
-  VMAP_SUPPORT(gather_backward, gather_backward_batch_rule);
   VMAP_SUPPORT2(scatter, value, scatter_value_batch_rule);
   VMAP_SUPPORT2(scatter, src, scatter_src_batch_rule);
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
