@@ -5819,6 +5819,70 @@ class TestQuantizeFx(QuantizationTestCase):
                 nn.Linear,
                 nn.Tanh)
 
+    @override_qengines
+    def test_linear_size_view(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_relu=False):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 32)
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                if self.use_relu:
+                    x = self.relu(x)
+                return x.view(x.size(0), 1, 4, 8)
+
+        for use_relu in [False, True]:
+            model_fp32 = M(use_relu).eval()
+            qengine = torch.backends.quantized.engine
+            qconfig_mapping = get_default_qconfig_mapping(qengine)
+            x = torch.randn((5, 16))
+            model_fp32(x)
+            prepared_model = prepare_fx(model_fp32, qconfig_mapping, x)
+            prepared_model(x)
+            quantized_model = convert_fx(prepared_model)
+            node_occurrence = {
+                ns.call_module(nnq.Linear): 0 if use_relu else 1,
+                ns.call_module(nniq.LinearReLU): 1 if use_relu else 0,
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
+
+    @override_qengines
+    def test_linear_shape_view(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_relu=False):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 32)
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                if self.use_relu:
+                    x = self.relu(x)
+                return x.view(x.shape[0], 1, 4, 8)
+
+        for use_relu in [False, True]:
+            model_fp32 = M(use_relu).eval()
+            qengine = torch.backends.quantized.engine
+            qconfig_mapping = get_default_qconfig_mapping(qengine)
+            x = torch.randn((5, 16))
+            model_fp32(x)
+            prepared_model = prepare_fx(model_fp32, qconfig_mapping, x)
+            prepared_model(x)
+            quantized_model = convert_fx(prepared_model)
+            node_occurrence = {
+                ns.call_module(nnq.Linear): 0 if use_relu else 1,
+                ns.call_module(nniq.LinearReLU): 1 if use_relu else 0,
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
