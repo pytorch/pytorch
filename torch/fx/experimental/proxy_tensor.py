@@ -18,6 +18,7 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+from torch.utils._stats import count
 
 from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
 from torch._subclasses import FakeTensor
@@ -477,6 +478,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.trace_state = {}
         self._managers = []
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
