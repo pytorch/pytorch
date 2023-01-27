@@ -50,7 +50,6 @@ from common_utils import (
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._functorch.named_members_polyfill import _named_buffers, _named_parameters
 
 USE_TORCHVISION = False
 try:
@@ -2234,7 +2233,6 @@ symbolic_aot_autograd_failures = {
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
@@ -2324,8 +2322,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
-    xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
@@ -2346,7 +2342,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.grid_sample', ''),  # RuntimeError: aten.grid_sampler_3d.default - couldn't find sym ...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2401,6 +2396,7 @@ symbolic_aot_autograd_failures = {
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd_lowrank', ''),  # could not find kernel
+    xfail('symeig', ''),  # aten.symeig.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2528,8 +2524,8 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
             params_and_buffers = {**named_params, **named_buffers}
             return torch.func.functional_call(m, params_and_buffers, c_args, c_kwargs)
 
-        named_params = dict(_named_parameters(m, remove_duplicate=False))
-        named_buffers = dict(_named_buffers(m, remove_duplicate=False))
+        named_params = dict(m.named_parameters(remove_duplicate=False))
+        named_buffers = dict(m.named_buffers(remove_duplicate=False))
         num_params_buffers = len(named_params) + len(named_buffers)
         compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers)
         params_buffers_args = [named_params, named_buffers, args]

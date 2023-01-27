@@ -70,6 +70,9 @@ class CI(NamedTuple):
 
 CI_SKIP = collections.defaultdict(list)
 
+
+# Skips for dynamic=False
+
 CI_SKIP[CI("aot_eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
@@ -86,7 +89,9 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
+    "moco",  # Please convert all Tensors to FakeTensors first
     "hf_BigBird",  # OOM
+    "tacotron2",  # AssertionError: Deduped args out of bounds
     # Huggingface
     "BartForConditionalGeneration",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
@@ -101,7 +106,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
-    "tacotron2",  # AssertionError: Deduped args out of bounds
     "vision_maskrcnn",
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
@@ -114,12 +118,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
-]
-
-CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
-    *CI_SKIP[CI("aot_eager", training=True)],
-    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "twins_pcpvt_base",  # timeout
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
@@ -166,6 +164,57 @@ CI_SKIP[CI("inductor", training=True)] = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     "xcit_large_24_p8_224",  # fp64_OOM
+]
+
+# Skips for dynamic=True
+
+CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # cannot determine truth value of Relational
+    # timm_models
+    "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
+]
+
+CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=True)],
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "twins_pcpvt_base",  # timeout
+]
+
+CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
+    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False)],
+    # torchbench
+    "Background_Matting",  # accuracy
+    "LearningToPaint",  # accuracy
+    "functorch_dp_cifar10",  # timeout
+    "opacus_cifar10",  # timeout
+    "pytorch_unet",  # ValueError: floor is not defined
+    # The size of tensor a (320) must match the size of tensor b (512) at
+    # non-singleton dimension 2
+    "speech_transformer",
+    # huggingface
+    "MBartForConditionalGeneration",  # OOM
+    "OPTForCausalLM",  # OOM
+    # timm_models
+    "eca_halonext26ts",  # 'Pointwise' object has no attribute 'get_stride'
+    "hrnet_w18",  # name 'floor' is not defined
+    "jx_nest_base",  # sym_sqrt() missing 1 required positional argument: 'a'
+    "pnasnet5large",  # ceiling is not defined
+    "swin_base_patch4_window7_224",  # floor is not defined
+    "twins_pcpvt_base",  # timeout
+    "volo_d1_224",  # ceiling is not defined
+    "xcit_large_24_p8_224",  # ceiling is not defined
+]
+
+CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
+    # NB: Intentionally omitting for symmetry with dynamic=False
+    # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=False, dynamic=True)],
+    *CI_SKIP[CI("inductor", training=True)],
+    # TODO: Fill this in
 ]
 
 
@@ -1468,9 +1517,15 @@ class BenchmarkRunner:
             )
             print(status)
         if self.args.timing:
-            from torch._dynamo.utils import print_time_report
+            from torch._dynamo.utils import op_count, print_time_report
+            from torch.utils._stats import simple_call_counter
 
             print_time_report()
+            stats = f"STATS: call_* op count: {op_count}"
+            stats = stats + " | ".join(
+                f"{key}:{value}" for key, value in simple_call_counter.items()
+            )
+            print(stats)
 
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
@@ -1804,11 +1859,6 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
-        "--inductor-dynamic",
-        action="store_true",
-        help="Measure speedup with TorchInductor",
-    )
-    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -2031,7 +2081,7 @@ def run(runner, args, original_dir=None):
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
 
-    if args.inductor or args.inductor_dynamic or args.inductor_settings:
+    if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
         if args.float16:
             # TODO(jansel): check if correctness issue is real
@@ -2061,19 +2111,10 @@ def run(runner, args, original_dir=None):
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
-    elif args.inductor or args.inductor_dynamic:
+    elif args.inductor:
         inductor_config.debug = args.verbose
         if args.threads:
             inductor_config.cpp.threads = args.threads
-
-        if args.inductor_dynamic:
-            inductor_config.triton.cudagraphs = False
-            inductor_config.dynamic_shapes = True
-        else:
-            inductor_config.dynamic_shapes = False
-            if args.export_profiler_trace:
-                print("Profiling requested, setting cudagraphs to False")
-                inductor_config.triton.cudagraphs = False
 
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
@@ -2186,7 +2227,7 @@ def run(runner, args, original_dir=None):
         if args.profiler_trace_name is None:
             if args.backend:
                 args.profiler_trace_name = args.backend
-            elif args.inductor or args.inductor_dynamic:
+            elif args.inductor:
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
