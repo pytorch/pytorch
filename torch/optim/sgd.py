@@ -208,7 +208,7 @@ def sgd(params: List[Tensor],
         # because JIT can't handle Optionals nor fancy conditionals when scripting
         if not torch.jit.is_scripting():
             foreach = _default_to_fused_or_foreach([params, d_p_list, momentum_buffer_list],
-                                                   differentiable = False, has_fused = False)[1]
+                                                   differentiable=False, has_fused=False)[1]
         else:
             foreach = False
 

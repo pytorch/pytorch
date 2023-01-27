@@ -188,7 +188,7 @@ def nadam(params: List[Tensor],
 
     if foreach is None:
         foreach = _default_to_fused_or_foreach([params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps],
-                                               differentiable, has_fused = False)[1]
+                                               differentiable, has_fused=False)[1]
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')

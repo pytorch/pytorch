@@ -194,7 +194,7 @@ def adadelta(
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         foreach = _default_to_fused_or_foreach([params, grads, square_avgs, acc_deltas],
-                                               differentiable, has_fused = False)[1]
+                                               differentiable, has_fused=False)[1]
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

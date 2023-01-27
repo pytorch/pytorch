@@ -312,7 +312,7 @@ def adam(params: List[Tensor],
     if fused is None and foreach is None:
         fused, foreach = _default_to_fused_or_foreach(
             [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, has_fused = True)
+            differentiable, has_fused=True)
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")

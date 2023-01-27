@@ -221,7 +221,7 @@ def rmsprop(
 
     if foreach is None:
         foreach = _default_to_fused_or_foreach([params, grads, square_avgs, grad_avgs, momentum_buffer_list],
-                                               differentiable, has_fused = False)[1]
+                                               differentiable, has_fused=False)[1]
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
