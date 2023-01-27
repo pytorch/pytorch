@@ -40,7 +40,13 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
+from .source import (
+    ConstantSource,
+    is_constant_source,
+    LocalInputSource,
+    LocalSource,
+    ShapeEnvSource,
+)
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -241,7 +247,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
-        self.param_buffer_cnt = 0
+        self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -314,6 +320,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 removed_nodes += 1
         log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
+    def add_grapharg(self, arg: GraphArg):
+        curr_pos = len(self.graphargs)
+        self.graphargs.append(arg)
+        if isinstance(arg.source, LocalInputSource):
+            self.pos_to_arg[arg.source.pos] = curr_pos
+
     def count_calls(self):
         return count_calls(self.graph)
 
@@ -376,7 +388,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         if isinstance(target, torch.Tensor):
-            self.param_buffer_cnt += 1
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 

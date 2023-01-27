@@ -1481,9 +1481,18 @@ def aot_wrapper_dedupe(
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            # Edge case, only happens for identity
-            if dupe_arg_pos != kept_pos:
-                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_pos, dupe_arg_pos))
+            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
+            kept_arg_dict = flat_args[kept_pos].__dict__
+            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
+                d_positions = dupe_arg_dict['graph_arg_pos']
+                k_positions = kept_arg_dict['graph_arg_pos']
+                assert(d_positions == k_positions)
+                if len(d_positions) >= 1:
+                    for i in range(1, len(d_positions)):
+                        pos = d_positions[i]
+                        pre_pos = d_positions[i - 1]
+                        print("GUARD", pre_pos, pos)
+                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -1512,8 +1521,11 @@ def aot_wrapper_dedupe(
         # Test that the computed remove/add arg functions are an inverse
         new_args = add_dupe_args(remove_dupe_args(args))
         seen = {}
+        print(add_dupe_map)
         for i, (x, y) in enumerate(zip(new_args, args)):
             seen[y] = None
+            print("i", i)
+
             assert x is y, format_guard_bug_msg(
                 aot_config,
                 f"{describe_input(i, aot_config)} would be a duplicate of "
