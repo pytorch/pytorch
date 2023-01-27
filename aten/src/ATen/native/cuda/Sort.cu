@@ -13,7 +13,7 @@
 #include <limits>
 #include <c10/core/DeviceArray.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename T>
 static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
@@ -280,4 +280,4 @@ void sortKeyValueInplace(
   }
 }
 
-}}  // namespace at::native
+}  // namespace at::native

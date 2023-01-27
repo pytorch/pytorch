@@ -114,12 +114,11 @@ class TORCH_API Optimizer {
   }
 
   /// Constructs the `Optimizer` from a vector of parameters.
-  // NOLINTNEXTLINE(performance-move-const-arg)
   explicit Optimizer(
       std::vector<Tensor> parameters,
       std::unique_ptr<OptimizerOptions> defaults)
       : Optimizer(
-            {std::move(OptimizerParamGroup(parameters))},
+            {OptimizerParamGroup(std::move(parameters))},
             std::move(defaults)){};
 
   /// Adds the given param_group to the optimizer's param_group list.
@@ -135,7 +134,7 @@ class TORCH_API Optimizer {
   void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
-  void zero_grad();
+  void zero_grad(bool set_to_none = true);
 
   /// Provides a const reference to the parameters in the first param_group this
   /// optimizer holds.

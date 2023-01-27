@@ -18,8 +18,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/complex.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
@@ -257,5 +256,4 @@ REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
