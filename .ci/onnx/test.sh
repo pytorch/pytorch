@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/bin/bash -ex
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
-  pip install click mock tabulate networkx==2.0
+  pip install click mock tabulate networkx==2.2
   pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
 fi
 
@@ -43,23 +43,13 @@ if [[ "$PIP_USER" = root && "$CURRENT_USER" != root ]]; then
   MAYBE_SUDO=sudo
 fi
 
-# Uninstall pre-installed hypothesis and coverage to use an older version as newer
-# versions remove the timeout parameter from settings which ideep/conv_transpose_test.py uses
-$MAYBE_SUDO pip -q uninstall -y hypothesis
-$MAYBE_SUDO pip -q uninstall -y coverage
-
-# "pip install hypothesis==3.44.6" from official server is unreliable on
-# CircleCI, so we host a copy on S3 instead
-$MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
-$MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-$MAYBE_SUDO pip -q install hypothesis==4.57.1
-
 ##############
 # ONNX tests #
 ##############
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
-  pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 onnxruntime==1.12.1 beartype==0.10.4 onnx==1.12.0
+  pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 beartype==0.10.4 onnx==1.12.0 coloredlogs==15.0.1
+  pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.14.0.dev20230131004
   # TODO: change this when onnx-script is on testPypi
   pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@4f3ff0d806d0d0f30cecdfd3e8b094b1e492d44a'
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
