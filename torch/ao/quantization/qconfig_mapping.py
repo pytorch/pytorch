@@ -106,15 +106,8 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
 
-    # QConfig for fused ops for onednn backend
-    # Separate ops are required to have the same qconfig as fused ops
-    # TODO: we should be able to configure qconfig for patterns
-    if backend == 'onednn':
-        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig) \
-                       .set_object_type(torch.nn.LeakyReLU, qconfig) \
-                       .set_object_type(torch.nn.functional.leaky_relu, qconfig) \
-                       .set_object_type(torch.nn.Tanh, qconfig) \
-                       .set_object_type(torch.nn.functional.tanh, qconfig)
+    # TODO Currently it's required that separate ops in a fused op/module have the same qconfig.
+    #      Need to be able to support fusion of ops with different qconfigs
 
     return qconfig_mapping
 

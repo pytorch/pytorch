@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+import sympy
+
 import torch
 
 import torch._dynamo
@@ -28,6 +30,8 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -35,41 +39,42 @@ from torch.testing._internal.common_utils import (
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-try:
-    import sympy
-
-    importlib.import_module("functorch")
-    importlib.import_module("filelock")
-
-    import torch._inductor.config
-    from functorch.compile import config as functorch_config
-    from torch._decomp import get_decompositions
-    from torch._inductor import codecache, config, metrics, test_operators
-    from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
-    from torch._inductor.codegen.triton import texpr
-    from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
-    from torch._inductor.ir import IndexingDiv, ModularIndexing
-    from torch._inductor.overrides import (
-        linear_permute_fusion,
-        linear_transpose,
-        permute_linear_fusion,
-        permute_matmul_fusion,
-        sink_cat_after_pointwise,
-        transpose_linear,
-        transpose_matmul,
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
     )
-    from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, timed
-
-    # This will only pass on pytorch builds newer than roughly 5/15/2022
-    assert get_decompositions([torch.ops.aten.trace])
-    # Requires functorch
-    from torch._inductor.compile_fx import compile_fx_inner
-except (ImportError, AssertionError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock") from e
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+importlib.import_module("functorch")
+importlib.import_module("filelock")
+
+import torch._inductor.config
+from functorch.compile import config as functorch_config
+from torch._decomp import get_decompositions
+from torch._inductor import codecache, config, metrics, test_operators
+from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
+from torch._inductor.codegen.triton import texpr
+
+from torch._inductor.compile_fx import (
+    compile_fx,
+    compile_fx_inner,
+    complex_memory_overlap,
+)
+from torch._inductor.ir import ModularIndexing
+from torch._inductor.overrides import (
+    linear_permute_fusion,
+    linear_transpose,
+    permute_linear_fusion,
+    permute_matmul_fusion,
+    sink_cat_after_pointwise,
+    transpose_linear,
+    transpose_matmul,
+)
+from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.utils import has_torchvision_roi_align, timed
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -552,7 +557,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
-        # if there are negative terms in ModularIndexing base, we cannot replace it with IndexingDiv
+        # if there are negative terms in ModularIndexing base, we cannot replace it with FloorDiv
         expr = ModularIndexing(i1 - 15, 1, 64)
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges),
@@ -560,8 +565,8 @@ class TestIndexingSimplification(TorchTestCase):
         )
         # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
-            sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
-            IndexingDiv(r3 + i2 + i1, 32),
+            sizevars.simplify_with_ranges(FloorDiv(r3 + i2 + i1, 32), var_ranges),
+            FloorDiv(r3 + i2 + i1, 32),
         )
 
         expr = ModularIndexing(2 * i2 + r3, 1, 64)
@@ -569,7 +574,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
 
         # check the same thing but with symbolic divisor
-        self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
+        self.assertEqual(FloorDiv(r3 * i0, r3), i0)
         self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
 
         # (10*i) % 10 is always zero and should get optimized away
@@ -597,7 +602,7 @@ class TestIndexingSimplification(TorchTestCase):
 
         # Constant fold from divisor into base
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
-        self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
+        self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
 
         # Nested modular indexing is correctly simplified
         var_ranges = {"i1": 13, "i2": 121}
@@ -607,7 +612,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {"i2": 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = IndexingDiv(ModularIndexing(i2, 1, 28), 7)
+        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
@@ -654,8 +659,8 @@ class TestIndexingSimplification(TorchTestCase):
             ModularIndexing(i0, 10, i1 * i2) + 10,
         )
 
-        # works for ModularIndexing + IndexingDiv
-        expr5 = 197 * IndexingDiv(i0, 197) + ModularIndexing(i0, 1, 197)
+        # works for ModularIndexing + FloorDiv
+        expr5 = 197 * FloorDiv(i0, 197) + ModularIndexing(i0, 1, 197)
         simplified = sizevars.simplify_with_ranges(expr5, {})
         self.assertEqual(simplified, i0)
         self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
@@ -667,9 +672,9 @@ class TestIndexingSimplification(TorchTestCase):
         )
 
         # divisor != 1
-        expr6 = 197 * IndexingDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
+        expr6 = 197 * FloorDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
         simplified = sizevars.simplify_with_ranges(expr6, {})
-        self.assertEqual(simplified, IndexingDiv(i0, 3))
+        self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
@@ -4386,6 +4391,30 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    def test_randn_like_empty(self):
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, v1: torch.Tensor):
+                vx = v1.min(dim=1).values
+                v2 = torch.randn_like(vx)
+                return v2
+
+        model = Model()
+        x = torch.rand(10, 3, 0)
+
+        self.common(model, (x,))
+
+    @patch.object(config, "fallback_random", True)
+    def test_like_rands(self):
+        def fn(x):
+            return torch.rand_like(x), torch.randn_like(x)
+
+        self.common(fn, [torch.zeros([20, 20])])
+
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -5166,6 +5195,7 @@ test_skips = {
     "test_add_inplace_permuted_dynamic_shapes": ("cuda",),
     "test_addmm_dynamic_shapes": ("cuda",),
     "test_alexnet_prefix_dynamic_shapes": ("cpu", "cuda"),
+    "test_randn_like_empty_dynamic_shapes": ("cpu", "cuda"),
     "test_any_dynamic_shapes": ("cuda",),
     "test_argmax_argmin2_dynamic_shapes": ("cuda",),
     "test_as_strided_dynamic_shapes": ("cuda",),
