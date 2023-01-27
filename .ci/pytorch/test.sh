@@ -335,12 +335,23 @@ test_inductor_benchmark_perf() {
   # Not checking accuracy for perf test for now
   # shellcheck disable=SC2086
   if [[ "$1" == *smoketest* ]]; then
-    python benchmarks/dynamo/torchbench.py --performance --backend inductor --float16 --training \
+    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
       --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
       --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
     # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
     # this value needs to be actively maintained to make this check useful
     python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+
+    # Check memory compression ratio for a few models
+    for test in hf_Albert timm_efficientdet timm_vision_transformer; do
+      python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
+        --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
+        --only $test --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+      cat "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+      python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
+        "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv \
+        --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+    done
   else
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
