@@ -449,7 +449,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
-                # self.pdf = torch.distributions.Normal(self.mean, torch.tensor([1.0]))
 
             def forward(self, a, b, c, d, e, f):
                 a.t_()

@@ -1521,11 +1521,8 @@ def aot_wrapper_dedupe(
         # Test that the computed remove/add arg functions are an inverse
         new_args = add_dupe_args(remove_dupe_args(args))
         seen = {}
-        print(add_dupe_map)
         for i, (x, y) in enumerate(zip(new_args, args)):
             seen[y] = None
-            print("i", i)
-
             assert x is y, format_guard_bug_msg(
                 aot_config,
                 f"{describe_input(i, aot_config)} would be a duplicate of "
