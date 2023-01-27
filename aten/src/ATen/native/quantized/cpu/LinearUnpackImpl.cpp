@@ -61,11 +61,18 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
-  TORCH_CHECK(
-      orig_weight.defined(),
-      "Cannot unpack weights. "
-      "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
+    if (orig_weight.defined()){
+        return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
+    }
+    else{
+        TORCH_WARN(
+        "Original weight is freed, we are converting pre-packed weight to original weight.");
+        uint8_t* kernel = w->unpackWeights(w_zero_points.data(), n_elements);
+        at::Tensor original_tensor = at::from_blob(kernel, weight_sizes, c10::kByte).clone().toType(c10::kQInt8);
+        original_tensor.sub_(128);
+        free(kernel);
+        return std::tuple<at::Tensor, c10::optional<at::Tensor>>(original_tensor, bias_);
+    }
 }
 #endif // USE_PYTORCH_QNNPACK
 
