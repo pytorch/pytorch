@@ -57,7 +57,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         std::string backend,
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
         : timeout(timeout), backend(std::move(backend)) {}
-    virtual ~Options() = default;
+    ~Options() override = default;
 
     std::chrono::milliseconds timeout;
 
@@ -83,7 +83,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int rank,
       int size,
       c10::intrusive_ptr<Options> options);
-  virtual ~ProcessGroup();
+  ~ProcessGroup() override;
 
   int getRank() const {
     return rank_;
