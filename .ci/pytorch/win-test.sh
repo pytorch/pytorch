@@ -60,6 +60,9 @@ run_tests() {
         fi
     done
 
+    # DEBUG
+    ls -la "/c/Users/runneruser/AppData/Local/torch_extensions/torch_extensions/Cache" || true
+
     if [[ "${TEST_CONFIG}" == *functorch* ]]; then
         "$SCRIPT_HELPERS_DIR"/install_test_functorch.bat
     elif [[ $NUM_TEST_SHARDS -eq 1 ]]; then
