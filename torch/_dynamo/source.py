@@ -7,7 +7,7 @@ from torch._guards import GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_instruction
-from .utils import rename_implicit
+from .utils import enum_repr, rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
@@ -266,9 +266,7 @@ class GetItemSource(Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
             if isinstance(self.index, enum.Enum):
-                # Workaround repr(Enum) returns invalid global reference before python 3.11
-                # https://peps.python.org/pep-0663/
-                return f"{self.base.name()}[{self.index!s}]"
+                return f"{self.base.name()}[{enum_repr(self.index)}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
 

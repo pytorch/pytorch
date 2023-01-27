@@ -1546,11 +1546,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             z = {
                 MyEnum.FOO: torch.tensor(1),
                 MyEnum.BAR: 10,
-                "abc": torch.tensor(8),
+                "MyEnum.BAR": torch.tensor(8),
                 5: torch.rand(3),
             }
             torch._dynamo.graph_break()
-            a = z[MyEnum.FOO] + z["abc"]
+            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
             b = y * 2
             return a, b
 
