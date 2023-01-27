@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import List, Union, Dict
 
-
 ################################################################################
 # Following section is the defining the permissible argument types for operators
 
@@ -23,7 +22,6 @@ class ScalarType(Enum):
     bf16 = auto()   # torch.bfloat16
 
 # Copied from torch/_C/__init__.pyi.in
-# !!! Consider if we want to keep all of them, as we figures out what to do with SparseTensor
 class Layout(Enum):
     # Defined in torch/csrc/utils/tensor_layouts.cpp
     strided = auto()
@@ -41,8 +39,6 @@ class MemoryFormat(Enum):
     contiguous_format = auto()
     channels_last = auto()
     channels_last_3d = auto()
-
-    # !!! This is annoying! preserve_format cannot be used as a tensor propery, as it can only used as an argument for operators
     preserve_format = auto()
 
 
@@ -142,7 +138,6 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 #     Layout?
 #     Device?
 
-
 ################################################################################
 # Following section is the defining the schema of serializing a concrete tensor
 
@@ -182,17 +177,6 @@ class Buffer:
 
 @dataclass
 class ExternalBuffer:
-    # !!! Example from onnx
-    #   // Data can be stored inside the protobuf file using type-specific fields or raw_data.
-    #   // Alternatively, raw bytes data can be stored in an external file, using the external_data field.
-    #   // external_data stores key-value pairs describing data location. Recognized keys are:
-    #   // - "location" (required) - POSIX filesystem path relative to the directory where the ONNX
-    #   //                           protobuf model was stored
-    #   // - "offset" (optional) - position of byte at which stored data begins. Integer stored as string.
-    #   //                         Offset values SHOULD be multiples 4096 (page size) to enable mmap support.
-    #   // - "length" (optional) - number of bytes containing data. Integer stored as string.
-    #   // - "checksum" (optional) - SHA1 digest of file specified in under 'location' key.
-    #   repeated StringStringEntryProto external_data
     location: str
     offset: str     # !!! Consider using int, but int has int_max limitation
     length: str     # !!! Consider using int, but int has int_max limitation
@@ -315,4 +299,3 @@ class GraphModule:
 
     # !!! Might also need to store the shape_env for symints, but it's unclear how downstream system will use it.
     # !!! Consider storing it in the GraphModule, or in the Graph.
-
