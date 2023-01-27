@@ -1614,7 +1614,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [
-        ("torch", torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        ("torch", torch, torch.__all__),
         ("torch.functional", torch.functional, torch.functional.__all__),
         ("torch.nn.functional", torch.nn.functional, dir(torch.nn.functional)),
         ("torch.nn.init", torch.nn.init, dir(torch.nn.init)),
