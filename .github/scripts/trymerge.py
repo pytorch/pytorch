@@ -67,7 +67,6 @@ class FlakyRule:
         return (
             job is not None
             and self.name in job.get('name', '')
-            and job.get('failure_captures', None) is not None
             and all([capture in job.get("failure_captures", []) for capture in self.captures])
         )
 
@@ -1297,16 +1296,12 @@ def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[
 
 def get_flaky_rules() -> List[FlakyRule]:
     url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
-    flaky_rules_json: List[FlakyRule] = []
     for _ in range(3):
         try:
-            raw_json = fetch_json_list(url)
-            for rule in raw_json:
-                flaky_rules_json.append(FlakyRule(**rule))
-            break
+            return [FlakyRule(**rule) for rule in fetch_json_list(url)]
         except Exception as e:
             print(f"Could not download {url} because: {e}.")
-    return flaky_rules_json
+    return []
 
 def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     query = f"""
@@ -1345,8 +1340,6 @@ def get_classifications(
         if key not in d:
             d[key] = val
             return
-        if d[key]["conclusion"] == "success":
-            return
         if d[key]["id"] < val["id"]:
             d[key] = val
 
@@ -1371,8 +1364,6 @@ def get_classifications(
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
             res[name].classification = "BROKEN_TRUNK"
-        elif head_sha_job is not None and head_sha_job["steps"] <= 1:
-            res[name].classification = "FLAKY"
         elif any([rule.matches(head_sha_job) for rule in flaky_rules_json]):
             res[name].classification = "FLAKY"
     assert(len(res) == len(checks))
@@ -1404,8 +1395,7 @@ def get_combined_checks_from_pr_and_land_validation(
 
     # Merge the two checks together. Land validation check results (if any) overwrite pr check results
     merged_checks = {**pr_checks, **land_validation_checks}  # explanation: https://stackoverflow.com/a/26853961/21539
-    res = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), merged_checks)
-    return res
+    return get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), merged_checks)
 
 def filter_checks_with_lambda(
     checks: JobNameToStateDict,
@@ -1536,7 +1526,13 @@ def categorize_checks(
                 failed_checks.append((checkname, check_runs[checkname].url))
 
     if ok_failed_checks:
-        print("The following checks failed but were ok to fail: " + ", ".join([x[0] for x in ok_failed_checks]))
+        print(
+            f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: " +
+            ", ".join([x[0] for x in ok_failed_checks]) +
+            (f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
+             if len(ok_failed_checks) > ok_failed_checks_threshold
+             else '')
+        )
 
     if len(ok_failed_checks) > ok_failed_checks_threshold:
         failed_checks = failed_checks + ok_failed_checks
@@ -1705,9 +1701,9 @@ def main() -> None:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
 
-    if pr.is_closed():
-        gh_post_pr_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
-        return
+    # if pr.is_closed():
+    #     gh_post_pr_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
+    #     return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
