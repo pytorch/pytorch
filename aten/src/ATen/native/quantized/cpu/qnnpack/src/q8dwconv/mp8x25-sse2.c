@@ -374,6 +374,7 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         _mm_storeu_si128((__m128i*)outacc, vacc_lo);
         outacc += 4;
         _mm_storeu_si128((__m128i*)outacc, vacc_hi);
+        outacc += 4;
       }
     }
     {
@@ -715,6 +716,7 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         _mm_storeu_si128((__m128i*)outacc, vacc_lo);
         outacc += 4;
         _mm_storeu_si128((__m128i*)outacc, vacc_hi);
+        outacc += 4;
       }
     }
     {
@@ -923,6 +925,7 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
         vacc_lo = _mm_add_epi32(vacc_lo, _mm_loadu_si128((__m128i*)outacc));
         vacc_hi =
             _mm_add_epi32(vacc_hi, _mm_loadu_si128((__m128i*)(outacc + 4)));
+        outacc += 8;
 
         const __m128 vmultiplier =
             _mm_set1_ps(quantization_params->sse2.requantization_scales[0]);
