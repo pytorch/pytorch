@@ -888,26 +888,34 @@ registered to Node. As the forward is computed, hooks are registered to grad_fn 
 to the inputs and outputs of the module. Because a module may take multiple inputs and return
 multiple outputs, a dummy custom autograd Function is first applied to the inputs of the module
 before forward and the outputs of the module before the output of forward is returned to ensure
-that those tensors share a single grad_fn, which we can then attach our hooks to.
+that those Tensors share a single grad_fn, which we can then attach our hooks to.
 
-Behavior of tensor hooks when tensor is modified in-place
+Behavior of Tensor hooks when Tensor is modified in-place
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Usually tensor hooks fire when gradients are computed for that tensor, but if you register
-hooks to a tensor, and then modify that tensor in-place, those hooks will be affected.
+Usually hooks registered to a Tensor fire when gradients are computed for that Tensor, i.e.,
+they fire when the autograd engine reaches the grad_fn of that Tensor during backward, and
+they receive the gradient of the outputs with respect to that Tensor, where the value of the
+Tensor is considered at the time backward is computed.
 
-When a hook is registered to tensor, it is associated with the grad_fn
-of the Tensor at the time of registration. (This is necessary so that the autograd engine can
-fire the hook as it traverses the Nodes in the graph during the backward pass.) However, if a
-tensor is modified in-place, even though it is now associated with a new grad_fn, hooks
-registered to that tensor before it was modified in-place will continue fire when the Tensor's
-old grad_fn is reached in the graph.
+However, if you register hooks to a Tensor, and then modify that Tensor in-place, hooks
+registered before in-place modification also receive gradients of with respect to the Tensor
+but the value of the Tensor is taken to be its value before in-place modification.
 
-If you'd like the hooks to fire when the tensor's gradients are computed, you
-should register it after the in-place is performed. For example:
+If you prefer the behavior in the former case,
+you should register them to the Tensor after all in-place modifications to it have been made.
+For example:
 
 .. code::
+
     t = torch.tensor(1., requires_grad=True).sin()
     t.cos_()
     t.register_hook(fn)
     t.backward()
+
+It can be helpful to know that under the hood,
+when hooks are registered to a Tensor, they actually become permanently bound to the grad_fn
+of that Tensor, so if that Tensor is then modified in-place,
+even though the Tensor now has a new grad_fn, hooks registered before it was
+modified in-place will continue to be associated with the old grad_fn, e.g. they will
+fire when that Tensor's old grad_fn is reached in the graph by the autograd engine.
