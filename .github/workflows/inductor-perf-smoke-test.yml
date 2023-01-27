@@ -6,8 +6,7 @@ on:
       - master
       - main
     tags:
-      - ciflow/inductor/*
-
+      - ciflow/inductor-perf-test-nightly/*
   pull_request:
     paths:
       - .github/workflows/inductor-perf-smoke-test.yml
