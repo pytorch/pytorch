@@ -645,6 +645,66 @@ class TestFloorDiv(TestCase):
             self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
     @skipIfNoSympy
+    def test_floordiv_bool(self):
+        values = (
+            (False, True),
+            (True, 2.5),
+            (2.5, True),
+            (False, 7),
+            (7, True),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
+            # Compares to int since our FloorDiv has no bool support
+            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(int(x), int(y)))
+            # Tests that our impl throws
+            self.assertRaisesRegex(
+                TypeError,
+                (rf"unsupported operand type\(s\) for //: "
+                 rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
+                 rf", expected integer or real"),
+                lambda: TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_complex(self):
+        values = (
+            (1.5 + 2.5j, 1.3 + 3.5j),
+            (1.5 + 2.5j, 2.5),
+            (2.5, 1.5 + 2.5j),
+            (1.5 + 2.5j, 7),
+            (7, 1.5 + 2.5j),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values):
+            # We don't test error messages to avoid depending on Python
+            # interpreter version
+            self.assertRaises(TypeError, lambda: TestFloorDiv.python_floordiv(x, y))
+            self.assertRaisesRegex(
+                TypeError,
+                (rf"unsupported operand type\(s\) for //: "
+                 rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
+                 rf", expected integer or real"),
+                lambda: TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_div_by_zero(self):
+        values = (
+            (2.5, 0),
+            (2.1, 0.0),
+            (2.3, sympy.Symbol("s", zero=True)),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
+            # We don't test error messages to avoid depending on Python
+            # interpreter version
+            if type(y) is not sympy.Symbol:
+                self.assertRaises(ZeroDivisionError, lambda: TestFloorDiv.python_floordiv(x, y))
+            self.assertRaisesRegex(
+                ZeroDivisionError,
+                "division by zero",
+                lambda: TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
     def test_floordiv_zero_base(self):
         values = (
             (0, 2.5),
