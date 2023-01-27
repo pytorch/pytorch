@@ -84,19 +84,24 @@ def get_custom_model(device):
             super(MyModule, self).__init__()
             mods = [
                 (MyLinear(), torch.nn.ReLU()),
-                # sandwitch the custom in the middle so it comes before and after
+                # sandwich the custom in the middle so it comes before and after
                 (MyCustomLinear(), torch.nn.ReLU()),
                 (MyLinear(), torch.nn.ReLU()),
             ]
             self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
 
-        def forward(self, x):
-            return self.seq(x)
+        def forward(self, x, y):
+            # test special case where the 0th bucket (layers close to graph input) is at capacity, which would
+            # trigger a new bucket, but there are only trivial ops without parameters to put into the new bucket.
+            # optimize this case by fusing that 'empty bucket' back together with the previous full one
+            return self.seq(x + y)
 
     m = MyModule().to(device)
     m.apply(init_weights)
     inputs = torch.rand((512, 512)).to(device)
-    correct_outputs = m(inputs)
+    # test duplicated inputs
+    inputs = (inputs, inputs)
+    correct_outputs = m(*inputs)
     return m, inputs, correct_outputs
 
 def get_hf_bert(rank):
@@ -520,7 +525,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize(check_splits_compiler.compile_fn)
         def opt_fn(inputs):
-            return ddp_m(inputs)
+            return ddp_m(*inputs)
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
@@ -563,7 +568,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize(ddp_optimizer.compile_fn)
         def opt_fn(inputs):
-            return ddp_m(inputs)
+            return ddp_m(*inputs)
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))

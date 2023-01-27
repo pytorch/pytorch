@@ -183,6 +183,12 @@ class DDPOptimizer:
             # Ignored params still end up in buckets, we just don't count them towards the capacity
             buckets[0].nodes.append(node)
 
+        if len(buckets) > 1 and buckets[0].size == 0:
+            # we collected a small preamble graph with ops that don't include parameters, fuse it back
+            buckets[1].nodes.extend(buckets[0].nodes)
+            assert len(buckets[0].params) == 0, "Params should be empty if size is 0"
+            del buckets[0]
+
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
         log.info(
