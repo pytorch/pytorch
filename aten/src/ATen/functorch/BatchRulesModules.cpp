@@ -12,11 +12,11 @@
 
 namespace at { namespace functorch {
 
-static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::SymInt num_embeddings) {
+static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size, const c10::SymInt& num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
   c10::SymDimVector view_shape(indices.dim(), 1);
   view_shape[0] = bdim_size;
-  auto range = at::arange(0, bdim_size * num_embeddings, std::move(num_embeddings), indices.options());
+  auto range = at::arange(0, bdim_size * num_embeddings, num_embeddings, indices.options());
   return range.view_symint(view_shape);
 }
 
