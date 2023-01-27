@@ -88,7 +88,7 @@ jobs:
 
       - name: Setup miniconda
         if: inputs.environment-file == ''
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
         with:
           python-version: ${{ inputs.python_version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -97,7 +97,7 @@ jobs:
       # environment even though the arch is x86-64
       - name: Setup miniconda using the provided environment file
         if: inputs.environment-file != ''
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
         with:
           python-version: ${{ inputs.python_version }}
           environment-file: ${{ inputs.environment-file }}
@@ -168,3 +168,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: sccache-stats-*.json
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job

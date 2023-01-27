@@ -90,7 +90,7 @@ jobs:
 
       - name: Setup miniconda (x86, py3.8)
         if: ${{ runner.arch == 'X64' }}
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
         with:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -98,7 +98,7 @@ jobs:
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -202,3 +202,8 @@ jobs:
         run: |
           set -x
           ${CONDA_RUN} python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job
