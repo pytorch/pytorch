@@ -445,7 +445,6 @@ def _compile(
         )
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
-        # guarded_code = GuardedCode(code, check_fn.check_fn)
 
         if config.output_code:
             guard_str = "GUARDS:\n"

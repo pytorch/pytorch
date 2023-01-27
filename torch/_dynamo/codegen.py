@@ -269,8 +269,8 @@ class PyCodegen(object):
     def load_function_name(self, fn_name, num_on_stack=0, push_null=False):
         """Load the global fn_name on the stack num_on_stack down"""
         output = []
-        # if push_null and sys.version_info >= (3, 11):
-        #     output.extend([create_instruction("PUSH_NULL")] + self.rot_n(num_on_stack + 1))
+        if push_null and sys.version_info >= (3, 11):
+            output.extend([create_instruction("PUSH_NULL")] + self.rot_n(num_on_stack + 1))
         output.extend(
             [self.create_load_global(fn_name, add=True, push_null=False)] + self.rot_n(num_on_stack + 1)
         )

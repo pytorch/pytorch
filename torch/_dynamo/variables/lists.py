@@ -142,7 +142,7 @@ class RangeVariable(BaseListVariable):
         assert "range" not in codegen.tx.f_globals
         codegen.append_output(codegen.create_load_python_module(range, push_null=True))
         codegen.foreach(self.items)
-        return create_call_function(3)
+        return create_call_function(3, push_null=False)
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
