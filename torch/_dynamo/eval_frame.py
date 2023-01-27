@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch._decomp import core_aten_decompositions
 
 from .hooks import Hooks
 
@@ -530,6 +531,10 @@ def export(
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+
+    if aten_graph and decomposition_table is None:
+        decomposition_table = core_aten_decompositions
+
     f = innermost_fn(f)
 
     graph = None
