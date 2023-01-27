@@ -1,4 +1,5 @@
 import copy
+from dataclasses import dataclass
 import itertools
 import math
 import os
@@ -8878,6 +8879,43 @@ class DistributedTest:
         )
         def test_ddp_new_tensor_in_fwd(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=False)
+
+        def test_ddp_static_graph_dataclass_no_grad_sync(self):
+            """
+            When static_graph=True, currently DDP has a bug where modules with
+            dataclass output types result in the first allreduce not running so
+            gradients are desynced.
+            """
+            torch.manual_seed(self.rank)
+            torch.cuda.manual_seed(self.rank)
+            torch.cuda.set_device(self.rank)
+
+            @dataclass
+            class MyDataClass:
+                tensor: torch.Tensor
+
+            class DCModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.m = torch.nn.Linear(10, 10)
+
+                def forward(self, x):
+                    out = self.m(x)
+                    return MyDataClass(tensor=out)
+
+            m = DCModule().cuda()
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                m, device_ids=[self.rank], static_graph=True,
+            )
+            ddp(torch.randn(2, 10)).tensor.sum().backward()
+
+            grads = [
+                torch.empty_like(ddp.module.m.weight.grad) for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(tensor_list=grads, tensor=ddp.module.m.weight.grad)
+            g, rest = grads[0], grads[1:]
+            for g_ in rest:
+                self.assertNotEqual(g, g_)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
