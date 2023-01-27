@@ -1,3 +1,5 @@
+# type: ignore[assignment]
+
 from dataclasses import dataclass
 from enum import auto, Enum
 from typing import List, Union, Dict
@@ -83,7 +85,10 @@ class SymIntArgument:
 @dataclass
 class ReturnArgument:  # Union, ONLY EXACTLY ONE of the following fields can be set
     as_tensor: TensorArgument = None
-    # as_tensors: List[TensorArgument] = None    # !!! ATM, no operator has return type as Tensor[], might need this latter?
+
+    # !!! ATM, no operator has return type as Tensor[], might need this latter?
+    # as_tensors: List[TensorArgument] = None
+
     as_symint: SymIntArgument = None
 
 
@@ -99,25 +104,26 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
     as_symint: SymIntArgument = None         # Symint can be an argument, there are symint in native_function.yaml
     as_symints: List[SymIntArgument] = None   # Symint[] can be an argement, there are symint[] in native_function.yaml
 
-    # as_scalar: Scalar = None      # !!! Looks like we don't need Scalar type during serialization,
-                                    # it will always be a concrete type, one of int, float, bool
-                                    # !!! Scalar is already an union type: Union[int, float, bool], check if serialization library can handle this
-    # List[Scalar], # !!! for Scalar[], used in native_function.yaml, but not used in canonical aten ops yet... Consider if we need this
+    # !!! Looks like we don't need Scalar type during serialization,
+    # as it will always be a concrete type, one of int, float, bool
+    # as_scalar: Scalar = None
+    # List[Scalar], # !!! Scalar[] is in native_function.yaml, but not used in canonical aten ops yet
 
     as_bool: bool = None
+
+    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
     as_bools: List[bool] = None     # for bool[]
-                                    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
 
     as_int: int = None
     as_ints: List[int] = None      # for int[]
     as_float: float = None
     as_floats: List[float] = None    # for float[]
     as_str: str = None
-    # List[str],    # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
+    # List[str],        # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
 
     # Graph,            # !!! Consider how to handle condition op, which need to pass in a graph for the branch
     # List[Graph],      # !!! What about list of graphs? Do we need this?
-    as_gm: "GraphModule" = None     #  !!! ATM, torch.cond models branch as GraphModule
+    as_gm: "GraphModule" = None     # !!! ATM, torch.cond models branch as GraphModule
 
     # !!! Following types doesn't have a list version in native_function.yaml
     as_scalar_type: ScalarType = None
@@ -154,6 +160,7 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 #       However, it's up to downstream system on how to utilized these fields
 #       In another word, these feilds are suggestive, rather than mandatory.
 
+
 @dataclass
 class TensorMeta:
     dtype: ScalarType
@@ -171,10 +178,11 @@ class TensorMeta:
 
 @dataclass
 class Buffer:
-    # !!! TODO: need to define endianness for the buffer
+    # data stored in big endian
     buffer: bytes
 
 
+# External data needs to stored in big endian
 @dataclass
 class ExternalBuffer:
     location: str
@@ -208,14 +216,10 @@ class Tensor:
 
 # IValue has no corresponding class in fx
 # IValue is the "values" that are passed between nodes in the graph
-# !!! Assumption: Only Tensor can be passed between nodes, and not other int/float/bool types...
 # IValue is a named virtual tensor, with an optional TensorMeta that describes the properties of the tensor
 # !!! Consider using a more descriptive name, e.g. TensorValue, TensorPlaceholder, TensorArgument, etc.
 @dataclass
 class IValue:
-    name: str   # A unique identifider name for the IValue
-                # The name will be used in the graph and node to refer to the IValue
-
     meta: TensorMeta
 
 
@@ -229,22 +233,27 @@ class NodeMetadata:
 # Maps to fx.Node
 @dataclass
 class Node:
-    op: str         # In fx, it can be one of ['placeholder', 'call_function', 'get_attr', 'output']
-                    # Only call_function can be present here
-                    # call_method and call_module are not supported, as they shouldn't apprear in the Caononical FX Graph
-                    # placeholder and output are serialized as inputs and outputs of the Graph
-                    # !!! Consider using an enum instead of string
-                    # !!! Consider removeing this field, as it can only be call_function
+    # In fx, it can be one of ['placeholder', 'call_function', 'get_attr', 'output']
+    # Only call_function can be present here
+    # call_method and call_module are not supported, as they shouldn't apprear in the Caononical FX Graph
+    # placeholder and output are serialized as inputs and outputs of the Graph
+    # !!! Consider using an enum instead of string
+    # !!! Consider removeing this field, as it can only be call_function
+    op: str
 
-    target: str      # fully qualified name to the target, e.g. aten.add.Tensnor
-                     # !!! Consider using a structured operator name instead of string
+    # fully qualified name to the target, e.g. aten.add.Tensnor
+    # !!! Consider using a structured operator name instead of string
+    target: str
 
-    args: List[Argument]              # args for this node
-    kwargs: Dict[str, Argument]       # kwargs for this node
-                                      # !!! Not all types in Argument are used as kwargs, e.g. TensorArgument should not be used as kwargs
-                                      # Do we want to enforce this in the schema? i.e. only allow certain types to be used as kwargs?
+    args: List[Argument]
 
-    outputs: List[ReturnArgument]   # A list of Argument returned by this node
+    # kwargs for this node
+    # !!! Not all types in Argument are used as kwargs, e.g. TensorArgument should not be used as kwargs
+    # Do we want to enforce this in the schema? i.e. only allow certain types to be used as kwargs?
+    kwargs: Dict[str, Argument]
+
+    # A list of Argument returned by this node
+    outputs: List[ReturnArgument]
 
     metadata: NodeMetadata          # metadata fields for this node
 
@@ -252,22 +261,26 @@ class Node:
 # Maps to fx.Graph
 @dataclass(init=False)
 class Graph:
+    # Maps to fx.graph's placeholder nodes.
+    # !!! Do we allow SymInt as graph input?
+    # !!! need to think about where to store the metadata for placeholder nodes
+    inputs: List[TensorArgument]
 
-    inputs: List[TensorArgument]    # Maps to fx.graph's placeholder nodes.
-                                    # !!! Do we allow SymInt as graph input?
-                                    # !!! need to think about where to store the metadata for placeholder nodes
+    # Maps to fx.graph's output node.
+    # !!! Do we allow SymInt as graph output?
+    # !!! need to thinking about where to store the metadata for original output node
+    outputs: List[TensorArgument]
 
-    outputs: List[TensorArgument]   # Maps to fx.graph's output node.
-                                    # !!! Do we allow SymInt as graph output?
-                                    # !!! need to thinking about where to store the metadata for original output node
-
-    nodes: List[Node]     # maps to computations nodes in fx.graph
-                          # Placeholder nodes and output node are not included in this list.
-                          # Only call_function can be included in this list
+    # maps to computations nodes in fx.graph
+    # Placeholder nodes and output node are not included in this list.
+    # Only call_function can be included in this list
+    nodes: List[Node]
 
     # Tensor values that appear in the graph
     # They could be graph inputs, graph outputs, or intermediate values produced by nodes
-    ivalues: List[IValue]
+    # The key is a unique identifider name for the IValue
+    # The name will be used in the graph and node to refer to the IValue
+    ivalues: Dict[str, IValue]
 
     # SymInts that appear in the graph
     # Key is the name/identifier of the SymInt, not the expression of the SymInt
@@ -278,20 +291,20 @@ class Graph:
 # This the top level construct for the model
 @dataclass(init=False)
 class GraphModule:
-    name: str       # A readable name for the model, potentially maps to GraphModule's self.__class__.__name__
-                    # This is not an identified for GraphModule
+    # A readable name for the model, potentially maps to GraphModule's self.__class__.__name__
+    # This is not an identified for GraphModule
+    name: str
 
     graph: Graph    # Only one Graph per GraphModule
 
-    metadata : Dict[str, str]   # maps to GraphModule's meta, which is a Dict[str, Any], but we only support string key and string value.
+    # maps to GraphModule's meta, which is a Dict[str, Any], but we only support string key and string value.
+    metadata : Dict[str, str]
 
     # Stateful fields of the graph module
 
     # The name of the tensor will be used to bind to the IValues of Graph Inputs
     # !!! Consider storing them in the Graph.
-    # There are functional difference between buffers and parameters, so they are stored separately. See:
-    #   - https://discuss.pytorch.org/t/what-is-the-difference-between-register-buffer-and-register-parameter-of-nn-module/32723
-    #   - https://stackoverflow.com/questions/57540745/what-is-the-difference-between-register-parameter-and-register-buffer-in-pytorch
+    # There are functional difference between buffers and parameters, so they are stored separately.
     parameters: Dict[str, Tensor]
     buffers: Dict[str, Tensor]
 
