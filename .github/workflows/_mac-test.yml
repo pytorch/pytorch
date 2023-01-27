@@ -88,6 +88,9 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
+      - name: Clean up disk space before running MacOS workflow
+        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job
+
       - name: Setup miniconda (x86, py3.8)
         if: ${{ runner.arch == 'X64' }}
         uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
