@@ -1,6 +1,5 @@
 import builtins
 import copy
-import getpass
 import hashlib
 import json
 import logging
@@ -13,6 +12,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from .. import config
+from ..codecache import cache_dir
 from ..ir import ReductionHint, TileHint
 from ..utils import conditional_product, has_triton
 from .conv_perf_model import (
@@ -53,11 +53,12 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.launchers = []
         self.lock = threading.Lock()
-        triton_cache_dir = os.path.join(
-            "/tmp", getpass.getuser(), str(self.meta.get("device", 0)), "triton/cache"
-        )
-        os.environ["TRITON_CACHE_DIR"] = triton_cache_dir
-        log.info(f"Triton cache directory: {triton_cache_dir}")
+        if os.getenv("TRITON_CACHE_DIR") is None:
+            os.environ["TRITON_CACHE_DIR"] = os.path.join(
+                cache_dir(),
+                "triton",
+                str(self.meta.get("device", 0)),
+            )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
