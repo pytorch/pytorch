@@ -159,21 +159,6 @@ class _BufferCommHook:
     buffer_comm_hook_location: _BufferCommHookLocation
 
 
-def _enqueue_delay_allreduce_hook(
-    ddp_weakref, *args,
-):
-    assert (
-        ddp_weakref().num_iterations == 1 and ddp_weakref().static_graph,
-    ), (
-        "Incorrect backward hook registeration: "
-        f"iter: {ddp_weakref().num_iterations} static_graph: {ddp_weakref().static_graph}"
-    )
-    # Remove the handle to prevent hook from firing for future
-    # iterations.
-    ddp_weakref()._bwd_hook_handle.remove()
-    # Enqueue delay allreduce for DDP static graph.
-    Variable._execution_engine.queue_callback(ddp_weakref().reducer._delay_all_reduce)
-
 # Add a DDPSink to run various functions when backwards starts, such as
 # queueing call back of out-most backward/graph task,
 # this helps call back is fired after all gradients' calculation
@@ -1170,13 +1155,6 @@ class DistributedDataParallel(Module, Joinable):
                 # Notify joined ranks whether they should sync in backwards pass or not.
                 self._check_global_requires_backward_grad_sync(
                     is_joined_rank=False
-                )
-
-            if self.static_graph and self.num_iterations == 1:
-                self._bwd_hook_handle = self.module.register_full_backward_pre_hook(
-                    hook=functools.partial(
-                        _enqueue_delay_allreduce_hook, weakref.ref(self)
-                    )
                 )
 
             output = self._run_ddp_forward(*inputs, **kwargs)

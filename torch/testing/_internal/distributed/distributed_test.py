@@ -8897,7 +8897,7 @@ class DistributedTest:
             class DCModule(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.m = torch.nn.Linear(10, 10)
+                    self.m = torch.nn.Linear(10, 10, bias=False)
 
                 def forward(self, x):
                     out = self.m(x)
@@ -8915,7 +8915,7 @@ class DistributedTest:
             dist.all_gather(tensor_list=grads, tensor=ddp.module.m.weight.grad)
             g, rest = grads[0], grads[1:]
             for g_ in rest:
-                self.assertNotEqual(g, g_)
+                self.assertEqual(g, g_)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -8924,36 +8924,6 @@ class DistributedTest:
         )
         def test_ddp_new_tensor_in_fwd_static_graph(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=True)
-
-        @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel"
-        )
-        def test_ddp_static_graph_delay_allreduce_enqueued(self):
-            """
-            Tests that DDP successfully enqueued delay allreduce for static
-            graph first iteration, and not subsequent iterations.
-            """
-            torch.cuda.set_device(self.rank)
-            m = torch.nn.Linear(1, 5).cuda()
-            ddp = torch.nn.parallel.DistributedDataParallel(
-                m, device_ids=[self.rank], static_graph=True
-            )
-
-            for i in range(3):
-                out = ddp(torch.randn(3, 1)).sum()
-                # Ensure hooks exist or don't as expected.
-                if i == 0:
-                    self.assertTrue(hasattr(ddp, '_bwd_hook_handle'))
-                    self.assertEqual(1, len(ddp._bwd_hook_handle.hooks_dict_ref()))
-                else:
-                    self.assertEqual(0, len(ddp._bwd_hook_handle.hooks_dict_ref()))
-                # TODO: it is hard to test whether the delay allreduce is
-                # actually called, because ctx.reducer._delay_all_reduce cannot
-                # be patched.
-                out.backward()
-                self.assertEqual(0, len(ddp._bwd_hook_handle.hooks_dict_ref()))
 
         def _test_ddp_buffer_hook_allreduce(self, return_futures):
             rank = self.rank

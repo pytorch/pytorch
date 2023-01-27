@@ -602,6 +602,7 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  if (process_group_->getRank() == 0) LOG(INFO) << "RV: autograd hook for " << index;
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -631,7 +632,11 @@ void Reducer::autograd_hook(size_t index) {
     });
   }
 
-  if (static_graph_first_iteration()) {
+  if (static_graph_first_iteration() && !static_graph_first_iteration_cb_enqueued_) {
+    torch::autograd::Engine::get_default_engine().queue_callback([=] {
+      this->delay_all_reduce();
+    });
+    static_graph_first_iteration_cb_enqueued_ = true;
     numGradHooksTriggeredMap_[index] += 1;
     return;
   }

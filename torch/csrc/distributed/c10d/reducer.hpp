@@ -518,6 +518,7 @@ class TORCH_API Reducer {
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
   bool set_grads_to_none_{false};
+  bool static_graph_first_iteration_cb_enqueued_{false};
   friend class Logger;
 };
 
