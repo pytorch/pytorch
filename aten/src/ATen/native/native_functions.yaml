@@ -5681,6 +5681,7 @@
     CPU, QuantizedCPU, CUDA, QuantizedCUDA: flip
     MPS: flip_mps
   autogen: flip.out
+  tags: core
 
 - func: fliplr(Tensor self) -> Tensor
   variants: function, method
@@ -9668,6 +9669,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: alias
+  tags: core
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   variants: function
