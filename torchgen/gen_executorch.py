@@ -29,10 +29,13 @@ from torchgen.gen import (
 )
 from torchgen.model import (
     BackendIndex,
+    BackendMetadata,
     DispatchKey,
+    is_cuda_dispatch_key,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
+    OperatorName,
     Variant,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
@@ -93,6 +96,8 @@ class ComputeFunction:
 
     use_aten_lib: bool
 
+    is_custom_op: Callable[[NativeFunction], bool]
+
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
@@ -106,7 +111,7 @@ class ComputeFunction:
             if self.use_aten_lib
             else ExecutorchCppSignature.from_native_function(f)
         )
-        if self.use_aten_lib and f.namespace == "aten":
+        if self.use_aten_lib and not self.is_custom_op(f):
             comma = ", "
 
             return f"""
@@ -233,6 +238,7 @@ def gen_functions_declarations(
     static_dispatch_idx: List[BackendIndex],
     selector: SelectiveBuilder,
     use_aten_lib: bool,
+    custom_ops_native_functions: Optional[Sequence[NativeFunction]] = None,
 ) -> str:
     """
     Generates namespace separated C++ function API inline declaration/definitions.
@@ -260,6 +266,8 @@ def gen_functions_declarations(
                     static_dispatch_backend_indices=static_dispatch_idx,
                     selector=selector,
                     use_aten_lib=use_aten_lib,
+                    is_custom_op=lambda f: custom_ops_native_functions is not None
+                    and f in custom_ops_native_functions,
                 ),
                 ns_grouped_functions[namespace],
             )
@@ -275,19 +283,31 @@ def gen_functions_declarations(
 def gen_headers(
     *,
     native_functions: Sequence[NativeFunction],
+    custom_ops_native_functions: Sequence[NativeFunction],
     static_dispatch_idx: List[BackendIndex],
     selector: SelectiveBuilder,
     backend_indices: Dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
     use_aten_lib: bool,
 ) -> None:
+    aten_headers = ["#include <ATen/Functions.h>"]
+    if custom_ops_native_functions:
+        cpu_fm.write_with_template(
+            "CustomOpsNativeFunctions.h",
+            "NativeFunctions.h",
+            lambda: {
+                "nativeFunctions_declarations": get_native_function_declarations(
+                    grouped_native_functions=custom_ops_native_functions,
+                    backend_indices=backend_indices,
+                    native_function_decl_gen=dest.compute_native_function_declaration,
+                ),
+            },
+        )
+        aten_headers.append('#include "CustomOpsNativeFunctions.h"')
     cpu_fm.write(
         "Functions.h",
         lambda: {
-            "static_dispatch_extra_headers": [
-                '#include "CustomOpsNativeFunctions.h"',
-                "#include <ATen/Functions.h>",
-            ]
+            "static_dispatch_extra_headers": aten_headers
             if use_aten_lib
             else ['#include "NativeFunctions.h"'],
             "Functions_declarations": gen_functions_declarations(
@@ -295,6 +315,7 @@ def gen_headers(
                 static_dispatch_idx=static_dispatch_idx,
                 selector=selector,
                 use_aten_lib=use_aten_lib,
+                custom_ops_native_functions=custom_ops_native_functions,
             ),
         },
     )
@@ -331,17 +352,6 @@ def gen_custom_ops(
         selector=selector,
         backend_index=backend_index,
         rocm=rocm,
-    )
-    cpu_fm.write_with_template(
-        "CustomOpsNativeFunctions.h",
-        "NativeFunctions.h",
-        lambda: {
-            "nativeFunctions_declarations": get_native_function_declarations(
-                grouped_native_functions=native_functions,
-                backend_indices=backend_indices,
-                native_function_decl_gen=dest.compute_native_function_declaration,
-            ),
-        },
     )
     cpu_fm.write_with_template(
         f"Register{dispatch_key}CustomOps.cpp",
@@ -389,7 +399,7 @@ def gen_custom_ops(
 def translate_native_yaml(
     tags_yaml_path: str,
     aten_yaml_path: str,
-    native_yaml_path: str,
+    native_yaml_path: Optional[str],
     use_aten_lib: bool,
     out_file: TextIO,
 ) -> None:
@@ -442,9 +452,16 @@ def translate_native_yaml(
     schema_dict = {
         f"{f.namespace}::{f.func.name}": str(f.func) for f in aten_native_functions
     }
-
+    if (
+        not native_yaml_path
+        or not os.path.exists(native_yaml_path)
+        or os.stat(native_yaml_path).st_size == 0
+    ):
+        return
     with open(native_yaml_path, "r") as native_yaml:
         native_es = yaml.load(native_yaml, Loader=LineLoader)
+        if not native_es:
+            return
         for e in native_es:
             assert isinstance(e.get("__line__"), int), e
             loc = Location(native_yaml_path, e.pop("__line__"))
@@ -462,11 +479,71 @@ def translate_native_yaml(
         yaml.dump(native_es, out_file, width=1000)
 
 
+def convert_backend_indices(
+    bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
+) -> Dict[DispatchKey, BackendIndex]:
+    indices: Dict[DispatchKey, BackendIndex] = defaultdict(
+        lambda: BackendIndex(
+            dispatch_key=DispatchKey.Undefined,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={},
+        )
+    )
+    for k, v in bs.items():
+        indices[k] = BackendIndex(
+            dispatch_key=k,
+            use_out_as_primary=True,
+            external=False,
+            # Only cuda-like devices in tree require device guards
+            device_guard=is_cuda_dispatch_key(k),
+            index=v,
+        )
+    return indices
+
+
+def parse_yaml(
+    path: Optional[str],
+    tags_yaml_path: str,
+    function_filter: Callable[[NativeFunction], bool],
+    skip_native_fns_gen: bool = False,
+) -> Tuple[
+    List[NativeFunction], Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
+]:
+    if path and os.path.exists(path) and os.stat(path).st_size > 0:
+        parsed_yaml = parse_native_yaml(
+            path,
+            tags_yaml_path,
+            None,
+            skip_native_fns_gen=skip_native_fns_gen,
+        )
+        native_functions = list(filter(function_filter, parsed_yaml.native_functions))
+        op_names = [f.func.name for f in native_functions]
+
+        def map_index(
+            m: Dict[OperatorName, BackendMetadata]
+        ) -> Dict[OperatorName, BackendMetadata]:
+            return {op: m[op] for op in m if op in op_names}
+
+        backend_indices = dict(
+            (
+                k,
+                map_index(b.index),
+            )
+            for (k, b) in parsed_yaml.backend_indices.items()
+        )
+        return native_functions, backend_indices
+    else:
+        return [], {}
+
+
 def parse_yaml_files(
     tags_yaml_path: str,
     aten_yaml_path: str,
     native_yaml_path: Optional[str],
     custom_ops_yaml_path: Optional[str],
+    selector: SelectiveBuilder,
     use_aten_lib: bool,
 ) -> Tuple[ParsedYaml, Optional[ParsedYaml]]:
     """Parses functions.yaml and custom_ops.yaml files.
@@ -481,6 +558,7 @@ def parse_yaml_files(
             file are appended to the yaml input to be parsed.
         custom_ops_yaml_path: Path to a custom_ops.yaml file to parse. If
             the path does not exist in the filesystem, it is ignored.
+        selector: For selective build.
         use_aten_lib: We use this flag to determine if we want to generate native
             functions. In ATen mode we should generate out= variants.
     Returns:
@@ -492,14 +570,11 @@ def parse_yaml_files(
     """
     import tempfile
 
-    gen_native_fns = use_aten_lib and native_yaml_path
+    # only include selected ops, this is because we want to avoid
+    def function_filter(f: NativeFunction) -> bool:
+        return selector.is_native_function_selected(f)
+
     with tempfile.TemporaryDirectory() as tmpdirname:
-        # If native_yaml_path doesn't exist, point to an empty file.
-        if not native_yaml_path or not os.path.exists(native_yaml_path):
-            native_yaml_path = os.path.join(tmpdirname, "functions.yaml")
-            with open(native_yaml_path, "w"):
-                pass
-        # Translate native_yaml_path to the same format of native_functions.yaml
         translated_yaml_path = os.path.join(tmpdirname, "translated.yaml")
         with open(translated_yaml_path, "w") as translated:
             translate_native_yaml(
@@ -509,31 +584,35 @@ def parse_yaml_files(
                 use_aten_lib,
                 translated,
             )
-        # If custom_ops_yaml_path doesn't exist, point to an empty file.
-        if not custom_ops_yaml_path or not os.path.exists(custom_ops_yaml_path):
-            custom_ops_yaml_path = os.path.join(tmpdirname, "custom_ops.yaml")
-            with open(custom_ops_yaml_path, "w"):
-                pass
-        combined_yaml_path = os.path.join(tmpdirname, "combined.yaml")
-        with open(combined_yaml_path, "w") as tmp, open(
-            translated_yaml_path, "r"
-        ) as native, open(custom_ops_yaml_path, "r") as custom:
-            for line in native.readlines():
-                tmp.write(line)
-            for line in custom.readlines():
-                tmp.write(line)
-        custom_ops_parsed_yaml = parse_native_yaml(
-            custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
+        translated_functions, translated_backend_indices = parse_yaml(
+            translated_yaml_path, tags_yaml_path, function_filter, not use_aten_lib
+        )
+        custom_ops_functions, custom_ops_backend_indices = parse_yaml(
+            custom_ops_yaml_path, tags_yaml_path, function_filter, True
         )
 
-        parsed_yaml = parse_native_yaml(
-            combined_yaml_path,
-            tags_yaml_path,
-            None,
-            skip_native_fns_gen=(not gen_native_fns),
-        )
+        combined_functions = translated_functions + custom_ops_functions
+        combined_backend_indices: Dict[
+            DispatchKey, Dict[OperatorName, BackendMetadata]
+        ] = defaultdict(dict)
+        combined_backend_indices.update(translated_backend_indices)
 
-    return parsed_yaml, custom_ops_parsed_yaml
+        for dk in custom_ops_backend_indices:
+            if dk not in combined_backend_indices:
+                combined_backend_indices.update({dk: custom_ops_backend_indices[dk]})
+            else:
+                combined_backend_indices[dk] = {
+                    **combined_backend_indices[dk],
+                    **custom_ops_backend_indices[dk],
+                }
+
+        combined_yaml = ParsedYaml(
+            combined_functions, convert_backend_indices(combined_backend_indices)
+        )
+        custom_ops_parsed_yaml = ParsedYaml(
+            custom_ops_functions, convert_backend_indices(custom_ops_backend_indices)
+        )
+    return combined_yaml, custom_ops_parsed_yaml
 
 
 def main() -> None:
@@ -623,11 +702,18 @@ def main() -> None:
     )
     options = parser.parse_args()
     assert options.tags_path, "tags.yaml is required by codegen yaml parsing."
+
+    selector = get_custom_build_selector(
+        options.op_registration_whitelist,
+        options.op_selection_yaml_path,
+    )
+
     parsed_yaml, custom_ops_parsed_yaml = parse_yaml_files(
         aten_yaml_path=options.aten_yaml_path,
         tags_yaml_path=options.tags_path,
         native_yaml_path=options.functions_yaml_path,
         custom_ops_yaml_path=options.custom_ops_yaml_path,
+        selector=selector,
         use_aten_lib=options.use_aten_lib,
     )
     native_functions, backend_indices = (
@@ -635,21 +721,17 @@ def main() -> None:
         parsed_yaml.backend_indices,
     )
     custom_ops_native_functions = (
-        custom_ops_parsed_yaml.native_functions if custom_ops_parsed_yaml else None
+        custom_ops_parsed_yaml.native_functions if custom_ops_parsed_yaml else []
     )
 
     cpu_fm = make_file_manager(options=options)
-
-    selector = get_custom_build_selector(
-        options.op_registration_whitelist,
-        options.op_selection_yaml_path,
-    )
 
     static_dispatch_idx: List[BackendIndex] = [backend_indices[DispatchKey.CPU]]
 
     if "headers" in options.generate:
         gen_headers(
             native_functions=native_functions,
+            custom_ops_native_functions=custom_ops_native_functions,
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
