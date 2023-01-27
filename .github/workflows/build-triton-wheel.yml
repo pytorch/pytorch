@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   build-wheel:
+    name: "Build Trition Wheel"
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       fail-fast: false
@@ -148,6 +149,7 @@ jobs:
               aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
              done
   build-conda:
+    name: "Build Trition Conda"
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       fail-fast: false
