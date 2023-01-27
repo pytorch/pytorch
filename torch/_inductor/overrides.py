@@ -63,7 +63,9 @@ def replace_fx(gm: torch.fx.GraphModule):
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     fake_mode = fake_mode_from_tensors(example_inputs)

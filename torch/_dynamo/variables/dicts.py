@@ -28,6 +28,9 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
+    def as_python_constant(self):
+        return {k: v.as_python_constant() for k, v in self.items.items()}
+
     def python_type(self):
         return self.user_cls
 
