@@ -1050,7 +1050,10 @@ class TestCommon(TestCase):
                 if isinstance(
                     expected_forward, torch.Tensor
                 ) and dtype in op.supported_backward_dtypes(torch.device(device).type):
-                    output_process_fn_grad(expected_forward).sum().backward()
+                    out = output_process_fn_grad(expected_forward).sum()
+                    if out.dtype.is_complex:
+                        out = out.abs()
+                    out.backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -1095,7 +1098,10 @@ class TestCommon(TestCase):
                     if expected_grad is not None and (
                         variant not in inplace_ops or op.supports_inplace_autograd
                     ):
-                        output_process_fn_grad(variant_forward).sum().backward()
+                        out = output_process_fn_grad(variant_forward).sum()
+                        if out.dtype.is_complex:
+                            out = out.abs()
+                        out.backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)

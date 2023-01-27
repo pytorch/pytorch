@@ -3845,8 +3845,10 @@ class TestSparse(TestSparseBase):
             self.assertEqual(a.sum(), a._values().sum())
             if dtype.is_floating_point or dtype.is_complex:
                 a.requires_grad_(True)
-                a.sum().backward()
-                self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device))
+                a_inter = a.sum()
+                a_inter.abs().backward()
+                with torch.no_grad():
+                    self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device) * torch.sgn(a_inter).real)
         for shape in [(10, 5), (10, 10)]:
             run_test(shape, 0)
             run_test(shape, max(shape))

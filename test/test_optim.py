@@ -430,8 +430,8 @@ class TestOptim(TestCase):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            f(a1).backward()
-            f(a2).backward()
+            f(a1).abs().backward()
+            f(a2).abs().backward()
 
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
