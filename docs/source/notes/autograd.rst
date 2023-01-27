@@ -889,3 +889,25 @@ to the inputs and outputs of the module. Because a module may take multiple inpu
 multiple outputs, a dummy custom autograd Function is first applied to the inputs of the module
 before forward and the outputs of the module before the output of forward is returned to ensure
 that those tensors share a single grad_fn, which we can then attach our hooks to.
+
+Behavior of tensor hooks when tensor is modified in-place
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Usually tensor hooks fire when gradients are computed for that tensor, but if you register
+hooks to a tensor, and then modify that tensor in-place, those hooks will be affected.
+
+When a hook is registered to tensor, it is associated with the grad_fn
+of the Tensor at the time of registration. (This is necessary so that the autograd engine can
+fire the hook as it traverses the Nodes in the graph during the backward pass.) However, if a
+tensor is modified in-place, even though it is now associated with a new grad_fn, hooks
+registered to that tensor before it was modified in-place will continue fire when the Tensor's
+old grad_fn is reached in the graph.
+
+If you'd like the hooks to fire when the tensor's gradients are computed, you
+should register it after the in-place is performed. For example:
+
+.. code::
+    t = torch.tensor(1., requires_grad=True).sin()
+    t.cos_()
+    t.register_hook(fn)
+    t.backward()
