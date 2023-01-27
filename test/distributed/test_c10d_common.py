@@ -928,7 +928,7 @@ class CommonDistributedDataParallelTest(object):
             }
             return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
 
-    def _test_dataclass_output(self, skip_o1):
+    def _test_dataclass_output(self, skip_o1, static_graph):
         net_x = torch.cat(
             [torch.ones(4, 10) * i for i in range(self.world_size)]
         ).to(self.rank)
@@ -940,8 +940,8 @@ class CommonDistributedDataParallelTest(object):
         ddp = DistributedDataParallel(
             copy.deepcopy(net),
             device_ids=[self.rank],
-            find_unused_parameters=True,
-            static_graph=False,
+            find_unused_parameters=(not static_graph),
+            static_graph=static_graph,
             process_group=self._get_process_group(),
         )
 
@@ -972,11 +972,17 @@ class CommonDistributedDataParallelTest(object):
 
     @skip_if_lt_x_gpu(2)
     def test_dataclass_output(self):
-        self._test_dataclass_output(skip_o1=False)
+        for static_graph in [True, False]:
+            self._test_dataclass_output(
+                skip_o1=False, static_graph=static_graph
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_dataclass_output_unused_param(self):
-        self._test_dataclass_output(skip_o1=True)
+        for static_graph in [True, False]:
+            self._test_dataclass_output(
+                skip_o1=True, static_graph=static_graph
+            )
 
 
 class ComputeBucketAssignmentTest(TestCase):
