@@ -893,10 +893,8 @@ that those Tensors share a single grad_fn, which we can then attach our hooks to
 Behavior of Tensor hooks when Tensor is modified in-place
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Usually hooks registered to a Tensor fire when gradients are computed for that Tensor, i.e.,
-they fire when the autograd engine reaches the grad_fn of that Tensor during backward, and
-they receive the gradient of the outputs with respect to that Tensor, where the value of the
-Tensor is taken to be its value at the time backward is computed.
+Usually hooks registered to a Tensor receive the gradient of the outputs with respect to that
+Tensor, where the value of the Tensor is taken to be its value at the time backward is computed.
 
 However, if you register hooks to a Tensor, and then modify that Tensor in-place, hooks
 registered before in-place modification similarly receive gradients of the outputs with
@@ -914,7 +912,7 @@ For example:
     t.register_hook(fn)
     t.backward()
 
-It can be helpful to know that under the hood,
+Furthemore, it can be helpful to know that under the hood,
 when hooks are registered to a Tensor, they actually become permanently bound to the grad_fn
 of that Tensor, so if that Tensor is then modified in-place,
 even though the Tensor now has a new grad_fn, hooks registered before it was
