@@ -9493,7 +9493,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
-            input_names=["input"]
+            input_names = ["input"]
             directions = 2 if bidirectional else 1
 
             if initial_state:
@@ -9512,16 +9512,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             return input, input_names
 
         input, input_names = make_input(RNN_BATCH_SIZE)
-        dynamic_axes={"input": [0, 1], "seq_lengths": [0]}
-        export_options = {
-            "input_names" : input_names, "dynamic_axes" : dynamic_axes
-        }
+        dynamic_axes = {"input": [0, 1], "seq_lengths": [0]}
+        export_options = {"input_names" : input_names, "dynamic_axes" : dynamic_axes}
 
         # test that the model still runs with a different batch size
         other_input, _ = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, input, additional_test_inputs=[other_input], **export_options)
+        self.run_test(
+            model, input, additional_test_inputs=[other_input], **export_options
+        )
 
-        
     def _gru_test(
         self,
         layers,
