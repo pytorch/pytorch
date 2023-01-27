@@ -158,26 +158,26 @@ def _test_export_helper(self, device, dtype, op,
             #         f"Decomposed {op.name} should only contain core aten ops, but found {node.target.name()}"
             #     )
 
-class TestDynamoExportOpInfo(TestCase):
+class TestExportOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestDynamoExportOpInfo', 'test_export_with_aten', export_failures | export_failures_with_kwargs)
+    @skipOps('TestExportOpInfo', 'test_export_with_aten', export_failures | export_failures_with_kwargs)
     def test_export_with_aten(self, device, dtype, op):
         _test_export_helper(self, device, dtype, op, aten_graph=True)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestDynamoExportOpInfo', 'test_export_exhaustive_with_aten_dynamic',
+    @skipOps('TestExportOpInfo', 'test_export_with_aten_dynamic',
              export_failures | export_failures_with_kwargs | symbolic_tensor_failures | export_failures_dynamic)
-    def test_export_exhaustive_with_aten_dynamic(self, device, dtype, op):
+    def test_export_with_aten_dynamic(self, device, dtype, op):
         _test_export_helper(self, device, dtype, op, aten_graph=True, tracing_mode="symbolic")
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestDynamoExportOpInfo', 'test_export_with_aten_decomp', export_failures | export_failures_with_kwargs)
+    @skipOps('TestExportOpInfo', 'test_export_with_aten_decomp', export_failures | export_failures_with_kwargs)
     def test_export_with_aten_decomp(self, device, dtype, op):
         _test_export_helper(self, device, dtype, op, aten_graph=True, decomposition_table=core_aten_decompositions)
 
 
 only_for = ("cpu")
-instantiate_device_type_tests(TestDynamoExportOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestExportOpInfo, globals(), only_for=only_for)
 
 
 if __name__ == '__main__':
