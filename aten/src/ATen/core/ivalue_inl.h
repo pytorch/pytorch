@@ -1590,7 +1590,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
-  virtual ~PyObjectHolder()= default;
+  ~PyObjectHolder() override = default;
 };
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {
