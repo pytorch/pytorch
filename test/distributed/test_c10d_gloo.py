@@ -1462,9 +1462,12 @@ class DistributedDataParallelTest(
         self._spawn_processes()
 
     def _get_process_group(self):
-        store = self._get_store()
-        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
-        return c10d.distributed_c10d._get_default_group()
+        try:
+            return c10d.distributed_c10d._get_default_group()
+        except RuntimeError:
+            store = self._get_store()
+            c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
+            return c10d.distributed_c10d._get_default_group()
 
     def _test_gloo_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
