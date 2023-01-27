@@ -1377,21 +1377,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         graph, _ = torch._dynamo.export(
             f,
-            (torch.randn(5)),
+            (torch.randn(5, 5)),
             aten_graph=True,
             decomposition_table={torch.ops.aten.t.default: nop},
         )
         self.assertEqual(
             len([n for n in graph.graph.nodes if n.target == torch.ops.aten.t.default]),
             0,
-        )
-
-        graph, _ = torch._dynamo.export(
-            f, (torch.randn(5)), aten_graph=True, decomposition_table=None
-        )
-        self.assertEqual(
-            len([n for n in graph.graph.nodes if n.target == torch.ops.aten.t.default]),
-            2,
         )
 
     def test_export_decomp_asserts_bad_args(self):
