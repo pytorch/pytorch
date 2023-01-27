@@ -45,6 +45,8 @@ class Adam(Optimizer):
                 for pg in self.param_groups for p in pg['params']
             ):
                 raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
+            if foreach:
+                raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
     def __setstate__(self, state):
         super().__setstate__(state)

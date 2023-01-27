@@ -1616,12 +1616,8 @@ class TestOptim(TestCase):
             params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
-            grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
-            found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
+            grad_scale = torch.ones((1,), dtype=torch.float32, device="cuda")
+            found_inf = torch.ones((1,), dtype=torch.float32, device="cuda")
 
             functional_optim(
                 params,

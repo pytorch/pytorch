@@ -2651,6 +2651,42 @@ torch.cuda.synchronize()
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
 
+    def test_grad_scaler_pass_itself(self):
+        class _PlaceHolderOptimizer(torch.optim.Optimizer):
+            tester = self
+
+            def __init__(self, params, defaults=None):
+                if defaults is None:
+                    defaults = {}
+                super().__init__(params, defaults)
+                self._step_supports_amp_scaling = True
+
+        class Optimizer1(_PlaceHolderOptimizer):
+            def step(self, closure=None, *, grad_scaler=None):
+                self.tester.assertTrue(isinstance(grad_scaler, torch.cuda.amp.GradScaler))
+                self.tester.assertFalse(hasattr(self, "grad_scale"))
+                self.tester.assertFalse(hasattr(self, "found_inf"))
+
+        class Optimizer2(_PlaceHolderOptimizer):
+            def step(self, closure=None):
+                self.tester.assertTrue(isinstance(self.grad_scale, torch.Tensor))
+                self.tester.assertTrue(isinstance(self.found_inf, torch.Tensor))
+
+        x = torch.randn(4, 4).cuda()
+        m = torch.nn.Linear(4, 1).cuda()
+        o1 = Optimizer1(m.parameters())
+        o2 = Optimizer2(m.parameters())
+        scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+
+        with torch.cuda.amp.autocast():
+            y = m(x)
+            loss = y.mean()
+        scaler.scale(loss).backward()
+        with self.assertWarns(FutureWarning):
+            scaler.step(o1)
+        scaler.step(o2)
+        scaler.update()
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
