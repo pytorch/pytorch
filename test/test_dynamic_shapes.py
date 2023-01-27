@@ -769,5 +769,48 @@ class TestFloorDiv(TestCase):
             self.assertEqual(auto_wrapper(shape_env.simplify(expr)), auto_result)
             self.assertEqual(eval_wrapper(shape_env.evaluate_expr(expr)), eval_result)
 
+    @skipIfNoSympy
+    def test_floordiv_assumptions(self):
+        # We define two Symbols (with different names) for each type to make
+        # sure the behavior is consistent regardless of whether both arguments
+        # are the same object or not.
+        cases = (
+            sympy.Symbol("i1", integer=True),
+            sympy.Symbol("i2", integer=True),
+            sympy.Symbol("r1", real=True),
+            sympy.Symbol("r2", real=True),
+            sympy.Symbol("c1", complex=True, real=False, integer=False),
+            sympy.Symbol("c2", complex=True, real=False, integer=False),
+            sympy.Symbol("s1"),
+            sympy.Symbol("s2"),
+        )
+
+        for base, divisor in itertools.product(cases, repeat=2):
+            def op():
+                return FloorDiv(base, divisor)
+
+            def is_complex(x):
+                return x.is_integer is False and x.is_real is False and x.is_complex
+
+            if is_complex(base) or is_complex(divisor):
+                self.assertRaisesRegex(
+                    TypeError,
+                    (r"unsupported operand type\(s\) for //: 'Symbol' and 'Symbol',"
+                     r" expected integer or real"),
+                    op)
+                continue
+
+            op = op()
+
+            # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
+            # always returns an integer 1 when both args are the same object.
+            # This even works for Symbols with no assumptions specified.
+            if base is divisor:
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            else:
+                self.assertEqual(op.is_integer, None)
+                self.assertTrue(op.is_real)
+
 if __name__ == '__main__':
     run_tests()

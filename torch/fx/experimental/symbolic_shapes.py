@@ -251,6 +251,10 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
+        # Default return type for SymPy assumptions.
+        # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+        is_real = True
+
         def _sympystr(self, printer):
             lhs = self.args[0]
             rhs = self.args[1]
