@@ -525,21 +525,9 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static inline double swapDouble(double value) {
-  const char* bytes = reinterpret_cast<const char*>(&value);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double flipped;
-  char* out_bytes = reinterpret_cast<char*>(&flipped);
-  for (const auto i : c10::irange(sizeof(double))) {
-    out_bytes[i] = bytes[sizeof(double) - i - 1];
-  }
-  return *reinterpret_cast<double*>(out_bytes);
-}
-
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
-  // Python pickle format is big endian, swap.
-  push<double>(swapDouble(value));
+  push<double>(value);
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();

@@ -6,6 +6,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/utils/byte_order.h>
 
 namespace torch {
 namespace jit {
@@ -109,6 +110,26 @@ class TORCH_API Unpickler {
     } else {
       // Don't over-template the slow path, to avoid code size bloat.
       readSlowWithBuffer(reinterpret_cast<char*>(&item), sizeof(T));
+    }
+    if (std::is_same<T, double>::value) {
+      if (torch::utils::THP_nativeByteOrder() ==
+          torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
+        // Python pickle float format is big endian, swap on little endian.
+        AT_ASSERT(sizeof(double) == 8);
+        swapBytes64(&item);
+      }
+    } else {
+      if (torch::utils::THP_nativeByteOrder() ==
+          torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
+        // Python pickle int formats are little endian, swap on big endian.
+        if (sizeof(T) == 2) {
+          swapBytes16(&item);
+        } else if (sizeof(T) == 4) {
+          swapBytes32(&item);
+        } else if (sizeof(T) == 8) {
+          swapBytes64(&item);
+        }
+      }
     }
     return item;
   }

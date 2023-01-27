@@ -11,6 +11,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/FbcodeMaps.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/utils/byte_order.h>
 
 namespace torch {
 namespace jit {
@@ -222,7 +223,29 @@ class TORCH_API Pickler {
   static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
-    const char* begin = reinterpret_cast<const char*>(&value);
+    using common_type_t = typename std::common_type<T>::type;
+    common_type_t item = value;
+    if (std::is_same<common_type_t, double>::value) {
+      if (torch::utils::THP_nativeByteOrder() ==
+          torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
+        // Python pickle float format is big endian, swap on little endian.
+        AT_ASSERT(sizeof(double) == 8);
+        swapBytes64(&item);
+      }
+    } else {
+      if (torch::utils::THP_nativeByteOrder() ==
+          torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
+        // Python pickle int formats are little endian, swap on big endian.
+        if (sizeof(common_type_t) == 2) {
+          swapBytes16(&item);
+        } else if (sizeof(common_type_t) == 4) {
+          swapBytes32(&item);
+        } else if (sizeof(common_type_t) == 8) {
+          swapBytes64(&item);
+        }
+      }
+    }
+    const char* begin = reinterpret_cast<const char*>(&item);
     if (bufferPos_ + sizeof(T) > buffer_.size()) {
       flushNonEmpty();
     }
