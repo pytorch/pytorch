@@ -57,6 +57,30 @@ struct nansum_functor {
   }
 };
 
+const char nansum_name[] = "nansum";
+template <>
+struct nansum_functor<c10::complex<at::Half>> {
+#if AT_USE_JITERATOR()
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    std::string func = jiterator_stringify(
+        arg_t combine(arg_t a, scalar_t b) {
+          return a + ((std::isnan(b.real()) || std::isnan(b.imag())) ? arg_t{0.} : arg_t{b});
+        }
+    );
+    jitted_gpu_reduce_kernel<nansum_name, scalar_t, scalar_t>(
+        iter, func, 0.);
+  }
+#else
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    using acc_t = at::opmath_type<scalar_t>;
+    gpu_reduce_kernel<scalar_t, acc_t>(
+        iter, NanSumOps<acc_t, acc_t>{});
+  }
+#endif
+};
+
 const char prod_name[] = "prod";
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
@@ -162,8 +186,9 @@ static void sum_kernel_cuda(TensorIterator& iter){
 
 static void nansum_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nansum_cuda", [&]() {
-      nansum_functor<scalar_t>{}(iter);
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kComplexHalf,
+      iter.dtype(), "nansum_cuda", [&]() {
+        nansum_functor<scalar_t>{}(iter);
     });
   };
 

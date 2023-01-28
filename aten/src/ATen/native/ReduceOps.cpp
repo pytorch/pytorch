@@ -1199,7 +1199,6 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
 
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
   // For integral types, use existing sum as
   // integral types don't have `Nan`.
   if (c10::isIntegralType(self.scalar_type(), true)){
@@ -1374,10 +1373,6 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
-      self.is_floating_point(),
-      "nanmean(): expected input to have floating point dtype but got ",
-      self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);

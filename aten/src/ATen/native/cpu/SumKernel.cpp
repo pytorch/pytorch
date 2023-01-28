@@ -621,6 +621,7 @@ void sum_kernel_impl(TensorIterator &iter) {
 }
 
 void nansum_kernel_impl(TensorIterator &iter) {
+  // AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
     cascade_sum</*ignore_nan=*/true, scalar_t>(iter);
