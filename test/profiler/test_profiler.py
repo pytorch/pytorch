@@ -2669,10 +2669,10 @@ aten::mm""")
         )
         optimizer = torch.optim.Adam(model.parameters())
         cases = (
-            (1, lambda: optimizer.zero_grad()),
-            (1, lambda: model.zero_grad()),
-            (0, lambda: optimizer.zero_grad(set_to_none=True)),
-            (0, lambda: model.zero_grad(set_to_none=True))
+            (0, lambda: optimizer.zero_grad()),
+            (0, lambda: model.zero_grad()),
+            (1, lambda: optimizer.zero_grad(set_to_none=False)),
+            (1, lambda: model.zero_grad(set_to_none=False))
         )
         num_matched = []
         for _, fn in cases:
