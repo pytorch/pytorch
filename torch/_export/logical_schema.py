@@ -231,16 +231,12 @@ class NodeMetadata:
 
 
 # Maps to fx.Node
+# Node can only be 'call_function' ops
+# 'placeholder' and 'output' are serialized as inputs and outputs of the Graph
+# 'get_attr' is not needed anymore, as it's an implicit lookup from GraphModule's parameters/buffers
+# 'call_method' and 'call_module' is not supported, as it's not used in the canonical FX Graph
 @dataclass
 class Node:
-    # In fx, it can be one of ['placeholder', 'call_function', 'get_attr', 'output']
-    # Only call_function can be present here
-    # call_method and call_module are not supported, as they shouldn't apprear in the Caononical FX Graph
-    # placeholder and output are serialized as inputs and outputs of the Graph
-    # !!! Consider using an enum instead of string
-    # !!! Consider removeing this field, as it can only be call_function
-    op: str
-
     # fully qualified name to the target, e.g. aten.add.Tensnor
     # !!! Consider using a structured operator name instead of string
     target: str
