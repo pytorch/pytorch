@@ -1,5 +1,4 @@
 import ast
-import sys
 from typing import List, Optional, Tuple
 
 from ._importlib import _resolve_name

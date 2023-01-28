@@ -3,7 +3,6 @@
 import os
 import sys
 from textwrap import dedent
-import unittest
 
 import torch
 

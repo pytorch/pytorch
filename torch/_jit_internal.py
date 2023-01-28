@@ -22,6 +22,7 @@ from typing import (  # noqa: F401
     Any,
     Callable,
     Dict,
+    Final,
     Generic,
     List,
     Optional,
@@ -41,7 +42,6 @@ import torch.package._mangling as package_mangling
 from torch._C import Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
-from typing import Final
 
 LockType: Type
 try:

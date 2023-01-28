@@ -3,7 +3,6 @@
 from itertools import repeat
 import os
 import re
-import sys
 from typing import Union, get_args, get_origin
 import unittest
 
