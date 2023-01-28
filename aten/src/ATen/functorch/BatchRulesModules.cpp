@@ -26,8 +26,8 @@ std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
     c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (!weight_bdim && indices_bdim) {
     // B*, ED -> B*D
-    const auto result = at::embedding_symint(weight, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
-    return std::make_tuple(result, indices_bdim);
+    auto result = at::embedding_symint(weight, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
+    return std::make_tuple(std::move(result), indices_bdim);
   } else if (weight_bdim && !indices_bdim) {
     // *, BED -> *, E(BD) -> *(BD) -> *BD
     const auto batch_size = weight.size(*weight_bdim);
@@ -156,7 +156,7 @@ grid_sample_backward_helper_in(
   grid_ = ensure_has_bdim(grid_, grid_bdim.has_value(), batch_size);
   grid_ = reshape_dim_into(0, 0, grid_);
 
-  return std::make_tuple(grad_output_, input_, grid_, batch_size);
+  return std::make_tuple(std::move(grad_output_), std::move(input_), std::move(grid_), batch_size);
 }
 
 std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
