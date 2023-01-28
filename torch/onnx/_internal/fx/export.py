@@ -819,7 +819,7 @@ def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_load_paths: Tuple[str],
+    torch_load_paths: Tuple[str, ...],
     onnx_model: onnx.ModelProto,
 ):
     onnx_model_with_initializers = onnx.ModelProto()
