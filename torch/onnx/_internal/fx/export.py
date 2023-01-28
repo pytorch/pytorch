@@ -2,7 +2,8 @@ import copy
 import inspect
 import itertools
 import operator
-from typing import Callable, Dict, Optional, Tuple, Union
+import os
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import onnx
 
@@ -193,10 +194,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     ts_name_to_real_tensor: Dict[
         str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
     ] = {}
-    # fx_module_with_metadata.print_readable()
     for node in fx_module_with_metadata.graph.nodes:
-        # print(f"Export {node}, {node.target}:")
-        # print(g)
         if node.op == "placeholder":
             if node.meta["val"] is None:
                 # This input argument is None, which is mapped
@@ -427,6 +425,25 @@ def _shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *
     return decomposed_module
 
 
+def _rename_placeholder_targets(
+    module: torch.fx.GraphModule, reference_module: torch.fx.GraphModule
+):
+    """Align the argument names in module with those in reference_module.
+    After calling this function, the two forward(...) in module and reference_module should have
+    the same signature.
+    """
+    placeholders = [n for n in module.graph.nodes if n.op == "placeholder"]
+    reference_placeholders = [
+        n for n in reference_module.graph.nodes if n.op == "placeholder"
+    ]
+
+    for placeholder, reference_placeholder in zip(placeholders, reference_placeholders):
+        placeholder.target = reference_placeholder.target
+        placeholder.name = reference_placeholder.name
+
+    module.recompile()
+
+
 def _export(
     module: torch.fx.GraphModule,
     opset_version=None,
@@ -446,7 +463,9 @@ def _export(
         tracing_mode="fake",
         _allow_non_fake_inputs=True,
     )(*args)
-
+    # Rename placeholder targets to match the original module's signature since
+    # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
+    _rename_placeholder_targets(decomposed_module, module)
     # Run FakeTensorProp on decomposed_module.
     # Symbolic output of the i-th node can be accessed via
     # decomposed_module.graph.nodes[i].meta["val"]
@@ -626,7 +645,7 @@ def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
 
 
 def export_without_parameters_and_buffers(
-    module: torch.fx.GraphModule,
+    module: torch.nn.Module,
     *args,
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
     use_binary_format: bool = True,
@@ -637,10 +656,7 @@ def export_without_parameters_and_buffers(
 ):
     if opset_version is None:
         opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
-    if isinstance(module, torch.nn.Module):
-        signature = inspect.signature(module.forward)
-    else:
-        signature = inspect.signature(module)
+    signature = inspect.signature(module.forward)
 
     # We hope the input kwargs will be mapped to bound.args after binding.
     # If not, we will raise an error.
@@ -699,3 +715,149 @@ def export_without_parameters_and_buffers(
         bound.args,
         replaced_attrs,
     )
+
+
+class TorchLoadPathCaptureContext:
+    """Context manager to capture the path of torch.load().
+
+    This context manager is used to capture the path of torch.load() in
+    order to save the external data of the model to the same directory
+    as the model.
+
+    Example:
+        with TorchLoadPathCaptureContext() as path:
+            torch.load(model_path)
+        # path is the directory of model_path.
+    """
+
+    def __init__(self):
+        # List of file paths processed by torch.load.
+        self.paths: List[str] = []
+        # Original version of torch.load.
+        self.torch_load = torch.load
+
+        def torch_load_wrapper(f, *args, **kwargs):
+            # Record path.
+            self.paths.append(f)
+            # Then, call the original torch.load.
+            return self.torch_load(f, *args, **kwargs)
+
+        self.torch_wrapper = torch_load_wrapper
+
+    def __enter__(self):
+        torch.load = self.torch_wrapper
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        torch.load = self.torch_load
+
+
+def _create_tensor_proto_with_external_data(
+    tensor: torch.Tensor, name: str, location: str, basepath: str
+):
+    """Create a TensorProto with external data from a PyTorch tensor.
+    The external data is saved in os.path.join(basepath, location).
+
+    Args:
+        tensor: Tensor to be saved.
+        name: Name of the tensor (i.e., initializer name in ONNX graph).
+        location: Relative location of the external data file
+            (e.g., "/tmp/initializers/weight_0" when model is "/tmp/model_name.onnx").
+        basepath: Base path of the external data file (e.g., "/tmp/external_data" while model must be in "/tmp").
+
+
+    Reference for ONNX's external data format:
+        How to load?
+        https://github.com/onnx/onnx/blob/5dac81ac0707bdf88f56c35c0a5e8855d3534673/onnx/external_data_helper.py#L187
+        How to save?
+        https://github.com/onnx/onnx/blob/5dac81ac0707bdf88f56c35c0a5e8855d3534673/onnx/external_data_helper.py#L43
+        How to set ONNX fields?
+        https://github.com/onnx/onnx/blob/5dac81ac0707bdf88f56c35c0a5e8855d3534673/onnx/external_data_helper.py#L88
+    """
+    tensor_proto = onnx.TensorProto()
+    tensor_proto.name = name
+    tensor_proto.data_type = torch.onnx._type_utils._SCALAR_TYPE_TO_ONNX[  # type: ignore[assignment]
+        torch.onnx._type_utils._DTYPE_TO_SCALAR_TYPE[tensor.dtype]
+    ]
+    tensor_proto.dims.extend(tensor.shape)
+    tensor_proto.data_location = onnx.TensorProto.EXTERNAL
+
+    # Settings for saving one tensor per file.
+    # Offset is zero because there is no other tensor in the same file.
+    key_value_pairs = {
+        "location": location,
+        "offset": 0,
+        "length": tensor.untyped_storage().nbytes(),
+    }
+    for k, v in key_value_pairs.items():
+        entry = tensor_proto.external_data.add()
+        entry.key = k
+        entry.value = str(v)
+
+    # Actual path to write content of tensor.
+    external_data_file_path = os.path.join(basepath, location)
+    if os.path.exists(external_data_file_path):
+        os.remove(external_data_file_path)
+
+    # Create external data's folder if not exists.
+    external_data_dir_path = os.path.dirname(external_data_file_path)
+    if not os.path.exists(external_data_dir_path):
+        # if the demo_folder directory is not present
+        # then create it.
+        os.makedirs(external_data_dir_path)
+
+    # Create a fresh file.
+    with open(external_data_file_path, "xb") as data_file:
+        # No need to call "seek" because offset is 0.
+        # data_file.seek(0)
+        # Write tensor content to the file.
+        data_file.write(tensor.numpy().tobytes())
+
+    return tensor_proto
+
+
+def save_model_with_external_data(
+    basepath: str,
+    model_location: str,
+    initializer_location: str,
+    torch_load_paths: Tuple[str],
+    onnx_model: onnx.ModelProto,
+):
+    onnx_model_with_initializers = onnx.ModelProto()
+    onnx_model_with_initializers.CopyFrom(onnx_model)
+    onnx_input_names = [input.name for input in onnx_model.graph.input]
+
+    for path in torch_load_paths:
+        state_ditc = torch.load(path)
+        for name, tensor in state_ditc.items():
+            # Basically, "transformer.attention.self.query.weight" is mapped
+            # to "transformer_attention_self_query_weight" for mimicing the
+            # name-modifying code in FX-to-ONNX exporter.
+            # See function _replace_get_attr_with_placeholder for details.
+            refined_name = name.replace(".", "_")
+
+            # For each refined PyTorch tensor name loaded by torch.load,
+            #  1.  Search its best match in ONNX model. E.g., the match of
+            #       "transformer_attention_weight" could be "attention_weight".
+            #  2.  Set "tensor" as the initializer of the matched ONNX input.
+            #      E.g., "tensor" is stored as the initializer of "attention_weight".
+            # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
+            # loaded by torch.load.
+            for onnx_input_name in onnx_input_names:
+                if onnx_input_name.endswith(refined_name) or refined_name.endswith(
+                    onnx_input_name
+                ):
+                    # Find a match. Change refined_name to the matched ONNX input name, so that we
+                    # create initializer with the right ONNX name.
+                    refined_name = onnx_input_name
+                    break
+
+            # Create one file per tensor.
+            # tensor_proto.raw_data is stored to external file at os.path.join(basepath, initializer_location).
+            tensor_proto = _create_tensor_proto_with_external_data(
+                tensor, refined_name, initializer_location, basepath
+            )
+            # Add the tensor_proto to the ONNX model as an initializer with external data.
+            onnx_model_with_initializers.graph.initializer.append(tensor_proto)
+
+    # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
+    onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
