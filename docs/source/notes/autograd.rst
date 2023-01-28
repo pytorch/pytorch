@@ -414,9 +414,10 @@ limit definition of a derivative and generalizes it to operate on
 complex numbers. Consider a function :math:`f: ℂ → ℂ`,
 
     .. math::
-        `f(z=x+yj) = u(x, y) + v(x, y)j`
+        f(z=x+yj) = u(x, y) + v(x, y)j
 
-where :math:`u` and :math:`v` are two variable real valued functions.
+where :math:`u` and :math:`v` are two variable real valued functions
+and :math:`j` is the imaginary unit.
 
 Using the derivative definition, we can write:
 
