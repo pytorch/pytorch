@@ -220,28 +220,42 @@ class SymNode:
     def int_(self):
         if len(self.expr.free_symbols) == 0:
             return int(self.expr)
-        raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
+        raise RuntimeError(f"Trying to extract a concrete int out of a symbolic int {self.expr}")
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return int(self.shape_env.evaluate_expr(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return int(r)
+        except Exception:
+            log.warn(f"Failed to convert to int: {r}")
+            raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return float(self.shape_env.evaluate_expr(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return float(r)
+        except Exception:
+            log.warn(f"Failed to convert to float: {r}")
+            raise
 
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         # TODO: why is the replace needed here?
-        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+        r = self.shape_env.evaluate_expr(self.shape_env.replace(self.expr))
+        try:
+            return bool(r)
+        except Exception:
+            log.warn(f"Failed to convert to bool: {r}")
+            raise
 
     def bool_(self):
-        # TODO: why is the replace needed here?
-        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+        return self.guard_bool("", 0)
 
 
 if HAS_SYMPY:
