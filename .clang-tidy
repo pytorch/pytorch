@@ -3,19 +3,29 @@
 InheritParentConfig: true
 Checks: '
 bugprone-*,
+-bugprone-argument-comment,
+-bugprone-easily-swappable-parameters,
 -bugprone-forward-declaration-namespace,
 -bugprone-macro-parentheses,
+-bugprone-narrowing-conversions
 -bugprone-lambda-function-name,
 -bugprone-reserved-identifier,
+-bugprone-swapped-arguments,
+-bugprone-implicit-widening-of-multiplication-result,
 cppcoreguidelines-*,
+-cppcoreguidelines-avoid-c-arrays,
+-cppcoreguidelines-avoid-const-or-ref-data-members
+-cppcoreguidelines-avoid-do-while,
 -cppcoreguidelines-avoid-magic-numbers,
 -cppcoreguidelines-avoid-non-const-global-variables,
 -cppcoreguidelines-interfaces-global-init,
 -cppcoreguidelines-macro-usage,
+-cppcoreguidelines-narrowing-conversions,
 -cppcoreguidelines-owning-memory,
 -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
 -cppcoreguidelines-pro-bounds-constant-array-index,
 -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+-cppcoreguidelines-pro-type-const-cast,
 -cppcoreguidelines-pro-type-cstyle-cast,
 -cppcoreguidelines-pro-type-reinterpret-cast,
 -cppcoreguidelines-pro-type-static-cast-downcast,
@@ -29,14 +39,18 @@ hicpp-avoid-goto,
 misc-unused-alias-decls,
 misc-unused-using-decls,
 modernize-*,
+-modernize-avoid-c-arrays,
 -modernize-concat-nested-namespaces,
+-modernize-macro-to-enum,
 -modernize-return-braced-init-list,
 -modernize-use-auto,
 -modernize-use-default-member-init,
 -modernize-use-using,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
+-modernize-redundant-void-arg,
 performance-*,
+-performance-move-const-arg,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 readability-container-size-empty,
@@ -44,5 +58,5 @@ readability-container-size-empty,
 HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
-CheckOptions:
+CheckOptions: []
 ...
