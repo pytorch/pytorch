@@ -16,7 +16,7 @@ import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
                                                   load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO,
-                                                  TEST_WITH_ROCM)
+                                                  TEST_WITH_ROCM, IS_MACOS)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -376,7 +376,10 @@ class TestMultiprocessing(TestCase):
                      "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_sharing(self):
         with fs_sharing():
-            self._test_sharing(repeat=TEST_REPEATS)
+            # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
+            # so run it only once there
+            repeat = 1 if IS_MACOS else TEST_REPEATS
+            self._test_sharing(repeat=repeat)
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
                      "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
