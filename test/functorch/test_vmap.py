@@ -50,6 +50,7 @@ from common_utils import (
 )
 import types
 from collections import namedtuple
+import contextlib
 
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
@@ -3738,14 +3739,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # AssertionError: Tensor-likes are not equal!
+        # Issue: https://github.com/pytorch/pytorch/issues/70904
+        xfail('bitwise_left_shift', device_type='cpu'),
+        decorate('bitwise_right_shift', device_type='cpu',
+                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
@@ -4923,6 +4927,21 @@ class TestRandomness(TestCase):
         jacfwd(torch.bernoulli, randomness="same")(x)
         jacfwd(torch.bernoulli, randomness="different")(x)
 
+    @parametrize('randomness', ['error', 'same', 'different'])
+    def test_dropout_unbatched(self, device, randomness):
+        x = torch.randn(3, device=device)
+        y = torch.randn(1, 3, device=device)
+
+        def fn(x, y):
+            # output from dropout should be a Tensor[B, 1, 3] (B=3)
+            return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
+
+        # We just verify that this doesn't raise an error for
+        # `same` and `different` randomness.
+        # Ref: https://github.com/pytorch/pytorch/issues/92283
+        context = self.assertRaises(RuntimeError) if randomness == 'error' else contextlib.nullcontext()
+        with context:
+            vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
 
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
