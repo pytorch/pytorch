@@ -79,7 +79,7 @@ jobs:
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       - name: Clean up disk space before running MacOS workflow
-        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -93,7 +93,7 @@ jobs:
 
       - name: Setup miniconda (x86, py3.8)
         if: ${{ runner.arch == 'X64' }}
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@macos-cleanup-after-job
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -209,4 +209,4 @@ jobs:
       - name: Clean up disk space
         if: always()
         continue-on-error: true
-        uses: huydhn/test-infra/.github/actions/check-disk-space@macos-cleanup-after-job
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
