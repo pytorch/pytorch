@@ -651,7 +651,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
                 else:
                     phs.append(arg)
         else:
-            phs = pytree.tree_map_only(lambda _: fx.PH, args)  # type: ignore[attr-defined]
+            phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
