@@ -34,7 +34,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         std::string backend,
         std::chrono::milliseconds timeout = kBackendDefaultTimeout)
         : timeout(timeout), backend(std::move(backend)) {}
-    virtual ~Options() = default;
+    ~Options() override = default;
 
     std::chrono::milliseconds timeout;
 
@@ -43,7 +43,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   };
 
   explicit Backend(int rank, int size);
-  virtual ~Backend() = 0;
+  ~Backend() override = 0;
 
   int getRank() const {
     return rank_;

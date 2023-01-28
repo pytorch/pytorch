@@ -284,7 +284,7 @@ test_single_dynamo_benchmark() {
   # Feel free to remove --device cuda if you ever decide to need to
   # test CPU as well in CI
   python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --device cuda \
+    --ci --accuracy --timing --explain --device cuda \
     "$@" "${partition_flags[@]}" \
     --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   python benchmarks/dynamo/check_csv.py \
@@ -317,9 +317,8 @@ test_inductor_benchmark() {
   # Check training with --amp
   test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
 
-  # Check training with symbolic shapes (not actually inductor)
-  test_single_dynamo_benchmark "dynamic_aot_eager_training" "$@" \
-    --backend aot_eager --dynamic-shapes --training
+  # Check inference with --dynamic-shapes
+  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes
 }
 
 test_inductor_benchmark_perf() {
@@ -351,9 +350,9 @@ test_inductor_benchmark_perf() {
 # No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
   local exit_status=0
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" || exit_status=$?
-  test_aot_eager_benchmark huggingface "" || exit_status=$?
-  test_aot_eager_benchmark timm_models "" || exit_status=$?
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "$@" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" "$@" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" "$@" || exit_status=$?
   if [[ $exit_status -ne 0 ]]; then
     echo "Some benchmarks failed; scroll up for details"
   fi
@@ -474,13 +473,14 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
 
     # Make test_reports directory
     # NB: the ending test_libtorch must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
@@ -491,6 +491,7 @@ test_libtorch() {
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$TORCH_BIN_DIR"/nvfuser_tests --gtest_output=xml:$TEST_REPORTS_DIR/nvfuser_tests.xml
     else
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
@@ -527,7 +528,7 @@ test_aot_compilation() {
 
   # Make test_reports directory
   # NB: the ending test_libtorch must match the current function name for the current
-  # test reporting process (in print_test_stats.py) to function as expected.
+  # test reporting process to function as expected.
   TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
   mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
@@ -541,7 +542,7 @@ test_vulkan() {
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
     LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
@@ -558,7 +559,7 @@ test_distributed() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     # NB: the ending test_distributed must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
     "$TORCH_BIN_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
@@ -582,7 +583,7 @@ test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
@@ -814,6 +815,10 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_smoke() {
+  time python test/run_test.py --include test_fx test_jit test_schema_check test_foreach test_weak --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -864,7 +869,42 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   checkout_install_torchbench
   install_huggingface
   install_timm
-  test_aot_eager_all
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    # NB: This code path is currently dead because dynamic shapes takes
+    # too long to run unsharded
+    test_aot_eager_all --dynamic-shapes
+  else
+    test_aot_eager_all
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_huggingface
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark huggingface "" --dynamic-shapes
+  else
+    test_aot_eager_benchmark huggingface ""
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
+  else
+    test_aot_eager_benchmark timm_models "$id"
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
+  else
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
+  fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
@@ -922,6 +962,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
+  install_torchvision
   install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
@@ -938,6 +979,9 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
+elif [[ "${TEST_CONFIG}" == *smoke* ]]; then
+  # TODO: Delete me once we get more 3.11 testing
+  test_smoke
 else
   install_torchvision
   install_triton

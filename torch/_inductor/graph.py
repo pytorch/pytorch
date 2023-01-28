@@ -265,7 +265,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.static_weight_shapes
             and (
                 len(self.graph_inputs) < self.num_static_inputs
-                or not config.dynamic_shapes
+                or not dynamo_config.dynamic_shapes
             )
             and not example._has_symbolic_sizes_strides
         ):
@@ -392,7 +392,9 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            if any(user.op == "output" for user in n.users):
+            if any(user.op == "output" for user in n.users) and isinstance(
+                n.meta["val"], torch.Tensor
+            ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
