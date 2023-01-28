@@ -68,7 +68,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // LazyTensorPtr instead.
   LazyTensor() = delete;
 
-  virtual ~LazyTensor() = default;
+  ~LazyTensor() override = default;
 
   size_t generation() const {
     return data()->generation;
