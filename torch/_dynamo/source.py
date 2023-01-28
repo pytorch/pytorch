@@ -60,6 +60,11 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass
+class LocalInputSource(LocalSource):
+    pos: int
+
+
+@dataclasses.dataclass
 class RandomValueSource(Source):
     random_call_index: int
 
