@@ -39,8 +39,6 @@ Developer tools which you might find useful:
   can conveniently run diffs on them when working on code-generation.
   (See also [generated_dirs.txt](generated_dirs.txt) which
   specifies the list of directories with generated files.)
-* [stats/test_history.py](stats/test_history.py) - Query S3 to display history of a single
-  test across multiple jobs over time.
 
 Important if you want to run on AMD GPU:
 
