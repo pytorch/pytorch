@@ -275,8 +275,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             batch_size, in_channels_per_group, input_feature_map_size,
             out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
             W_scale, W_zero_point, use_bias, use_channelwise)
-        example_input = [X,]
-        example_input_q = [X_q,]
+        example_input = [X, ]
+        example_input_q = [X_q, ]
 
         if post_op in ["add", "add_relu"]:
             X2, X2_q = _make_conv_add_extra_input_tensor(X2_scale, X2_zero_point, conv_module[0](X).size())
@@ -417,7 +417,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Smoke test to make sure the module actually runs
         if use_bias:
             self.assertEqual(conv_module[0].bias if (post_op in ["relu", "add", "add_relu"]) else conv_module.bias,
-                                converted_qconv_module[0].bias())
+                             converted_qconv_module[0].bias())
         # Smoke test extra_repr
         self.assertTrue(module_name == converted_qconv_module[0]._get_name())
 
