@@ -236,12 +236,8 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
 #else /* _WIN32 */
   {
     /* open file */
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int fd;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int flags; // shadow
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    struct stat file_stat;
+    int fd{-1};
+    int flags{}; // shadow
 
     if (flags_ & (ALLOCATOR_MAPPED_SHARED | ALLOCATOR_MAPPED_SHAREDMEM)) {
       flags = O_RDWR | O_CREAT;
@@ -278,6 +274,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
       fd = fd_;
     }
 
+    struct stat file_stat;
     if (fstat(fd, &file_stat) == -1) {
       int last_err = errno;
       if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
@@ -471,6 +468,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(WithFd, const char *filename, int
 }
 
 void RefcountedMapAllocator::initializeAlloc() {
+  TORCH_CHECK(base_ptr_, "base_ptr_ is null");
   MapInfo *map_info = (MapInfo*)base_ptr_;
 
 #ifdef _WIN32

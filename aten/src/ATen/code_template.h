@@ -18,7 +18,7 @@ namespace jit {
 // in the top level environment, and then recurses into a parent
 // environment if the key is not found.)
 struct TemplateEnv {
-  TemplateEnv() : parent(nullptr) {}
+  TemplateEnv() = default;
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
 
   using string_list = std::vector<std::string>;
@@ -86,7 +86,7 @@ struct TemplateEnv {
 
   std::unordered_map<std::string, std::string> strings_;
   std::unordered_map<std::string, string_list> lists_;
-  TemplateEnv* parent;
+  TemplateEnv* parent{nullptr};
 };
 
 /*
