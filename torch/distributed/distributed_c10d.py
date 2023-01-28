@@ -10,7 +10,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch._C._distributed_c10d import (
@@ -3758,10 +3758,10 @@ def new_subgroups_by_enumeration(
 
     return cur_subgroup, subgroups
 
-# from torch.library import Library, impl
-# aten_cpu_lib = Library("aten", "IMPL", "CPU")
-# aten_cuda_lib = Library("aten", "IMPL", "CUDA")
 
-# @impl(aten_cpu_lib, 'all_reduce')
-# def all_reduce_cpu(self, group_id, reduce_op):
-#     return self
+def _find_pg_by_ranks_and_tag(tag:str, ranks: List[int]) -> ProcessGroup:
+    for group, group_ranks in _world.pg_group_ranks.items():
+        good = all(r in group_ranks for r in ranks)
+        if good:
+            return group
+    raise Exception(f"Could not find pg with {ranks}")

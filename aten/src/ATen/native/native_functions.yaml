@@ -14732,8 +14732,8 @@
   autogen: _fused_adam, _fused_adam.out
 
 # Collectives
-# TODO: add reduce_op and add some form of ranks instead of processgroup obj
-- func: all_reduce(Tensor self, int group_id, str reduce_op) -> Tensor
+# TODO figure out how to encode list[list[int]]
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks) -> Tensor
   dispatch:
     CompositeExplicitAutograd: all_reduce
   variants: function

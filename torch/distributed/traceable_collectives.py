@@ -1,13 +1,20 @@
 import weakref
 
 import torch
+import torch.distributed as dist
+
 from torch._C import DispatchKey
+
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
 from typing import Any, Optional
 
-from .distributed_c10d import _find_pg_by_ranks, get_rank
+from .distributed_c10d import _find_pg_by_ranks_and_tag, get_rank
 from .constants import default_pg_timeout
+from torch._meta_registrations import register_meta
+
+
+from typing import List
 """
 New traceable, functional collectives.
   compiler: trace these ops with plain-old-data schemas, then choose how to lower them.
@@ -25,13 +32,49 @@ Issues:
 FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
 FIXME wait_tensor should be an op so its traceable
 """
-tensor_to_work = weakref.WeakKeyDictionary
-def wait_tensor(tensor: torch.Tensor):
-    w = tensor_to_work.get(tensor)
+
+#FIXME we do this way cuz we can't use tensor __eq__, we want id()
+#TODO use a weakref callback
+class StupidWeakDict:
+    def __init__(self):
+        self.kvs = []
+
+    def add(self, key, val):
+        self.kvs.append((weakref.ref(key), val))
+
+    def get_and_remove(self, key):
+        new_arr = []
+        val = None
+        for k, v in self.kvs:
+            this_k = k()
+            if this_k == None:
+                continue
+            if id(this_k) == id(key):
+                val = v
+            else:
+                new_arr.append((k, v))
+        self.kvs = new_arr
+        return val
+
+tensor_to_work = StupidWeakDict()
+
+lib = torch.library.Library("tr_c10d", "DEF")
+lib.define("wait(Tensor self) -> Tensor")
+
+impl_lib = torch.library.Library("tr_c10d", "IMPL",  "CPU")
+
+def _wait_tensor(tensor: torch.Tensor):
+    print("__wait")
+    w = tensor_to_work.get_and_remove(tensor)
     if w:
         w.wait()
+    return tensor * 99
 
+impl_lib.impl("wait", _wait_tensor)
 
+def wait_tensor(tensor):
+    print("wait")
+    return torch._ops.ops.tr_c10d.wait(tensor)
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
@@ -65,8 +108,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: Any):
             if isinstance(e, AsyncCollectiveTensor):
                 # print(f"unwrapping {e}")
-                wait_tensor(e._tensor)
-                return e._tensor
+                return wait_tensor(e._tensor)
             return e
 
         # TODO what happens when func is an inplace? (add_) -
@@ -82,28 +124,35 @@ class AsyncCollectiveTensor(torch.Tensor):
         return out
 
 
-@torch._ops.ops.aten.all_reduce.default.py_impl(DispatchKey.CPU)
-@torch._ops.ops.aten.all_reduce.default.py_impl(DispatchKey.CUDA)
-def all_reduce(self, reduce_op, ranks, tag):
+# TODO assert if ranks has duplicated entries
+# TODO change signature from int[] to int[][]
+def _all_reduce_cpu(self, reduceOp, tag, ranks):
     print("all reducing!")
-    assert reduce_op == "sum", "Unable to convert str to ReduceOp, so only default sum works"
+    #TODO accept SUM - lowercase it
+    assert reduceOp == "sum", "Unable to convert str to ReduceOp, so only default sum works"
     assert tag == "", "No support for non-empty comms tag"
 
     my_rank = get_rank()
-    my_ranks = None
-    for rs in ranks:
-        if my_rank() in rs:
-            my_ranks = rs
+    my_ranks = ranks
+
 
     assert my_ranks is not None, "Called all_reduce with a set of ranks that doesn't include the current node"
-    group = _find_pg_by_ranks(my_ranks)
+    assert my_rank in my_ranks, "Called all_reduce with a set of ranks that doesn't include the current node"
+    
+    group = _find_pg_by_ranks_and_tag(tag, my_ranks)
+    assert group is not None
 
-    # TODO we take this from tag
-    timeout = default_pg_timeout
     inplace_tensor = self.clone()
-    _, work = torch.ops.c10d.allreduce_([inplace_tensor], group, torch.classes.c10d.ReduceOp(), timeout)
+    work = dist.all_reduce(inplace_tensor,op=dist.ReduceOp.SUM, group=group, async_op=True)
 
+    global tensor_to_work
+    tensor_to_work.add(inplace_tensor, work)
+    return inplace_tensor
 
-    tensor_to_work[inplace_tensor] = work
-    c_self = AsyncCollectiveTensor(inplace_tensor)
-    return c_self
+c10_lib = torch.library.Library("aten", "IMPL",  "CPU")
+c10_lib.impl("all_reduce", _all_reduce_cpu)
+
+# FIXME not the actual Python API, just here to help try it
+def all_reduce(self, reduceOp, tag, ranks):
+    tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, ranks)
+    return AsyncCollectiveTensor(tensor)
