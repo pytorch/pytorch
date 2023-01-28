@@ -614,38 +614,59 @@ class TestFloorDiv(TestCase):
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
+        result = 21
         exprs = (
-            # expr, is_auto, is_eval
-            (7 * FloorDiv(6, 2), True, True),
-            (7 * FloorDiv(6.28, 2), False, True),
-            (7 * FloorDiv(6.28, 2.0), False, True),
-            (7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))), False, True),
+            7 * FloorDiv(6, 2),
+            7 * FloorDiv(6.28, 2),
+            7 * FloorDiv(6.28, 2.0),
+            7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))),
         )
 
-        for expr, is_auto, is_eval in exprs:
-            def identity(x):
-                return x
+        for expr in exprs:
+            self.assertEqual(expr, result)
+            self.assertEqual(expr.doit(deep=False), result)
+            self.assertEqual(expr.doit(deep=True), result)
+            self.assertEqual(sympy.simplify(expr), result)
+            self.assertEqual(shape_env.simplify(expr), result)
+            self.assertEqual(shape_env.evaluate_expr(expr), result)
 
-            if is_auto:
-                auto_wrapper = identity
-                auto_result = 21
+    @skipIfNoSympy
+    def test_floordiv_assumptions(self):
+        # We define two Symbols (with different names) for each type to make
+        # sure the behavior is consistent regardless of whether both arguments
+        # are the same object or not.
+        cases = (
+            sympy.Symbol("i1", integer=True),
+            sympy.Symbol("i2", integer=True),
+            sympy.Symbol("r1", real=True),
+            sympy.Symbol("r2", real=True),
+            sympy.Symbol("c1", complex=True, real=False, integer=False),
+            sympy.Symbol("c2", complex=True, real=False, integer=False),
+            sympy.Symbol("s1"),
+            sympy.Symbol("s2"),
+        )
+
+        for base, divisor in itertools.product(cases, repeat=2):
+            op = FloorDiv(base, divisor)
+
+            def is_complex(x):
+                return x.is_integer is False and x.is_real is False and x.is_complex
+
+            # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
+            # always returns an integer 1 when both args are the same object.
+            # This even works for Symbols with no assumptions specified.
+            if base is divisor:
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            elif base.is_integer and divisor.is_integer:
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            elif is_complex(base) or is_complex(divisor):
+                self.assertEqual(op.is_integer, False)
+                self.assertTrue(op.is_real)
             else:
-                auto_wrapper = type
-                auto_result = sympy.Mul
-
-            if is_eval:
-                eval_wrapper = identity
-                eval_result = 21
-            else:
-                eval_wrapper = type
-                eval_result = sympy.Mul
-
-            self.assertEqual(auto_wrapper(expr), auto_result)
-            self.assertEqual(auto_wrapper(expr.doit(deep=False)), auto_result)
-            self.assertEqual(auto_wrapper(expr.doit(deep=True)), auto_result)
-            self.assertEqual(auto_wrapper(sympy.simplify(expr)), auto_result)
-            self.assertEqual(auto_wrapper(shape_env.simplify(expr)), auto_result)
-            self.assertEqual(eval_wrapper(shape_env.evaluate_expr(expr)), eval_result)
+                self.assertEqual(op.is_integer, None)
+                self.assertTrue(op.is_real)
 
 if __name__ == '__main__':
     run_tests()
