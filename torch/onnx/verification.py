@@ -33,7 +33,6 @@ from typing import (
 )
 
 import numpy as np
-import onnx
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1915,14 +1914,16 @@ def verify_model_with_fx_to_onnx_exporter(
     onnx_args, onnx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
     onnx_model = fx_onnx.export(model, opset_version, *onnx_args, **onnx_kwargs)
 
+    if not isinstance(onnx_model, bytes):
+        onnx_model = onnx_model.SerializeToString()
+    onnx_model_f = io.BytesIO(onnx_model)
+
     with torch.no_grad(), contextlib.ExitStack() as stack:
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
-        model_file_path: str = os.path.join(tmpdir_path, "model.onnx")
-        onnx.save(onnx_model, model_file_path)
 
         _compare_onnx_pytorch_model(
             fx_model,
-            model_file_path,
+            onnx_model_f,
             input_args=input_args,
             # Dynamo exporter folds all kwargs into in-graph constants,
             # so we can't specify input_kwargs=input_kwargs.
