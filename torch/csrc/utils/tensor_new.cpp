@@ -33,19 +33,14 @@
 #include <stdexcept>
 #include <vector>
 
-using at::Backend;
 using at::Device;
 using at::IntArrayRef;
-using at::kCPU;
-using at::kCUDA;
 using at::kInt;
 using at::kLong;
-using at::Scalar;
 using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorOptions;
-using at::Type;
 using c10::optional;
 
 namespace torch {
