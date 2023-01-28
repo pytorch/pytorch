@@ -851,10 +851,12 @@ def save_model_with_external_data(
                     refined_name = onnx_input_name
                     break
 
+            relative_tensor_file_path = os.path.join(initializer_location, refined_name)
             # Create one file per tensor.
-            # tensor_proto.raw_data is stored to external file at os.path.join(basepath, initializer_location).
+            # tensor_proto.raw_data is stored to external file at
+            # os.path.join(basepath, relative_tensor_file_path).
             tensor_proto = _create_tensor_proto_with_external_data(
-                tensor, refined_name, initializer_location, basepath
+                tensor, refined_name, relative_tensor_file_path, basepath
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
             onnx_model_with_initializers.graph.initializer.append(tensor_proto)
