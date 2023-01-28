@@ -79,7 +79,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
     StreamData3Holder(struct c10::StreamData3 d) {
       val = d;
     }
-    StreamData3Holder() {}
+    StreamData3Holder() = default;
     struct c10::StreamData3 val;
 };
 
