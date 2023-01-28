@@ -536,14 +536,7 @@ class CheckFunctionManager:
         w_local = weakref.ref(local_builder)
         w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if (
-                not config.guard_nn_modules
-                and guard.is_nn_module()
-                # Default func args must be guarded on.
-                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
-                and "__defaults__" not in guard.name
-                and "__kwdefaults__" not in guard.name
-            ):
+            if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(
