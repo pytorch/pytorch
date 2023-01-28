@@ -2991,7 +2991,7 @@ class FallbackKernel(ExternKernelAlloc):
                     index,
                 )
             elif isinstance(output, int):
-                return int
+                return output
             else:
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
