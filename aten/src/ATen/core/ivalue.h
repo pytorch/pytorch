@@ -1179,7 +1179,7 @@ public:
       case Tag::Device:
         return false;
       case Tag::Stream:
-        return false;
+        return true;
       case Tag::Object:
         return true;
       case Tag::PyObject:

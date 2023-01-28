@@ -5,7 +5,7 @@ namespace torch {
 namespace optim {
 
 LRScheduler::LRScheduler(torch::optim::Optimizer& optimizer)
-    : step_count_(0), optimizer_(optimizer) {}
+    : optimizer_(optimizer) {}
 
 void LRScheduler::step() {
   std::vector<double> learning_rates = get_lrs();
