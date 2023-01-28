@@ -183,6 +183,9 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
+cmake_dependent_option(
+    BUILD_NVFUSER "Build NVFUSER" ON
+    "USE_CUDA OR USE_ROCM" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -777,7 +780,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
-if(USE_LITE_INTERPRETER_PROFILER)
+if(BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
 endif()
 
@@ -1154,6 +1157,14 @@ if(BUILD_JNI)
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
+endif()
+
+if(NOT USE_CUDA AND NOT USE_ROCM)
+  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
+endif()
+
+if(BUILD_NVFUSER)
+  add_subdirectory(third_party/nvfuser)
 endif()
 
 include(cmake/Summary.cmake)
