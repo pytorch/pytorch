@@ -1,21 +1,19 @@
 # Owner(s): ["module: dynamo"]
-import functools
-import os
 import unittest
-from unittest.mock import patch
 import torch
 from torch._dispatch.python import enable_python_dispatcher
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.distributed as dist
-from contextlib import contextmanager
 from torch._dynamo.utils import same
 from torch._dynamo.testing import CompileCounter
 from torch.distributed.distributed_c10d import _get_default_group
 from torch._C._distributed_c10d import _register_process_group
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    _dynamo_dist_per_rank_init,
+    DynamoDistributedSingleProcTestCase,
+    DynamoDistributedMultiProcTestCase,
     skip_if_lt_x_gpu,
     requires_nccl
 )
@@ -26,55 +24,12 @@ import torch._dynamo.logging
 # the no-op C++ kernel that i am forced to implement despite not using it
 import torch.distributed.traceable_collectives
 
-@contextmanager
-def _per_rank_init(rank, world_size):
-    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
-    # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6789'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    yield
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    dist.destroy_process_group()
-
-
 
 @requires_nccl()
-class TestCollectivesMultiProc(MultiProcessTestCase):
+class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self) -> int:
-        return torch.cuda.device_count()
-
-    @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
-        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
-        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        # _set_ddp_with_replicated_tensor(True)
-
-        # The rest is copypasta from MultiProcessTestCase._run
-        self = cls(test_name)
-        self.rank = rank
-        self.file_name = file_name
-        self.run_test(test_name, parent_pipe)
 
     @unittest.skip("hangs in nccl somewhere. work cleanup issue?")
     @skip_if_lt_x_gpu(2)
@@ -96,7 +51,7 @@ class TestCollectivesMultiProc(MultiProcessTestCase):
             graph = make_fx(func)(*example_inputs)
             return inductor_compile_fx(graph, example_inputs)
 
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
 
             pg = _get_default_group()
             pg_id = _register_process_group(pg)
@@ -113,7 +68,7 @@ class TestCollectivesMultiProc(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_eager(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             pg = _get_default_group()
             pg_id = _register_process_group(pg)
             input = torch.ones(4, 4, device="cuda")
@@ -129,33 +84,10 @@ class TestCollectivesMultiProc(MultiProcessTestCase):
 
 
 @requires_nccl()
-class TestCollectives(torch._dynamo.test_case.TestCase):
+class TestCollectives(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
     """
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        # _exit_stack is set up in TestCase
-        cls._exit_stack.enter_context(
-            patch.dict(
-                os.environ,
-                {
-                    "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
-                },
-            )
-        )
-        cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        dist.init_process_group("nccl", rank=cls.rank, world_size=1)
-
-    @classmethod
-    def tearDownClass(cls):
-        dist.destroy_process_group()
-        super().tearDownClass()
 
     def test_inductor_single_op(self):
         torch._inductor.config.debug = True

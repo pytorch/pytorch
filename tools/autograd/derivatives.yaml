@@ -2955,4 +2955,4 @@
   result: auto_linear
 
 - name: all_reduce(Tensor self, int group_id, str reduce_op) -> Tensor
-  self: grad
+  self: at::ones_like(self)
