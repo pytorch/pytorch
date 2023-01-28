@@ -19,7 +19,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -1442,16 +1441,16 @@ def _optim_state_dict(
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     if to_save:
-        # NamedOptimizer/KeyedOptimizer allow users to plugin any states.
-        if is_named_optimizer:
-            flat_param_fqns = set(flat_param_to_fqn.values())
-            for key, value in optim_state_dict["state"].items():
-                if key in fsdp_osd_state:
-                    continue
-                if key in flat_param_fqns:
-                    continue
-                # This key is not a parameter state. It is a user-defined state.
-                fsdp_osd_state[key] = copy.copy(value)
+        flat_param_fqns = set(flat_param_to_fqn.values())
+        for key, value in optim_state_dict["state"].items():
+            if key in fsdp_osd_state:
+                continue
+            if key in flat_param_fqns:
+                continue
+            if key in param_key_to_param:
+                continue
+            # This key is not a parameter state. It is a user-defined state.
+            fsdp_osd_state[key] = copy.copy(value)
 
         fsdp_osd["param_groups"] = _unflatten_param_groups(
             optim_state_dict, param_key_to_param, param_to_fqns
@@ -1528,7 +1527,8 @@ def _all_gather_optim_state(
     for state_name, value in sorted_items(optim_state):
         if torch.is_tensor(value):
             if value.dim() == 0:
-                processed_state.scalar_tensors[state_name] = value
+                # Ensure that `step` is on CPU.
+                processed_state.scalar_tensors[state_name] = value.cpu()
             else:
                 processed_state.tensors[state_name] = _PosDimTensorInfo(
                     value.shape, value.dtype
@@ -1549,26 +1549,20 @@ def _all_gather_optim_state(
     for name in all_tensor_states:
         numels = []
         dtype = torch.float
-        max_numel = 0
         for object_state in object_list:
             numels.append(0)
             info = object_state.tensors.get(name, None)
             if info is not None:
                 numels[-1] = info.shape.numel()
                 dtype = info.dtype
-                max_numel = max(max_numel, numels[-1])
-        local_state = (
-            optim_state[name]
-            if name in optim_state
-            else torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
+        empty_func = functools.partial(
+            torch.empty, dtype=dtype, device=fsdp_state.compute_device
         )
-        if max_numel > local_state.numel():
-            local_state = F.pad(local_state, [0, max_numel - local_state.numel()])
+        local_state = optim_state.get(name, empty_func(0))
+        local_state = local_state.to(fsdp_state.compute_device)
         tensors = [
-            torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
-            if rank != fsdp_state.rank
-            else local_state
-            for rank in range(len(object_list))
+            empty_func(numel) if rank != fsdp_state.rank else local_state
+            for rank, numel in enumerate(numels)
         ]
         work = dist.all_gather(
             tensors, local_state, group=fsdp_state.process_group, async_op=True
