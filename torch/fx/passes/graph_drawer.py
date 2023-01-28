@@ -59,6 +59,10 @@ if HAS_PYDOT:
             g = FxGraphDrawer(symbolic_traced, "resnet18")
             with open("a.svg", "w") as f:
                 f.write(g.get_dot_graph().create_svg())
+
+        log_node_meta_keys can be enabled to have generated dot node also
+        contains all keys in the node's meta that has a corresponding non-empty
+        value or a boolean field equals to True
         """
 
         def __init__(
@@ -68,11 +72,12 @@ if HAS_PYDOT:
             ignore_getattr: bool = False,
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
+            log_node_meta_keys: bool = False,
         ):
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
-                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args
+                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args, log_node_meta_keys
                 )
             }
 
@@ -156,6 +161,7 @@ if HAS_PYDOT:
             module: torch.fx.GraphModule,
             node: torch.fx.Node,
             skip_node_names_in_args: bool,
+            log_node_meta_keys: bool = False,
         ) -> str:
             def _get_str_for_args_kwargs(arg):
                 if isinstance(arg, tuple):
@@ -178,8 +184,15 @@ if HAS_PYDOT:
                 arg_strs = prefix + r",\n".join(arg_strs_list) + suffix
                 return arg_strs.replace("{", r"\{").replace("}", r"\}")
 
+            meta_keys_str = ""
+            if log_node_meta_keys and hasattr(node, "meta"):
+                meta_keys_info = ",\n".join(
+                    [k for k, v in node.meta.items() if v]
+                ) if isinstance(node.meta, dict) else ""
+                if meta_keys_info:
+                    meta_keys_str = f"|meta_keys={meta_keys_info}"
 
-            label = "{" + f"name=%{node.name}|op_code={node.op}\n"
+            label = "{" + f"name=%{node.name}{meta_keys_str}|op_code={node.op}\n"
 
             if node.op == "call_module":
                 leaf_module = self._get_leaf_node(module, node)
@@ -267,6 +280,7 @@ if HAS_PYDOT:
             ignore_getattr: bool,
             ignore_parameters_and_buffers: bool,
             skip_node_names_in_args: bool,
+            log_node_meta_keys: bool = False
         ) -> pydot.Dot:
             """
             Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph.
@@ -281,7 +295,7 @@ if HAS_PYDOT:
 
                 style = self._get_node_style(node)
                 dot_node = pydot.Node(
-                    node.name, label=self._get_node_label(graph_module, node, skip_node_names_in_args), **style
+                    node.name, label=self._get_node_label(graph_module, node, skip_node_names_in_args, log_node_meta_keys), **style
                 )
                 dot_graph.add_node(dot_node)
 
