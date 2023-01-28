@@ -49,6 +49,7 @@ from .source import (
     GlobalSource,
     GlobalWeakRefSource,
     LocalInputSource,
+    LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
@@ -1672,12 +1673,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(
-                        k,
-                        code_options["co_varnames"].index(k)
-                        if k in code_options["co_varnames"]
-                        else None,
-                    ),
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
                 )(f_locals[k]),
             )
             for k in vars

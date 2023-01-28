@@ -494,6 +494,44 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(failure_reason, "c is d")
 
     @patch("torch._functorch.config.debug_assert", True)
+    def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
+        z = None
+
+        class F(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mean = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, a, b, c, d, e, f):
+                a.t_()
+                b.t_()
+                c.t_()
+                d.t_()
+                return (a + b + c + d + z + self.mean) * e * f
+
+        a = torch.randn(3, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+        z = a
+        a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
+        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        self.assertTrue(failure_reason is None)
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        f(a1, a1, a1, a1, 2, 2)
+        f(a2, b2, b2, b2, 2, 2)
+        self.assertEqual(cc.frame_count, 2)
+        self.assertEqual(failure_reason, "a is b")
+
+    @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
         class F(torch.nn.Module):
             def __init__(self):

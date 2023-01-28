@@ -1487,11 +1487,10 @@ def aot_wrapper_dedupe(
                 d_positions = dupe_arg_dict['graph_arg_pos']
                 k_positions = kept_arg_dict['graph_arg_pos']
                 assert(d_positions == k_positions)
-                if len(d_positions) >= 1:
+                if len(d_positions) > 1:
                     for i in range(1, len(d_positions)):
                         pos = d_positions[i]
                         pre_pos = d_positions[i - 1]
-                        print("GUARD", pre_pos, pos)
                         tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
 
     @wraps(flat_fn)

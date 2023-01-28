@@ -247,6 +247,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        # Maps the source arg position to the grapharg position
         self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
