@@ -392,7 +392,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # JIT testing
         self.checkScriptable(
-            qconv_module, [[X_q, X2_q]] if (post_op in ["add", "add_relu"]) else [[X_q]],
+            qconv_module, [example_input_q],
             check_save_load=True)
 
         class _FusedModule_two_input_args(torch.nn.intrinsic._FusedModule):
