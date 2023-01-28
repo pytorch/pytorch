@@ -25,7 +25,7 @@ void c10_cuda_check_implementation(
   }
 
   auto error_unused C10_UNUSED = cudaGetLastError();
-  (void) error_unused;
+  (void)error_unused;
 
   std::string check_message;
 #ifndef STRIP_ERROR_MESSAGES
