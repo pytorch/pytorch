@@ -63,19 +63,19 @@ install_ubuntu() {
 
     # precompiled miopen kernels added in ROCm 3.5; search for all unversioned packages
     # if search fails it will abort this script; use true to avoid case where search fails
-    MIOPENKERNELS=$(apt-cache search --names-only miopenkernels | awk '{print $1}' | grep -F -v . || true)
-    if [[ "x${MIOPENKERNELS}" = x ]]; then
-      echo "miopenkernels package not available"
-    else
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
-    fi
-
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 5.4) ]]; then
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 5.5) ]]; then
         MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
         if [[ "x${MIOPENHIPGFX}" = x ]]; then
-          echo "miopen-hip-gfx package not available"
+          echo "miopen-hip-gfx package not available" && exit 1
         else
           DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
+        fi
+    else
+        MIOPENKERNELS=$(apt-cache search --names-only miopenkernels | awk '{print $1}' | grep -F -v . || true)
+        if [[ "x${MIOPENKERNELS}" = x ]]; then
+          echo "miopenkernels package not available" && exit 1
+        else
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
         fi
     fi
 
@@ -151,19 +151,19 @@ install_centos() {
 
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
-  MIOPENKERNELS=$(yum -q search miopenkernels | grep miopenkernels- | awk '{print $1}'| grep -F kdb. || true)
-  if [[ "x${MIOPENKERNELS}" = x ]]; then
-    echo "miopenkernels package not available"
-  else
-    yum install -y ${MIOPENKERNELS}
-  fi
-
-  if [[ $(ver $ROCM_VERSION) -ge $(ver 5.4) ]]; then
+  if [[ $(ver $ROCM_VERSION) -ge $(ver 5.5) ]]; then
       MIOPENHIPGFX=$(yum -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
       if [[ "x${MIOPENHIPGFX}" = x ]]; then
-        echo "miopen-hip-gfx package not available"
+        echo "miopen-hip-gfx package not available" && exit 1
       else
         yum install -y ${MIOPENHIPGFX}
+      fi
+  else
+      MIOPENKERNELS=$(yum -q search miopenkernels | grep miopenkernels- | awk '{print $1}'| grep -F kdb. || true)
+      if [[ "x${MIOPENKERNELS}" = x ]]; then
+        echo "miopenkernels package not available" && exit 1
+      else
+        yum install -y ${MIOPENKERNELS}
       fi
   fi
 
