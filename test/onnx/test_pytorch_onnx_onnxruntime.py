@@ -6639,6 +6639,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         constant = torch.tensor(5, dtype=torch.float)
         self.run_test(MaskedScatterModel(), (mask, constant))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_with_1d_mask_to_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, tensor, mask, some_const):
+                tensor[mask] = some_const
+                return tensor
+
+        mask = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1], dtype=torch.bool)
+        tensor = torch.randn(8, 4, 5, requires_grad=True)
+        some_const = torch.randn(4, 4, 5, dtype=torch.float)
+        self.run_test(MaskedScatterModel(), (tensor, mask, some_const))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
@@ -12117,9 +12129,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(1, 2, 3, 4), 1, 0, torch.quint8)
         self.run_test(FlattenModel(), x)
 
-    @unittest.skip(
-        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
-    )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat_when_concatinating_the_same_tensor(self):
@@ -12172,9 +12181,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="different_zero_point_and_scale",
             ),
         ],
-    )
-    @unittest.skip(
-        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
     )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
@@ -12263,6 +12269,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4), offset=-8)
         self.run_test(model, input)
+
+    @unittest.skip(
+        "ORT fails with Validating no unexpected access using an invalid node_index on torch converted model"
+    )
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_quantized_list_of_inputs_with_cat(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = torch.cat([x, x], 1)
+                x = self.dequant(x)
+                return x
+
+        model = TestModel()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        model = torch.quantization.convert(model)
+        x = torch.randn(2, 4, 6)
+        self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_relu(self):

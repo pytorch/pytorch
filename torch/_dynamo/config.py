@@ -181,6 +181,9 @@ inductor_import = dynamo_import.replace("dynamo", "inductor")
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# Disables graph breaking on rnn. YMMV with backends.
+allow_rnn = False
+
 # root folder of the project
 if "torch." in dynamo_import:
     base_dir = dirname(dirname(dirname(abspath(__file__))))
