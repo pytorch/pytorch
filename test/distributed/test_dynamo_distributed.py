@@ -14,7 +14,6 @@ import torch.distributed as dist
 from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
-from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
