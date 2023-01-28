@@ -700,8 +700,6 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
 
-    # TODO: inductor fails with sympy.floor, so we don't floor base as Python
-    @unittest.expectedFailure
     @skipIfNoSympy
     def test_floordiv_div_by_one(self):
         values = (
@@ -718,38 +716,21 @@ class TestFloorDiv(TestCase):
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
+        result = 21
         exprs = (
-            # expr, is_auto, is_eval
-            (7 * FloorDiv(6, 2), True, True),
-            (7 * FloorDiv(6.28, 2), False, True),
-            (7 * FloorDiv(6.28, 2.0), False, True),
-            (7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))), False, True),
+            7 * FloorDiv(6, 2),
+            7 * FloorDiv(6.28, 2),
+            7 * FloorDiv(6.28, 2.0),
+            7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))),
         )
 
-        for expr, is_auto, is_eval in exprs:
-            def identity(x):
-                return x
-
-            if is_auto:
-                auto_wrapper = identity
-                auto_result = 21
-            else:
-                auto_wrapper = type
-                auto_result = sympy.Mul
-
-            if is_eval:
-                eval_wrapper = identity
-                eval_result = 21
-            else:
-                eval_wrapper = type
-                eval_result = sympy.Mul
-
-            self.assertEqual(auto_wrapper(expr), auto_result)
-            self.assertEqual(auto_wrapper(expr.doit(deep=False)), auto_result)
-            self.assertEqual(auto_wrapper(expr.doit(deep=True)), auto_result)
-            self.assertEqual(auto_wrapper(sympy.simplify(expr)), auto_result)
-            self.assertEqual(auto_wrapper(shape_env.simplify(expr)), auto_result)
-            self.assertEqual(eval_wrapper(shape_env.evaluate_expr(expr)), eval_result)
+        for expr in exprs:
+            self.assertEqual(expr, result)
+            self.assertEqual(expr.doit(deep=False), result)
+            self.assertEqual(expr.doit(deep=True), result)
+            self.assertEqual(sympy.simplify(expr), result)
+            self.assertEqual(shape_env.simplify(expr), result)
+            self.assertEqual(shape_env.evaluate_expr(expr), result)
 
     @skipIfNoSympy
     def test_floordiv_assumptions(self):
@@ -788,6 +769,9 @@ class TestFloorDiv(TestCase):
             # always returns an integer 1 when both args are the same object.
             # This even works for Symbols with no assumptions specified.
             if base is divisor:
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            elif base.is_integer and divisor.is_integer:
                 self.assertTrue(op.is_integer)
                 self.assertTrue(op.is_real)
             else:
