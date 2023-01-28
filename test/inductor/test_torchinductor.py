@@ -913,7 +913,6 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
-    @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -4838,7 +4837,7 @@ class CommonTemplate:
         rank3_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
         rank5_inps = [shrink_rank(x, 5) for x in [grad_out, inp, weight]]
 
-        with torch.backends.cudnn.flags(allow_tf32=False):
+        with torch.backends.cudnn.flags(enabled=True, allow_tf32=False):
             self.common(
                 fn,
                 [rank4_inps, rank3_inps, rank5_inps],
@@ -5292,7 +5291,7 @@ test_skips = {
     "test_reduction4_dynamic_shapes": ("cuda",),
     "test_relu_dynamic_shapes": ("cuda",),
     "test_repeat_dynamic_shapes": ("cuda",),
-    "test_roi_align_dynamic_shapes": ("cpu",),
+    "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
     "test_roll_dynamic_shapes": ("cuda",),
     "test_round_dynamic_shapes": ("cuda",),
     "test_scatter4_dynamic_shapes": ("cuda",),
@@ -5373,7 +5372,6 @@ def make_dynamic_cls(cls):
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
-        (config, "dynamic_shapes", True),
         (torch._dynamo.config, "dynamic_shapes", True),
         (functorch_config, "use_dynamic_shapes", True),
     )
@@ -5525,7 +5523,6 @@ if HAS_CPU:
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
-        @patch.object(config, "dynamic_shapes", True)
         @patch.object(torch._dynamo.config, "dynamic_shapes", True)
         @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_vec_dynamic_shapes(self):
@@ -6255,7 +6252,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
         # TODO: Abstract this out, test more extensively
-        @patch.object(config, "dynamic_shapes", True)
         @patch.object(torch._dynamo.config, "dynamic_shapes", True)
         @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_dynamic_shapes(self):

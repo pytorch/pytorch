@@ -100,8 +100,7 @@ struct TORCH_API Function {
 /// `backward` in custom autograd operations (see `torch::autograd::Function`
 /// for details).
 struct TORCH_API AutogradContext {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AutogradContext() : materialize_grads_(true) {}
+  AutogradContext() = default;
   AutogradContext(const AutogradContext& other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
@@ -141,7 +140,7 @@ struct TORCH_API AutogradContext {
   std::unordered_set<at::TensorImpl*> dirty_inputs_;
   std::vector<torch::autograd::SavedVariable> saved_variables_;
   variable_list to_save_;
-  bool materialize_grads_;
+  bool materialize_grads_{true};
 
   // The CppNode in the autograd graph that owns this AutogradContext. We need a
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
