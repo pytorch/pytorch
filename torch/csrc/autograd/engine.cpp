@@ -1545,7 +1545,7 @@ void GraphTask::init_to_execute(
   captured_vars_.resize(output_idx);
 
   struct Frame {
-    Frame(Node* fn) : fn_(fn), next_next_fn_(0) {}
+    Frame(Node* fn) : fn_(fn) {}
     Node* fn_{};
     size_t next_next_fn_{};
 

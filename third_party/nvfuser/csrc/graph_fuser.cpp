@@ -728,9 +728,7 @@ struct CudaGraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-    for (const auto i : c10::irange(nchunks)) {
-      (void)i; // Suppress unused variable warning
+    for (const auto _ : c10::irange(nchunks)) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 

@@ -284,7 +284,8 @@ target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/inclu
 
 # -- build tests
 
-if(USE_CUDA)
+# note: ideally we don't need USE_CUDA here, but our cpp tests are not ROCM compatible.
+if(BUILD_TEST AND USE_CUDA)
   set(NVFUSER_TESTS "${PROJECT_NAME}_tests")
   set(JIT_TEST_SRCS)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
