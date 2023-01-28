@@ -95,7 +95,9 @@ class ReturnArgument:  # Union, ONLY EXACTLY ONE of the following fields can be 
 # !!! This is a Union struct, but there is no good python construct to model this
 @dataclass
 class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
-    # None          # !!! This is used for nullable arguments, is this the right way to handle None?
+    # A special type for representing python None in the arguments
+    # This must only be used for ops that accepts None as an argument, e.g. Tensor?, Scalar?, int?, int[]?
+    as_none: bool = None
 
     as_tensor: TensorArgument = None
     as_tensors: List[TensorArgument] = None   # Tensor[], used by aten.cat, and condition ops
@@ -125,18 +127,6 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
     as_layout: Layout = None
     as_device: Device = None
 
-# !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
-#     Tensor?
-#     Scalar?
-#     ScalarType?
-#     bool?
-#     int?
-#     int[]?
-#     float[]?
-#     SymInt[]?
-#     MemoryFormat?
-#     Layout?
-#     Device?
 
 ################################################################################
 # Following section is the defining the schema of serializing a concrete tensor
