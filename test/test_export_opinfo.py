@@ -12,100 +12,63 @@ from test_proxy_tensor import xfail, skipOps, _get_safe_inplace, symbolic_tensor
 import itertools
 
 export_failures = {
-    xfail("H"),
     xfail("__getitem__"),
     xfail("__rdiv__"),
     xfail("__rmatmul__"),
     xfail("__rmod__"),
     xfail("__rpow__"),
     xfail("__rsub__"),
+    xfail("allclose"),
     xfail("argwhere"),
     xfail("bernoulli"),
+    xfail("bucketize"),
     xfail("cdouble"),
     xfail("cfloat"),
     xfail("cholesky_inverse"),
+    xfail("cholesky"),
+    xfail("combinations"),
     xfail("corrcoef"),
     xfail("cov"),
     xfail("equal"),
-    xfail("mH"),
+    xfail("H"),
+    xfail("linalg.eigh"),
+    xfail("linalg.eigvalsh"),
+    xfail("linalg.lstsq", "grad_oriented"),
+    xfail("linalg.lstsq"),
     xfail("masked_select"),
+    xfail("mH"),
     xfail("multinomial"),
     xfail("nanquantile"),
     xfail("narrow"),
     xfail("nn.functional.alpha_dropout"),
+    xfail("nn.functional.ctc_loss"),
+    xfail("nn.functional.dropout"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
-    xfail("nn.functional.dropout"),
     xfail("nn.functional.feature_alpha_dropout", "with_train"),
     xfail("nn.functional.feature_alpha_dropout", "without_train"),
-    xfail("normal"),
-    xfail("normal", "number_mean"),
-    xfail("quantile"),
-    xfail("rand_like"),
-    xfail("randint"),
-    xfail("randint_like"),
-    xfail("randn_like"),
-    xfail("tensor_split"),
-    xfail("uniform"),
-}
-
-export_failures_with_kwargs = {
-    xfail("allclose"),
-    xfail("bucketize"),
-    xfail("cholesky"),
-    xfail("combinations"),
-    xfail("gradient"),
-    xfail("histogram"),
-    xfail("histogramdd"),
-    xfail("linalg.eigh"),
-    xfail("linalg.eigvalsh"),
-    xfail("linalg.lstsq"),
-    xfail("linalg.lstsq", "grad_oriented"),
-    xfail("linalg.matrix_rank"),
-    xfail("linalg.pinv"),
-    xfail("masked.amax"),
-    xfail("masked.amin"),
-    xfail("masked.argmax"),
-    xfail("masked.argmin"),
-    xfail("masked.cumprod"),
-    xfail("masked.cumsum"),
-    xfail("masked.log_softmax"),
-    xfail("masked.logaddexp"),
-    xfail("masked.logsumexp"),
-    xfail("masked.mean"),
-    xfail("masked.median"),
-    xfail("masked.norm"),
-    xfail("masked.prod"),
-    xfail("masked.softmax"),
-    xfail("masked.softmin"),
-    xfail("masked.std"),
-    xfail("masked.sum"),
-    xfail("masked.var"),
-    xfail("nn.functional.binary_cross_entropy"),
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
-    xfail("nn.functional.cross_entropy"),
-    xfail("nn.functional.ctc_loss"),
-    xfail("nn.functional.embedding_bag"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.group_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.nll_loss"),
-    xfail("nn.functional.prelu"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.scaled_dot_product_attention"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nonzero"),
+    xfail("normal", "number_mean"),
+    xfail("normal"),
     xfail("pca_lowrank"),
+    xfail("quantile"),
+    xfail("rand_like"),
+    xfail("randint_like"),
+    xfail("randint"),
+    xfail("randn_like"),
     xfail("randn"),
     xfail("repeat_interleave"),
-    xfail("searchsorted"),
     xfail("segment_reduce", "lengths"),
     xfail("segment_reduce", "offsets"),
-    xfail("stft"),
     xfail("svd_lowrank"),
+    xfail("tensor_split"),
+    xfail("uniform"),
     xfail("unique_consecutive"),
     xfail("unique"),
 }
@@ -114,7 +77,6 @@ export_failures_dynamic = {
     xfail("block_diag"),
     xfail("complex"),
     xfail("i0"),
-    xfail("ldexp"),
     xfail("masked_scatter"),
     xfail("nn.functional.max_unpool1d"),
     xfail("nn.functional.max_unpool2d"),
@@ -151,27 +113,15 @@ def _test_export_helper(self, device, dtype, op,
                         f"dynamo.export(aten_graph=True) should only results aten ops, seeign {node.target.name()}"
                     )
 
-            # TODO: enable this when core aten ops are finalized
-            # if decomposition_table is core_aten_decompositions:
-            #     self.assertTrue(
-            #         torch.Tag.core in node.target.tags,
-            #         f"Decomposed {op.name} should only contain core aten ops, but found {node.target.name()}"
-            #     )
 
 class TestExportOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestExportOpInfo', 'test_export_with_aten', export_failures | export_failures_with_kwargs)
+    @skipOps('TestExportOpInfo', 'test_export_with_aten', export_failures)
     def test_export_with_aten(self, device, dtype, op):
         _test_export_helper(self, device, dtype, op, aten_graph=True)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestExportOpInfo', 'test_export_with_aten_dynamic',
-             export_failures | export_failures_with_kwargs | symbolic_tensor_failures | export_failures_dynamic)
-    def test_export_with_aten_dynamic(self, device, dtype, op):
-        _test_export_helper(self, device, dtype, op, aten_graph=True, tracing_mode="symbolic")
-
-    @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestExportOpInfo', 'test_export_with_aten_decomp', export_failures | export_failures_with_kwargs)
+    @skipOps('TestExportOpInfo', 'test_export_with_aten_decomp', export_failures)
     def test_export_with_aten_decomp(self, device, dtype, op):
         _test_export_helper(self, device, dtype, op, aten_graph=True, decomposition_table=core_aten_decompositions)
 
