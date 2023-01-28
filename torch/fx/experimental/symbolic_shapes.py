@@ -25,6 +25,7 @@ try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
+    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -251,13 +252,32 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
-        def _sympystr(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer.parenthesize(lhs, self.precedence)
-            rhs_str = printer.parenthesize(rhs, self.precedence)
-            return f"{lhs_str}//{rhs_str}"
+        # Default return type for SymPy assumptions.
+        # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+        is_real = True
 
+        @property
+        def base(self):
+            return self.args[0]
+
+        @property
+        def divisor(self):
+            return self.args[1]
+
+        def _sympystr(self, printer):
+            base = printer.parenthesize(self.base, self.precedence)
+            divisor = printer.parenthesize(self.divisor, self.precedence)
+            return f"{base}//{divisor}"
+
+        # SymPy assumptions based on argument types.
+        def _eval_is_real(self):
+            return fuzzy_or([self.base.is_real, self.divisor.is_real])
+
+        def _eval_is_integer(self):
+            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
+
+        # Automatic evaluation.
+        # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
             def check_supported_type(x):
@@ -277,10 +297,14 @@ if HAS_SYMPY:
 
             if base.is_zero:
                 return sympy.S.Zero
-            if divisor == 1:
+            if isinstance(base, sympy.Integer) and divisor == 1:
                 return base
+            if isinstance(base, sympy.Float) and divisor == 1:
+                return sympy.floor(base)
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+                return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
@@ -1026,9 +1050,7 @@ class ShapeEnv(object):
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        # NB: we use subs and not xreplace to simplify all FloorDiv sub-exprs,
-        # like: FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
-        new_expr = safe_expand(new_expr.subs(floor_div_replace))
+        new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -1057,7 +1079,7 @@ class ShapeEnv(object):
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
                 if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = base / divisor
+                    div_replacements[atom] = sympy.floor(base / divisor)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
@@ -1161,8 +1183,7 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        # NB: FloorDiv currently needs to be evaluated in _maybe_evaluate_static
-        if not expr.has(FloorDiv) and len(expr.free_symbols) == 0:
+        if len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
         static_expr = self._maybe_evaluate_static(expr)
