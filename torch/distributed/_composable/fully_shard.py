@@ -17,6 +17,7 @@ from torch.distributed.fsdp._init_utils import (
     _init_runtime_state,
     _init_state_dict_state,
 )
+from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._runtime_utils import (
     _register_post_forward_hooks,
     _register_pre_forward_hooks,
@@ -54,6 +55,7 @@ def fully_shard(
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
+    _annotate_modules_for_dynamo(module, state._ignored_modules, True)
     state = _init_process_group_state(
         state, process_group, ShardingStrategy.FULL_SHARD, policy
     )
