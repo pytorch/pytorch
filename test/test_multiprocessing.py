@@ -377,7 +377,7 @@ class TestMultiprocessing(TestCase):
     def test_fs_sharing(self):
         with fs_sharing():
             # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
-            # so run it only once there
+            # so run it only once there. The delay is in waiting for the child process to terminate (join)
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
