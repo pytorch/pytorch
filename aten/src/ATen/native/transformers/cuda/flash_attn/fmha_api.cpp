@@ -191,7 +191,7 @@ void run_fmha_fwd(Launch_params<FMHA_fprop_params> &launch_params) {
         run_fmha_fwd_hdim128(launch_params);
     }
 }
-// out will get populated the output attention
+// The tensor `out` will get populated the output attention
 // First return value is softmax_logsumexp
 // Second return value is the random generator state
 std::tuple<at::Tensor, at::Tensor, at::Tensor>

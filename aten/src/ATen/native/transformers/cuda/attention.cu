@@ -844,7 +844,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
       softmax_scale,
       false, /*zero_tensors = false for all calls here*/
       is_causal,
-      return_debug_mask, /*return_softmax = false(this is used for debugging)*/
+      return_debug_mask, /*return_softmax (this is used for testing)*/
       num_splits,
       c10::nullopt);
 
