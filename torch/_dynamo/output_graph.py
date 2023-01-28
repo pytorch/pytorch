@@ -80,7 +80,6 @@ class OutputGraphState(NamedTuple):
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
-    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -286,7 +285,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
-            self.name_to_input.copy(),
         )
         self.timestamp += 1
         return state
@@ -300,7 +298,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.nn_modules,
             self.side_effects,
             self.timestamp,
-            self.name_to_input,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
@@ -627,6 +624,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        tot = 0
+        for node in gm.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                tot += 1
+        torch._dynamo.utils.increment_op_count(tot)
         try:
             name = (
                 self.compiler_fn.__name__
