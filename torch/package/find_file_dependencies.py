@@ -43,16 +43,10 @@ class _ExtractModuleReferences(ast.NodeVisitor):
                 self.references[(name, None)] = True
 
     def _grab_node_int(self, node):
-        if sys.version_info[:2] < (3, 8):
-            return node.n
-        else:
-            return node.value
+        return node.value
 
     def _grab_node_str(self, node):
-        if sys.version_info[:2] < (3, 8):
-            return node.s
-        else:
-            return node.value
+        return node.value
 
     def visit_Call(self, node):
         # __import__ calls aren't routed to the visit_Import/From nodes

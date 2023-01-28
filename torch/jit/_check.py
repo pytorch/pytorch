@@ -59,9 +59,6 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """
 
     def check(self, nn_module: torch.nn.Module) -> None:
-        # Check if we have a Python version <3.8
-        self.using_deprecated_ast: bool = sys.version_info < (3, 8)
-
         source_lines = inspect.getsource(nn_module.__class__.__init__)
 
         # Ignore comments no matter the indentation
@@ -99,12 +96,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         elif ann_type == "Optional":
             # Assigning `None` to an `Optional` type gives you a
             # Node where value=Constant(value=None, kind=None)
-            # or, in Python <3.8, value=NameConstant(value=None)
-            if (not self.using_deprecated_ast
-                    and not isinstance(node, ast.Constant)):
-                return False
-            if (self.using_deprecated_ast
-                    and not isinstance(node, ast.NameConstant)):
+            if not isinstance(node, ast.Constant):
                 return False
             if node.value:  # type: ignore[attr-defined]
                 return False
