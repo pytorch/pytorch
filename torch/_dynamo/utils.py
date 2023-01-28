@@ -1247,3 +1247,10 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode is flat_input.fake_mode
     return fake_mode
+
+
+def fqn(obj: Any):
+    """
+    Returns the fully qualified name of the object.
+    """
+    return f"{obj.__module__}.{obj.__qualname__}"
