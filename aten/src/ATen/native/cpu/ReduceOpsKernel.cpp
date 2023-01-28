@@ -112,18 +112,15 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
     );
   });
 }
-
 // custom min and max to be used in logcumsumexp for complex arguments
-template <typename scalar_t>
-c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y, bool min) {
-  scalar_t xr = std::real(x);
-  scalar_t yr = std::real(y);
-  if (std::isnan(yr) || (std::isnan(std::imag(y)))) {
+template <typename scalar_t, bool min>
+c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
+  if (std::isnan(y)) {  // either real is nan or imag is nan
     return y;
-  } else if (std::isnan(xr) || (std::isnan(std::imag(x)))) {
+  } else if (std::isnan(x)) {  // either real is nan or imag is nan
     return x;
   } else {
-    return ((xr < yr) == min) ? x : y;  // logical xnor
+    return ((x.real() < y.real()) == min) ? x : y;  // logical xnor
   }
 }
 
@@ -142,13 +139,13 @@ scalar_t _log_add_exp_helper(scalar_t x, scalar_t y) {
 }
 
 template <typename scalar_t>
-c10::complex<scalar_t> _log_add_exp_helper(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
-  c10::complex<scalar_t> min = _logcumsumexp_minmax(x, y, /*min=*/true);
-  c10::complex<scalar_t> max = _logcumsumexp_minmax(x, y, /*min=*/false);
-  scalar_t min_real = std::real(min);
-  scalar_t max_real = std::real(max);
+c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+  auto min = _logcumsumexp_minmax<scalar_t, true>(x, y);
+  auto max = _logcumsumexp_minmax<scalar_t, false>(x, y);
+  auto min_real = std::real(min);
+  auto max_real = std::real(max);
 
-  if (std::isnan(min_real) || std::isnan(std::imag(min))) {
+  if (std::isnan(min)) {  // either real is nan or imag is nan
     // handling the "infectious" NaNs
     return {std::numeric_limits<scalar_t>::quiet_NaN(), std::numeric_limits<scalar_t>::quiet_NaN()};
   } else if ((!std::isfinite(min_real)) && (min_real == max_real)) {
@@ -172,7 +169,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
-  // AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {

@@ -180,28 +180,6 @@ jobs:
         with:
           file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
-      - name: Upload test statistics
-        if: always()
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: ${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        shell: bash
-        run: |
-          set -x
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
