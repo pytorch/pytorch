@@ -35,19 +35,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self)
-        source = AttrSource(self.source, name) if self.source is not None else None
+        source = AttrSource(self.source, name) if self.source else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
+
         if isinstance(obj, staticmethod):
-            return variables.UserFunctionVariable(
-                obj.__get__(self.value), source=source, **options
-            )
+            return variables.UserFunctionVariable(obj.__get__(self.value), **options)
         elif isinstance(obj, classmethod):
-            return variables.UserMethodVariable(
-                obj.__func__, self, source=source, **options
-            )
+            return variables.UserMethodVariable(obj.__func__, self, **options)
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -181,6 +178,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
+
             if method is object.__init__:
                 return ConstantVariable(None, **options)
 
@@ -217,15 +215,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = (
-                    None
-                    if self.source is None
-                    else AttrSource(AttrSource(self.source, "__class__"), name)
-                )
                 # TODO(jansel): add a guard to check for monkey patching?
-                return UserMethodVariable(
-                    method, self, source=source, **options
-                ).call_function(tx, args, kwargs)
+                return UserMethodVariable(method, self, **options).call_function(
+                    tx, args, kwargs
+                )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -307,14 +300,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = None
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
-                    getattr_fn, self, source=source, **options
+                    getattr_fn, self, **options
                 ).call_function(tx, [ConstantVariable(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
             return variables.UserMethodVariable(
-                subobj.fget, self, source=source, **options
+                subobj.fget, self, **options
             ).call_function(tx, [], {})
         elif isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(
@@ -362,7 +355,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             return VariableBuilder(tx, source)(subobj).add_options(options)
-        options["source"] = source
+
         if isinstance(
             subobj,
             (
@@ -371,12 +364,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.distributions.constraints.Constraint,
             ),
         ):
-            return UserDefinedObjectVariable(subobj, **options)
+            return UserDefinedObjectVariable(subobj, source=source, **options)
 
         if name == "__class__":
-            return UserDefinedClassVariable(type(self.value), **options)
+            return UserDefinedClassVariable(type(self.value), source=source, **options)
 
-        return variables.GetAttrVariable(self, name, **options)
+        return variables.GetAttrVariable(self, name, source=source, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         if not self.source:

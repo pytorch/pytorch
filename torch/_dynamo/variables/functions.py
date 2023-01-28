@@ -148,11 +148,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
             if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
-                result[name] = variables.UserDefinedClassVariable(
-                    cell.cell_contents,
-                    source=source,
-                )
+                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
             else:
                 var = tx.match_nested_cell(name, cell)
                 if var is not None:
