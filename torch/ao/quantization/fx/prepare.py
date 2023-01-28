@@ -1217,7 +1217,7 @@ def insert_observers_for_model(
             # we can do is to validate the dtype when we set them so that
             # target_dtype is set correctly after one pass
             if node.op != "output" and not is_supported_by_backend:
-                output_act_dtype = _get_dtype_and_is_dynamic(node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"])
+                output_act_dtype, _ = _get_dtype_and_is_dynamic(node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"])
                 if output_act_dtype not in [None, int, float, torch.bool]:
                     node.meta["target_dtype_info"] = {
                         "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),

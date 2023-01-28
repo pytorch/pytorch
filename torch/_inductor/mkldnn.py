@@ -351,7 +351,7 @@ class PackedLinear(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = int(reduce(lambda x, y: x * y, input_size) / input_size[-1])
+        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
@@ -488,7 +488,9 @@ def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
 
 def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     # make sure the autograd is disabled.

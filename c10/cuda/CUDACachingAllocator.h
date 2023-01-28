@@ -95,7 +95,7 @@ struct DeviceStats {
 };
 
 struct Context {
-  virtual ~Context() {}
+  virtual ~Context() = default;
 };
 
 typedef std::shared_ptr<Context> (*CreateContextFn)(void);

@@ -282,6 +282,17 @@ def index_put(
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
+            mask_rank = symbolic_helper._get_tensor_rank(bool_inp)
+            self_rank = symbolic_helper._get_tensor_rank(self)
+            if (
+                mask_rank is not None
+                and self_rank is not None
+                and self_rank > mask_rank
+            ):
+                # Unsqueeze 'bool_inp' to be broadcastable to shape of 'self'.
+                bool_inp = symbolic_helper._unsqueeze_helper(
+                    g, bool_inp, list(range(mask_rank, self_rank))
+                )
             return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = symbolic_helper._unsqueeze_helper(g, index, [-1])
