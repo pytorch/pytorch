@@ -62,7 +62,6 @@ class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
 #     as_flaot: float = None
 #     as_sym: str = None
 
-# Scalar = Union[int, float, bool]
 
 # This is a Tensor Arugment used in the args of an node
 # We intentionally don't store the tensor's storage, nor the tensor's meta data here,
@@ -103,11 +102,6 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 
     as_symint: SymIntArgument = None         # Symint can be an argument, there are symint in native_function.yaml
     as_symints: List[SymIntArgument] = None   # Symint[] can be an argement, there are symint[] in native_function.yaml
-
-    # !!! Looks like we don't need Scalar type during serialization,
-    # as it will always be a concrete type, one of int, float, bool
-    # as_scalar: Scalar = None
-    # List[Scalar], # !!! Scalar[] is in native_function.yaml, but not used in canonical aten ops yet
 
     as_bool: bool = None
 
