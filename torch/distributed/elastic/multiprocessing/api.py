@@ -117,7 +117,7 @@ class Std(IntFlag):
         Any other input raises an exception
         """
 
-        def to_std(v):
+        def to_std(v: str) -> Std:
             v = int(v)
             for s in Std:
                 if s == v:
