@@ -1285,7 +1285,7 @@ class View(BaseView):
     __repr__ = __str__
 
     @classmethod
-    def create(cls, x, new_size, inplace=False):
+    def create(cls, x, new_size):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
@@ -1304,8 +1304,6 @@ class View(BaseView):
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
             )
-            if inplace:
-                return InplaceView(storage, new_layout)
             return ReinterpretView(storage, new_layout)
 
         reindex = cls.dynamic_reshape_indexer(old_size, new_size)
@@ -1472,9 +1470,7 @@ class ReinterpretView(BaseView):
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
-
-class InplaceView(ReinterpretView):
-    def codegen_reference(self):
+    def codegen_inplace_reference(self):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
@@ -2793,6 +2789,27 @@ class ExternKernelAlloc(ExternKernel):
 
     def apply_constraint(self):
         raise NotImplementedError
+
+
+class InplaceView(ExternKernel):
+    def codegen(self, wrapper):
+        wrapper.writeline(f"{self.inputs[0].codegen_inplace_reference()}")
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, x):
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage([x]),
+            (),
+        )
+        self.name = V.graph.register_buffer(self)
 
 
 class InplaceBernoulliFallback(ExternKernel):

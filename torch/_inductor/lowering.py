@@ -808,10 +808,9 @@ def unsqueeze(x, dim):
 
 @register_lowering(aten.unsqueeze_, type_promotion_kind=None)
 def unsqueeze_(x, dim):
-    dim = _validate_dim(x, dim, 1)
-    new_shape = list(x.get_size())
-    new_shape.insert(dim, sympy.Integer(1))
-    return TensorBox(View.create(x.data, new_shape, True))
+    x = unsqueeze(x, dim)
+    ir.InplaceView(x)
+    return x
 
 
 def _validate_dim(x, dim, offset=0):
