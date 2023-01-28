@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     lengths_to_offsets,
     skipIfNoONEDNN,
+    _make_conv_add_extra_input_tensor,
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
@@ -274,17 +275,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             batch_size, in_channels_per_group, input_feature_map_size,
             out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
             W_scale, W_zero_point, use_bias, use_channelwise)
+        example_input = [X,]
+        example_input_q = [X_q,]
 
         if post_op in ["add", "add_relu"]:
-            (X2_value_min, X2_value_max) = (0, 4)
-            X2_init = torch.randint(
-                X2_value_min,
-                X2_value_max,
-                conv_module[0](X).size()  # Infer the size of tensor to do the add
-            )
-            X2 = X2_scale * (X2_init - X2_zero_point).float()
-            X2_q = torch.quantize_per_tensor(
-                X2, scale=X2_scale, zero_point=X2_zero_point, dtype=torch.quint8)
+            X2, X2_q = _make_conv_add_extra_input_tensor(X2_scale, X2_zero_point, conv_module[0](X).size())
+            example_input = [X, X2]
+            example_input_q = [X_q, X2_q]
 
         # Make sure the weight shape is correct
         self.assertTrue(qconv_module.weight().shape == W_q.shape)
@@ -293,14 +290,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qconv_module.scale = Y_scale
         qconv_module.zero_point = Y_zero_point
 
-        if post_op in ["relu", "add", "add_relu"]:
-            conv_module[0].weight.data = W
-            if use_bias:
-                conv_module[0].bias.data = b
-        else:
-            conv_module.weight.data = W
-            if use_bias:
-                conv_module.bias.data = b
+        raw_conv_module = conv_module[0] if post_op in ["relu", "add", "add_relu"] else conv_module
+        raw_conv_module.weight.data = W
+        if use_bias:
+            raw_conv_module.bias.data = b
 
         # Test members
         self.assertTrue(module_name == qconv_module._get_name(), module_name + " " + qconv_module._get_name())
@@ -316,16 +309,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(Y_zero_point, qconv_module.zero_point)
 
         # Test forward
-        if post_op in ["add", "add_relu"]:
-            Y_exp = conv_module(X, X2)
-            Y_exp = torch.quantize_per_tensor(
-                Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
-            Y_act = qconv_module(X_q, X2_q)
-        else:
-            Y_exp = conv_module(X)
-            Y_exp = torch.quantize_per_tensor(
-                Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
-            Y_act = qconv_module(X_q)
+        Y_exp = conv_module(*example_input)
+        Y_exp = torch.quantize_per_tensor(
+            Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+        Y_act = qconv_module(*example_input_q)
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -369,10 +356,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qconv_module.scale, loaded_qconv_module.scale)
         self.assertEqual(qconv_module.zero_point,
                          loaded_qconv_module.zero_point)
-        if post_op in ["add", "add_relu"]:
-            Y_loaded = loaded_qconv_module(X_q, X2_q)
-        else:
-            Y_loaded = loaded_qconv_module(X_q)
+        Y_loaded = loaded_qconv_module(*example_input_q)
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
@@ -393,10 +377,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(copied_conv.scale, qconv_module.scale)
         self.assertEqual(copied_conv.zero_point,
                          qconv_module.zero_point)
-        if post_op in ["add", "add_relu"]:
-            Y_copied = copied_conv(X_q, X2_q)
-        else:
-            Y_copied = copied_conv(X_q)
+        Y_copied = copied_conv(*example_input_q)
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
 
@@ -405,10 +386,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(deepcopied_conv.scale, qconv_module.scale)
         self.assertEqual(deepcopied_conv.zero_point,
                          qconv_module.zero_point)
-        if post_op in ["add", "add_relu"]:
-            Y_deepcopied = deepcopied_conv(X_q, X2_q)
-        else:
-            Y_deepcopied = deepcopied_conv(X_q)
+        Y_deepcopied = deepcopied_conv(*example_input_q)
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
@@ -435,10 +413,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
-        if post_op in ["add", "add_relu"]:
-            fused_conv_module(X.float(), X2)
-        else:
-            fused_conv_module(X.float())
+        example_input[0] = example_input[0].float()
+        fused_conv_module(*example_input)
         converted_qconv_module = fused_conv_module
         reference_mapping = get_default_static_quant_module_mappings()
         reference_mapping[type(conv_module)] = type(qconv_module)
@@ -446,12 +422,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         if use_bias:
-            if post_op in ["relu", "add"]:
-                self.assertEqual(conv_module[0].bias,
-                                 converted_qconv_module[0].bias())
-            else:
-                self.assertEqual(conv_module.bias,
-                                 converted_qconv_module[0].bias())
+            self.assertEqual(conv_module[0].bias if (post_op in ["relu", "add"]) else conv_module.bias,
+                                converted_qconv_module[0].bias())
         # Smoke test extra_repr
         self.assertTrue(module_name == converted_qconv_module[0]._get_name())
 
