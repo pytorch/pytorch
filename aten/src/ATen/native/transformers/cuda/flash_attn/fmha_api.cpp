@@ -315,7 +315,8 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     int64_t counter_offset = launch_params.params.b * launch_params.params.h * 32;
 
     // We want to checkpoint and save the RNG state for backward if dropout
-    at::Tensor generator_state = at::empty({0}, q.options());
+    c10::TensorOptions mask_options{at::ScalarType::Byte};
+    at::Tensor generator_state = at::detail::empty_cpu({0}, mask_options);
     if( is_dropout ) {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);

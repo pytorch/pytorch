@@ -2094,7 +2094,7 @@ def meta__scaled_dot_product_flash(
             DEFAULT_RNG_STATE_SIZE, dtype=torch.uint8, device="meta"
         )
     else:
-        rng_state_tensor = torch.empty(0, dtype=query.dtype, device=query.device)
+        rng_state_tensor = torch.empty(0, dtype=torch.uint8, device="meta")
 
     if return_debug_mask:
         blocksize_c = 128 if head_dim > 64 else 256
