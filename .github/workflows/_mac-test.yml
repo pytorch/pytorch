@@ -23,7 +23,12 @@ on:
         type: string
         description: |
           Contains the architecture to run the tests with
-
+      timeout-minutes:
+        required: false
+        type: number
+        default: 270
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
         required: true
@@ -67,7 +72,7 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -127,8 +132,17 @@ jobs:
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
 
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Test
         id: test
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
