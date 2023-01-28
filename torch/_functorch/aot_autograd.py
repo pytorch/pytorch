@@ -1859,22 +1859,43 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
             del contiguous_args
-            if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
-                context = disable_autocast_manager if disable_amp else nullcontext
-                with context(), track_graph_compiling(aot_config, "backward"):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
-                    )
 
-            ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(
-                CompiledFunction.compiled_bw,
-                all_args,
-                steal_args=True,
-                disable_amp=disable_amp,
-            )
-            return tuple(out)
+            def call_compiled_backward():
+                if CompiledFunction.compiled_bw is None:
+                    # TODO - pass in fake tensors ?
+                    context = disable_autocast_manager if disable_amp else nullcontext
+                    with context(), track_graph_compiling(aot_config, "backward"):
+                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            bw_module, all_args
+                        )
+
+                ctx.maybe_clear_saved_tensors()
+                out = call_func_with_args(
+                    CompiledFunction.compiled_bw,
+                    all_args,
+                    steal_args=True,
+                    disable_amp=disable_amp,
+                )
+
+                return tuple(out)
+
+            if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
+                # Ensure that the graph is connected, and error if double backward is performed.
+                # See comment for why once_differentiable is not sufficient:
+                # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
+                class CompiledFunctionBackward(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, *unused_args):
+                        return call_compiled_backward()
+
+                    @staticmethod
+                    def backward(ctx, *args):
+                        raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+                # Pass args even though they're unused, so that the graph is built
+                out = CompiledFunctionBackward.apply(*all_args)
+            else:
+                out = call_compiled_backward()
+            return out
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
