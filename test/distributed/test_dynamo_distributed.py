@@ -144,10 +144,10 @@ def get_hf_t5(rank):
     model = T5ForConditionalGeneration(config).to(device)
     model.train()
     inputs = {
-        "source_ids": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
-        "source_mask": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
-        "target_ids": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
-        "target_mask": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
+        "source_ids": torch.randint(0, 32128, (2, 1024,), dtype=torch.long, device=device),
+        "source_mask": torch.randint(0, 2, (2, 1024,), dtype=torch.long, device=device),
+        "target_ids": torch.randint(0, 32128, (2, 1024,), dtype=torch.long, device=device),
+        "target_mask": torch.randint(0, 2, (2, 1024,), dtype=torch.long, device=device),
     }
     return model, inputs
 
@@ -451,8 +451,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             inputs_flat = [inputs[k] for k in inputs]
             correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
             opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
-            # TODO: Fix correctness.
-            self.assertFalse(same(correct_results, opt_results))
+            self.assertTrue(same(correct_results, opt_results))
 
             # TODO: Fix compilation error from gradient accumulation without
             # `no_sync()`:
