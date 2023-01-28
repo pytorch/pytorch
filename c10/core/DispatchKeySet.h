@@ -157,7 +157,7 @@ class DispatchKeySet final {
 
   // NB: default constructor representation as zero is MANDATORY as
   // use of DispatchKeySet in TLS requires this.
-  constexpr DispatchKeySet() : repr_(0) {}
+  constexpr DispatchKeySet() = default;
 
   constexpr DispatchKeySet(Full)
       : repr_((1ULL << (num_backends + num_functionality_keys - 1)) - 1) {}
