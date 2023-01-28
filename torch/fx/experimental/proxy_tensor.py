@@ -126,7 +126,7 @@ def set_meta(proxy, val):
         if all(isinstance(x, FakeTensor) for x in val):
             proxy.node.meta['val'] = [snapshot_fake(x) for x in val]
     elif isinstance(val, torch.Tensor):
-        if not val.is_sparse:
+        if not val.is_sparse and hasattr(proxy, 'node'):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
@@ -631,7 +631,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, _tracing_argnums=None):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -639,7 +639,19 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
     @functools.wraps(f)
     def wrapped(*args):
-        phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
+        if _tracing_argnums is not None:
+            flat_args, args_spec = pytree.tree_flatten(args)
+            flat_argnums, trace_spec = pytree.tree_flatten(_tracing_argnums)
+
+            assert args_spec == trace_spec
+            phs = []
+            for arg, argnum in zip(flat_args, flat_argnums):
+                if argnum:
+                    phs.append(fx.PH)
+                else:
+                    phs.append(arg)
+        else:
+            phs = pytree.tree_map_only(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
