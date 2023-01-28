@@ -37,7 +37,7 @@ class StorageWriter(abc.ABC):
 
     A subclass should expect the following sequence of calls.
 
-    1) (all ranks) init()
+    1) (all ranks) set_up_storage_writer()
     2) (all ranks) prepare_local_plan()
     3) (coordinator) prepare_global_plan()
     4) (all ranks) write_data()
@@ -45,7 +45,7 @@ class StorageWriter(abc.ABC):
     """
 
     @abc.abstractmethod
-    def init(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool) -> None:
         """
         Initialize this instance.
 
@@ -146,10 +146,10 @@ class StorageReader(abc.ABC):
     A subclass should expected the following sequence of calls by ``load_state_dict``:
 
     1) (all ranks) read_metadata()
-    2) (all ranks) init
-    3) (all ranks) prepare_local_plan
-    4) (coordinator) prepare_global_plan
-    5) (all ranks) read_data
+    2) (all ranks) set_up_storage_reader()
+    3) (all ranks) prepare_local_plan()
+    4) (coordinator) prepare_global_plan()
+    5) (all ranks) read_data()
     """
 
     @abc.abstractmethod
@@ -164,7 +164,7 @@ class StorageReader(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def init(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         """
         Initialize this instance.
 
