@@ -14,10 +14,11 @@ import torch.distributed as dist
 from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
+from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy, transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
@@ -113,6 +114,41 @@ def get_hf_bert(rank):
     decoder_ids = torch.randint(0, config.vocab_size, (batch_size, max_length)).to(device)
     inputs = {'input_ids': input_ids, 'labels': decoder_ids}
     model.train()
+    return model, inputs
+
+def get_hf_t5(rank):
+    try:
+        from transformers import T5Config, T5ForConditionalGeneration
+    except ImportError as e:
+        raise unittest.SkipTest("Unable to import transformers") from e
+
+    device = f"cuda:{rank}"
+    # Emulate "google/t5-v1_1-small"
+    config = T5Config(
+        d_ff=1024,
+        d_kv=64,
+        d_model=512,
+        decoder_start_token_id=0,
+        dropout_rate=0.1,
+        eos_token_id=1,
+        initializer_factor=1.0,
+        is_encoder_decoder=True,
+        layer_norm_epsilon=1e-06,
+        num_decoder_layers=8,
+        num_heads=6,
+        num_layers=8,
+        pad_token_id=0,
+        relative_attention_num_buckets=32,
+        vocab_size=32128,
+    )
+    model = T5ForConditionalGeneration(config).to(device)
+    model.train()
+    inputs = {
+        "source_ids": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
+        "source_mask": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
+        "target_ids": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
+        "target_mask": torch.randint(1, 32000, (10, 1024,), dtype=torch.long, device=device),
+    }
     return model, inputs
 
 class CheckSplitsCompiler:
@@ -361,7 +397,6 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
                 reset_rng_state()
                 opt_model = apply_fsdp(model, wrap_policy)
-
                 opt_model = torch._dynamo.optimize("inductor")(opt_model)
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
@@ -371,6 +406,66 @@ class TestDistributedMultiProc(MultiProcessTestCase):
                 correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
                 opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
                 self.assertTrue(same(correct_results, opt_results))
+
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_t5_fsdp(self):
+        from transformers.models.t5.modeling_t5 import T5Block
+
+        def apply_fsdp(model, wrap_policy):
+            model = FSDP(
+                copy.deepcopy(model),
+                auto_wrap_policy=wrap_policy,
+                use_orig_params=True,
+            )
+            return model
+
+        with _per_rank_init(self.rank, self.world_size):
+            wrap_policy = ModuleWrapPolicy({T5Block})
+            test_instance = "FSDP with recursive wrapping T5Block instances"
+            print(f"Running t5-small test for {test_instance}")
+            model, inputs = get_hf_t5(self.rank)
+            reset_rng_state()
+            eager_model = apply_fsdp(model, wrap_policy)
+            correct_outputs = eager_model(
+                input_ids=inputs["source_ids"],
+                attention_mask=inputs["source_mask"],
+                labels=inputs["target_ids"],
+            )
+            correct_loss = correct_outputs["loss"]
+            correct_loss.backward()
+
+            reset_rng_state()
+            opt_model = apply_fsdp(model, wrap_policy)
+            opt_model = torch._dynamo.optimize("inductor")(opt_model)
+            opt_outputs = opt_model(
+                input_ids=inputs["source_ids"],
+                attention_mask=inputs["source_mask"],
+                labels=inputs["target_ids"],
+            )
+            opt_loss = opt_outputs["loss"]
+            opt_loss.backward()
+
+            inputs_flat = [inputs[k] for k in inputs]
+            correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
+            opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+            # TODO: Fix correctness.
+            self.assertFalse(same(correct_results, opt_results))
+
+            # TODO: Fix compilation error from gradient accumulation without
+            # `no_sync()`:
+            # RuntimeError: assigned grad has data of a different size
+            with self.assertRaises(InternalTorchDynamoError):
+                # Run a second forward to trigger error with the accumulated
+                # gradient, which has sharded size, while the `FlatParameter`
+                # has unsharded size
+                opt_outputs = opt_model(
+                    input_ids=inputs["source_ids"],
+                    attention_mask=inputs["source_mask"],
+                    labels=inputs["target_ids"],
+                )
 
 
 @requires_nccl()
