@@ -6260,7 +6260,7 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
         ((S, S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
     )
 
-    reductions = ["amax", "mean", "amin", "sum", "prod"]
+    reductions = ["max", "mean", "min", "sum", "prod"]
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
@@ -16093,9 +16093,9 @@ op_db: List[OpInfo] = [
            )
            ),
     OpInfo('logcumsumexp',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           backward_dtypes=floating_types_and(torch.bfloat16),
+           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.bfloat16),
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
