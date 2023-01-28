@@ -24,6 +24,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -32,6 +33,8 @@ from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
     cache_on_self,
+    convert_shape_to_inductor,
+    convert_shape_to_symint,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -127,11 +130,14 @@ def reads_from_conv(buf, var_ranges):
 
 
 def ir_node_to_tensor(x, guard_shape=True):
-    shape_fn = (
-        V.graph.sizevars.guard_static_shape
-        if guard_shape
-        else V.graph.sizevars.size_hint
-    )
+    if not guard_shape:
+        shape_fn = V.graph.sizevars.size_hint
+    else:
+
+        def nop(x):
+            return x
+
+        shape_fn = nop
     size = [shape_fn(s) for s in x.get_size()]
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]
@@ -139,6 +145,8 @@ def ir_node_to_tensor(x, guard_shape=True):
         stride = make_contiguous_strides_for(size)
     dtype = x.get_dtype()
     device = x.get_device()
+    size = convert_shape_to_symint(size)
+    stride = convert_shape_to_symint(stride)
     t = torch.empty_strided(
         size=size, stride=stride, dtype=dtype, device=device
     ).zero_()
@@ -208,42 +216,11 @@ class ModularIndexing(sympy.Function):
             if len(new_terms) != len(base.args) and all_positive:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
-        if isinstance(base, IndexingDiv):
+        if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
 
-class IndexingDiv(sympy.Function):
-    """
-    a // b used in indexing where we need to be careful about simplification.
-    We don't use sympy.FloorDiv to bypass some simplification rules.
-    """
-
-    nargs = (2,)
-
-    @classmethod
-    def eval(cls, base, divisor):
-        if base == 0:
-            return sympy.Integer(0)
-        if divisor == 1:
-            return base
-        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-            return base // divisor
-        if isinstance(base, IndexingDiv):
-            return IndexingDiv(base.args[0], base.args[1] * divisor)
-
-        if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return IndexingDiv(base - a, divisor) + a / gcd
-        gcd = sympy.gcd(base, divisor)
-        if gcd != 1:
-            return IndexingDiv(
-                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-            )
-
-
-class CleanDiv(IndexingDiv):
+class CleanDiv(FloorDiv):
     """
     Div where we can assume no rounding.
     This is to enable future optimizations.
@@ -261,7 +238,7 @@ class CeilDiv(sympy.Function):
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
         else:
-            return IndexingDiv(base + (divisor - 1), divisor)
+            return FloorDiv(base + (divisor - 1), divisor)
 
 
 def get_device_type(x):
@@ -929,7 +906,7 @@ class Reduction(Loops):
             need_mask = True
 
         split = sympy.Integer(split)
-        block_size = IndexingDiv(reduction_numel + (split - 1), split)
+        block_size = FloorDiv(reduction_numel + (split - 1), split)
 
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
 
@@ -1517,7 +1494,7 @@ class SliceView(View):
             sizevars.guard_equals(end, new_size[dim])
             return x
 
-        new_size[dim] = IndexingDiv(end - start + (step - 1), step)
+        new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
         if is_storage_and_layout(x):
             # Fast path
@@ -1607,6 +1584,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
+        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -2036,7 +2014,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        return str(self.shape)
+        return str(V.graph.sizevars.simplify(self.shape))
 
 
 @dataclasses.dataclass
@@ -2500,6 +2478,8 @@ class ExternKernel(InputsKernel):
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
+                if isinstance(arg, sympy.Expr):
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
@@ -3004,8 +2984,8 @@ class FallbackKernel(ExternKernelAlloc):
                     FixedLayout(
                         output.device,
                         output.dtype,
-                        [sympy.Integer(s) for s in output.size()],
-                        [sympy.Integer(s) for s in output.stride()],
+                        convert_shape_to_inductor(output.size()),
+                        convert_shape_to_inductor(output.stride()),
                     ),
                     packed,
                     index,
@@ -3057,10 +3037,8 @@ class Convolution(ExternKernelAlloc):
         self.preferred_stride_order = preferred_stride_order
 
     def codegen(self, wrapper):
-        if self.kernel == "triton_ops.conv":
-            wrapper.header.writeline(
-                f"import {config.inductor_import}.triton_ops.conv as {self.kernel}"
-            )
+        if self.kernel.startswith("triton_ops."):
+            wrapper.header.writeline(f"from {config.inductor_import} import triton_ops")
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
@@ -3198,8 +3176,8 @@ class Convolution(ExternKernelAlloc):
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
-            output_size,
-            strides,
+            convert_shape_to_inductor(output_size),
+            convert_shape_to_inductor(strides),
         )
 
         if bias is not None:
@@ -3368,8 +3346,8 @@ def _prepare_convolution_fusion_create(
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
-        output.size(),
-        output_stride,
+        convert_shape_to_inductor(output.size()),
+        convert_shape_to_inductor(output_stride),
     )
     constant_args = [padding, stride, dilation, groups]
 
