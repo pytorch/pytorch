@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -243,7 +244,7 @@ struct BailOutInserter {
 
     // Returns an int so that we have an easy way to do graph traversal
     unopt_func->output()->setType(IntType::get());
-    unopt_func->g_(attr::Subgraph, unoptimized_graph);
+    unopt_func->g_(attr::Subgraph, std::move(unoptimized_graph));
     for (auto bn : bailouts_) {
       bn->insertInput(0, unopt_func->output());
     }

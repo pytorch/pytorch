@@ -100,7 +100,7 @@ class SavePlanner(abc.ABC):
 
     A planner subclass can expect the following sequence of calls during save_state_dict:
 
-    1) init - called on all ranks.
+    1) set_up_planner - called on all ranks.
         Signals the start of a checkpoint save.
 
     2) create_local_plan - called on all ranks.
@@ -125,9 +125,9 @@ class SavePlanner(abc.ABC):
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
-    >>>     def init(self, state_dict, is_coordinator):
+    >>>     def set_up_planner(self, state_dict, is_coordinator):
     >>>         # prefix all keys with `foo_``
-    >>>         super().init(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
@@ -179,7 +179,7 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         """
         Intialize this planner to save ``state_dict``.
 
@@ -225,7 +225,7 @@ class SavePlanner(abc.ABC):
         self, write_item: WriteItem
     ) -> Union[torch.Tensor, io.BytesIO]:
         """
-        Lookup the object associated with ``write_item``in `state_dict` and apply any
+        Lookup the object associated with ``write_item`` in ``state_dict`` and apply any
         transformation (such as serialization) prior to the storage layer consuming it.
 
         Called on each rank multiple times, at least once per WriteItem in the final SavePlan.
@@ -237,7 +237,7 @@ class SavePlanner(abc.ABC):
         is called in order to reduce peak memory required by checkpointing.
 
         When returning tensors, they can be on any device or format, they can be views too.
-        It's the storage layer responsiblity to figure out how to save them.
+        It's the storage layer responsibility to figure out how to save them.
         """
         pass
 
@@ -253,7 +253,7 @@ class LoadPlanner:
 
     A planner subclass can expect the following sequence of calls during load_state_dict:
 
-    1) init - called on all ranks.
+    1) set_up_planner - called on all ranks.
         Signals the start of loading a checkpoint.
 
     2) create_local_plan - called on all ranks.
@@ -280,9 +280,9 @@ class LoadPlanner:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultLoadPlanner):
-    >>>     def init(self, state_dict, metadata, is_coordinator):
+    >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
     >>>         self.original_state_dict = state_dict
-    >>>         super().init(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
@@ -302,7 +302,7 @@ class LoadPlanner:
     """
 
     @abc.abstractmethod
-    def init(
+    def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
         metadata: Metadata,
@@ -318,7 +318,7 @@ class LoadPlanner:
     @abc.abstractmethod
     def create_local_plan(self) -> LoadPlan:
         """
-        Create a LoadPlan based on state_dict and metadata provided by init.
+        Create a LoadPlan based on state_dict and metadata provided by set_up_planner.
 
         . N.B. This is called on every rank.
         """
