@@ -16,6 +16,57 @@ TORCH_API THPByteOrder THP_nativeByteOrder();
 TORCH_API void THP_decodeInt16Buffer(
     int16_t* dst,
     const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeInt32Buffer(
+    int32_t* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeInt64Buffer(
+    int64_t* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeHalfBuffer(
+    c10::Half* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeFloatBuffer(
+    float* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeDoubleBuffer(
+    double* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeBoolBuffer(
+    bool* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeBFloat16Buffer(
+    at::BFloat16* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeComplexFloatBuffer(
+    c10::complex<float>* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+TORCH_API void THP_decodeComplexDoubleBuffer(
+    c10::complex<double>* dst,
+    const uint8_t* src,
+    bool do_byte_swap,
+    size_t len);
+
+TORCH_API void THP_decodeInt16Buffer(
+    int16_t* dst,
+    const uint8_t* src,
     THPByteOrder order,
     size_t len);
 TORCH_API void THP_decodeInt32Buffer(
