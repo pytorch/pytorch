@@ -9,6 +9,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <memory>
+#include <utility>
 
 namespace at {
 // This function is defined in the codegenerated RegisterDispatchKey.cpp file.
@@ -80,9 +81,9 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   }
 
   at::Tensor MakeTensorFromComputationData(
-      const torch::lazy::BackendDataPtr data,
+      torch::lazy::BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const override {
-    const auto ts_data = std::static_pointer_cast<TSData>(data);
+    const auto ts_data = std::static_pointer_cast<TSData>(std::move(data));
     return ts_data->data();
   }
 
@@ -208,11 +209,12 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
     torch::lazy::ComputationPtr computation,
     c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
-  auto ts_computation =
-      std::dynamic_pointer_cast<torch::lazy::TSComputation>(computation);
+  auto ts_computation = std::dynamic_pointer_cast<torch::lazy::TSComputation>(
+      std::move(computation));
   TORCH_CHECK(ts_computation, "Computation isn't TSComputation");
   torch::jit::GraphExecutor& graph_executor = ts_computation->graph_executor();
   std::vector<torch::jit::IValue> stack;
+  stack.reserve(arguments.size());
   for (const auto& argument : arguments) {
     const auto ts_data = std::static_pointer_cast<TSData>(argument);
     if (ts_data->scalar.has_value()) {
@@ -229,13 +231,15 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
   }
   graph_executor.run(stack);
   std::vector<torch::lazy::BackendDataPtr> results;
-  for (torch::jit::IValue component : stack) {
+  results.reserve(stack.size());
+  for (const auto& component : stack) {
     at::Tensor result = component.toTensor();
     at::IntArrayRef result_sizes = result.sizes();
     torch::lazy::Shape shape(
         result.scalar_type(),
         std::vector<int64_t>(result_sizes.begin(), result_sizes.end()));
-    results.push_back(std::make_shared<TSData>(result, shape, device));
+    results.push_back(
+        std::make_shared<TSData>(std::move(result), std::move(shape), device));
   }
   return results;
 }

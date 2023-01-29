@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/ScalarType.h>
 #include <memory>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -11,12 +12,12 @@ using NodePtr = std::shared_ptr<Node>;
 
 template <typename To, typename From>
 NodePtr<To> to(NodePtr<From> x) {
-  return std::dynamic_pointer_cast<To>(x);
+  return std::dynamic_pointer_cast<To>(std::move(x));
 }
 
 template <typename To, typename From>
 NodePtr<To> static_to(NodePtr<From> x) {
-  return std::static_pointer_cast<To>(x);
+  return std::static_pointer_cast<To>(std::move(x));
 }
 
 template <typename Node, typename... Args>

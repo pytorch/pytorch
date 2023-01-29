@@ -391,7 +391,7 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
         "module at all by passing /*include_self=*/false "
         "to modules() or named_modules()");
   }
-  return std::const_pointer_cast<Module>(ptr);
+  return std::const_pointer_cast<Module>(std::move(ptr));
 }
 
 std::ostream& operator<<(std::ostream& stream, const nn::Module& module) {

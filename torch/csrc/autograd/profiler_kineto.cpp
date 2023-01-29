@@ -680,7 +680,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   // Traces are converged via libkineto automatically for ondemand flow
   if (state_ptr->config().global()) {
-    (void)std::static_pointer_cast<KinetoThreadLocalState>(state_ptr)
+    (void)std::static_pointer_cast<KinetoThreadLocalState>(std::move(state_ptr))
         ->finalizeTrace();
     return std::make_unique<ProfilerResult>();
   }
@@ -694,7 +694,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   if (config.state == ProfilerState::KINETO ||
       config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     auto kineto_state_ptr =
-        std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
+        std::static_pointer_cast<KinetoThreadLocalState>(std::move(state_ptr));
     auto trace = kineto_state_ptr->finalizeTrace();
     result = std::make_unique<ProfilerResult>(
         kineto_state_ptr->start_time_,
