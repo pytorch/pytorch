@@ -282,7 +282,7 @@ if HAS_SYMPY:
         def eval(cls, base, divisor):
             if base == 0:
                 return sympy.Integer(0)
-            if isinstance(base, sympy.Integer) and divisor == 1:
+            if base.is_integer and divisor == 1:
                 return base
             if isinstance(base, sympy.Float) and divisor == 1:
                 return sympy.floor(base)
