@@ -21,31 +21,6 @@ namespace at { namespace native {
 
 namespace {
 
-template <typename scalar_t, ReductionType reduce>
-struct Reducer {
-  static inline void update(scalar_t& out, const scalar_t data) {
-    if (reduce == ReductionType::SUM || reduce == ReductionType::MEAN) {
-      out += data;
-    } else if (reduce == ReductionType::MAX) {
-      out = std::max(out, data);
-    } else {
-      out = std::min(out, data);
-    }
-  }
-
-  static inline void update(
-      vec::Vectorized<scalar_t>& out_vec,
-      const vec::Vectorized<scalar_t>& data_vec) {
-    if (reduce == ReductionType::SUM || reduce == ReductionType::MEAN) {
-      out_vec += data_vec;
-    } else if (reduce == ReductionType::MAX) {
-      out_vec = vec::maximum(out_vec, data_vec);
-    } else {
-      out_vec = vec::minimum(out_vec, data_vec);
-    }
-  }
-};
-
 template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_kernel_impl(
     const Tensor& out,
@@ -61,6 +36,7 @@ void spmm_reduce_kernel_impl(
 
   auto other = other_.contiguous();
 
+  // access `crow_indices`, `col_indices` and `values` via TessorAccessor
   scalar_t* out_data = out.data_ptr<scalar_t>();
   auto csr_data = crow_indices.accessor<index_t, 1>();
   auto col_data = col_indices.accessor<index_t, 1>();
@@ -83,13 +59,13 @@ void spmm_reduce_kernel_impl(
       constexpr int64_t kVLEN = kVecSize * 4;
       constexpr int64_t CHUNK_SIZE = 16;
 
-      // reinit the output row for reduce type 'amax' and 'amin'
+      // step 1: reinit the output row for reduce type 'amax' and 'amin'
       int64_t count = row_end - row_start;
       if (count != 0) {
         init<scalar_t, reduce>(out_ptr, K, /*include_self*/false);
       }
 
-      // blocking on rowwise to reduce write memory bandwidth
+      // step 2: reduce, do blocking on rowwise to reduce write memory bandwidth
       for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
         int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
 
@@ -104,10 +80,10 @@ void spmm_reduce_kernel_impl(
             scalar_t val = val_data[e];
             scalar_t* other_ptr = other_data + c * K + k;
 
-            Reducer<scalar_t, reduce>::update(out_vec0, Vec::loadu(other_ptr) * Vec(val));
-            Reducer<scalar_t, reduce>::update(out_vec1, Vec::loadu(other_ptr + kVecSize) * Vec(val));
-            Reducer<scalar_t, reduce>::update(out_vec2, Vec::loadu(other_ptr + kVecSize * 2) * Vec(val));
-            Reducer<scalar_t, reduce>::update(out_vec3, Vec::loadu(other_ptr + kVecSize * 3) * Vec(val));
+            out_vec0 = update<Vec, reduce>(out_vec0, Vec::loadu(other_ptr) * Vec(val));
+            out_vec1 = update<Vec, reduce>(out_vec1, Vec::loadu(other_ptr + kVecSize) * Vec(val));
+            out_vec2 = update<Vec, reduce>(out_vec2, Vec::loadu(other_ptr + kVecSize * 2) * Vec(val));
+            out_vec3 = update<Vec, reduce>(out_vec3, Vec::loadu(other_ptr + kVecSize * 3) * Vec(val));
           }
           out_vec0.store(out_ptr + k);
           out_vec1.store(out_ptr + k + kVecSize);
@@ -120,7 +96,7 @@ void spmm_reduce_kernel_impl(
             c = col_data[e];
             scalar_t val = val_data[e];
             scalar_t* other_ptr = other_data + c * K;
-            Reducer<scalar_t, reduce>::update(out_vec, Vec::loadu(other_ptr + k) * Vec(val));
+            out_vec = update<Vec, reduce>(out_vec, Vec::loadu(other_ptr + k) * Vec(val));
           }
           out_vec.store(out_ptr + k);
         }
@@ -130,23 +106,14 @@ void spmm_reduce_kernel_impl(
             c = col_data[e];
             scalar_t val = val_data[e];
             scalar_t* other_ptr = other_data + c * K;
-            Reducer<scalar_t, reduce>::update(out_val, other_ptr[k] * val);
+            out_val = update<scalar_t, reduce>(out_val, other_ptr[k] * val);
           }
           out_ptr[k] = out_val;
         }
       }
 
-      if (reduce == ReductionType::MEAN && count != 0) {
-        int64_t k = 0;
-        for (; k < K - (K % Vec::size()); k += Vec::size()) {
-          Vec out_vec = Vec::loadu(out_ptr + k);
-          out_vec /= Vec(count);
-          out_vec.store(out_ptr + k);
-        }
-        for (; k < K; k++) {
-          out_ptr[k] /= count;
-        }
-      }
+      // step 3: finalize
+      write<scalar_t, reduce>(out_ptr, count, K);
     }
   });
 }
@@ -154,7 +121,8 @@ void spmm_reduce_kernel_impl(
 template <typename scalar_t, typename index_t, ReductionType reduce>
 inline void update(scalar_t *val, scalar_t new_val, index_t *arg, index_t new_arg) {
   if ((reduce == ReductionType::MIN && new_val < *val) ||
-      (reduce == ReductionType::MAX && new_val > *val)) {
+      (reduce == ReductionType::MAX && new_val > *val) ||
+      at::_isnan<scalar_t>(new_val)) {
     *val = new_val;
     *arg = new_arg;
   }
@@ -164,27 +132,24 @@ template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_arg_kernel_impl(
     const Tensor& out,
     const Tensor& arg_out,
-    const Tensor& crow_indices_,
-    const Tensor& col_indices_,
-    const Tensor& values_,
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
+    const Tensor& values,
     const Tensor& other_) {
 
   TORCH_CHECK(reduce == ReductionType::MAX || reduce == ReductionType::MIN);
-  int64_t nnz = values_.numel();
+  int64_t nnz = values.numel();
   if (nnz == 0) {
     return;
   }
 
-  auto crow_indices = crow_indices_.contiguous();
-  auto col_indices = col_indices_.contiguous();
-  auto values = values_.contiguous();
   auto other = other_.contiguous();
 
   scalar_t* out_data = out.data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
-  index_t* csr_data = crow_indices.data_ptr<index_t>();
-  index_t* col_data = col_indices.data_ptr<index_t>();
-  scalar_t* val_data = values.data_ptr<scalar_t>();
+  auto csr_data = crow_indices.accessor<index_t, 1>();
+  auto col_data = col_indices.accessor<index_t, 1>();
+  auto val_data = values.accessor<scalar_t, 1>();
   scalar_t* other_data = other.data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
@@ -221,10 +186,10 @@ template <typename scalar_t, typename index_t, ReductionType reduce>
 void spmm_reduce_backward_input_kernel_impl(
     const Tensor& grad_self,
     const Tensor& grad_out_,
-    const Tensor& crow_indices_,
-    const Tensor& col_indices_,
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
     const Tensor& other_,
-    const Tensor& row_indices_) {
+    const Tensor& row_indices) {
 
   int64_t nnz = grad_self._nnz();
   if (nnz == 0) {
@@ -232,15 +197,13 @@ void spmm_reduce_backward_input_kernel_impl(
   }
 
   auto grad_out = grad_out_.contiguous();
-  auto crow_indices = crow_indices_.contiguous();
-  auto col_indices = col_indices_.contiguous();
   auto other = other_.contiguous();
-  auto row_indices = row_indices_.contiguous();
 
-  scalar_t* grad_values_data = grad_self.values().data_ptr<scalar_t>();
+  auto values = grad_self.values();
+  auto grad_values_data = values.accessor<scalar_t, 1>();
   scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  index_t* crow_data = crow_indices.data_ptr<index_t>();
-  index_t* col_data = col_indices.data_ptr<index_t>();
+  auto crow_data = crow_indices.accessor<index_t, 1>();
+  auto col_data = col_indices.accessor<index_t, 1>();
   scalar_t* other_data = other.data_ptr<scalar_t>();
   index_t* row_data = row_indices.data_ptr<index_t>();
 
@@ -273,7 +236,7 @@ template <typename scalar_t, typename index_t>
 void spmm_reduce_backward_input_arg_kernel_impl(
     const Tensor& grad_self,
     const Tensor& grad_out_,
-    const Tensor& col_indices_,
+    const Tensor& col_indices,
     const Tensor& other_,
     const Tensor& arg_out_) {
 
@@ -283,13 +246,13 @@ void spmm_reduce_backward_input_arg_kernel_impl(
   }
 
   auto grad_out = grad_out_.contiguous();
-  auto col_indices = col_indices_.contiguous();
   auto other = other_.contiguous();
   auto arg_out = arg_out_.contiguous();
 
-  scalar_t* grad_values_data = grad_self.values().data_ptr<scalar_t>();
+  auto grad_values = grad_self.values();
+  auto grad_values_data = grad_values.accessor<scalar_t, 1>();
   scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  index_t* col_data = col_indices.data_ptr<index_t>();
+  auto col_data = col_indices.accessor<index_t, 1>();
   scalar_t* other_data = other.data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
 
@@ -328,23 +291,19 @@ void spmm_reduce_backward_input_arg_kernel_impl(
 template <typename scalar_t, typename index_t>
 void spmm_reduce_update_values_kernel_impl(
     const Tensor& updated_values,
-    const Tensor& values_,
-    const Tensor& crow_indices_,
-    const Tensor& row_indices_) {
+    const Tensor& values,
+    const Tensor& crow_indices,
+    const Tensor& row_indices) {
 
-  int64_t nnz = values_.numel();
+  int64_t nnz = values.numel();
   if (nnz == 0) {
     return;
   }
 
-  auto values = values_.contiguous();
-  auto crow_indices = crow_indices_.contiguous();
-  auto row_indices = row_indices_.contiguous();
-
-  scalar_t* updated_values_data = updated_values.data_ptr<scalar_t>();
-  scalar_t* values_data = values.data_ptr<scalar_t>();
-  index_t* crow_data = crow_indices.data_ptr<index_t>();
-  index_t* row_data = row_indices.data_ptr<index_t>();
+  auto updated_values_data = updated_values.accessor<scalar_t, 1>();
+  auto values_data = values.accessor<scalar_t, 1>();
+  auto crow_data = crow_indices.accessor<index_t, 1>();
+  auto row_data = row_indices.accessor<index_t, 1>();
 
   at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
@@ -359,24 +318,22 @@ template <typename scalar_t, typename index_t>
 void spmm_reduce_backward_other_arg_kernel_impl(
     const Tensor& grad_other,
     const Tensor& grad_out_,
-    const Tensor& col_indices_,
-    const Tensor& values_,
+    const Tensor& col_indices,
+    const Tensor& values,
     const Tensor& arg_out_) {
 
-  int64_t nnz = values_.numel();
+  int64_t nnz = values.numel();
   if (nnz == 0) {
     return;
   }
 
   auto grad_out = grad_out_.contiguous();
-  auto col_indices = col_indices_.contiguous();
-  auto values = values_.contiguous();
   auto arg_out = arg_out_.contiguous();
 
   scalar_t* grad_other_data = grad_other.data_ptr<scalar_t>();
   scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  index_t* col_data = col_indices.data_ptr<index_t>();
-  scalar_t* values_data = values.data_ptr<scalar_t>();
+  auto col_data = col_indices.accessor<index_t, 1>();
+  auto values_data = values.accessor<scalar_t, 1>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
 
   int64_t M = grad_out.size(0);
