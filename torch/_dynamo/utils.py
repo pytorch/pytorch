@@ -749,7 +749,7 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value):
-    # Workaround repr(Enum) returns invalid global reference before python 3.11
+    # Workaround repr(Enum) returning invalid global reference before python 3.11
     # https://peps.python.org/pep-0663/
     if sys.version_info < (3, 11):
         return str(value)
@@ -767,6 +767,8 @@ def dict_const_keys(value):
 
 def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
+        # To workaround repr(Enum) returning invalid global reference before python 3.11
+        # by calling enum_repr and removing quotes to render enum in guard code.
         const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
             "'", ""
         )
