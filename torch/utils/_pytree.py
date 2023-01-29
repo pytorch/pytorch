@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
+from typing import NamedTuple, Callable, Any, Set, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
@@ -43,9 +43,13 @@ class NodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
+EXPLICIT_LEAVES: Set[Type[Any]] = set()
 
 def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
+
+def _register_pytree_leaf(typ: Any) -> None:
+    EXPLICIT_LEAVES.add(typ)
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
@@ -121,7 +125,7 @@ def _get_node_type(pytree: Any) -> Any:
 
 # A leaf is defined as anything that is not a Node.
 def _is_leaf(pytree: PyTree) -> bool:
-    return _get_node_type(pytree) not in SUPPORTED_NODES.keys()
+    return type(pytree) in EXPLICIT_LEAVES or _get_node_type(pytree) not in SUPPORTED_NODES.keys()
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
