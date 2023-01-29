@@ -86,6 +86,11 @@ bool is_coalesced_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->coalesced();
 }
 
+bool is_coalesced_default(const Tensor& self) {
+  TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
+  return false;
+}
+
 int64_t _nnz_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->nnz();
 }
@@ -114,11 +119,19 @@ Tensor indices_sparse(const Tensor& self) {
   return get_sparse_impl(self)->indices().alias();
 }
 
+Tensor indices_default(const Tensor& self) {
+  TORCH_CHECK(false, "indices expected sparse coordinate tensor layout but got ", self.layout());
+}
+
 Tensor values_sparse(const Tensor& self) {
   TORCH_CHECK(
       self.is_coalesced(),
       "Cannot get values on an uncoalesced tensor, please call .coalesce() first");
   return get_sparse_impl(self)->values().alias();
+}
+
+Tensor values_default(const Tensor& self) {
+  TORCH_CHECK(false, "values expected sparse tensor layout but got ", self.layout());
 }
 
 /******************************************************************************
@@ -398,8 +411,6 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       !options.has_layout() || options.layout() == kSparse,
       "expected sparse layout, but got layout ",
       options.layout());
-
-  at::native::_validate_sparse_coo_tensor_args(indices, values, size);
   return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
@@ -415,20 +426,10 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
-
-  Tensor values = expand_values_if_needed(values_);
-
-  auto sparse_dim = indices.size(0);
-  auto dense_dim = values.dim() - 1;
-
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim,
-      dense_dim,
-      size,
-      indices,
-      values,
-      values.options().layout(kSparse));
+  if (at::globalContext().checkSparseTensorInvariants()) {
+    at::native::_validate_sparse_coo_tensor_args(indices, values_, size);
+  }
+  return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
@@ -644,6 +645,7 @@ SparseTensor& copy_sparse_(
 }
 
 SparseTensor coalesce(const SparseTensor& self) {
+  TORCH_CHECK(self.layout() == kSparse, "coalesce expected sparse coordinate tensor layout but got ", self.layout());
   // See NOTE: [ coalesce autograd ]
   if (self.is_coalesced()) {
     return self;

@@ -339,7 +339,7 @@ Tensor _to_copy(
   // at::empty also does not work here because there is no proper at::empty support for quantized tensors
   // as it would return a quantized tensor with an UnknownQuantizer
   auto r = self.is_quantized() ? at::empty_like(self, memory_format)
-                               : at::empty(self.sizes(),
+                               : at::empty_symint(self.sym_sizes(),
                                  options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
@@ -498,35 +498,29 @@ std::vector<Tensor> _to_cpu(TensorList tensors) {
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.layout() != c10::kStrided);
-  if (input_.layout() == c10::kSparse) {
-    auto input = input_.coalesce();
-    return grad.sparse_mask(input);
-  }
-  if (at::sparse_csr::is_sparse_compressed(input_)) {
-    // TODO: implement sparse_compressed_mask
-    switch(input_.layout()) {
-    case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
-    case kSparseCsc: return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_csc();
-    case kSparseBsr: {
-      auto blocksize = DimVector(input_.values().sizes().slice(1, 2));
-      return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_bsr(blocksize);
-    }
+  const auto input_layout = input_.layout();
+  switch (input_layout) {
+    case kStrided:
+      return grad.to_dense();
+    case kSparse:
+      // Autograd operates on the coalesced assumption, i.e. no duplicate values.
+      return grad.sparse_mask(input_.coalesce());
+    case kSparseCsr:
+    case kSparseCsc:
+      // TODO: add efficient CSR/CSC support for sparse_mask
+      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout);
+    case kSparseBsr:
     case kSparseBsc: {
-      auto blocksize = DimVector(input_.values().sizes().slice(1, 2));
-      return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_bsc(blocksize);
+      // TODO: add efficient BSR/BSC support for sparse_mask
+      const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
+      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout, blocksize);
     }
-      // BSR and BSC should be handled via implement sparse_compressed_mask
-    default: ; // fall back to unsupported input layout error
-    }
+    case kMkldnn:
+      return grad.to_mkldnn(input_.scalar_type());
+    default:
+      AT_ERROR("to_dense_backward: Unsupported input layout: ", input_layout);
+      return Tensor {};
   }
-  if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn(input_.scalar_type());
-  }
-  if (input_.layout() == c10::kStrided) {
-    return grad.to_dense();
-  }
-  AT_ERROR("to_dense_backward: Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
@@ -1103,7 +1097,7 @@ Tensor sparse_compressed_to_flipped(
   // performance.
   const auto batch_nnz_offset = [&]() -> Tensor {
     const auto wrapped_nnz = at::tensor({nnz}, compressed_indices.options());
-    const auto offset = wrapped_nnz
+    auto offset = wrapped_nnz
       .expand({batch_numel_nonzero})
       .cumsum(-1).sub_(wrapped_nnz)
       .reshape(batch_sizes_nonempty);
@@ -1158,7 +1152,7 @@ Tensor sparse_compressed_to_flipped(
   // To CSC/BSC inputs these indices will appear "transposed".
   const auto is_transposed_indices = layout == at::kSparseCsc || layout == at::kSparseBsc;
   const auto coo_indices_2d_transposed = [&]() -> Tensor {
-    const auto coo_indices_2d = _convert_indices_from_csr_to_coo(
+    auto coo_indices_2d = _convert_indices_from_csr_to_coo(
         compressed_indices_2d,
         plain_indices_2d,
         is_out_int32,
@@ -1421,7 +1415,7 @@ void _csr_to_block_csr_cpu_kernel(
   // value lives within them. Otherwise they're not.
 
   // Allocate pointers for all possible column blocks plus 1
-  std::vector<T*> blocks(n_col / C + 1, (T*)0);
+  std::vector<T*> blocks(n_col / C + 1, nullptr);
 
   assert(n_row % R == 0);
   assert(n_col % C == 0);
@@ -1701,14 +1695,15 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self, c10::optional<int64_t
   return self;
 }
 
-Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
-  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  TORCH_CHECK(sparse_dim <= 2,
-              "sparse_dim must be less than or equal to 2");
-  // TODO: implement coo.to_sparse(sparse_dim) and then use
-  // return self.to_sparse().to_sparse(sparse_dim);
+Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
   TORCH_CHECK(
-      sparse_dim == 2, "sparse dim 1 is not supported by sparse_compressed_to_sparse");
+     sparse_dim == self.sparse_dim(), "sparse dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
+  return self;
+}
+
+Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
+  TORCH_CHECK(
+      sparse_dim == 2, "sparse dim argument must be 2 for sparse_compressed_to_sparse");
   Layout layout = self.layout();
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
