@@ -420,6 +420,19 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif (
+            not is_allowed(value)
+            and value.__name__ in dir(torch.ops.aten)
+            and isinstance(
+                getattr(torch.ops.aten, value.__name__), torch._ops.OpOverloadPacket
+            )
+        ):
+            # point torch.Tensor.fn to torch.ops.aten.fn
+            return TorchVariable(
+                getattr(torch.ops.aten, value.__name__),
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
