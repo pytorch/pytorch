@@ -92,22 +92,40 @@ inline void init(scalar_t* out, int64_t size, bool include_self = false) {
   }
 }
 
+template <typename scalar_t>
+inline scalar_t _max(const scalar_t& x, const scalar_t& y) {
+  return at::_isnan(y) ? y : std::max(x, y);
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _max(const Vectorized<scalar_t>& x, const Vectorized<scalar_t>& y) {
+  // vec::maximum propagates NaN
+  return vec::maximum(x, y);
+}
+
+template <typename scalar_t>
+inline scalar_t _min(const scalar_t& x, const scalar_t& y) {
+  return at::_isnan(y) ? y : std::min(x, y);
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _min(const Vectorized<scalar_t>& x, const Vectorized<scalar_t>& y) {
+  // vec::minimum propagates NaN
+  return vec::minimum(x, y);
+}
+
 // for Max and Min, propagate NaN:
-template <typename Vec, ReductionType reduce>
-inline Vec update(const Vec& x, const Vec& y) {
+template <typename T, ReductionType reduce>
+inline T update(const T& x, const T& y) {
   if (reduce == ReductionType::SUM ||
       reduce == ReductionType::MEAN) {
     return x + y;
   } else if (reduce == ReductionType::PROD) {
     return x * y;
   } else if (reduce == ReductionType::MAX) {
-    // true = all ones, false = all zeros
-    Vec mask = (y > x) | y.isnan();
-    return Vec::blendv(x, y, mask);
+    return _max(x, y);
   } else {
-    // true = all ones, false = all zeros
-    Vec mask = (y < x) | y.isnan();
-    return Vec::blendv(x, y, mask);
+    return _min(x, y);
   }
 }
 
