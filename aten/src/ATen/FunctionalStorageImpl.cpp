@@ -43,7 +43,7 @@ ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
 const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  if (update.view_metas.size() == 0) return t;
+  if (update.view_metas.empty()) return t;
 
   std::vector<at::Tensor> tmp_values({base});
   for (size_t i = 0; i < update.view_metas.size() - 1; ++i) {
@@ -113,7 +113,7 @@ bool FunctionalStorageImpl::apply_updates() {
   // It adds the Functionalize key into TLS before redispatching to the functionalization kernels,
   // which means that we need to explicitly exclude it here before doing any other work underneath the pass.
   at::AutoDispatchSkipFunctionalize guard;
-  bool any_updates = updates_.size() > 0;
+  bool any_updates = !updates_.empty();
   for (auto& update_data: updates_) {
     base_ = apply_update(update_data, base_);
   }
