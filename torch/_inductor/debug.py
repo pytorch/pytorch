@@ -8,11 +8,12 @@ import os.path
 import pstats
 import shutil
 import subprocess
+import sys
 from typing import Any, List
 from unittest.mock import patch
 
 from functorch.compile import (
-    config,
+    config as functorch_config,
     draw_graph,
     get_aot_graph_name,
     get_graph_being_compiled,
@@ -175,22 +176,36 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    if not bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
-        yield
-        return
-
-    # Enable all graphs to be logged to a file by setting the flags to True
-    # and the log level of the file logger to DEBUG
-
-    stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
-    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
-    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
-    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    debug_graphs = functorch_config.debug_graphs
+    debug_joint_graphs = functorch_config.debug_joint
 
     import torch._functorch.aot_autograd
 
     log = logging.getLogger(torch._functorch.aot_autograd.__name__)
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
+    # if user has specified they want to see graphs via either env var
+    # add stream to std out
+    if debug_graphs or debug_joint_graphs:
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        log.addHandler(stdout_handler)
+        stack.callback(lambda: log.removeHandler(stdout_handler))
+
+    if not compile_debug:
+        try:
+            yield
+        finally:
+            stack.close()
+        return
+
+    # Enable all graphs to be logged to a file by setting the flags to True
+    # and the log level of the file logger to DEBUG
+    stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
+    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
+    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
+
     path = os.path.join(get_debug_dir(), "aot_torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
