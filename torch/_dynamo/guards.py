@@ -1,3 +1,4 @@
+import builtins
 import collections
 import logging
 import math
@@ -97,16 +98,14 @@ class GuardBuilder(GuardBuilderBase):
         else:
             scope = dict()
         self.scope: Dict[str, object] = scope
-
-        if "__builtins__" not in self.scope:
-            self.scope["__builtins__"] = {}
+        self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
             package_module,
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"].__dict__[name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 
@@ -602,18 +601,18 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = guard.input_pos_a
-                pos_b = guard.input_pos_b
-                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
-                    self.output_graph.graphargs
-                ), "Deduped args out of bounds"
+                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
+                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
+                assert (
+                    pos_b >= 0 and pos_a >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
                 assert self.output_graph.graphargs[
                     pos_a
                 ].is_tensor, "Deduped arg must be a tensor"
                 assert self.output_graph.graphargs[
                     pos_b
                 ].is_tensor, "Deduped arg must be a tensor"
-
                 code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
