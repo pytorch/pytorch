@@ -1443,7 +1443,7 @@ py::object create_dim(py::object name, py::handle size) {
     if (!py::is_none(size)) {
         d->set_size(py::to_int(size));
     }
-    return std::move(d);
+    return d;
 }
 
 py::object create_dimlist(py::object name, py::handle size) {
@@ -1459,7 +1459,7 @@ py::object create_dimlist(py::object name, py::handle size) {
             }
         }
     }
-    return std::move(d);
+    return d;
 }
 
 
