@@ -59,7 +59,7 @@ TensorOptions build_options(
   return options;
 }
 
-void maybe_initialize_cuda(const Device device) {
+void maybe_initialize_cuda(const Device& device) {
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
