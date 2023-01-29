@@ -1,9 +1,10 @@
 import torch
-from typing import Union, Sequence
+from typing import Tuple, Union, Sequence
 import inspect
 import dis
 from .tree_map import tree_flatten, tree_map
 from .wrap_type import wrap_type
+from torch.functional import Tensor
 from functorch._C import dim as _C
 _C._patch_tensor_class()
 dims, DimList, dimlists = _C.dims, _C.DimList, _C.dimlists
@@ -168,3 +169,83 @@ softmax = _wrap(torch.nn.functional.softmax, single_dim=True, reduce=False)
 # scatter_add
 # scatter_add_
 # scatter_reduce
+
+
+def rearrange(tensor: Tensor, equation: str, **kwargs) -> Tensor:
+    r"""Flattens or coalesces dimensions of the input tensor based on the given equation. 
+    Implemented as a thin wrapper around `functorch.dim.dims`
+
+    Equation:
+        The equation must be of the form `axes_before -> axes_after`, with the grouping of the
+        axes following the Einstein notation.
+
+        Both sides of the equation will take a series of space-seperated axis groupings.
+        The groupings are positional, and can be either of the form
+        `axis_name` (single axis) or `(axis_0, axis_1, ..)`. 
+        
+        There must be exactly as many axis groupings on the left as the tensor 
+        dimension of the input tensor. Individual axis names must appear exactly once on both sides.
+        
+        Where there is more than one axis in a given axis grouping on the left (input side), the 
+        dimensions of at most one axis can be unknown (so it can be inferred from the input tensor shape).
+
+        There should not be any spaces separating brackets and axis names.
+
+    Examples:
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # simple
+        >>> tensor = torch.rand(1, 4, 2, 2)
+        >>> tensor_out = functorch.dim.rearrange(tensor, 'b c h w -> b h w c')
+        >>> tensor_out.shape
+        torch.Size([1, 2, 2, 4])
+
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # with unknown dim kwargs
+        >>> tensor = torch.rand(1, 4, 2, 2)
+        >>> tensor_out = functorch.dim.rearrange(tensor, 'b (c h2 w2) h w -> b c (h h2) (w w2)', h2=2, w2=2)
+        >>> tensor_out.shape
+        torch.Size([1, 1, 4, 4])
+
+    Args:
+        tensor (Tensor): The tensor to rearrange
+        equation (str): The axes and their groupings in Einstein-notation
+        kwargs: arguments of the form `axis_name=size`
+
+    Raises:
+        ValueError/SyntaxError/NameError: If equation is not validly constructed.
+    """
+    # returns lhs, rhs, and axes. Does minor validation of input equation.
+    # the remainder of useful error messages are handled naturally by the generated code.
+    def parse_equation(equation: str) -> Tuple[str, str, str]:
+        split = equation.split('->')
+        if len(split) != 2:
+            raise ValueError(f"While parsing equation: {equation} should be of the form `before_axes -> after_axes`")
+        lhs, rhs = split[0].split(), split[1].split()
+        
+        lhs_idents, rhs_idents = set(), set()
+        
+        for ident in lhs:
+            lhs_idents.add(ident.replace('(', '').replace(')', ''))
+        for ident in rhs:
+            rhs_idents.add(ident.replace('(', '').replace(')', ''))
+        
+        # Should we just check that `rhs_idents.is_subset(lhs_idents)`?
+        if lhs_idents != rhs_idents:
+            raise ValueError(f"While parsing equation: lhs axes {lhs_idents} != rhs axes {rhs_idents}")
+        
+        lhs, rhs, axes = (',').join(lhs), (',').join(rhs), (',').join(lhs_idents)
+        return lhs, rhs, axes
+    
+    lhs, rhs, axes = parse_equation(equation)
+                                          
+    kwarg_dim_def = "\n".join(["{}.size={}".format(key, kwargs[key]) for key in kwargs])
+
+    exec_string = r"""
+{axes} = dims({num_axes})
+{kwarg_dim_def}
+res = tensor[{lhs}].order({rhs})
+    """.format(num_axes=len(axes.split(',')), kwarg_dim_def=kwarg_dim_def, lhs=lhs, rhs=rhs, axes=axes)
+    
+    env = {"dims": dims, "tensor": tensor}
+    exec(exec_string, {}, env)
+    return env["res"]

@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types_and,
 )
+from functorch.dim import rearrange
 
 # TODO: replace this with make_tensor() in common_utils.py
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1579,6 +1580,30 @@ class TestOldViewOps(TestCase):
                                             r"The expanded size of the tensor \(\d\) "
                                             r"must match the existing size \(\d\)"):
                     torch.broadcast_to(t, s1)
+
+    @dtypes(torch.half, torch.bfloat16)
+    def test_rearrange(self, device, dtype):
+        tensor = torch.rand((1, 4, 2, 2), dtype=dtype, device=device)
+
+        tensor_out = rearrange(tensor, 'b (c h2 w2) h w -> b c (h h2) (w w2)', h2=2, w2=2)
+        self.assertEqual(tensor_out.shape, (1, 1, 4, 4))
+
+        tensor_out = rearrange(tensor, 'b c h w -> h w b c')
+        self.assertEqual(tensor_out.shape, (2, 2, 1, 4))
+
+        # Check malformed rearrange equations
+        with self.assertRaises(ValueError):
+            rearrange(tensor, 'b (c h2 w2) h w  b c (h h2) (w w2)', h2=2, w2=2)
+
+        with self.assertRaises(ValueError):
+            rearrange(tensor, 'b (c h2 w2) h w -> c (h h2) (w w2)', h2=2, w2=2)
+
+        with self.assertRaises(SyntaxError):
+            rearrange(tensor, 'b (c h2 w2) h w -> b c h h2) (w w2)', h2=2, w2=2)
+
+        with self.assertRaises(NameError):
+            rearrange(tensor, 'b c h w -> h w b c', h2=2, w2=2)
+
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
