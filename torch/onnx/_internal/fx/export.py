@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import copy
+import functools
 import inspect
 import itertools
 import operator
 import os
 from types import ModuleType
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 try:
     import onnx
@@ -33,6 +34,70 @@ from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.onnx._internal import jit_utils, registration
 from torch.utils import _pytree
+
+
+class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
+    """Tracer to create ONNX-exporting friendly FX graph.
+
+    This tracer traces models into operators. That is,
+    the traced graph mostly contains call_function nodes and
+    has no call_module nodes. The call_module nodes
+    are problematic to the use of make_fx(...) in ONNX
+    exporter.
+    """
+
+    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
+        return False
+
+
+def module_expansion_symbolic_trace(
+    root: Union[torch.nn.Module, Callable[..., Any]],
+    concrete_args: Optional[Dict[str, Any]] = None,
+) -> torch.fx.GraphModule:
+    _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full", "empty"]
+
+    def gen_constructor_wrapper(target):
+        @functools.wraps(target)
+        def wrapper(*args, **kwargs):
+            proxy = None
+
+            def check_has_proxy(v):
+                if isinstance(v, torch.fx.Proxy):
+                    nonlocal proxy
+                    proxy = v
+
+            torch.fx.node.map_aggregate(args, check_has_proxy)
+            torch.fx.node.map_aggregate(kwargs, check_has_proxy)
+
+            if proxy is not None:
+                return proxy.tracer.create_proxy("call_function", target, args, kwargs)
+            else:
+                return target(*args, **kwargs)
+
+        return wrapper, target
+
+    patched_torch_methods = {
+        target: gen_constructor_wrapper(getattr(torch, target))
+        for target in _TORCH_METHODS_TO_PATCH
+    }
+    orig_fns = set()
+
+    for name, (wrapper, orig) in patched_torch_methods.items():
+        setattr(torch, name, wrapper)
+        orig_fns.add(orig)
+
+    try:
+        tracer = ModuleExpansionTracer()
+        graph = tracer.trace(root, concrete_args)
+        name = (
+            root.__class__.__name__
+            if isinstance(root, torch.nn.Module)
+            else root.__name__
+        )
+        return torch.fx.GraphModule(tracer.root, graph, name)
+    finally:
+        for name, (_, orig) in patched_torch_methods.items():
+            setattr(torch, name, orig)
 
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
@@ -694,9 +759,7 @@ def export_without_parameters_and_buffers(
         else:
             concrete_args[param_name] = param_value
 
-    graph_module = torch.fx.symbolic_trace(
-        module, concrete_args=concrete_args, expand_submodule_call_into_operators=True
-    )
+    graph_module = module_expansion_symbolic_trace(module, concrete_args=concrete_args)
 
     # Make sure all placeholder nodes are executed before get_attr nodes.
     # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.

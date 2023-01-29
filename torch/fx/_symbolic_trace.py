@@ -228,7 +228,6 @@ class Tracer(TracerBase):
         autowrap_modules: Tuple[ModuleType] = (math,),
         autowrap_functions: Tuple[Callable, ...] = (),
         param_shapes_constant: bool = False,
-        expand_submodule_call_into_operators: bool = False,
     ) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
@@ -254,11 +253,6 @@ class Tracer(TracerBase):
                 will be evaluated directly, rather than returning a new Proxy value
                 for an attribute access. Backward compatibility for this parameter
                 is guaranteed.
-
-            expand_submodule_call_into_operators (bool): If this flag is true,
-                calling forward function of nn.Module will not be recorded as a
-                call_module node; instead, the call will be expanded into a series
-                call_function nodes.
         """
 
         super().__init__()
@@ -278,7 +272,6 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
-        self.expand_submodule_call_into_operators = expand_submodule_call_into_operators
         self.root_module_name: str = ""
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
@@ -470,9 +463,7 @@ class Tracer(TracerBase):
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
             self.module_stack[_scope.module_path] = _scope.module_type
-            # Expand all submodules if expand_submodule_call_into_operators is True.
-            # Or just expand non-leaf modules.
-            if self.expand_submodule_call_into_operators or not self.is_leaf_module(m, module_qualified_name):
+            if not self.is_leaf_module(m, module_qualified_name):
                 # Calling into forward can expand sub-modules into ops in the traced graph.
                 ret_val = forward(*args, **kwargs)
             else:
@@ -1068,7 +1059,6 @@ def wrap(fn_or_name: Union[str, Callable]):
 def symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
     concrete_args: Optional[Dict[str, Any]] = None,
-    expand_submodule_call_into_operators: bool = False,
 ) -> GraphModule:
     """
     Symbolic tracing API
@@ -1113,53 +1103,16 @@ def symbolic_trace(
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
         concrete_args (Optional[Dict[str, any]]): Inputs to be partially specialized
-        expand_submodule_call_into_operators (bool): If True, expand submodule calls into the
-            underying operators (i.e., call_function nodes). This will eliminate call_module
-            nodes in the traced graph. If False, calling submodule will be recorded as
-            call_module nodes in the traced graph.
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
     """
-    _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full", "empty"]
-
-    def gen_constructor_wrapper(target):
-        @functools.wraps(target)
-        def wrapper(*args, **kwargs):
-            proxy = None
-
-            def check_has_proxy(v):
-                if isinstance(v, torch.fx.Proxy):
-                    nonlocal proxy
-                    proxy = v
-            torch.fx.node.map_aggregate(args, check_has_proxy)
-            torch.fx.node.map_aggregate(kwargs, check_has_proxy)
-
-            if proxy is not None:
-                return proxy.tracer.create_proxy('call_function', target, args, kwargs)
-            else:
-                return target(*args, **kwargs)
-        return wrapper, target
-
-    patched_torch_methods = {
-        target: gen_constructor_wrapper(getattr(torch, target)) for target in _TORCH_METHODS_TO_PATCH
-    }
-    orig_fns = set()
-
-    for name, (wrapper, orig) in patched_torch_methods.items():
-        setattr(torch, name, wrapper)
-        orig_fns.add(orig)
-
-    try:
-        tracer = Tracer(expand_submodule_call_into_operators=expand_submodule_call_into_operators)
-        graph = tracer.trace(root, concrete_args)
-        name = (
-            root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
-        )
-        return GraphModule(tracer.root, graph, name)
-    finally:
-        for name, (_, orig) in patched_torch_methods.items():
-            setattr(torch, name, orig)
+    tracer = Tracer()
+    graph = tracer.trace(root, concrete_args)
+    name = (
+        root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
+    )
+    return GraphModule(tracer.root, graph, name)
 
 
 @wrap
