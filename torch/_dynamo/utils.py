@@ -5,6 +5,7 @@ import cProfile
 import dataclasses
 import datetime
 import dis
+import enum
 import functools
 import gc
 import inspect
@@ -698,7 +699,7 @@ def is_safe_constant(v):
             type(type),
             torch.device,
         ),
-    )
+    ) or isinstance(v, enum.Enum)
 
 
 def check_constant_args(args, kwargs):
@@ -747,12 +748,33 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def enum_repr(value):
+    # Workaround repr(Enum) returning invalid global reference before python 3.11
+    # https://peps.python.org/pep-0663/
+    if sys.version_info < (3, 11):
+        return str(value)
+    else:
+        return repr(value)
+
+
 def dict_param_key_ids(value):
     return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
 
 
 def dict_const_keys(value):
     return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+
+
+def dict_const_keys_repr(const_keys):
+    if any(isinstance(k, enum.Enum) for k in const_keys):
+        # To workaround repr(Enum) returning invalid global reference before python 3.11
+        # by calling enum_repr and removing quotes to render enum in guard code.
+        const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
+            "'", ""
+        )
+    else:
+        const_keys_str = f"{const_keys!r}"
+    return const_keys_str
 
 
 def global_key_name(key):
