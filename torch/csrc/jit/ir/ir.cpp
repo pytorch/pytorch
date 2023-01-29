@@ -23,8 +23,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace utils {
 std::string getNodesModuleHierarchy(const Node& n) {
@@ -474,13 +473,11 @@ void Node::lint() const {
   }
 
   for (auto o : outputs()) {
-    size_t i = 0;
     for (auto use : o->uses()) {
       // Use invariants
       // - Use is consistent with inputs
       // - Every user node is live (checked in Graph)
       AT_ASSERT(use.user->inputs_[use.offset] == o);
-      i++;
     }
   }
 
@@ -2315,5 +2312,4 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   return false;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

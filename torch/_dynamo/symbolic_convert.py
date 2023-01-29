@@ -48,6 +48,7 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
@@ -60,6 +61,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -80,7 +82,7 @@ from .variables.misc import (
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +279,30 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                state = self.copy_graphstate()
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
+                    self.output.guards.update(result.guards)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    # rollback to the state before the __bool__ inline
+                    self.restore_graphstate(state)
+                    unimplemented(
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
+                    )
+            # __bool__ is non-function or not existed in the user defined object
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -306,7 +332,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -1641,8 +1667,17 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
         self.symbolic_locals = collections.OrderedDict(
-            (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
+            (
+                k,
+                VariableBuilder(
+                    self,
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
+                )(f_locals[k]),
+            )
             for k in vars
             if k in f_locals
         )
@@ -1747,7 +1782,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         _step_logger()(
@@ -1796,9 +1831,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
-        except TypeError as exc:
+        except TypeError as e:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
             )
             unimplemented("arg mismatch inlining")
 
@@ -1822,7 +1857,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
-        tracer.run()
+        try:
+            tracer.run()
+        except exc.SkipFrame as e:
+            msg = f"SKIPPED INLINING {code}: {e}"
+            log.debug(msg)
+            raise Unsupported(msg) from e
+        except Exception as e:
+            log.debug(f"FAILED INLINING {code}")
+            raise
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 

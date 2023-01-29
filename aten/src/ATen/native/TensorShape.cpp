@@ -162,6 +162,7 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/squeeze_copy_native.h>
 #include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/squeeze.h>
 #include <ATen/ops/stack_native.h>
 #include <ATen/ops/sub.h>
 #include <ATen/ops/sum.h>
@@ -1803,7 +1804,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
 
 Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
-  grad_input.select_symint(dim, index).copy_(grad);
+  grad_input.select_symint(dim, std::move(index)).copy_(grad);
   return grad_input;
 }
 
@@ -3095,6 +3096,22 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
+std::tuple<SymDimVector, SymDimVector>
+inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
+  const auto ndim = tensor.dim();
+  const auto sym_sizes = tensor.sym_sizes();
+  const auto sym_strides = tensor.sym_strides();
+
+  SymDimVector out_sizes, out_strides;
+  for (const auto d: c10::irange(ndim)) {
+    if (!dim_mask.test(d) || sym_sizes[d] != 1) {
+      out_sizes.push_back(sym_sizes[d]);
+      out_strides.push_back(sym_strides[d]);
+    }
+  }
+  return std::make_tuple(std::move(out_sizes), std::move(out_strides));
+}
+
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -3117,18 +3134,21 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
-Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
+Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   SymDimVector sizes;
   SymDimVector strides;
-  std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
+  const auto ndim = self.dim();
+  auto mask = dims.has_value()
+      ? dim_list_to_bitset(dims, self.dim())
+      : std::bitset<dim_bitset_size>((1ull << self.dim()) - 1);
+  std::tie(sizes, strides) = inferSqueezeGeometry(self, mask);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
-    for (const auto d : dims) {
-      if (self.sizes()[d] == 1) {
+    for (const auto d : c10::irange(ndim)) {
+      if (mask.test(d) && self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
         if (d < axis) {
           ++shift;
@@ -3144,13 +3164,8 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
   // are missing for now.
   auto result = make_qtensor(self, C10_AS_INTARRAYREF_SLOW(sizes), C10_AS_INTARRAYREF_SLOW(strides), std::move(quantizer));
-  if (dim.has_value()) {
-    namedinference::propagate_names_except(result, self, {dim.value()});
-  } else {
-    auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
-    namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  }
-
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -3163,10 +3178,7 @@ Tensor squeeze(const Tensor& self) {
 }
 
 Tensor squeeze_quantized(const Tensor& self) {
-  at::Tensor result = squeeze_qtensor(self, c10::nullopt);
-  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
+  return squeeze_qtensor(self, c10::nullopt);
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -3182,8 +3194,19 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
 }
 
 Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
-  int64_t dims = self.dim();
-  dim = maybe_wrap_dim(dim, dims);
+  return squeeze_qtensor(self, dim);
+}
+
+Tensor squeeze(const Tensor& self, IntArrayRef dims) {
+  auto mask = dim_list_to_bitset(dims, self.dim());
+  auto g = inferSqueezeGeometry(self, mask);
+  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
+}
+
+Tensor squeeze_quantized(const Tensor& self, IntArrayRef dim) {
   return squeeze_qtensor(self, dim);
 }
 
@@ -3202,6 +3225,13 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
+  return self;
+}
+
+Tensor & squeeze_(Tensor &self, IntArrayRef dims) {
+  auto mask = dim_list_to_bitset(dims, self.dim());
+  auto g = inferSqueezeGeometry(self, mask);
   self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
@@ -3511,17 +3541,18 @@ std::vector<Tensor> meshgrid(TensorList tensors,
                 "but received: ", indexing);
   }
 
-  std::vector<int64_t> shape(size);
+  std::vector<c10::SymInt> shape(size);
   for(const auto i: c10::irange(size)){
     TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
                 "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
-    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
+    shape[i] = tensor_refs[i].get().sym_numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
-  std::vector<int64_t> view_shape(size, 1);
+  grids.reserve(size);
+  std::vector<c10::SymInt> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
     view_shape[i] = -1;  // select this dimension to infer
-    grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    grids.push_back(tensor_refs[i].get().view_symint(view_shape).expand_symint(shape));
     view_shape[i] = 1;  // restore to previous value
   }
 
@@ -3543,6 +3574,10 @@ Tensor numpy_T(const Tensor &self) {
         "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
     );
   }
+  if (n == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
@@ -3552,6 +3587,10 @@ Tensor numpy_T(const Tensor &self) {
 
 Tensor matrix_H(const Tensor &self) {
   const auto ndim = self.dim();
+  if (ndim == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.H is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   TORCH_CHECK(ndim == 2 || ndim == 0,
       "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
       ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
@@ -3576,14 +3615,25 @@ Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name
 } // anonymous namespace
 
 Tensor mT(const Tensor &self) {
+  if (self.dim() == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.mT is deprecated on 0-D tensors. This function is the identity in these cases.");
+  }
   return _adjoint(self, /*transpose=*/true, "mT");
 }
 
 Tensor mH(const Tensor &self) {
+  if (self.dim() == 0) {
+    // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.mH is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   return _adjoint(self, /*transpose=*/false, "mH");
 }
 
 Tensor adjoint(const Tensor &self) {
+  if (self.dim() == 0) {
+   TORCH_WARN_ONCE("adjoint() is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
@@ -3830,7 +3880,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   auto nbytes = self.storage().sym_nbytes();
   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
   auto numel = nbytes / dtype_size;
-  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto self_full_size = self.as_strided_symint({std::move(numel)}, {1}, 0);
   auto clone = self_full_size.clone();
   auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
   return out;
@@ -3847,7 +3897,7 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
 }
 at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
     auto output = clone_preserve_strides(self);
-    auto slice = output.select_symint(dim, index);
+    auto slice = output.select_symint(dim, std::move(index));
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
@@ -3990,7 +4040,7 @@ at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef siz
 
 
 at::Tensor& select_copy_symint_out(const at::Tensor & self, int64_t dim, c10::SymInt index, at::Tensor & out) {
-  auto tmp = self.select_symint(dim, index);
+  auto tmp = self.select_symint(dim, std::move(index));
   out.copy_(tmp);
   return out;
 }
@@ -4039,6 +4089,13 @@ at::Tensor& squeeze_copy_out(const at::Tensor & self, at::Tensor & out) {
 
 at::Tensor& squeeze_copy_dim_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
   auto tmp = self.squeeze(dim);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& squeeze_copy_dims_out(const at::Tensor & self, IntArrayRef dims, at::Tensor & out) {
+  auto tmp = self.squeeze(dims);
   out.copy_(tmp);
   return out;
 }

@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct NoneValue : SugaredValue {
   NoneValue() = default;
@@ -775,5 +774,4 @@ SugaredValuePtr SugaredEnumClass::iter(
   return enum_values_list_constant;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
