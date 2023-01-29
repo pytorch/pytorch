@@ -783,12 +783,12 @@ class CheckSparseTensorInvariantsContext {
  public:
   CheckSparseTensorInvariantsContext()
       : state{at::globalContext().checkSparseTensorInvariants()} {}
-} ~CheckSparseTensorInvariantsContext() {
-  at::globalContext().setCheckSparseTensorInvariants(state);
-}
+  ~CheckSparseTensorInvariantsContext() {
+    at::globalContext().setCheckSparseTensorInvariants(state);
+  }
 
-private:
-bool state;
+ private:
+  bool state;
 };
 
 Tensor sparse_compressed_tensor_ctor_worker(
