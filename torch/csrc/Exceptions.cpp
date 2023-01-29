@@ -3,6 +3,7 @@
 
 #include <cstdarg>
 #include <exception>
+#include <iterator>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -283,7 +284,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
         // location into the message.
         fmt::memory_buffer buf;
         fmt::format_to(
-            buf,
+            std::back_inserter(buf),
             FMT_STRING("{} (Triggered internally at {}:{}.)"),
             msg,
             source_location.file,
