@@ -328,8 +328,6 @@ def transform_code_object(code, transformations, safe=False):
         "co_freevars",
         "co_cellvars",
     ]
-    if sys.version_info < (3, 8):
-        keys.pop(1)
     if sys.version_info >= (3, 10):
         keys = list(map(lambda x: x.replace("co_lnotab", "co_linetable"), keys))
     code_options = {k: getattr(code, k) for k in keys}

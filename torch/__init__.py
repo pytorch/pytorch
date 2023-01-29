@@ -98,18 +98,10 @@ if sys.platform == 'win32':
 
     kernel32.LoadLibraryW.restype = ctypes.c_void_p
     if with_load_library_flags:
-        kernel32.AddDllDirectory.restype = ctypes.c_void_p
         kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
     for dll_path in dll_paths:
-        if sys.version_info >= (3, 8):
-            os.add_dll_directory(dll_path)
-        elif with_load_library_flags:
-            res = kernel32.AddDllDirectory(dll_path)
-            if res is None:
-                err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
-                raise err
+        os.add_dll_directory(dll_path)
 
     try:
         ctypes.CDLL('vcruntime140.dll')
@@ -441,7 +433,7 @@ except ImportError:
     import torch._C as _C_for_compiled_check
 
     # The __file__ check only works for Python 3.7 and above.
-    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+    if _C_for_compiled_check.__file__ is None:
         raise ImportError(textwrap.dedent('''
             Failed to load PyTorch C extensions:
                 It appears that PyTorch has loaded the `torch/_C` folder

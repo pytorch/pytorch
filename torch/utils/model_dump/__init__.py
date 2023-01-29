@@ -360,9 +360,6 @@ def get_inline_skeleton():
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
 
-    if sys.version_info < (3, 7):
-        raise Exception("get_inline_skeleton requires Python 3.7")
-
     import importlib.resources
 
     skeleton = importlib.resources.read_text(__package__, "skeleton.html")
