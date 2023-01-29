@@ -30,6 +30,7 @@ from ..source import (
     GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
+    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -113,7 +114,6 @@ class GraphArg:
     example: Any
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
-
     # UnspecializedPythonVariable often masquerades as a tensor.
     # We MUST NOT generate shape guard code
     # that actually tries to access tensor properties on these values.
@@ -126,6 +126,11 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
+            # Mapping for downstream systems to remap back into dynamo arg positions
+            if isinstance(self.source, LocalInputSource):
+                if "graph_arg_pos" not in self.fake_tensor.__dict__:
+                    self.fake_tensor.__dict__["graph_arg_pos"] = []
+                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -582,9 +587,7 @@ class VariableBuilder:
 
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), value, False, None)
-            )
+            self.tx.output.add_grapharg(GraphArg(self.get_source(), value, False, None))
         elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
@@ -662,7 +665,7 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        self.tx.output.graphargs.append(
+        self.tx.output.add_grapharg(
             GraphArg(self.get_source(), value, False, fake_tensor_value)
         )
 
@@ -727,7 +730,7 @@ class VariableBuilder:
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
-                self.tx.output.graphargs.append(
+                self.tx.output.add_grapharg(
                     GraphArg(
                         self.get_source(),
                         wrapped_value,

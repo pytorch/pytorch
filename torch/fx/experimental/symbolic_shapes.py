@@ -297,7 +297,7 @@ if HAS_SYMPY:
 
             if base.is_zero:
                 return sympy.S.Zero
-            if isinstance(base, sympy.Integer) and divisor == 1:
+            if base.is_integer and divisor == 1:
                 return base
             if isinstance(base, sympy.Float) and divisor == 1:
                 return sympy.floor(base)
