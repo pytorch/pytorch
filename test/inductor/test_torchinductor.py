@@ -4071,7 +4071,22 @@ class CommonTemplate:
                 aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2,
             )
 
+        def fn_channels_last(x):
+            return (
+                aten.as_strided(
+                    x, (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0
+                ),
+                aten.as_strided(
+                    x + 1, (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0
+                )
+                + 2,
+            )
+
         self.common(fn, [torch.randn(64, 64)])
+        self.common(
+            fn_channels_last,
+            [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
+        )
 
     def test_as_strided_scatter(self):
         def fn(a, b):
