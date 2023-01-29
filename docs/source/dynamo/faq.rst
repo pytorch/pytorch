@@ -77,17 +77,17 @@ enabled then the most important first step is figuring out which part of
 the stack your failure occurred in so try running things in the below
 order and only try the next step if the previous step succeeded.
 
-1. ``dynamo.optimize("eager")`` which only runs torchdynamo forward graph
+1. ``torch.compile(..., backend="eager")`` which only runs torchdynamo forward graph
    capture and then runs the captured graph with PyTorch. If this fails
    then there’s an issue with TorchDynamo.
 
-2. ``dynamo.optimize("aot_eager")``
+2. ``torch.compile(..., backend="aot_eager")``
    which runs torchdynamo to capture a forward graph, and then AOTAutograd
    to trace the backward graph without any additional backend compiler
    steps. PyTorch eager will then be used to run the forward and backward
    graphs. If this fails then there’s an issue with AOTAutograd.
 
-3. ``dynamo.optimize("inductor")`` which runs torchdynamo to capture a
+3. ``torch.compile(..., backend="inductor")`` which runs torchdynamo to capture a
    forward graph, and then AOTAutograd to trace the backward graph with the
    TorchInductor compiler. If this fails then there’s an issue with TorchInductor
 
@@ -198,11 +198,15 @@ trouble, and the profiler will accumulate statistics over this duration.
 
 .. code-block:: python
 
-   prof = dynamo.utils.CompilationProfiler()
-   @dynamo.optimize(prof)
+   from torch._dynamo.utils import CompileProfiler
+
+   prof = CompileProfiler()
+
    def my_model():
        ...
-   my_model()
+
+   profiler_model = torch.compile(my_model, backend=prof)
+   profiler_model()
    print(prof.report())
 
 Many of the reasons for graph breaks and excessive recompilation will be
@@ -227,7 +231,7 @@ generated:
 How are you speeding up my code?
 --------------------------------
 
-There are 3 major ways to accelerat PyTorch code:
+There are 3 major ways to accelerate PyTorch code:
 
 1. Kernel fusion via vertical fusions which fuse sequential operations to avoid
    excessive read/writes. For example, fuse 2 subsequent cosines means you
@@ -271,10 +275,10 @@ Given a program like:
 
 .. code-block:: python
 
-   @dynamo.optimize(...)
    def some_fun(x):
        ...
-   some_fun(x)
+
+   torch.compile(some_fun)(x)
    ...
 
 Torchdynamo will attempt to compile all of the torch/tensor operations
@@ -327,9 +331,10 @@ familiar if you’ve worked with export based compilers.
 
 .. code-block:: python
 
-   @dynamo.optimize(<compiler>, nopython=True)
    def toy_example(a, b):
       ...
+
+   torch.compile(toy_example, fullgraph=True, backend=<compiler>)
 
 Why didn’t my code recompile when I changed it?
 -----------------------------------------------

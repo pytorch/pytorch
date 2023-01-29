@@ -43,7 +43,7 @@ TEST_YAML = """
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
-  tags: canonical
+  tags: core
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -67,7 +67,7 @@ TEST_YAML = """
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
-  tags: canonical
+  tags: core
 
 """
 
@@ -84,7 +84,7 @@ class TestParseNativeYaml(unittest.TestCase):
         with open(self.tags_yaml_path, "w") as f:
             f.write(
                 """
-- tag: canonical
+- tag: core
   desc: test
             """
             )
