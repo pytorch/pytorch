@@ -55,7 +55,7 @@ from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import ConstantVariable, EnumVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
@@ -1161,8 +1161,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.specialized_value is not None
+            assert (
+                isinstance(k, ConstantVariable)
+                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
+                or isinstance(k, EnumVariable)
             )
 
             result[ConstDictVariable.get_key(k)] = v
