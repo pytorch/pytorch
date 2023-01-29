@@ -1592,16 +1592,16 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor_out.shape, (2, 2, 1, 4))
 
         # Check malformed rearrange equations
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "should be of the form `before_axes -> after_axes`"):
             rearrange(tensor, 'b (c h2 w2) h w  b c (h h2) (w w2)', h2=2, w2=2)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, r"lhs axes {.*} != rhs axes {.*}"):
             rearrange(tensor, 'b (c h2 w2) h w -> c (h h2) (w w2)', h2=2, w2=2)
 
-        with self.assertRaises(SyntaxError):
+        with self.assertRaisesRegex(SyntaxError, "unmatched '\)'"):
             rearrange(tensor, 'b (c h2 w2) h w -> b c h h2) (w w2)', h2=2, w2=2)
 
-        with self.assertRaises(NameError):
+        with self.assertRaisesRegex(NameError, "name 'h2' is not defined"):
             rearrange(tensor, 'b c h w -> h w b c', h2=2, w2=2)
 
 
