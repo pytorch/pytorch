@@ -27,6 +27,7 @@ except ImportError:
     from .test_minifier import requires_cuda
 
 from torch import nn
+from torch._dynamo.utils import ifdyn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch.nn import functional as F
@@ -47,13 +48,6 @@ def is_fx_tracing_test() -> bool:
     Copied from the hpc trainer codebase
     """
     return torch.nn.Module.__call__ is not _orig_module_call
-
-
-def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
 
 
 def has_detectron2():
@@ -986,7 +980,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(5, 4))
+        self.assertEqual(cnt.frame_count, 4)
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (31, 36, 35, 34, 29, 28))
 

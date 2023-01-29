@@ -19,6 +19,7 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.utils import ifdyn
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
 from torch._dynamo.output_graph import OutputGraph
@@ -474,7 +475,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize((cnts))(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, ifdyn(3, 2))
 
     def test_namedtuple1(self):
         def fn(a, b):
@@ -1535,6 +1536,33 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res1, 8)
         self.assertEqual(res2, 9)
+
+    def test_enum_as_dict_key(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+        def fn(x):
+            y = x + 2
+            z = {
+                MyEnum.FOO: torch.tensor(1),
+                MyEnum.BAR: 10,
+                "MyEnum.BAR": torch.tensor(8),
+                5: torch.rand(3),
+            }
+            torch._dynamo.graph_break()
+            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
+            b = y * 2
+            return a, b
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.rand(3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable

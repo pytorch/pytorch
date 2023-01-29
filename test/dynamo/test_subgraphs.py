@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit
+from torch._dynamo.utils import disable_cache_limit, ifdyn
 
 globalmod = torch.nn.ReLU()
 
@@ -459,7 +459,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x / (a + b)
             return x
 
-        self._common(fn, 2, 5)
+        # NB: Doesn't actually graph break with dynamic shapes
+        self._common(fn, ifdyn(1, 2), ifdyn(6, 5))
 
     def test_resume_paths_join(self):
         def fn(x, c1, c2, c3):
