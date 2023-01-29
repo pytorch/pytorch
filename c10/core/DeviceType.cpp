@@ -49,6 +49,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "hpu" : "HPU";
     case DeviceType::IPU:
       return lower_case ? "ipu" : "IPU";
+    case DeviceType::MTIA:
+      return lower_case ? "mtia" : "MTIA";
     case DeviceType::PrivateUse1:
       return get_privateuse1_backend(/*lower_case=*/lower_case);
     default:
@@ -93,6 +95,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::Meta:
     case DeviceType::HPU:
     case DeviceType::IPU:
+    case DeviceType::MTIA:
     case DeviceType::PrivateUse1:
       return true;
     default:

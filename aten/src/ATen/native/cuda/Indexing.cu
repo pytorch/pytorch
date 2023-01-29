@@ -184,7 +184,7 @@ __global__ void indexing_backward_kernel_quantized(
 }
 
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -1668,5 +1668,4 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 }
 
 
-} // native
-} // at
+} // at::native
