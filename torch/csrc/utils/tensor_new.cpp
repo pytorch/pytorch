@@ -369,7 +369,7 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type;
+        ScalarType storage_scalar_type{ScalarType::Undefined};
         bool is_typed_storage = false;
         Storage storage =
             createStorageGetType(data, storage_scalar_type, is_typed_storage);
@@ -650,7 +650,7 @@ Tensor legacy_tensor_generic_ctor_new(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    at::ScalarType storage_scalar_type;
+    at::ScalarType storage_scalar_type{at::ScalarType::Undefined};
     bool is_typed_storage = false;
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
@@ -781,15 +781,14 @@ Tensor indexing_tensor_from_data(
 
 class CheckSparseTensorInvariantsContext {
  public:
-  CheckSparseTensorInvariantsContext() {
-    state = at::globalContext().checkSparseTensorInvariants();
-  }
-  ~CheckSparseTensorInvariantsContext() {
-    at::globalContext().setCheckSparseTensorInvariants(state);
-  }
+  CheckSparseTensorInvariantsContext()
+      : state{at::globalContext().checkSparseTensorInvariants()} {}
+} ~CheckSparseTensorInvariantsContext() {
+  at::globalContext().setCheckSparseTensorInvariants(state);
+}
 
- private:
-  bool state;
+private:
+bool state;
 };
 
 Tensor sparse_compressed_tensor_ctor_worker(
