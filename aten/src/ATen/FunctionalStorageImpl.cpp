@@ -46,6 +46,7 @@ const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Ten
   if (update.view_metas.empty()) return t;
 
   std::vector<at::Tensor> tmp_values({base});
+  tmp_values.reserve(update.view_metas.size());
   for (size_t i = 0; i < update.view_metas.size() - 1; ++i) {
     at::Tensor next_view = update.view_metas[i].forward_fn(tmp_values.back(), update.view_metas[i].out_index);
     // NB: We only actually need tmp_values for ops like select/slice/diagonal/squeeze/as_strided
