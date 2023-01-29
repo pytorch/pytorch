@@ -491,13 +491,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
                     ]
                     for idx, name in enumerate(output_tensor_names):
-                        assert name in tx.symbolic_locals
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                        if name in tx.symbolic_locals:
+                            tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     name = tx.find_symbolic_locals_name(kwargs["out"])
-                    assert name in tx.symbolic_locals
-                    tx.symbolic_locals[name] = tensor_variable
+                    if name in tx.symbolic_locals:
+                        tx.symbolic_locals[name] = tensor_variable
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
