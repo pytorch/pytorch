@@ -1605,8 +1605,8 @@ class TestSDPA(NNTestCase):
         # Run the math kernel on low precision references
         query_ref_lp = query.clone().detach().requires_grad_(True)
         key_ref_lp = key.clone().detach().requires_grad_(True)
-        value_ref_lp = value.clone().detach().requires_grad_(True
-        )
+        value_ref_lp = value.clone().detach().requires_grad_(True)
+
         query_ref = query.clone().detach().to(torch.float32).requires_grad_(True)
         key_ref = key.clone().detach().to(torch.float32).requires_grad_(True)
         value_ref = value.clone().detach().to(torch.float32).requires_grad_(True)
@@ -1637,7 +1637,7 @@ class TestSDPA(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(
                     query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal)
         else:
-             # High Precision Math Reference
+            # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
