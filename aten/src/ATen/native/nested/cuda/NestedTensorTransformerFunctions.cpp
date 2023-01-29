@@ -321,12 +321,11 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
 
 } // namespace
 
-std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_nestedtensor_cuda(
+std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool return_softmax,
     bool is_causal) {
   TORCH_CHECK(false, "There are currently cuda memory errors being returned from this path.")
   // Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
@@ -373,13 +372,12 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_nestedten
       cumulative_sequence_length_k,
       max_seqlen_batch_q,
       max_seqlen_batch_k,
-      return_softmax,
       dropout_p,
       is_causal);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = std::get<0>(attention_and_lse_and_softmax);
   attention = wrap_buffer(attention.view(-1), get_nested_size_tensor(q_t).clone()).transpose(1,2);
-  return std::tie(attention, std::get<1>(attention_and_lse_and_softmax), std::get<2>(attention_and_lse_and_softmax));
+  return std::tie(attention, std::get<1>(attention_and_lse_and_softmax));
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_cuda(
@@ -496,7 +494,6 @@ Tensor flash_attention_helper(
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool need_atten_weights,
     bool is_causal) {
   //  Query is of size (batch_size x ragged_seq_len x (3 or 1) x n_heads x
   //  head_did
@@ -541,7 +538,6 @@ Tensor flash_attention_helper(
           cumulative_sequence_length_q,
           max_seqlen_batch_q,
           max_seqlen_batch_q,
-          false /*return_softmax*/,
           dropout_p,
           is_causal));
   // Output of flash_attention is a regular tensor lets wrap it back up to
