@@ -1,11 +1,14 @@
 # Owner(s): ["module: pytree"]
 
+from collections import namedtuple, OrderedDict
+from dataclasses import dataclass, fields, is_dataclass
+from typing import Dict, List
+
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
 from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
-from collections import namedtuple, OrderedDict
 from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
 
 class TestPytree(TestCase):
@@ -103,6 +106,69 @@ class TestPytree(TestCase):
         run_test(Point(1., 2))
         run_test(Point(torch.tensor(1.), 2))
 
+    def test_flatten_unflatten_dataclass(self):
+        @dataclass
+        class SimpleDataclass:
+            x: int
+            y: str
+            z: torch.Tensor
+
+        def run_test(d, expected_flatten_values):
+            expected_spec = TreeSpec(
+                dataclass,
+                (SimpleDataclass, ["x", "y", "z"]),
+                [LeafSpec() for _ in fields(d)]
+            )
+
+            values, treespec = tree_flatten(d)
+            self.assertTrue(isinstance(values, list))
+            self.assertEqual(values, expected_flatten_values)
+            print(treespec)
+            print(expected_spec)
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, d)
+            self.assertTrue(is_dataclass(unflattened))
+
+        run_test(
+            SimpleDataclass(x=5, y="abc", z=torch.zeros(2)),
+            [5, "abc", torch.zeros(2)]
+        )
+        run_test(
+            SimpleDataclass(x=-1, y="", z=torch.ones(10, 10)),
+            [-1, "", torch.ones(10, 10)]
+        )
+
+    def test_tensors_from_nested_dataclass(self):
+
+        @dataclass
+        class InnerDataclass:
+            a: torch.Tensor
+            b: Dict[str, torch.Tensor]
+
+        @dataclass
+        class OuterDataclass:
+            x: int
+            y: str
+            z: List[InnerDataclass]
+
+        d = OuterDataclass(
+            x=5,
+            y="a",
+            z=[
+                InnerDataclass(
+                    a=torch.zeros(2),
+                    b={"1": torch.ones(3), "2": torch.ones(2, 2)},
+                )
+            ],
+        )
+
+        values, treespec = tree_flatten(d)
+        tensors = [v for v in values if torch.is_tensor(v)]
+
+        self.assertEqual(tensors, [torch.zeros(2), torch.ones(3), torch.ones(2, 2)])
+
     @parametrize("op", [
         subtest(torch.max, name='max'),
         subtest(torch.min, name='min'),
@@ -150,12 +216,29 @@ class TestPytree(TestCase):
             unflattened = tree_unflatten(values, treespec)
             self.assertEqual(unflattened, pytree)
 
+        @dataclass
+        class InnerDataclass:
+            x: torch.Tensor
+            y: List[int]
+
+        @dataclass
+        class OuterDataclass:
+            a: int
+            b: Dict[str, InnerDataclass]
+
         cases = [
             [()],
             ([],),
             {'a': ()},
             {'a': 0, 'b': [{'c': 1}]},
             {'a': 0, 'b': [1, {'c': 2}, torch.randn(3)], 'c': (torch.randn(2, 3), 1)},
+            OuterDataclass(
+                a=5,
+                b={
+                    "1": InnerDataclass(x=torch.zeros(5), y=[6, 7]),
+                    "2": InnerDataclass(x=torch.ones(10, 2), y=[]),
+                },
+            ),
         ]
 
 

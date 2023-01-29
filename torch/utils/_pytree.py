@@ -1,7 +1,7 @@
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 
 
 T = TypeVar('T')
@@ -77,12 +77,28 @@ def _odict_flatten(d: 'OrderedDict[Any, Any]') -> Tuple[List[Any], Context]:
 def _odict_unflatten(values: List[Any], context: Context) -> 'OrderedDict[Any, Any]':
     return OrderedDict((key, value) for key, value in zip(context, values))
 
+def _dataclass_flatten(d: Any) -> Tuple[List[Any], Context]:
+    if not is_dataclass(d):
+        raise RuntimeError(
+            "_dataclass_flatten expects dataclass instance as input, but "
+            f"dataclasses.is_dataclass returns False. Got input type {type(d)}."
+        )
+
+    values, names = map(list, zip(*[[getattr(d, f.name), f.name] for f in fields(d)]))
+    return values, (type(d), names)
+
+def _dataclass_unflatten(values: List[Any], context: Context) -> Any:
+    clazz = context[0]
+    names = context[1]
+    return clazz(**{n: v for n, v in zip(names, values)})
+
 
 _register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 _register_pytree_node(list, _list_flatten, _list_unflatten)
 _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
 _register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
 _register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
+_register_pytree_node(dataclass, _dataclass_flatten, _dataclass_unflatten)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
@@ -99,6 +115,8 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
 def _get_node_type(pytree: Any) -> Any:
     if _is_namedtuple_instance(pytree):
         return namedtuple
+    if is_dataclass(pytree):
+        return dataclass
     return type(pytree)
 
 # A leaf is defined as anything that is not a Node.
