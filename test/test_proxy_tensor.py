@@ -4,7 +4,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 import torch
 import unittest
 import warnings
-import torch.nn.utils._stateless as stateless
 import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -334,12 +333,12 @@ def forward(self, x_1):
         # An old version of this test called the module directly.  This works
         # for tracing_mode == "real", but for fake tensors, we also have to
         # ensure that the parameters and buffers get wrapped in fake tensors
-        # because free fake tensors are not supported.  Fortunately stateless
+        # because free fake tensors are not supported.  Fortunately functional_call
         # does precisely this for us.
         def f(x, params, buffers):
             for p in params.values():
                 p.grad = None
-            loss = stateless.functional_call(mod, {**params, **buffers}, (x,)).sum()
+            loss = torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
             # I could have done this with the functional API, but there is
             # plenty of exercising this; I want to show mutating API still
             # works
@@ -523,7 +522,7 @@ def forward(self, x_1):
         model = Foo()
 
         def f(x, params):
-            out = stateless.functional_call(model, params, x).sum()
+            out = torch.func.functional_call(model, params, x).sum()
             out.backward()
             return list(params.values())
         input = torch.randn(3, 5, requires_grad=True)
@@ -581,7 +580,7 @@ def forward(self, x_1):
             if not isinstance(args, Iterable):
                 args = [args]
             params_and_buffers = {**params, **buffers}
-            out = stateless.functional_call(model, params_and_buffers, args)
+            out = torch.func.functional_call(model, params_and_buffers, args)
             out.sum().backward()
             return [p - 1e-4 * p.grad for p in params.values()]
 
@@ -857,6 +856,23 @@ def forward(self, x_1, y_1):
         # not currently being done yet
         assert len(gm.shape_env.guards) == 1, "\n" + gm.shape_env.format_guards()
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_cpu_scalar_cuda(self):
+        # Extracted from wave2vec2
+        def f(a, b):
+            return (a * b) @ b
+
+        r = str(
+            make_fx(f, tracing_mode="symbolic")(
+                torch.tensor(1.0), torch.randn(2, 2, device='cuda')
+            ).code
+        ).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1, b_1):
+    mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
+    mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
+    return mm""")
+
     def test_binary_broadcast(self):
         def f(a, b):
             c = a * b
@@ -987,7 +1003,7 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj().expr == meta_d.meta['val'].node.expr)
+        self.assertTrue(meta_c.meta['val'].shape[0].node.expr == meta_d.meta['val'].node.expr)
 
     def test_metadata_fresh(self):
         def f(x):
@@ -997,10 +1013,10 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
         meta_cos = _get_node(fx_g, lambda x: x.target == aten.cos.default)
         meta_inp = _get_node(fx_g, lambda x: x.op == 'placeholder')
-        self.assertTrue(meta_cos.meta['val'].shape[0].get_pyobj().expr == 3)
+        self.assertTrue(meta_cos.meta['val'].shape[0].node.expr == 3)
         # Checks if the input expr has been updated even though the constraint
         # happened afterwards
-        self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
+        self.assertTrue(meta_inp.meta['val'].shape[0].node.expr == 3)
 
     def test_elementwise_meta_with_sym_numbers(self):
         def f(x, offset, as_sym_float=False):
@@ -1185,7 +1201,6 @@ symbolic_tensor_failures = {
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('cartesian_prod', ''),  # Tensors of type TensorImpl do not have numel
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
@@ -1226,10 +1241,8 @@ symbolic_tensor_failures = {
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
@@ -1269,8 +1282,6 @@ symbolic_tensor_failures = {
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
-    xfail('meshgrid', 'list_of_tensors'),  # Tensors of type TensorImpl do not have numel
-    xfail('meshgrid', 'variadic_tensors'),  # Tensors of type TensorImpl do not have numel
     xfail('min', 'reduction_with_dim'),  # aten.min.dim - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
@@ -1290,7 +1301,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.interpolate', 'area'),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.interpolate', 'bicubic'),  # aten.upsample_bicubic2d.vec - couldn't find symbolic meta function/d...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.max_pool1d', ''),  # Trying to call aten.size on a tensor with symbolic shapes.
@@ -1363,7 +1373,7 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
-    xfail('masked_fill', ''),  # expected predicate to be bool, got torch.float32
+    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.rrelu', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
 }
@@ -1372,13 +1382,6 @@ inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
     # decomp not implemented
-    xfail('addmm', ''),
-    xfail('addmm', 'decomposed'),
-    xfail('nn.functional.hardsigmoid', ''),
-    xfail('round', ''),  # ref missing a kwarg
-    xfail('round', 'decimals_0'),  # ref missing a kwarg
-    xfail('round', 'decimals_3'),  # ref missing a kwarg
-    xfail('round', 'decimals_neg_3'),  # ref missing a kwarg
     xfail('unique', ''),
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),

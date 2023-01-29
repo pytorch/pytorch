@@ -50,7 +50,6 @@ log = logging.getLogger(__name__)
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
 
-
 timer_counter = itertools.count()
 
 
@@ -86,20 +85,97 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-def dynamo_timed(func):
-    @wraps(func)
-    def time_wrapper(*args, **kwargs):
-        key = func.__qualname__
-        if key not in compilation_metrics:
-            compilation_metrics[key] = []
-        t0 = time.time()
-        r = func(*args, **kwargs)
-        latency = time.time() - t0
-        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-        compilation_metrics[key].append(latency)
-        return r
+frame_phase_timing = collections.OrderedDict()
 
-    return time_wrapper
+curr_frame = 0
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def increment_frame():
+    global curr_frame
+    curr_frame = curr_frame + 1
+
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def reset_frame_count():
+    global curr_frame
+    frame_phase_timing.clear()
+    curr_frame = 0
+
+
+op_count = 0
+
+
+def increment_op_count(cnt):
+    global op_count
+    op_count += cnt
+
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+# entire_frame_compile:8.574629999999999
+# backend_compile:5.26806
+def print_time_report():
+    total = 0
+    total_by_key = {}
+    for frame, timings in frame_phase_timing.items():
+        for key, timing in timings.items():
+            total += timing
+            if key not in total_by_key:
+                total_by_key[key] = timing
+            else:
+                total_by_key[key] += timing
+
+    out = "TIMING:"
+    for key, value in total_by_key.items():
+        out = f"{out} {key}:{round(value, 5)}"
+
+    print(out)
+
+
+# dynamo_timed API works as a function decorator
+# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# where the key is the functions name.
+# For example:
+#
+#  @dynamo_timed
+#  def _foo(...):
+#
+# Would show up as an entry in our timing dict:
+# OrderedDict([('bar.<locals>._foo', [0.083690, 0.23949, 3.1425e-05])])
+# This is extremely useful for granular debugging.
+#
+# For a higher-level mode, pass a phase_name into dynamo_timed
+# phase_names record an extra record into a separate compilation timing structure,
+# one keyed on frame+name rather than function.
+# The frame is incremented outside of this function, in def increment_frame() above.
+def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed_inner(func):
+        @wraps(func)
+        def time_wrapper(*args, **kwargs):
+            key = func.__qualname__
+            if key not in compilation_metrics:
+                compilation_metrics[key] = []
+            t0 = time.time()
+            r = func(*args, **kwargs)
+            time_spent = time.time() - t0
+            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+            compilation_metrics[key].append(time_spent)
+            if phase_name:
+                frame_key = str(curr_frame)
+                if frame_key not in frame_phase_timing:
+                    frame_phase_timing[frame_key] = {}
+                assert (
+                    phase_name not in frame_phase_timing[frame_key]
+                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
+                frame_phase_timing[frame_key][phase_name] = time_spent
+            return r
+
+        return time_wrapper
+
+    if original_function:
+        return dynamo_timed_inner(original_function)
+    return dynamo_timed_inner
 
 
 def compile_times(repr="str", aggregate=False):
@@ -181,22 +257,6 @@ def init_logging():
         config.log_level, log_file_name=config.log_file_name
     )
     graph_break_dup_warning_checker.reset()
-
-
-# filter out all frames after entering dynamo
-def filter_stack(stack):
-    user_stack = []
-    for frame in stack:
-        if "convert_frame" in frame.filename:
-            break
-        if (
-            "eval_frame" in frame.filename
-            or f"{config.dynamo_import}.optimize(" in frame.line
-        ):
-            continue
-        user_stack.append(frame)
-
-    return user_stack
 
 
 def format_graph_tabular(graph):
@@ -805,13 +865,16 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
-                return torch.allclose(
+                r = torch.allclose(
                     ref.to(dtype=torch.uint8),
                     res.to(dtype=torch.uint8),
                     atol=tol,
                     rtol=tol,
                     equal_nan=equal_nan,
                 )
+                if not r:
+                    log.error("Accuracy failed: uint8 tensor did not match")
+                return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -856,15 +919,25 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
+            log.error(f"Accuracy failed: allclose not within tol={tol}")
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
-        return ref == res
+        r = ref == res
+        if not r:
+            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+        return r
     elif isinstance(ref, float):
-        return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        if not r:
+            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+        return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
             ref = ref.item()
-        return (type(ref) is type(res)) and (ref == res)
+        r = (type(ref) is type(res)) and (ref == res)
+        if not r:
+            log.error("Accuracy failed (numpy): {ref} != {res}")
+        return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
@@ -1174,3 +1247,10 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode is flat_input.fake_mode
     return fake_mode
+
+
+def fqn(obj: Any):
+    """
+    Returns the fully qualified name of the object.
+    """
+    return f"{obj.__module__}.{obj.__qualname__}"

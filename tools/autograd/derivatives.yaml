@@ -42,7 +42,7 @@
 #     to that argument could exist. You should either:
 #       - Specify the formula for that gradient
 #       - Specify not_implemented("function_name") as a formula to say that this is not
-#         implement yet (but might be in the future and the user can request that on an issue)
+#         implemented yet (but might be in the future and the user can request that on an issue)
 #   - If that argument is not differentiable, because it is not a floating point dtype or the
 #     function is not differentiable with respect to that argument  for
 #     example. You should either:
@@ -277,6 +277,12 @@
 
 - name: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   output_differentiability: [False]
+
+- name: _is_all_true(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: _is_any_true(Tensor self) -> Tensor
+  self: non_differentiable
 
 - name: all(Tensor self) -> Tensor
   output_differentiability: [False]
@@ -611,7 +617,7 @@
   result: auto_element_wise
 
 - name: exp2(Tensor self) -> Tensor
-  self: grad * result * M_LN2
+  self: grad * result.conj() * M_LN2
   result: auto_element_wise
 
 - name: expm1(Tensor self) -> Tensor
@@ -1168,7 +1174,7 @@
   rstd: not_implemented("native_layer_norm_backward rstd")
 
 - name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].suggest_memory_format()), input.device().is_xpu() ? input : input.contiguous(input.suggest_memory_format()), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].device().is_cpu() ? grads[0].suggest_memory_format() : c10::MemoryFormat::Contiguous), input.device().is_xpu() ? input : input.contiguous(input.device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
   result1: group_norm_mean_jvp(input_t, result1, group)
   result2: group_norm_invstd_jvp(input_p, input_t, result1, result2, group)

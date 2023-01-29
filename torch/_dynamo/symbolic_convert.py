@@ -48,6 +48,7 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
@@ -60,6 +61,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -80,7 +82,7 @@ from .variables.misc import (
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +279,30 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                state = self.copy_graphstate()
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
+                    self.output.guards.update(result.guards)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    # rollback to the state before the __bool__ inline
+                    self.restore_graphstate(state)
+                    unimplemented(
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
+                    )
+            # __bool__ is non-function or not existed in the user defined object
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -306,7 +332,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -662,8 +688,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
-        value = importlib.import_module(module_name)
-        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        if "torch_package" in module_name:
+            value = torch.package.package_importer._package_imported_modules[
+                module_name
+            ]
+            alias = (
+                module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            )
+        else:
+            value = importlib.import_module(module_name)
+            alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -1633,8 +1667,17 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
         self.symbolic_locals = collections.OrderedDict(
-            (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
+            (
+                k,
+                VariableBuilder(
+                    self,
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
+                )(f_locals[k]),
+            )
             for k in vars
             if k in f_locals
         )
@@ -1739,7 +1782,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         _step_logger()(
