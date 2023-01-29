@@ -1,13 +1,12 @@
 import builtins
 
 import torch
+from torch._dynamo.testing import rand_strided
 
 from .. import config, triton_ops
-from ..utils import dynamo_testing
 from ..virtualized import V
 
 aten = torch.ops.aten
-rand_strided = dynamo_testing.rand_strided
 
 
 def str2func(str):

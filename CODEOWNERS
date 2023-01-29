@@ -101,8 +101,8 @@ test/test_type_promotion.py @mruberry @ngimel
 # functorch-related things
 # This list is for people wanting to be notified every time there's a change
 # Useful for e.g. auditing xfails that other folks add to tests
-test/functorch/test_ops.py @zou3519
-test/functorch/test_vmap.py @zou3519
+test/functorch/test_ops.py @zou3519 @chillee
+test/functorch/test_vmap.py @zou3519 @chillee
 
 # torch MPS
 test/test_mps.py @kulinseth
