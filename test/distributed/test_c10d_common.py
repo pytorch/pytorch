@@ -249,6 +249,52 @@ class SparseGradientModule(nn.Module):
         return F.softmax(self.embedding(x), dim=1)
 
 
+
+@dataclass
+class CustomOutput:
+    o1: Optional[torch.Tensor]
+    o2: Dict[str, torch.Tensor]
+
+
+class DataclassOutputModule(nn.Module):
+    def __init__(self, skip_o1):
+        super().__init__()
+        self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+        self.relu = nn.ReLU()
+        self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+        self.skip_o1 = skip_o1
+
+    def forward(self, x):
+        o1 = None if self.skip_o1 else self.relu(self.seq1(x))
+        o2 = {
+            "a": self.seq2(x),
+            "b": self.relu(self.seq2(x))
+        }
+        return CustomOutput(o1=o1, o2=o2)
+
+
+@dataclass
+class NestedCustomOutput:
+    o: Dict[str, CustomOutput]
+
+
+class NestedDataclassOutputModule(nn.Module):
+    def __init__(self, skip_o1):
+        super().__init__()
+        self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+        self.relu = nn.ReLU()
+        self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+        self.skip_o1 = skip_o1
+
+    def forward(self, x):
+        o1 = None if self.skip_o1 else self.relu(self.seq1(x))
+        o2 = {
+            "a": self.seq2(x),
+            "b": self.relu(self.seq2(x))
+        }
+        return NestedCustomOutput(o={"out": CustomOutput(o1=o1, o2=o2)})
+
+
 class CommonDistributedDataParallelTest(object):
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
@@ -907,27 +953,6 @@ class CommonDistributedDataParallelTest(object):
 
         self._test_not_nan(model, x)
 
-    @dataclass
-    class CustomOutput:
-        o1: Optional[torch.Tensor]
-        o2: Dict[str, torch.Tensor]
-
-    class DataclassOutputModule(nn.Module):
-        def __init__(self, skip_o1):
-            super().__init__()
-            self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
-            self.relu = nn.ReLU()
-            self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
-            self.skip_o1 = skip_o1
-
-        def forward(self, x):
-            o1 = None if self.skip_o1 else self.relu(self.seq1(x))
-            o2 = {
-                "a": self.seq2(x),
-                "b": self.relu(self.seq2(x))
-            }
-            return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
-
     def _test_dataclass_output(self, skip_o1):
         net_x = torch.cat(
             [torch.ones(4, 10) * i for i in range(self.world_size)]
@@ -936,7 +961,7 @@ class CommonDistributedDataParallelTest(object):
 
         # use manual_seed to make sure local models start with the same values
         torch.manual_seed(0)
-        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        net = DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
         ddp = DistributedDataParallel(
             copy.deepcopy(net),
             device_ids=[self.rank],
@@ -976,6 +1001,56 @@ class CommonDistributedDataParallelTest(object):
 
     @skip_if_lt_x_gpu(2)
     def test_dataclass_output_unused_param(self):
+        self._test_dataclass_output(skip_o1=True)
+
+    def _test_nested_dataclass_output(self, skip_o1):
+        net_x = torch.cat(
+            [torch.ones(4, 10) * i for i in range(self.world_size)]
+        ).to(self.rank)
+        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
+
+        # use manual_seed to make sure local models start with the same values
+        torch.manual_seed(0)
+        net = NestedDataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[self.rank],
+            find_unused_parameters=False,
+            static_graph=True,
+            process_group=self._get_process_group(),
+        )
+
+        net_out = net(net_x).o
+        ddp_out = ddp(ddp_x).o
+
+        net_loss = F.mse_loss(
+            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+            if not skip_o1
+            else net_out.o2["a"] + net_out.o2["b"],
+            torch.ones_like(net_out.o2["a"], device=self.rank),
+        )
+        ddp_loss = F.mse_loss(
+            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+            if not skip_o1
+            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            torch.ones_like(ddp_out.o2["a"], device=self.rank),
+        )
+
+        net_loss.backward()
+        ddp_loss.backward()
+
+        for p1, p2 in zip(net.parameters(), ddp.parameters()):
+            if torch.is_tensor(p1.grad):
+                self.assertTrue(p1.grad.allclose(p2.grad))
+            else:
+                self.assertEqual(p1.grad, p2.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_nested_dataclass_output(self):
+        self._test_dataclass_output(skip_o1=False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_nested_dataclass_output_unused_param(self):
         self._test_dataclass_output(skip_o1=True)
 
 
