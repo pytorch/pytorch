@@ -705,14 +705,15 @@ class {module_name}(torch.nn.Module):
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
         res = GraphModule(fake_mod, fake_mod.__dict__['_graph'])
-        res.meta = copy.deepcopy(self.meta)
+        res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
         return res
+
 
     def __copy__(self):
         res = GraphModule(self, self.graph)
-        res.meta = self.meta
+        res.meta = getattr(self, 'meta', {})
         return res
 
     @compatibility(is_backward_compatible=False)
