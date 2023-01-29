@@ -261,7 +261,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 return self.relu(x)
 
         with override_quantized_engine("x86"):
-            example_inputs = (torch.randn(1, 3, 224, 224),)
+            example_inputs = (torch.randn(1, 3, 16, 16),)
             m = Mod().eval()
             # program capture
             m, guards = torchdynamo.export(
@@ -282,6 +282,8 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             m = convert_pt2e(m)
             after_quant_result = m(*example_inputs)
 
+            self.assertTrue(torch.allclose(before_fusion_result, after_quant_result, rtol=5e-02, atol=5e-02))
+
             # A few ops in EXIR are not supported. Set nopython=False to make it work
             run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
 
@@ -293,4 +295,6 @@ class TestQuantizePT2EModels(QuantizationTestCase):
 
             # second run
             inductor_result = run(*example_inputs)
+
+            self.assertTrue(torch.allclose(before_fusion_result, inductor_result, rtol=5e-02, atol=5e-02))
 

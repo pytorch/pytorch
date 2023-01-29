@@ -599,7 +599,7 @@ def fuse_quantization(gm: torch.fx.GraphModule):
     if not is_quantized_graph_module(gm):
         return gm
 
-    # gm = fuse_reference_quantized_conv_relu(gm)
+    gm = fuse_reference_quantized_conv_relu(gm)
 
     return gm
 
@@ -637,9 +637,8 @@ def fuse_reference_quantized_conv_relu(gm: torch.fx.GraphModule):
             y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
         # TODO: aten.convolution can be used for all conv1d/2d/3d but the spatial dim info
         # is lost. Here we hardcode conv2d for experiment.
-        quantized = torch.ops.quantized
-        w_packed = quantized.conv2d_prepack(qw, bias, stride, padding, dilation, groups)
-        qy = quantized.conv2d_relu.new(qx, w_packed, y_scale, y_zp)
+        qy = quantized_decomposed.conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                                                       bias, stride, padding, dilation, groups, y_scale, y_zp)
         return qy
 
     subgraph_rewriter.replace_pattern(gm, pattern, replacement)

@@ -2,7 +2,7 @@ import torch
 from torch.library import Library, impl
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
 from typing import Tuple
-
+from torch._meta_registrations import calc_conv_nd_return_shape
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
 # name is not too long
@@ -175,6 +175,42 @@ def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
+
+quantized_decomposed_lib.define(
+    "conv2d_relu_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
+    "Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
+    "int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point) -> Tensor")
+@impl(quantized_decomposed_lib, "conv2d_relu_inductor.tensor", "CPU")
+def conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                         bias, stride, padding, dilation, groups, output_scale, output_zero_point):
+    quantized = torch.ops.quantized
+
+    # Input Workaround to test feasibility
+    # Re-constructure the qw and qx
+    real_qx = torch._make_per_tensor_quantized_tensor(qx, x_scale, x_zp)
+    real_qw = torch._make_per_channel_quantized_tensor(qw, w_scale, w_zp, w_axis)
+
+    w_packed = quantized.conv2d_prepack(real_qw, bias, stride, padding, dilation, groups)
+    qy = quantized.conv2d_relu.new(real_qx, w_packed, output_scale, output_zero_point)
+
+    # Output Workround: Return a int8 tensor without quantizer
+    return qy.int_repr()
+
+@impl(quantized_decomposed_lib, "conv2d_relu_inductor.tensor", "Meta")
+def conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
+                         stride, padding, dilation, groups, output_scale, output_zero_point):
+    shape_out = calc_conv_nd_return_shape(
+        qx,
+        qw,
+        stride,
+        padding,
+        dilation,
+        False,
+        groups,
+        None,
+    )
+    out = qx.new_empty(shape_out).to(memory_format=torch.channels_last)
+    return out
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
