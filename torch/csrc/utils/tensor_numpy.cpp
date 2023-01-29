@@ -382,6 +382,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ScalarType dtype;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
