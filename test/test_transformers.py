@@ -1601,9 +1601,15 @@ class TestSDPA(NNTestCase):
                          dtype=dtype, requires_grad=True)
         value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
-        query_ref = query.clone().detach().to(torch.float64).requires_grad_(True)
-        key_ref = key.clone().detach().to(torch.float64).requires_grad_(True)
-        value_ref = value.clone().detach().to(torch.float64).requires_grad_(True)
+
+        # Run the math kernel on low precision references
+        query_ref_lp = query.clone().detach().requires_grad_(True)
+        key_ref_lp = key.clone().detach().requires_grad_(True)
+        value_ref_lp = value.clone().detach().requires_grad_(True
+        )
+        query_ref = query.clone().detach().to(torch.float32).requires_grad_(True)
+        key_ref = key.clone().detach().to(torch.float32).requires_grad_(True)
+        value_ref = value.clone().detach().to(torch.float32).requires_grad_(True)
 
         is_dropout = dropout_p > 0.0
 
@@ -1624,27 +1630,40 @@ class TestSDPA(NNTestCase):
 
         if not is_dropout:
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
+                # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
                     query_ref, key_ref, value_ref, is_causal=is_causal)
+                # Low Precision Math Reference
+                out_lp_ref = F.scaled_dot_product_attention(
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal)
         else:
-            dropout_mask = dropout_mask if is_dropout else None
+             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+            # Low Precision Math Reference
+            out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
-        upstream_grad_ref = upstream_grad
 
         out.backward(upstream_grad)
-        out_ref.backward(upstream_grad_ref)
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        if dtype == torch.float16:
-            rtol, atol = 5e-3, 5e-3
-        else:
-            rtol, atol = 9e-2, 9e-2
-        self.assertEqual(out, out_ref.to(out.dtype), rtol=rtol, atol=atol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype), rtol=rtol, atol=atol)
-        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype), rtol=rtol, atol=atol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype), rtol=rtol, atol=atol)
+        # Use LP vs HP reference to establish tolerance
+        output_ref_tolerance = max(2 * torch.abs(out_ref.to(out_lp_ref.dtype) - out_lp_ref).max().item(), 5e-3)
+
+        grad_q_ref_tolerance = max(4 * torch.abs(query_ref.grad.to(query_ref_lp.dtype) - query_ref_lp.grad).max().item(), 5e-3)
+        grad_k_ref_tolerance = 4 * torch.abs(key_ref.to(key_ref_lp.dtype) - key_ref_lp.grad).max().item()
+        grad_v_ref_tolerance = 4 * torch.abs(value_ref.to(value_ref_lp.dtype) - value_ref_lp.grad).max().item()
+
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_tolerance, rtol=output_ref_tolerance)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_tolerance, rtol=grad_q_ref_tolerance)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_tolerance, rtol=grad_k_ref_tolerance)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_tolerance, rtol=grad_v_ref_tolerance)
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
