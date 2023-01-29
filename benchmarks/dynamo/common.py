@@ -179,7 +179,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    "twins_pcpvt_base",  # timeout
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -191,19 +190,10 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
     "pytorch_unet",  # ValueError: floor is not defined
-    # The size of tensor a (320) must match the size of tensor b (512) at
-    # non-singleton dimension 2
-    "speech_transformer",
-    # huggingface
-    "MBartForConditionalGeneration",  # OOM
-    "OPTForCausalLM",  # OOM
     # timm_models
-    "eca_halonext26ts",  # 'Pointwise' object has no attribute 'get_stride'
     "hrnet_w18",  # name 'floor' is not defined
-    "jx_nest_base",  # sym_sqrt() missing 1 required positional argument: 'a'
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
-    "twins_pcpvt_base",  # timeout
     "volo_d1_224",  # ceiling is not defined
     "xcit_large_24_p8_224",  # ceiling is not defined
 ]
