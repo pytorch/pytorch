@@ -57,7 +57,7 @@ struct nansum_functor {
   }
 };
 
-const char nansum_name[] = "nansum";
+constexpr char nansum_name[] = "nansum";
 template <>
 struct nansum_functor<c10::complex<at::Half>> {
 #if AT_USE_JITERATOR()
@@ -65,7 +65,7 @@ struct nansum_functor<c10::complex<at::Half>> {
     using scalar_t = c10::complex<at::Half>;
     std::string func = jiterator_stringify(
         arg_t combine(arg_t a, scalar_t b) {
-          return a + ((std::isnan(b.real()) || std::isnan(b.imag())) ? arg_t{0.} : arg_t{b});
+          return a + (std::isnan(b) ? arg_t{0.} : arg_t{b});
         }
     );
     jitted_gpu_reduce_kernel<nansum_name, scalar_t, scalar_t>(

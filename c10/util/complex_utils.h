@@ -39,7 +39,7 @@ template <typename T>
 class numeric_limits<c10::complex<T>> : public numeric_limits<T> {};
 
 template <typename T>
-bool isnan(const c10::complex<T>& v) {
+C10_HOST_DEVICE bool isnan(const c10::complex<T>& v) {
   return std::isnan(v.real()) || std::isnan(v.imag());
 }
 
