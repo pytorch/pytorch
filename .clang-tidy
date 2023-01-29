@@ -3,7 +3,6 @@
 InheritParentConfig: true
 Checks: '
 bugprone-*,
--bugprone-argument-comment,
 -bugprone-easily-swappable-parameters,
 -bugprone-forward-declaration-namespace,
 -bugprone-macro-parentheses,
@@ -48,9 +47,7 @@ modernize-*,
 -modernize-use-using,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
--modernize-redundant-void-arg,
 performance-*,
--performance-move-const-arg,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 readability-container-size-empty,
