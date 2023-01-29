@@ -895,7 +895,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // module hierarchy.
       const auto& g = frame.function->graph_;
       std::string g_self_type;
-      if (g && g->inputs().size() > 0) {
+      if (g && !g->inputs().empty()) {
         const auto& g_self_type_ptr =
             g->inputs()[0]->type()->cast<c10::ClassType>();
         if (g_self_type_ptr) {
@@ -945,7 +945,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         if (node->input(0)->node()->kind() == prim::GetAttr) {
           class_instance_name = node->input(0)->node()->s(attr::name);
         } else if (
-            node->owningGraph()->inputs().size() > 0 &&
+            !node->owningGraph()->inputs().empty() &&
             node->input(0) == node->owningGraph()->inputs()[0]) {
           class_instance_name = "SELF";
         } else {

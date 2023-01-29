@@ -104,7 +104,7 @@ class MutableTypePtrHelper {
                 (*maybe_inner_types).end());
           }
         }
-        if (mutable_types.size() == 0) {
+        if (mutable_types.empty()) {
           return c10::nullopt;
         }
         return mutable_types;
@@ -133,7 +133,7 @@ class MutableTypePtrHelper {
                 (*maybe_inner_types).end());
           }
         }
-        if (mutable_types.size() == 0) {
+        if (mutable_types.empty()) {
           return c10::nullopt;
         }
         return {AliasTypeSet{TupleType::create(mutable_types)}};
@@ -736,7 +736,7 @@ void AliasDb::analyzeImpl(Node* node) {
       // run into lifetime issues with the graph
       std::vector<std::shared_ptr<Graph>>& graphs =
           function_call_copies_[graph.get()];
-      if (graphs.size() == 0) {
+      if (graphs.empty()) {
         graphs.push_back(graph);
         analyzeSubgraph(node, graph);
       } else {
@@ -914,7 +914,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // Otherwise it is the form of a|fresh, which we can ignore, taking the
     // conservative assumption that the output must alias `a`, e.g
     //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
-    if (!inputs_has_alias && formal->beforeSets().size()) {
+    if (!inputs_has_alias && !formal->beforeSets().empty()) {
       giveFreshAlias(actual);
     }
 
@@ -1385,9 +1385,8 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   auto a_elems = getElements(a);
-  return a_elems.size() == 0
-      ? false
-      : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+  return a_elems.empty() ? false
+                         : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
@@ -1395,7 +1394,7 @@ bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
     return false;
   }
   auto b_elems = getElements(b);
-  return b_elems.size() == 0
+  return b_elems.empty()
       ? false
       : memoryDAG_->mayContainAlias(elementMap_.at(a), b_elems);
 }

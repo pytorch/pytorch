@@ -211,7 +211,7 @@ std::vector<Node*> CreateQuantizedWeights(
   zero_point_node->t_(Symbol::attr("value"), zero_point_value.clone());
 
   Node* axis_node = graph->create(prim::Constant);
-  if (axis_data.size() > 0) {
+  if (!axis_data.empty()) {
     auto axis_value =
         at::from_blob(
             axis_data.data(), c10::IntArrayRef(axis_data.size()), at::kLong)

@@ -702,7 +702,7 @@ static bool is_int_list(
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
         (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+         THPVariable_Unpack(item.ptr()).sizes().empty());
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -738,7 +738,7 @@ static bool is_int_or_symint_list(
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
         (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+         THPVariable_Unpack(item.ptr()).sizes().empty());
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -1454,7 +1454,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
       max_args = signature.max_args;
     }
   }
-  if (signatures_.size() > 0) {
+  if (!signatures_.empty()) {
     function_name = signatures_[0].name;
   }
 

@@ -1227,7 +1227,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t>
     TORCH_INTERNAL_ASSERT(((dims[0] == 0 && dims[1] == 1) || (dims[0] == 1 && dims[1] == 0)));
     return reduce_sparse_csr_dim01_cpu_template<scalar_t>(sparse, rop);
   }
-  TORCH_INTERNAL_ASSERT(dims.size() == 0);
+  TORCH_INTERNAL_ASSERT(dims.empty());
   // effective after gh-29137 has been resolved
   return sparse.clone();
 }
@@ -1242,7 +1242,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
   TORCH_INTERNAL_ASSERT(input_dim == 2);
   auto dims = dims_to_sum.vec();
   maybe_wrap_dims(dims, input_dim);
-  if (dims.size() == 0) {
+  if (dims.empty()) {
     // after gh-29137 is resolved, delete this if-block
     dims.emplace_back(0);
     dims.emplace_back(1);

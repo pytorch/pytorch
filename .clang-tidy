@@ -39,6 +39,7 @@ modernize-*,
 performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
+readability-container-size-empty,
 '
 HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
 AnalyzeTemporaryDtors: false

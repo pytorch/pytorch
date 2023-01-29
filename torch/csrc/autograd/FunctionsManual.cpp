@@ -135,7 +135,7 @@ Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
 
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   int64_t size = 1;
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return 1;
   }
   for (auto d : dim) {
@@ -147,7 +147,7 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
 
 c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
   c10::SymInt size = 1;
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return 1;
   }
   for (auto d : dim) {
@@ -613,8 +613,8 @@ Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     OptionalIntArrayRef opt_dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    if (opt_dims.has_value() && opt_dims.value().size() > 0) {
+  if (!keepdim && !sizes.empty()) {
+    if (opt_dims.has_value() && !opt_dims.value().empty()) {
       return unsqueeze_multiple(grad, opt_dims, sizes.size())
           .expand_symint(sizes);
     }
@@ -627,7 +627,7 @@ Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     c10::IntArrayRef dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+  if (!keepdim && !sizes.empty() && !dims.empty()) {
     // we are only using `keepdim=true` path for SymInts for now
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
@@ -652,7 +652,7 @@ Tensor mean_backward(
     OptionalIntArrayRef opt_dim,
     c10::SymInt numel,
     bool keepdim) {
-  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto n =
       is_all_reduce ? std::move(numel) : _safe_size(shape, opt_dim.value());
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
@@ -998,7 +998,7 @@ std::vector<Tensor> block_diag_backward(
                      .slice(1, cur_dim1, cur_dim1 + dim1);
     if (shape.size() == 1) {
       slice = slice.squeeze(-1);
-    } else if (shape.size() == 0) {
+    } else if (shape.empty()) {
       slice = slice.squeeze(-1).squeeze(-1);
     }
     grad_inputs[i] = slice;
@@ -2737,7 +2737,7 @@ Tensor softplus_double_backward(
 static inline bool _maybe_overlapping_memory(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
-  if (sizes.size() > 0) {
+  if (!sizes.empty()) {
     std::vector<std::size_t> argsort(sizes.size());
     std::iota(argsort.begin(), argsort.end(), 0);
     std::sort(

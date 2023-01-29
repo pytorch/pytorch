@@ -207,7 +207,7 @@ static inline std::vector<T> _conv_output_size(
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
-  bool has_dilation = dilation.size() > 0;
+  bool has_dilation = !dilation.empty();
   auto dim = input_size.size();
   std::vector<T> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];

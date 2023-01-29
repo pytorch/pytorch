@@ -915,7 +915,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     const auto args_elems = args->elements();
     auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
     auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
-    if (py_state.size() > 0) {
+    if (!py_state.empty()) {
       TORCH_WARN(
           "Loading Tensor with Python attributes will return at::Tensor with Python attributes being discarded");
     }

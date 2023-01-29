@@ -115,7 +115,7 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
   std::vector<at::Tensor> table;
   c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
   auto result = jit::pickle(ivalue, &table);
-  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
+  TORCH_CHECK(table.empty(), "Expected 0 tensors to be written");
   return result;
 }
 

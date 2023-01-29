@@ -247,7 +247,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dims_batch_rule(
   auto ndim = self.dim();
   if (ndim == 1) {
     TORCH_CHECK(
-        dims.size() == 0 || (dims.size() == 1 && dims[0] == 0),
+        dims.empty() || (dims.size() == 1 && dims[0] == 0),
         "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
     return std::make_tuple(self.alias(), bdim);
   }

@@ -903,7 +903,7 @@ struct MobileCodeImpl : CodeImpl {
 
           size_t numInclude = specifiedArgs.first +
               (support_default_args_before_out_ ? specifiedArgs.second : 0);
-          auto unique_name = op_schema.overload_name() != ""
+          auto unique_name = !op_schema.overload_name().empty()
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(

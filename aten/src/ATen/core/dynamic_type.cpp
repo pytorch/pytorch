@@ -38,7 +38,7 @@ std::string DynamicType::str() const {
   std::string ret = "Dynamic<";
   ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
   ret += ">";
-  if (tag_ != Tag::Class && arguments_.elems.size() > 0) {
+  if (tag_ != Tag::Class && !arguments_.elems.empty()) {
     ret += "[";
     for (const auto& arg : arguments_.elems) {
       if (arg.label) {

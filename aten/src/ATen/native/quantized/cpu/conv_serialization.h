@@ -90,7 +90,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   int version = -1;
   if (v.isTuple()) {
     const auto& elements = v.toTupleRef().elements();
-    if (elements.size() > 0) {
+    if (!elements.empty()) {
       auto firstElement = elements[0];
       if (firstElement.isTensor()) {
         version = 1;

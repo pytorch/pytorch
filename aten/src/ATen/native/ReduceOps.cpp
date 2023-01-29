@@ -1321,7 +1321,7 @@ TORCH_IMPL_FUNC(mean_out)
   // in lieu of the sum + divide implementation below.
   if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
-    if (!opt_dim.has_value() || opt_dim.value().size() == 0 || self.ndimension() == 0) {
+    if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
     } else {
       auto dim = opt_dim.value();
@@ -2122,7 +2122,7 @@ Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim
         return grad_in.scatter_(dim, indices_, grad_out);
       };
 
-  if (!keepdim && sizes.size() > 0) {
+  if (!keepdim && !sizes.empty()) {
     auto grad_ = grad.unsqueeze(dim);
     auto indices_ = indices.unsqueeze(dim);
     return inplace_scatter_if_not_tensor_subclass(grad_, indices_);

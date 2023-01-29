@@ -15,7 +15,7 @@ bool MutationRemover::removeTensorMutation() {
 bool MutationRemover::hasSideEffectOrAlias(Value* v, AliasDb* aliasDb) {
   // bail on nodes with side effects, blocks, or graph / graph inputs
   Node* n = v->node();
-  bool unhandled_node = n->blocks().size() != 0 ||
+  bool unhandled_node = !n->blocks().empty() ||
       n->hasAttribute(attr::Subgraph) || n->hasSideEffects() ||
       (v->node()->kind() == prim::Param);
 
@@ -210,7 +210,7 @@ bool MutationRemover::RemoveListMutation(Block* block) {
     }
 
     // process use-chain and aliasing of node output
-    bool has_output = (node->outputs().size() > 0);
+    bool has_output = (!node->outputs().empty());
     if (has_output) {
       node->output()->replaceAllUsesWith(mutated_value);
       getOrCreateAliasDb()->writeIndex_->erase(node);
@@ -339,7 +339,7 @@ bool MutationRemover::inplaceOpVariant(Node* n) {
   // all inplace ops at time of writing have a single input that is mutated
   // and returned. check that this is true, anything else could have strange
   // semantics,
-  if (n->outputs().size() != 1 || n->inputs().size() == 0) {
+  if (n->outputs().size() != 1 || n->inputs().empty()) {
     return false;
   }
   auto inputs = n->inputs();
@@ -350,7 +350,7 @@ bool MutationRemover::inplaceOpVariant(Node* n) {
   }
 
   auto new_schema = name.substr(0, name.size() - 1);
-  return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
+  return !getAllOperatorsFor(Symbol::fromQualString(new_schema)).empty();
 }
 
 bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {

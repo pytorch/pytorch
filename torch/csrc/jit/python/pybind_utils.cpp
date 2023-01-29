@@ -570,7 +570,7 @@ py::object toPyObject(IValue ivalue) {
 
     // If we have a NamedTuple
     if (tuple->type() && tuple->type()->schema() &&
-        tuple->type()->schema()->name() != "") {
+        !tuple->type()->schema()->name().empty()) {
       auto unqualName = tuple->type()->name()->name();
 
       const std::vector<Argument>& tuple_args =
@@ -758,7 +758,7 @@ py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0 || at::impl::torch_function_mode_enabled()) {
+  if (!overloaded_args.empty() || at::impl::torch_function_mode_enabled()) {
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();
@@ -768,7 +768,7 @@ py::object _get_operation_for_overload_or_packet(
                          .attr(method_name.c_str());
     if (is_overload) {
       auto overload_name = operations[0]->schema().overload_name();
-      if (overload_name == "") {
+      if (overload_name.empty()) {
         self_func = self_func.attr("default");
       } else {
         self_func = self_func.attr(overload_name.c_str());

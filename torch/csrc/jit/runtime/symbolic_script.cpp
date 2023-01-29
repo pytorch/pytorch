@@ -1617,7 +1617,7 @@ void loadFunctions() {
 c10::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_graphs.size() == 0) {
+  if (schema_to_graphs.empty()) {
     loadFunctions();
   }
   auto cache_it = cached_gradient_pairs.find(&schema);

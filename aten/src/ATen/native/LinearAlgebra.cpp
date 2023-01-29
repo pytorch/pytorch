@@ -198,7 +198,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   //   - We cannot reduce over an empty dimension
   if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
     // dim=None or dim=() reduces the whole tensor
-    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
+    TORCH_CHECK(opt_dim.has_value() && !opt_dim->empty(),
       "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
       "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
@@ -1078,7 +1078,7 @@ Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+      !matrices.empty(), "chain_matmul(): Expected one or more matrices");
 
   if (matrices.size() == 1) {
     return matrices[0].clone();
@@ -1096,7 +1096,7 @@ Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+      !matrices.empty(), "chain_matmul(): Expected one or more matrices");
 
   if (matrices.size() == 1) {
     at::native::resize_output(result, matrices[0].sizes());

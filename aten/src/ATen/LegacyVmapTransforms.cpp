@@ -239,7 +239,7 @@ MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
 
 static std::pair<std::bitset<kVmapNumLevels>,int64_t>
 getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
-  TORCH_INTERNAL_ASSERT(logical_tensors.size() > 0);
+  TORCH_INTERNAL_ASSERT(!logical_tensors.empty());
   std::bitset<kVmapNumLevels> levels;
   int64_t largest_logical_dim = -1;
   for (const auto& tensor : logical_tensors) {

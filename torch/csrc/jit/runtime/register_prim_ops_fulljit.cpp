@@ -91,7 +91,7 @@ RegisterOperators reg({
           int64_t chunks = node->i(attr::chunks);
           int64_t dim = node->i(attr::dim);
           auto outputs_used = fmap(node->outputs(), [](const Value* v) {
-            return v->uses().size() > 0;
+            return !v->uses().empty();
           });
           return [=](Stack& stack) {
             RECORD_FUNCTION("chunk", last(stack, 1));

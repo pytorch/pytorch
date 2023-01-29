@@ -1886,7 +1886,7 @@ void initJITBindings(PyObject* module) {
     return self_value->overlaps(*other_value);
   });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
-    AT_ASSERT(args.size() >= 1);
+    AT_ASSERT(!args.empty());
 
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);

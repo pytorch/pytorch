@@ -519,7 +519,7 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
-  if (config_.experimental_config.performance_events.size()) {
+  if (!config_.experimental_config.performance_events.empty()) {
     perf_profiler_ =
         std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
     perf_profiler_->Configure(config_.experimental_config.performance_events);
