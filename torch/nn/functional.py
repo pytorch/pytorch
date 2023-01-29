@@ -4762,7 +4762,7 @@ def _in_projection_packed(
         if q is k:
             # self-attention
             proj = linear(q, w, b)
-            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing
+            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
             proj = proj.view(1, *proj.shape[:-1], 3, E).transpose(0, -2).squeeze(-1).contiguous()
             return proj[0], proj[1], proj[2]
         else:
@@ -4774,7 +4774,7 @@ def _in_projection_packed(
                 b_q, b_kv = b.split([E, E * 2])
             q_proj = linear(q, w_q, b_q)
             kv_proj = linear(k, w_kv, b_kv)
-            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing
+            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
             kv_proj = kv_proj.view(1, *kv_proj.shape[:-1], 2, E).transpose(0, -2).squeeze(-1).contiguous()
             return (q_proj, kv_proj[0], kv_proj[1])
     else:
