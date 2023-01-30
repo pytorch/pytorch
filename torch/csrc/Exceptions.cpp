@@ -249,7 +249,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::WarningUtils::set_warning_handler(prev_handler_);
   auto& warning_buffer = internal_handler_.warning_buffer_;
 
-  if (warning_buffer.size() > 0) {
+  if (!warning_buffer.empty()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     pybind11::gil_scoped_acquire gil;
