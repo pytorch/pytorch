@@ -477,10 +477,6 @@ class DynamicShapeVariable(VariableTracker):
         )
 
     def compare(self, tx, op, right, **options):
-        # symint.compare(tensor), tensor impl takes priority (need to return a TensorVariableTracker)
-        if isinstance(right, TensorVariable):
-            return right.compare(tx, op, self, **options)
-
         if op not in supported_tensor_comparison_ops:
             unimplemented(f"compare {typestr(self)} {op} {typestr(right)}")
 
