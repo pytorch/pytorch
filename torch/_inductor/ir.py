@@ -4093,9 +4093,8 @@ class AllReduce(ExternKernel):
         )
 
     def codegen(self, wrapper):
-        # these header lines just get output once
-        wrapper.header.writeline("import torch.distributed as dist")
-        wrapper.header.writeline("from torch._C._distributed_c10d import ReduceOp")
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once("from torch._C._distributed_c10d import ReduceOp")
 
         # extract references to our args in string form for codegen output
         (input_name,) = [t.codegen_reference() for t in self.inputs]
