@@ -1,7 +1,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -296,14 +296,15 @@ class WorldData:
     pg_names: Dict[dist.ProcessGroup, str]
     pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
     group_count: int
-
+    tags_to_pg: Dict[str, List[dist.ProcessGroup]]
+    pg_to_tag: Dict[dist.ProcessGroup, str]
 
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0)
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -333,6 +334,14 @@ class ThreadLocalWorld:
     @group_count.setter
     def group_count(self, value):
         self._get_world().group_count = value
+
+    @property
+    def tags_to_pg(self):
+        return self._get_world().tags_to_pg
+ 
+    @property
+    def pg_to_tag(self):
+        return self._get_world().pg_to_tag
 
 
 _old_pg_world = None

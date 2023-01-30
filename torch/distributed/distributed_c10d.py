@@ -299,6 +299,8 @@ _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_map: Dict[ProcessGroup, str] = {}
 _group_count = 0
+_tags_to_pg: Dict[str, List[ProcessGroup]] = {}
+_pg_to_tag: Dict[ProcessGroup, str] = {}
 
 class _World:
     """
@@ -372,6 +374,15 @@ class _World:
         global _group_count
         _group_count = value
 
+    @property
+    def tags_to_pg(self) -> Dict[str, List[ProcessGroup]]:
+        global _tags_to_pg
+        return _tags_to_pg
+ 
+    @property
+    def pg_to_tag(self) -> Dict[ProcessGroup, str]:
+        global _pg_to_tag
+        return _pg_to_tag
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -885,7 +896,7 @@ def init_process_group(
             store,
             pg_options=pg_options,
             group_name=group_name,
-            timeout=timeout,
+            timeout=timeout
         )
         _update_default_pg(default_pg)
 
@@ -914,6 +925,7 @@ def _new_process_group_helper(
     pg_options=None,
     group_name=None,
     timeout=default_pg_timeout,
+    pg_tag=None
 ):
     """
     Create a new distributed process group.
@@ -940,6 +952,9 @@ def _new_process_group_helper(
         raise RuntimeError(
             "Expected timeout argument to be of type" "datetime.timedelta"
         )
+
+    if pg_tag not in [None, ""] and _try_find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group) is not None:
+        raise RuntimeError("Cannot create")
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
@@ -1068,7 +1083,12 @@ def _new_process_group_helper(
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
+    #FIXME this should be moved to _World
     _pg_backend_map[pg] = str(backend_config)
+    #"" is the default tag for user PGs
+    pg_tag = pg_tag or ""
+    _world.tags_to_pg.get(pg_tag, []).append(pg)
+    _world.pg_to_tag[pg] = pg_tag
     return pg
 
 
@@ -3388,7 +3408,7 @@ def _create_process_group_wrapper(
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, pg_tag=None):
     """
     Creates a new distributed group.
 
@@ -3496,6 +3516,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             default_store,
             pg_options=pg_options,
             timeout=timeout,
+            pg_tag=pg_tag
         )
 
     # Create the global rank to group rank mapping
@@ -3755,9 +3776,28 @@ def new_subgroups_by_enumeration(
     return cur_subgroup, subgroups
 
 
-def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
-    for group, group_ranks in _world.pg_group_ranks.items():
+def _try_find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
+    for group, group_ranks in _world.tags_to_pg[tag].items():
         good = all(r in group_ranks for r in ranks)
         if good:
             return group
-    raise Exception(f"Could not find pg with {ranks}")
+    return None
+
+def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
+    pg = _try_find_pg_by_ranks_and_tag(tag, ranks)
+    if pg is None:
+        raise Exception(f"Could not find pg with {ranks}")
+    return pg
+
+def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
+    """This is NOT a replacement for new_group.
+    We don't expect it to work when ``get_rank() not in ranks``.
+    """
+    pg = _try_find_pg_by_ranks_and_tag(tag, ranks)
+    if pg is not None:
+        return pg
+    #TODO copy settings and timeout from default PG
+    return new_group(ranks, pg_tag=tag)
+
+def _get_group_tag(pg: ProcessGroup) -> str:
+    return _world.pg_to_tag[pg]

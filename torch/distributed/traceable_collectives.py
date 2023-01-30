@@ -9,8 +9,8 @@ from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
 from typing import Any, Union
 
-from .distributed_c10d import _find_pg_by_ranks_and_tag, get_rank
-
+import torch.distributed.distributed_c10d as c10d
+import torch.distributed._tensor as dt
 
 from typing import List
 """
@@ -124,7 +124,7 @@ def _all_reduce_cpu(self, reduceOp, tag, ranks, stride):
     assert tag == "", "No support for non-empty comms tag"
     assert len(ranks) % stride == 0, f"Ranks length ({len(ranks)}) must be divisible by stride ({stride})"
 
-    my_rank = get_rank()
+    my_rank = dist.get_rank()
     rank_set = None
 
     for i in range(0, len(ranks), stride):
@@ -137,7 +137,7 @@ def _all_reduce_cpu(self, reduceOp, tag, ranks, stride):
 
     my_ranks.sort()
 
-    group = _find_pg_by_ranks_and_tag(tag, my_ranks)
+    group = c10d._find_pg_by_ranks_and_tag(tag, my_ranks)
     assert group is not None
 
     inplace_tensor = self.clone()
@@ -150,10 +150,10 @@ def _all_reduce_cpu(self, reduceOp, tag, ranks, stride):
 c10_lib = torch.library.Library("aten", "IMPL",  "CPU")
 c10_lib.impl("all_reduce", _all_reduce_cpu)
 
-RANK_TYPES = Union[List[int], List[List[int]]]
+RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh]
 
 # FIXME not the actual Python API, just here to help try it
-def all_reduce(self: torch.Tensor, reduceOp: str, tag: str, ranks: RANK_TYPES):
+def all_reduce(self: torch.Tensor, reduceOp: str, tag: str, group: RANK_TYPES):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -167,15 +167,22 @@ def all_reduce(self: torch.Tensor, reduceOp: str, tag: str, ranks: RANK_TYPES):
         DeviceMesh: Do a SPMD collective over all ranks of a collective
         (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
     """
-
-    if isinstance(ranks[0], list):
-        rankset = []
-        for rs in ranks:
-            rankset.extend(rs)
-            stride = len(rs)
-    else:
-        rankset = ranks
+    if isinstance(group, list):
+        if isinstance(group[0], list):
+            rankset = []
+            for rs in group:
+                rankset.extend(rs)
+                stride = len(rs)
+        else:
+            rankset = group
+            stride = len(rankset)
+    elif isinstance(group, dist.ProcessGroup):
+        rankset = dist.get_process_group_ranks(group)
         stride = len(rankset)
-
+        tag = tag or c10d._get_group_tag(group)
+    elif isinstance(group, dt.DeviceMesh):
+        raise ValueError("TODO DeviceMesh")
+    else:
+        raise ValueError("Invalid type for group")
     tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, rankset, stride)
     return AsyncCollectiveTensor(tensor)
