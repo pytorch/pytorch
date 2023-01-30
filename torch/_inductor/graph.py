@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
@@ -31,7 +32,12 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_dtype_size,
+    sympy_product,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -61,15 +67,14 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            size = ex.size()
-            stride = ex.stride()
+            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
+                ex.stride()
+            )
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
-        stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
-        ]
+        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
+        stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
@@ -121,6 +126,12 @@ class GraphLowering(torch.fx.Interpreter):
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
         self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.warning(f"Using FallbackKernel: {name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -166,7 +177,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -246,8 +257,17 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if config.static_weight_shapes and (
-            len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
+        # todo(chilli): We can remove the last check once we turn buffers into
+        # static shape tensors. That's a hack to workaround Inductor believing
+        # the buffer should be static but us passing in a fake tensor with
+        # symbolic shapes.
+        if (
+            config.static_weight_shapes
+            and (
+                len(self.graph_inputs) < self.num_static_inputs
+                or not dynamo_config.dynamic_shapes
+            )
+            and not example._has_symbolic_sizes_strides
         ):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
@@ -368,11 +388,20 @@ class GraphLowering(torch.fx.Interpreter):
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
-            # so that user-land view() will not throw because inductor
+            # 1. user-land view() will not throw because inductor
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            if any(user.op == "output" for user in n.users):
+            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # eager model to align with eager behavior.
+            as_strided_ops = [
+                torch.ops.aten.as_strided.default,
+                torch.ops.aten.as_strided_.default,
+                torch.ops.aten.as_strided_scatter.default,
+            ]
+            if any(
+                user.op == "output" or user.target in as_strided_ops for user in n.users
+            ) and isinstance(n.meta["val"], torch.Tensor):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
@@ -516,7 +545,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
