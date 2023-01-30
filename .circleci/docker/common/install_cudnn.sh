@@ -4,7 +4,6 @@ if [[ ${CUDNN_VERSION} == 8 ]]; then
     # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
     mkdir tmp_cudnn && cd tmp_cudnn
     CUDNN_NAME="cudnn-linux-x86_64-8.3.2.44_cuda11.5-archive"
-
     if [[ ${CUDA_VERSION:0:4} == "11.7" ]]; then
         CUDNN_NAME="cudnn-linux-x86_64-8.5.0.96_cuda11-archive"
         curl --retry 3 -OLs https://ossci-linux.s3.amazonaws.com/${CUDNN_NAME}.tar.xz
