@@ -47,22 +47,27 @@ class TestGitRepo(TestCase):
             raise SkipTest("Can't find git directory, make sure to run this test on real repo checkout")
         self.repo = GitRepo(str(repo_dir))
 
+    def _skip_if_ref_does_not_exist(self, ref: str) -> None:
+        """ Skip test if ref is missing as stale branches are deleted with time """
+        try:
+            self.repo.show_ref(ref)
+        except RuntimeError as e:
+            raise SkipTest(f"Can't find head ref {ref} due to {str(e)}") from e
+
     def test_compute_diff(self) -> None:
         diff = self.repo.diff("HEAD")
         sha = _shasum(diff)
         self.assertEqual(len(sha), 64)
 
-    def test_ghstack_branches_are_in_sync(self) -> None:
+    def test_ghstack_branches_in_sync(self) -> None:
         head_ref = "gh/SS-JIA/206/head"
-        # With time, this can get deleted..
-        try:
-            self.repo.show_ref(head_ref)
-        except RuntimeError as e:
-            raise SkipTest(f"Can't find head ref {head_ref} due to {str(e)}") from e
+        self._skip_if_ref_does_not_exist(head_ref)
         self.assertTrue(are_ghstack_branches_in_sync(self.repo, head_ref))
 
-    def test_ghtstack_branches_not_in_sync(self) -> None:
-        self.assertFalse(are_ghstack_branches_in_sync(self.repo, "gh/clee2000/1/head"))
+    def test_ghstack_branches_not_in_sync(self) -> None:
+        head_ref = "gh/clee2000/1/head"
+        self._skip_if_ref_does_not_exist(head_ref)
+        self.assertFalse(are_ghstack_branches_in_sync(self.repo, head_ref))
 
 if __name__ == '__main__':
     main()
