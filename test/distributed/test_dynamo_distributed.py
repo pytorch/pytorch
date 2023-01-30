@@ -200,6 +200,11 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 # optimizer, you should be able to repro it single process!
 @requires_nccl()
 class TestMultiProc(DynamoDistributedMultiProcTestCase):
+    """
+    Note: MultiProcTestCase spawns processes per test and is slow.
+    Prefer MultiThreadedTestCase for most tests. Perhaps use this one
+    sparingly for integration tests.
+    """
     @skip_if_lt_x_gpu(2)
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
