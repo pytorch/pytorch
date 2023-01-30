@@ -53,7 +53,7 @@ static constexpr ScalarType TORCH_INT_TYPE = at::kInt;
 
 class SparseCsrMKLInterface {
  private:
-  sparse_matrix_t A = 0;
+  sparse_matrix_t A{nullptr};
   matrix_descr desc;
 
  public:

@@ -70,8 +70,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -1375,7 +1374,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           py::init([](const std::string& lang, const uint32_t _frames_up) {
             auto cu = std::make_shared<CompilationUnit>();
-            if (lang.size() > 0) {
+            if (!lang.empty()) {
               pyCompilationUnitDefine(*cu, lang, nullptr, _frames_up);
             }
             return cu;
@@ -2388,5 +2387,5 @@ void initJitScriptBindings(PyObject* module) {
   initScriptDictBindings(module);
   initScriptListBindings(module);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

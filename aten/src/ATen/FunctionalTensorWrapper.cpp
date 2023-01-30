@@ -132,7 +132,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
 {
   set_constructor_metadata();
   // Copy the original tensor's ViewMeta vector and push the current one.
-  if (base->view_metas_.size() > 0) {
+  if (!base->view_metas_.empty()) {
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
@@ -238,7 +238,7 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   //
   // Given all of the above, for now we're just banning the above usage.
   TORCH_CHECK(storage().use_count() == 1, "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
-  TORCH_CHECK(view_metas_.size() == 0, "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
+  TORCH_CHECK(view_metas_.empty(), "Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass");
   // If this tensor is not a view (and has no outstanding views taken out on it),
   // Then it's safe to throw out the old storage and replace it with the new, larger one.
   storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(other));
@@ -291,7 +291,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
+    auto r = pyobj_slot_.load_pyobj_interpreter()->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -508,7 +508,7 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
 }
 
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  if (t_list.size() == 0) return false;
+  if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].has_value() || !t_list[i]->defined()) continue;

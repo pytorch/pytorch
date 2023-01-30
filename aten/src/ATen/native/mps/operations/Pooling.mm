@@ -3,8 +3,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Pool.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 struct PoolingCachedGraph : public MPSCachedGraph
@@ -345,5 +344,4 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
                        std::string("avg_pool2d_backward") + (count_include_pad ? "_include_pad" : ""));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

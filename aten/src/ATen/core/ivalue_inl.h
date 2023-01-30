@@ -186,10 +186,18 @@ inline c10::Storage IValue::toStorage() const& {
   return c10::Storage(toIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Stream IValue::toStream() && {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::Stream IValue::toStream() const& {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
@@ -936,7 +944,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
           "an error):\n",
-          tryRetrieveErrorMessageInternal(eptr));
+          tryRetrieveErrorMessageInternal(std::move(eptr)));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -1191,7 +1199,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) const {
     try {
-      std::rethrow_exception(eptr);
+      std::rethrow_exception(std::move(eptr));
     } catch (const std::exception& e) {
       return e.what();
     } catch (...) {
@@ -1502,7 +1510,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
-  virtual ~PyObjectHolder()= default;
+  ~PyObjectHolder() override = default;
 };
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {

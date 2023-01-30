@@ -19,8 +19,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -625,8 +624,7 @@ void Module::dump(
             << std::endl;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace c10 {
 

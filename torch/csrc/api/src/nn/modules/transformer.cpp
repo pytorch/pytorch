@@ -13,8 +13,8 @@ namespace nn {
 
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
-    const TransformerEncoderLayerOptions& options_)
-    : options(options_) {
+    TransformerEncoderLayerOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -91,8 +91,8 @@ Tensor TransformerEncoderLayerImpl::forward(
 
 // ========================TransformerDecoderLayerImpl=========================
 TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
-    const TransformerDecoderLayerOptions& options_)
-    : options(options_) {
+    TransformerDecoderLayerOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
