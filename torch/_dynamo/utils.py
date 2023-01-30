@@ -50,7 +50,6 @@ log = logging.getLogger(__name__)
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
 
-
 timer_counter = itertools.count()
 
 
@@ -103,6 +102,14 @@ def reset_frame_count():
     curr_frame = 0
 
 
+op_count = 0
+
+
+def increment_op_count(cnt):
+    global op_count
+    op_count += cnt
+
+
 # Print a report of time spent so far
 # Ex:
 # TIMING:
@@ -111,7 +118,6 @@ def reset_frame_count():
 def print_time_report():
     total = 0
     total_by_key = {}
-    print("TIMING:")
     for frame, timings in frame_phase_timing.items():
         for key, timing in timings.items():
             total += timing
@@ -120,7 +126,7 @@ def print_time_report():
             else:
                 total_by_key[key] += timing
 
-    out = ""
+    out = "TIMING:"
     for key, value in total_by_key.items():
         out = f"{out} {key}:{round(value, 5)}"
 
