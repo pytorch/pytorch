@@ -17,7 +17,6 @@ from torch.ao.ns.fx.ns_types import (
 )
 from torch.ao.ns.fx.graph_passes import _maybe_get_fqn
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import _MatchResult
@@ -654,7 +653,7 @@ def handle_subgraph(
     # order but the eventual results will be in reverse order.
     # So, we keep track of the last shadow logger we added and
     # always insert after it.
-    last_added_shadow_node_list = [None]
+    last_added_shadow_node_list: List[Optional[Node]] = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
 
         handle_subgraph_candidate(

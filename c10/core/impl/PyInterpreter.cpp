@@ -92,16 +92,15 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
   void trace_gpu_event_synchronization(uintptr_t event) const override {}
 
-  void mode_state_push_trampoline(
-      std::shared_ptr<SafePyObject> mode) const override{};
-  void mode_state_pop_trampoline(
-      std::shared_ptr<SafePyObject> mode) const override{};
+  void reset_backward_hooks(const TensorImpl* self) const override {
+    PANIC(reset_backward_hooks);
+  };
 };
 
 void PyInterpreter::disarm() noexcept {
   // Intentionally leaked
-  static PyInterpreterVTable* noop_vtable = new NoopPyInterpreterVTable();
-  vtable_ = noop_vtable;
+  static NoopPyInterpreterVTable noop_vtable;
+  vtable_ = &noop_vtable;
 }
 
 } // namespace impl

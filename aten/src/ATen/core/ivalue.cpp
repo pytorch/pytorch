@@ -490,7 +490,7 @@ std::ostream& printMaybeAnnotatedList(
     const IValue& the_list,
     IValueFormatter formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
-  if (the_list.toListRef().size() == 0 ||
+  if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
@@ -531,7 +531,7 @@ std::ostream& printMaybeAnnotatedDict(
     const IValue& the_dict,
     IValueFormatter formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
-  if (the_dict.toGenericDict().size() == 0 ||
+  if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
@@ -1098,7 +1098,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  if (ctx->srcFutures.size() == 0) {
+  if (ctx->srcFutures.empty()) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();

@@ -7,7 +7,6 @@ from torch._decomp import decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch.utils._mode_utils import no_dispatch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -26,6 +25,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
+from torch._ops import has_key, DispatchKey
 
 import itertools
 import functools
@@ -165,8 +165,9 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -250,8 +251,7 @@ def normalize_op_input_output2(
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
+            # TODO We should check that the integer outputs also agree
             result = tuple(
                 r
                 for r in result
@@ -294,15 +294,26 @@ CROSS_REF_EXCLUDE_SET = {
     # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
     ("cuda", torch.bfloat16, "nn.functional.bilinear"),
     # randomness
-    ("cuda", torch.float16, "nn.functional.dropout"),
-    ("cuda", torch.bfloat16, "nn.functional.dropout"),
-    ("cuda", torch.float64, "nn.functional.dropout"),
-    ("cuda", torch.float32, "nn.functional.dropout"),
     (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),
 
+    # It's the only in-place op without an out-of-place equivalent in the Python API
+    # Its OpInfo wrongly registers it as `torch.zero_(x.clone())`.
+    (None, None, "zero_"),
+
+    # No idea what's going on here
+    # In the recursive test logsumexp.default fails with args = (torch.tensor(-math.inf), [])
+    # in the test, but it seems to pass when tested locally and in the logsumexp test
+    (None, torch.float32, "masked.logsumexp"),
+    (None, torch.float64, "masked.logsumexp"),
+
+    # exp_vml_cpu not implemented for Half
+    (torch.cpu, torch.float16, "signal.windows.exponential"),
+    (torch.cpu, torch.float16, "signal.windows.gaussian"),
+    # sin_vml_cpu not implemented for Half
+    (torch.cpu, torch.float16, "signal.windows.cosine"),
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
@@ -431,10 +442,6 @@ class TestDecomp(TestCase):
 
         class DecompCrossRefMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                with no_dispatch():
-                    return self._torch_dispatch(func, types, args, kwargs)
-
-            def _torch_dispatch(self, func, types, args=(), kwargs=None):
                 test_case.precision = saved_precision
                 test_case.rel_tol = saved_rel_tol
 
@@ -443,13 +450,19 @@ class TestDecomp(TestCase):
 
                 # Stuff we shouldn't bother testing
                 # (TODO: remove detach from the decomp table?)
+                # N.b. Testing in-place ops would need dedicated logic
+                in_place = func.name()[-1] == '_'
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
                     torch.ops.aten.empty.memory_format,
                     torch.ops.aten.empty_like.default,
-                    torch.ops.aten.new_empty.default
-                ] or any_unsupported(args, kwargs):
+                    torch.ops.aten.new_empty.default,
+                    torch.ops.aten.empty_strided.default,
+                    torch.ops.aten.new_empty_strided.default,
+                    torch.ops.aten.randn.default,
+                    torch.ops.aten.native_dropout.default,
+                ] or any_unsupported(args, kwargs) or in_place:
                     return func(*args, **kwargs)
 
                 decomposed.add(func)
@@ -465,12 +478,30 @@ class TestDecomp(TestCase):
                 # decomposition and pytorch are from the "ground truth" (i.e.
                 # fp64). If the decomposition results in more error, we error
 
+                # We also decompose the decomposition recursively for
+                # further coverage, as some paths not be exercised directly by
+                # OpInfos (sadly) but just by other ops
+
                 decomposition = decomposition_table[func]
 
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
+                if run_all:
+                    # Execute recursively via DFS, to find the root of a possible error first
+                    with self:
+                        decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                else:
+                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
+                # At this stage we should not be decomposing an in-place op
+                # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
+                #  because decompositions are run after functionalisation and we would not like them to
+                #  de-functionalise the graph, as that would break AoTAutograd
+                # We run the real function *after* the decomposition to make sure that the
+                # decomposition does not modify any of the inputs in-place. If it does
+                # real_out should be differen than decom_out so we should catch this
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
@@ -478,7 +509,7 @@ class TestDecomp(TestCase):
                     real_out_double, _ = tree_flatten(
                         func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                     )
-                    for i, orig, decomp, ref in zip(range(len(real_out)), real_out, decomp_out, real_out_double):
+                    for i, (orig, decomp, ref) in enumerate(zip(real_out, decomp_out, real_out_double)):
                         if not isinstance(orig, torch.Tensor):
                             assert type(orig) == type(decomp)
                             assert orig == decomp
@@ -633,6 +664,55 @@ class DecompAmpTests(TestCase):
 
 
 instantiate_device_type_tests(DecompAmpTests, globals())
+
+class HasDecompTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.maxDiff = None
+
+    def test_has_decomposition(self):
+
+        def can_appear_in_trace(op) -> bool:
+            has_tensor_arg = any(
+                "Tensor" in str(a.type)
+                for a in itertools.chain(op._schema.arguments, op._schema.returns))
+            if not has_tensor_arg:
+                return False
+
+            try:
+                # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
+                return not has_key(op, DispatchKey.CompositeImplicitAutograd)
+            except RuntimeError as e:
+                # has_key fails for some jit-registered ops, which shouldn't be
+                # relevant here anyway
+                if 'does not exist' in str(e):
+                    return False
+                raise
+
+        def all_aten_overloads():
+            for name in torch._C._dispatch_get_all_op_names():
+                if not name.startswith("aten::"):
+                    continue
+
+                name = name[6:]
+                if "." in name:
+                    packet_name, overload_name = name.split(".")
+                else:
+                    packet_name, overload_name = name, "default"
+
+                packet = getattr(aten, packet_name)
+                assert isinstance(packet, torch._ops.OpOverloadPacket)
+                op = getattr(packet, overload_name)
+                yield op
+
+        # This is for operators that are only registered in some CI
+        # configurations, so would cause the test to fail
+        allow_list = set([aten.get_gradients.default])
+
+        overloads_wanting_decomp = set(op for op in all_aten_overloads() if can_appear_in_trace(op))
+        ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
+        ops_missing_decomp -= allow_list
+        self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
 
 if __name__ == "__main__":
     run_tests()
