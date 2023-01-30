@@ -210,11 +210,11 @@ class Tensor:
 
 # TensorValue has no corresponding class in fx
 # TensorValue is the "tensor results" that are passed between nodes in the graph
-# TensorValue is a named virtual tensor, with an optional TensorMeta that describes the properties of the tensor
+# TensorValue is a named virtual tensor, with an TensorMeta that describes the properties of the tensor
 @dataclass
 class TensorValue:
-    name: str                   # unique identifier of the TensorValue, referenced in Argument.as_tensor field
-    meta: Optional[TensorMeta]  # optional tensor meta
+    name: str           # unique identifier of the TensorValue, referenced in Argument.as_tensor field
+    meta: TensorMeta    # tensor meta
 
 
 @dataclass
