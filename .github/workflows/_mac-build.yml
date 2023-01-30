@@ -74,6 +74,9 @@ jobs:
     outputs:
       build-outcome: ${{ steps.build.outcome }}
     steps:
+      - name: Clean up disk space before running MacOS workflow
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -168,3 +171,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: sccache-stats-*.json
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main

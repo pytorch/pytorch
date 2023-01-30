@@ -1,5 +1,6 @@
 import dis
 import copy
+import sys
 import torch
 import inspect
 import operator
@@ -358,7 +359,13 @@ class Proxy:
         assert frame is not None
         calling_frame = frame.f_back
         assert calling_frame is not None
-        inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
+        inst_list = list(dis.get_instructions(calling_frame.f_code))
+        if sys.version_info >= (3, 11):
+            from bisect import bisect_left
+            inst_idx = bisect_left(inst_list, calling_frame.f_lasti, key=lambda x: x.offset)
+        else:
+            inst_idx = calling_frame.f_lasti // 2
+        inst = inst_list[inst_idx]
         if inst.opname == 'UNPACK_SEQUENCE':
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
@@ -373,7 +380,11 @@ class Proxy:
             calling_frame = frame.f_back
             assert calling_frame is not None
             insts = list(dis.get_instructions(calling_frame.f_code))
-            cur = calling_frame.f_lasti // 2
+            if sys.version_info >= (3, 11):
+                from bisect import bisect_left
+                cur = bisect_left(insts, calling_frame.f_lasti, key=lambda x: x.offset)
+            else:
+                cur = calling_frame.f_lasti // 2
             inst = insts[cur]
 
             if inst.opname == 'POP_JUMP_IF_TRUE':
@@ -421,6 +432,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
+            if isinstance(orig_method, torch._ops.PyOperator):
+                # TODO: Define how to symbolically trace PyOperators
+                raise RuntimeError("Unable to symbolically trace PyOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 

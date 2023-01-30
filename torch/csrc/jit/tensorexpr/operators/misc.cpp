@@ -479,7 +479,7 @@ Tensor computeFlatten(
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {
-  if (bufList.size() == 0) {
+  if (bufList.empty()) {
     throw std::runtime_error("Empty input list is passed to aten::cat");
   }
   std::vector<BufHandle> bufInputs;
@@ -487,7 +487,7 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   for (auto buf : bufList) {
     bufInputs.push_back(buf);
     TORCH_INTERNAL_ASSERT(
-        buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
+        !buf.node()->dims().empty(), buildErrorMessage("Invalid buf rank"));
     // Ignore buffers that are 0-sized on any dimension.
     bool hasEmptyDims = false;
     for (const auto& dim : buf.dims()) {
@@ -542,7 +542,7 @@ Tensor computeCatWoConditionals(
       ToDtype(high_type),
       nullptr,
       output_strides_expr);
-  if (non_empty_inputs.size() == 0) {
+  if (non_empty_inputs.empty()) {
     return Tensor(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
@@ -638,7 +638,7 @@ Tensor computeCat(
       outputShape,
       outputStrides,
       [&](const std::vector<VarHandle>& axes) {
-        if (nonEmptyInputs.size() == 0) {
+        if (nonEmptyInputs.empty()) {
           return ExprHandle(0);
         }
 

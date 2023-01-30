@@ -16,11 +16,6 @@ cpp_wrapper = False
 # dead code elimination
 dce = False
 
-# assume input tensors are dynamic
-dynamic_shapes = (
-    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
-)  # Use dynamic shapes if torchdynamo dynamic shapes is set
-
 # assume weight tensors are fixed size
 static_weight_shapes = True
 
@@ -172,7 +167,7 @@ class triton:
     # should we give different names to kernels
     ordered_kernel_names = False
     # should we put op names in kernel names
-    descriptive_kernel_names = True
+    descriptive_kernel_names = False
 
 
 # create a directory containing lots of debug information

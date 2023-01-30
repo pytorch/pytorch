@@ -33,6 +33,9 @@ hash = subprocess.check_output(
 entries = re.split(
     r"(?:cuda (?:train|eval) +([^ ]+)|WARNING:root:([^ ]+) failed to load)", full_log
 )[1:]
+# Entries schema example:
+# `['hf_Bert', None, '
+#  PASS\nTIMING: entire_frame_compile:1.80925 backend_compile:6e-05\nDynamo produced 1 graph(s) covering 367 ops\n']`
 
 
 def chunker(seq, size):
@@ -43,7 +46,24 @@ c = 0
 i = 0
 
 out = csv.writer(sys.stdout, dialect="excel")
-out.writerow(["", hash, "", "", "", "", gist_url])
+out.writerow(
+    [
+        "",
+        hash,
+        "",
+        "",
+        "",
+        "",
+        gist_url,
+        "frame_time",
+        "backend_time",
+        "total_ops",
+        "fake_tensor_dispatch_calls",
+        "proxy_torch_dispatch_calls",
+        "time_per_op",
+        "dispatches_per_op",
+    ]
+)
 
 # Sometimes backtraces will be in third party code, which results
 # in very long file names.  Delete the absolute path in this case.
@@ -95,6 +115,7 @@ for name, name2, log in chunker(entries, 3):
         r'File "([^"]+)", line ([0-9]+), in .+\n +(.+)\n([A-Za-z]+(?:Error|Exception|NotImplementedError): ?.*)',
         log,
     )
+
     if m is not None:
         r = "FAIL"
         component = f"{normalize_file(m.group(1))}:{m.group(2)}"
@@ -118,6 +139,37 @@ for name, name2, log in chunker(entries, 3):
     if r == "UNKNOWN":
         c += 1
 
+    backend_time = None
+    frame_time = None
+    if "TIMING:" in log:
+        result = re.search("TIMING:(.*)\n", log).group(1)
+        split_str = result.split("backend_compile:")
+        if len(split_str) == 2:
+            backend_time = float(split_str[1])
+            frame_time = float(split_str[0].split("entire_frame_compile:")[1])
+
+    tot_ops = None
+    fm_dispatches = None
+    pm_dispatches = None
+    if "STATS:" in log:
+        result = re.search("STATS:(.*)\n", log).group(1)
+        # call_* op count: 970 | FakeTensor.__torch_dispatch__:35285 | ProxyTorchDispatchMode.__torch_dispatch__:13339
+        split_all = result.split("|")
+
+        if len(split_all) == 3:
+            tot_ops = int(split_all[0].split("call_* op count:")[1])
+            fm_dispatches = int(split_all[1].split("FakeTensor.__torch_dispatch__:")[1])
+            pm_dispatches = int(
+                split_all[2].split("ProxyTorchDispatchMode.__torch_dispatch__:")[1]
+            )
+    time_per_op = None
+    if frame_time is not None and tot_ops is not None:
+        time_per_op = frame_time / tot_ops * 1000  # ms
+
+    dispatches_per_op = None
+    if fm_dispatches is not None and pm_dispatches is not None and tot_ops is not None:
+        dispatches_per_op = (fm_dispatches + pm_dispatches) / tot_ops
+
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
     # offer to split columns
@@ -130,7 +182,24 @@ for name, name2, log in chunker(entries, 3):
         component = "generated code"
         context = ""
 
-    out.writerow([bench, name, "", r, component, context, explain])
+    out.writerow(
+        [
+            bench,
+            name,
+            "",
+            r,
+            component,
+            context,
+            explain,
+            frame_time,
+            backend_time,
+            tot_ops,
+            fm_dispatches,
+            pm_dispatches,
+            time_per_op,
+            dispatches_per_op,
+        ]
+    )
     i += 1
 
 if c:
