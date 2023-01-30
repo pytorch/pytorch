@@ -37,7 +37,7 @@ def skip_if_pytest(fn):
     def wrapped(*args, **kwargs):
         if "PYTEST_CURRENT_TEST" in os.environ:
             raise unittest.SkipTest("does not work under pytest")
-        return wrapped(*args, **kwargs)
+        return fn(*args, **kwargs)
 
     return wrapped
 
