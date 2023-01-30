@@ -7351,6 +7351,55 @@ TEST_F(
       "");
 }
 
+TEST_F(NVFuserTest, FusionExprSortMatmulLikeSchedule_CUDA) {
+  // See https://github.com/csarofeen/pytorch/pull/2366
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  constexpr int M1 = 5, M2 = 5, N1 = 6, N2 = 6, K1 = 7, K2 = 7;
+
+  auto tv0 = makeContigConcreteTensor({M1, M2, K1, K2});
+  auto tv1 = makeContigConcreteTensor({N1, N2, K1, K2});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {false, true, false, true, false, false});
+  auto tv3 = broadcast(tv1, {true, false, true, false, false, false});
+  auto tv4 = mul(tv2, tv3);
+  auto tv5 = sum(tv4, {-1, -2});
+  fusion.addOutput(tv5);
+
+  auto tv6 = tv0->cacheAfter();
+  auto tv7 = tv1->cacheAfter();
+  auto tv8 = tv6->cacheAfter();
+  auto tv9 = tv7->cacheAfter();
+  auto tv10 = tv5->cacheBefore();
+
+  tv6->inlineAt(3);
+  tv7->inlineAt(3);
+  tv8->inlineAt(4);
+  tv9->inlineAt(4);
+  tv2->inlineAt(6);
+  tv3->inlineAt(6);
+  tv4->inlineAt(6);
+  tv10->inlineAt(4);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({M1, M2, K1, K2}, options);
+  at::Tensor t1 = at::randn({N1, N2, K1, K2}, options);
+  auto expect =
+      at::mm(t0.view({M1 * M2, K1 * K2}), t1.view({N1 * N2, K1 * K2}).t())
+          .view({M1, M2, N1, N2})
+          .transpose(1, 2);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  testValidate(fe.kernel(), cg_outputs, {t0, t1}, {expect}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

@@ -1189,13 +1189,30 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  if (consumer_group->payload()->pa_domains.size() <
-      consumer_group->payload()->ca_domains.size()) {
+  const auto& consumer_pa_domain = consumer_group->payload()->pa_domains;
+  const auto& consumer_ca_domain = consumer_group->payload()->ca_domains;
+
+  // For the consumer, if there's a dependency from PA to CA, definitely
+  // not possible to merge
+  if (!consumer_pa_domain.empty() && !consumer_ca_domain.empty() &&
+      ir_utils::IterDomainDependencySorter(
+          concrete_id_dependencies_, GpuLower::current()->caMap())(
+          consumer_pa_domain.back(), consumer_ca_domain.back())) {
+    return false;
+  }
+
+  // If the consumer has more PA domains than CA, don't merge so that
+  // the consumer is merged with its consumer first, unless there's a
+  // dependency from CA to PA
+  if (consumer_pa_domain.size() < consumer_ca_domain.size() &&
+      !(!consumer_pa_domain.empty() && !consumer_ca_domain.empty() &&
+        ir_utils::IterDomainDependencySorter(
+            concrete_id_dependencies_, GpuLower::current()->caMap())(
+            consumer_ca_domain.back(), consumer_pa_domain.back()))) {
     return false;
   }
 
   const auto& producer_ca_domain = producer_group->payload()->ca_domains;
-  const auto& consumer_pa_domain = consumer_group->payload()->pa_domains;
 
   if (producer_ca_domain.empty() && consumer_pa_domain.empty()) {
     return true;
