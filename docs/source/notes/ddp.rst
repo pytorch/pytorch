@@ -69,7 +69,7 @@ DDP works with TorchDynamo.  When used with TorchDynamo, apply the DDP model wra
 before compiling the model, such that torchdynamo can apply ``DDPOptimizer``
 (graph-break optimizations) based on DDP bucket sizes.  (See `TorchDynamo DDPOptimizer <./ddp.html#torchdynamo-ddpoptimizer>`_ for more information.)
 
-TorchDynamo support for DDP currently requires setting `static_graph=True` and `find_unused_parameters=True`, due to
+TorchDynamo support for DDP currently requires setting `static_graph=False`, due to
 interactions between the graph tracing process and DDP's mechanism for observing operations happening on its module,
 but this should be fixed ultimately.
 
@@ -211,7 +211,7 @@ TorchDynamo DDPOptimizer
 
 DDP's performance advantage comes from overlapping allreduce collectives with computations during backwards.
 AotAutograd prevents this overlap when used with TorchDynamo for compiling a whole forward and whole backward graph,
-becuase allreduce ops are launched by autograd hooks _after_ the whole optimized backwards computation finishes.
+because allreduce ops are launched by autograd hooks _after_ the whole optimized backwards computation finishes.
 
 TorchDynamo's DDPOptimizer helps by breaking the forward graph at the logical boundaries of DDP's allreduce buckets
 during backwards.  Note: the goal is to break the graph during backwards, and the simplest implementation is to

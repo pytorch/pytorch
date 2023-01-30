@@ -4,6 +4,7 @@ import functools
 import getpass
 import hashlib
 import importlib
+import json
 import logging
 import multiprocessing
 import os
@@ -22,6 +23,8 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
+
+from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -54,8 +57,39 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 @functools.lru_cache(None)
 def cache_dir():
     return os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+        "TORCHINDUCTOR_CACHE_DIR",
+        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
+
+
+class DiskCache:
+    @staticmethod
+    @functools.lru_cache(None)
+    def _subdir():
+        subdir = os.path.join(cache_dir(), "cached_tunings")
+        os.makedirs(subdir, exist_ok=True)
+        return subdir
+
+    @staticmethod
+    @functools.lru_cache(4096)
+    def _read_file(path):
+        with open(path, "r") as fd:
+            return json.loads(fd.read())
+
+    def __init__(self, unique_name):
+        super().__init__()
+        self.unique_name = unique_name
+
+    def lookup(self, key: Any, generate: Callable[[], Any]):
+        """
+        Check if we have already generated key, if not call generate()
+        to populate the cache.
+        """
+        path = os.path.join(self._subdir(), code_hash(self.unique_name + repr(key)))
+        if not os.path.exists(path):
+            value = generate()
+            write_atomic(path, json.dumps(value))
+        return self._read_file(path)
 
 
 def get_lock_dir():
@@ -86,12 +120,16 @@ def write(source_code, ext, extra=""):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        # use a temp file for thread safety
-        fd, tmp_path = tempfile.mkstemp(dir=subdir)
-        with os.fdopen(fd, "w") as f:
-            f.write(source_code)
-        os.rename(tmp_path, path)
+        write_atomic(path, source_code)
     return basename, path
+
+
+def write_atomic(path: str, source_code: str):
+    # use a temp file for thread safety
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w") as f:
+        f.write(source_code)
+    os.rename(tmp_path, path)
 
 
 def cpp_compiler():
@@ -412,6 +450,13 @@ class CppCodeCache:
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
+            if "failed to map segment from shared object" in str(e):
+                raise OSError(
+                    f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
+                    "is mounted with noexec (e.g., by default Docker mounts tmp file systems "
+                    f"as noexec).  Please remount {tempfile.gettempdir()} with exec enabled, or set another "
+                    "temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable."
+                ) from e
             raise
 
     @classmethod
@@ -570,7 +615,7 @@ class TritonFuture:
 
 class AsyncCompile:
     def __init__(self):
-        self._context_keepalive = None
+        pass
 
     @staticmethod
     @functools.lru_cache(1)
@@ -641,7 +686,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for i in range(config.compile_threads):
+            for _ in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -660,9 +705,6 @@ class AsyncCompile:
 
     def triton(self, source_code):
         _compile_start()
-        if self._context_keepalive is None:
-            # Workaround `CUDA: Error- context is destroyed`
-            self._context_keepalive = torch.tensor([1], device="cuda")
 
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
@@ -682,10 +724,26 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
+        num_kernels = len(
+            [
+                value
+                for key, value in scope.items()
+                if isinstance(value, (Future, TritonFuture))
+            ]
+        )
+        pbar = tqdm(
+            total=num_kernels,
+            desc="Inductor Compilation",
+            disable=config.disable_progress,
+            delay=0,
+        )
         if config.compile_threads > 1:
-            for key, result in list(scope.items()):
+            for key, result in scope.items():
+                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                    pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
+                    pbar.update(1)
 
         _compile_end()
 

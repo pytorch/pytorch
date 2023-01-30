@@ -7,7 +7,7 @@ from typing import Callable, List, Tuple
 import numpy
 
 import torch
-from torch.testing._internal.common_dtype import floating_types_and
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
@@ -176,7 +176,21 @@ def error_inputs_window(op_info, device, *args, **kwargs):
     yield ErrorInput(
         SampleInput(3, *args, dtype=torch.long, device=device, **kwargs),
         error_type=ValueError,
-        error_regex="expects floating point dtypes, got: torch.int64",
+        error_regex="expects float32 or float64 dtypes, got: torch.int64",
+    )
+
+    # Tests for window tensors that are bfloat16
+    yield ErrorInput(
+        SampleInput(3, *args, dtype=torch.bfloat16, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="expects float32 or float64 dtypes, got: torch.bfloat16",
+    )
+
+    # Tests for window tensors that are float16
+    yield ErrorInput(
+        SampleInput(3, *args, dtype=torch.float16, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="expects float32 or float64 dtypes, got: torch.float16",
     )
 
 
@@ -275,8 +289,8 @@ def make_signal_windows_opinfo(
     return OpInfo(
         name=name,
         ref=ref if TEST_SCIPY else None,
-        dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types(),
         sample_inputs_func=sample_inputs_func,
         reference_inputs_func=reference_inputs_func,
         error_inputs_func=error_inputs_func,
@@ -339,50 +353,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.hann",
@@ -390,50 +360,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.bartlett",
@@ -452,50 +378,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
@@ -505,50 +387,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
@@ -558,50 +396,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
         reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
@@ -613,51 +407,9 @@ op_db: List[OpInfo] = [
         error_inputs_func=error_inputs_gaussian_window,
         skips=(
             DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
                 unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
                 "test_numpy_ref_mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
             ),
         ),
     ),
@@ -669,50 +421,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, beta=12.0),
         reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
         error_inputs_func=error_inputs_kaiser_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.general_cosine",
@@ -724,50 +432,6 @@ op_db: List[OpInfo] = [
             reference_inputs_general_cosine_window, a=[0.54, 0.46]
         ),
         error_inputs_func=error_inputs_general_cosine_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.general_hamming",
@@ -779,49 +443,14 @@ op_db: List[OpInfo] = [
             reference_inputs_general_hamming_window, alpha=0.54
         ),
         error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.nuttall",
+        ref=reference_signal_window(scipy.signal.windows.nuttall)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
     ),
 ]

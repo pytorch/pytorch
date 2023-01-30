@@ -88,12 +88,12 @@ public:
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
+  ListElementReference(const ListElementReference&) = delete;
+  ListElementReference& operator=(const ListElementReference&) = delete;
+
 private:
   ListElementReference(Iterator iter)
   : iterator_(iter) {}
-
-  ListElementReference(const ListElementReference&) = delete;
-  ListElementReference& operator=(const ListElementReference&) = delete;
 
   // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;

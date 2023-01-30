@@ -55,7 +55,7 @@ int64_t store(std::shared_ptr<Graph> graph) {
       std::piecewise_construct,
       std::forward_as_tuple(key),
       std::forward_as_tuple(key, graph));
-  cache.graphToKey_.emplace(std::make_pair(std::move(repr), key));
+  cache.graphToKey_.emplace(std::move(repr), key);
   return key;
 }
 

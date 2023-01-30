@@ -428,7 +428,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(hardtanh_backward);
   BINARY_POINTWISE(hardshrink_backward);
   BINARY_POINTWISE(hardswish_backward);
-  // BINARY_POINTWISE(infinitely_differentiable_gelu_backward);
+  BINARY_POINTWISE(_prelu_kernel);
+  VARIADIC_BDIMS_BOXED(_prelu_kernel_backward);
   BINARY_POINTWISE(leaky_relu_backward);
   BINARY_POINTWISE(logit_backward);
   VMAP_SUPPORT(log_sigmoid_backward, log_sigmoid_backward_batch_rule);

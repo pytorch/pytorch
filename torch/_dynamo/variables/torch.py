@@ -6,8 +6,6 @@ import types
 from collections import OrderedDict
 from typing import Dict, List
 
-import numpy
-
 import torch._C
 import torch.fx
 import torch.nn
@@ -21,7 +19,9 @@ from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    HAS_NUMPY,
     istype,
+    np,
     product,
     proxy_args_kwargs,
     specialize_args_kwargs,
@@ -61,6 +61,7 @@ constant_fold_functions = [
     torch.device,
     torch.distributed.is_available,
     torch.finfo,
+    torch.get_default_dtype,
     torch.iinfo,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
@@ -315,6 +316,25 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        elif self.value is torch.backends.cudnn.is_acceptable:
+            # is_acceptable(tensor) returns true if
+            #   (a) tensor dtype/device are supported by cudnn
+            #   (b) cudnn is available
+            #   (c) some initialization has completed
+            # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
+            assert (
+                len(args) == 1 or "tensor" in kwargs
+            ), "Expect 1 input to cudnn.is_acceptable"
+            tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
+            assert isinstance(
+                tensor_variable, TensorVariable
+            ), "Expect input to cudnn.is_acceptable to be a tensor"
+            tensor_inp = torch.tensor(
+                0, dtype=tensor_variable.dtype, device=tensor_variable.device
+            )
+            return ConstantVariable(
+                torch.backends.cudnn.is_acceptable(tensor_inp), **options
+            )
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
@@ -427,13 +447,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (
-                self.value in tensortype_to_dtype
+                HAS_NUMPY
+                and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
                 and args[0].is_python_constant()
             ):
                 for x in args[0].items:
-                    if isinstance(x.value, numpy.generic):
+                    if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
