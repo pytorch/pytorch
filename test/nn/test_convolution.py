@@ -920,7 +920,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ]
 
         def run_test(benchmark):
-            with torch.backends.cudnn.flags(benchmark=benchmark):
+            with torch.backends.cudnn.flags(enabled=True, benchmark=benchmark):
                 conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to(device, dtype)
                 for size in sizes:
                     x = torch.randn(size, device=device, dtype=dtype)
@@ -1058,7 +1058,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.double)
     def test_conv_double_backward(self, device, dtype):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             # Double backward only runs with DoubleTensor due to precision reason
             batch_size = 1
             for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
