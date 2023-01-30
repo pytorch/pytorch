@@ -557,6 +557,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return at::empty({0}, build_options(options, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
@@ -664,6 +665,7 @@ Tensor legacy_tensor_generic_ctor_new(
     }
     return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
