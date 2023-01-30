@@ -37,7 +37,7 @@ TypePtr ScriptTypeParser::subscriptToType(
       // i.e. `typing.Tuple[()]`. Allow for parsing an empty tuple literal
       // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
       auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
-      if (tup_literal.inputs().size() > 0) {
+      if (!tup_literal.inputs().empty()) {
         throw ErrorReport(tup_literal.range())
             << "Tuple literal in Tuple type annotation must not "
             << "have any elements!";
