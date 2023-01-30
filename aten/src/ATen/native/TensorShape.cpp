@@ -253,7 +253,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
 
   TORCH_CHECK(
-      materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
+      !materialized.empty(), "torch.cat(): expected a non-empty list of Tensors");
 
   // Look for the first valid tensor.
   size_t valid = materialized.size();
@@ -523,7 +523,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
 
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
   Tensor new_indices = indices.new_empty(new_indices_size);
-  if (broadcast_sizes.size()>0) {
+  if (!broadcast_sizes.empty()) {
     // ones(broadcast_sizes).nonzero() is equivalent to
     // product(map(arange, broadcast_sizes)) but avoids creating
     // auxilary arange tensors
@@ -825,7 +825,7 @@ Tensor cat_sparse(const ITensorListRef& tensors, int64_t dim) {
 
 Tensor block_diag(TensorList tensors) {
   Tensor result;
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     result = at::empty({1, 0});
     return result;
   }
@@ -1669,7 +1669,7 @@ Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
-  return self.reshape(other.sizes());
+  return self.reshape_symint(other.sym_sizes());
 }
 
 static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
@@ -1804,7 +1804,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
 
 Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
-  grad_input.select_symint(dim, index).copy_(grad);
+  grad_input.select_symint(dim, std::move(index)).copy_(grad);
   return grad_input;
 }
 
@@ -2655,7 +2655,7 @@ void check_stack_inputs(TensorList tensors, int64_t dim) {
 
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
   if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
@@ -2685,7 +2685,7 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 
 // TODO(msubkhankulov): refactor to use _stack_out
 Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
   if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
@@ -2708,7 +2708,7 @@ Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 }
 
 Tensor hstack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
   if (rep[0].dim() == 1) {
@@ -2718,7 +2718,7 @@ Tensor hstack(TensorList tensors) {
 }
 
 Tensor& hstack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
   if (rep[0].dim() == 1) {
@@ -2728,27 +2728,27 @@ Tensor& hstack_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor vstack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat(rep, 0);
 }
 
 Tensor& vstack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat_out(result, rep, 0);
 }
 
 Tensor dstack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat(rep, 2);
 }
 Tensor& dstack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat_out(result, rep, 2);
@@ -2812,7 +2812,7 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
 }
 
 Tensor& column_stack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
               "column_stack expects a non-empty TensorList");
 
   auto reshaped_tensors = reshape_input_for_column_stack(tensors);
@@ -2820,7 +2820,7 @@ Tensor& column_stack_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor column_stack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
               "column_stack expects a non-empty TensorList");
 
   auto reshaped_tensors = reshape_input_for_column_stack(tensors);
@@ -3374,7 +3374,7 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
 
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
-  TORCH_CHECK(positions.size() > 0,
+  TORCH_CHECK(!positions.empty(),
       "flatten(tensor, dims, out_dim): dims cannot be empty");
   for (const auto i : c10::irange(positions.size() - 1)) {
     if (positions[i] + 1 == positions[i + 1]) continue;
@@ -3413,7 +3413,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
 Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
+  TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
   TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
   if (self.has_names()) {
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
@@ -3458,7 +3458,7 @@ Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
-  return self.view(other.sizes());
+  return self.view_symint(other.sym_sizes());
 }
 
 int64_t numel(const Tensor& self) {
@@ -3541,17 +3541,18 @@ std::vector<Tensor> meshgrid(TensorList tensors,
                 "but received: ", indexing);
   }
 
-  std::vector<int64_t> shape(size);
+  std::vector<c10::SymInt> shape(size);
   for(const auto i: c10::irange(size)){
     TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
                 "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
-    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
+    shape[i] = tensor_refs[i].get().sym_numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
-  std::vector<int64_t> view_shape(size, 1);
+  grids.reserve(size);
+  std::vector<c10::SymInt> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
     view_shape[i] = -1;  // select this dimension to infer
-    grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    grids.push_back(tensor_refs[i].get().view_symint(view_shape).expand_symint(shape));
     view_shape[i] = 1;  // restore to previous value
   }
 
@@ -3879,7 +3880,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   auto nbytes = self.storage().sym_nbytes();
   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
   auto numel = nbytes / dtype_size;
-  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto self_full_size = self.as_strided_symint({std::move(numel)}, {1}, 0);
   auto clone = self_full_size.clone();
   auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
   return out;
@@ -3896,7 +3897,7 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
 }
 at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
     auto output = clone_preserve_strides(self);
-    auto slice = output.select_symint(dim, index);
+    auto slice = output.select_symint(dim, std::move(index));
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
@@ -4039,7 +4040,7 @@ at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef siz
 
 
 at::Tensor& select_copy_symint_out(const at::Tensor & self, int64_t dim, c10::SymInt index, at::Tensor & out) {
-  auto tmp = self.select_symint(dim, index);
+  auto tmp = self.select_symint(dim, std::move(index));
   out.copy_(tmp);
   return out;
 }

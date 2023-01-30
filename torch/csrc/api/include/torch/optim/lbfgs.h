@@ -34,13 +34,12 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   void set_lr(const double lr) override;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API LBFGSParamState
     : public OptimizerCloneableParamState<LBFGSParamState> {
   TORCH_ARG(int64_t, func_evals) = 0;
   TORCH_ARG(int64_t, n_iter) = 0;
-  TORCH_ARG(double, t);
-  TORCH_ARG(double, prev_loss);
+  TORCH_ARG(double, t) = 0;
+  TORCH_ARG(double, prev_loss) = 0;
   TORCH_ARG(Tensor, d) = {};
   TORCH_ARG(Tensor, H_diag) = {};
   TORCH_ARG(Tensor, prev_flat_grad) = {};
