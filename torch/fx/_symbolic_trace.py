@@ -880,6 +880,18 @@ def _create_wrapped_method(cls, name):
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy("call_method", name, args, kwargs)
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are proxying fake tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped fn while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs, external_call=True)
+            return out
+        
         return orig_fn(*args, **kwargs)
 
     return wrapped

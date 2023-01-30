@@ -480,16 +480,21 @@ class TestFX(JitTestCase):
     
     def test_wrap_with_make_fx(self):
         def to_trace(y):
-            return a_lifted_leaf((4, y), 3) + a_lifted_leaf((3, 4), 5) + a_lifted_leaf((y, y), y)
+            return a_lifted_leaf((4, y), 3) * a_lifted_leaf((3, 4), 5) * a_lifted_leaf((y, y), y)
 
         m = make_fx(to_trace, tracing_mode="real")(torch.tensor([10]))
         self.assertIn('a_lifted_leaf', m.code)
+        # aten.add.Tensor should be internal to `a_lifted_leaf` when some of the parameters are tensors.
+        # However, it should not be traced as the function is marked as opaque.
+        self.assertNotIn('aten.add.Tensor', m.code)
 
         m = make_fx(to_trace, tracing_mode="fake")(torch.tensor([12]))
         self.assertIn('a_lifted_leaf', m.code)
+        self.assertNotIn('aten.add.Tensor', m.code)
 
         m = make_fx(to_trace, tracing_mode="symbolic")(torch.tensor([15]))
         self.assertIn('a_lifted_leaf', m.code)
+        self.assertNotIn('aten.add.Tensor', m.code)
 
 
     def test_graph_edit_with_proxy(self):
