@@ -107,6 +107,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
             m(*example_inputs)
             m = convert_pt2e(m)
+            print("converted:", m)
             m(*example_inputs)
             # conv is quantized, linear is not quantized
             node_occurrence = {
