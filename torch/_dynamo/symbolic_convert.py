@@ -79,12 +79,7 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import (
-    DynamicShapeVariable,
-    supported_const_comparison_ops,
-    supported_tensor_comparison_ops,
-    TensorVariable,
-)
+from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
@@ -903,11 +898,22 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
+        supported_is_const = {
+            "is": operator.is_,
+            "is not": operator.is_not,
+            "==": operator.eq,
+            "!=": operator.ne,
+        }
+        supported_tensors = {
+            ">": operator.gt,
+            "<": operator.lt,
+            ">=": operator.ge,
+            "<=": operator.le,
+            "==": operator.eq,
+            "!=": operator.ne,
+        }
         supported_any = dict(
-            itertools.chain(
-                supported_tensor_comparison_ops.items(),
-                supported_const_comparison_ops.items(),
-            )
+            itertools.chain(supported_tensors.items(), supported_is_const.items())
         )
         if (
             isinstance(
@@ -924,12 +930,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             and isinstance(right, ConstantVariable)
             and right.value is None
-            and op in supported_const_comparison_ops
+            and op in supported_is_const
         ):
             # <non-None> is None
             self.push(
                 ConstantVariable(
-                    supported_const_comparison_ops[op](object(), right.value), **options
+                    supported_is_const[op](object(), right.value), **options
                 )
             )
         elif (
@@ -946,35 +952,40 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     **options,
                 )
             )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                wrap_fx_proxy(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, DynamicShapeVariable)
+            or isinstance(right, DynamicShapeVariable)
+        ) and op in supported_tensors:
+            self.push(
+                DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,
+                    **options,
+                )
+            )
         elif op in ("in", "not in"):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
         elif (
-            # TODO: feels like we should be able to refactor so that VariableTracker.compare()
-            # covers more cases. However some of the cases are simpler to leave in the current function.
-            # (for example, if both left an right are python constants, always return a constant
-            # instead of re-writing that logic for every type of VariableTracker that can be constant)
-            isinstance(
-                left,
-                (
-                    TensorVariable,
-                    DynamicShapeVariable,
-                    BaseListVariable,
-                    UserFunctionVariable,
-                ),
-            )
-            or isinstance(
-                right,
-                (
-                    TensorVariable,
-                    DynamicShapeVariable,
-                    BaseListVariable,
-                    UserFunctionVariable,
-                ),
-            )
+            isinstance(left, UserFunctionVariable)
+            and isinstance(right, UserFunctionVariable)
+            and op in supported_is_const
         ):
-            self.push(left.compare(self, op, right, **options))
+            self.push(
+                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            )
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 

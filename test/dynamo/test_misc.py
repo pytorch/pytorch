@@ -150,23 +150,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torch._dynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
-    def test_compare_shapes(self):
-        def compare_shapes(a, b, to_list):
-            x = list(a.unsqueeze(-1).shape) if to_list else a.shape
-            y = list(b.unsqueeze(-1).shape) if to_list else b.shape
-            if x == y:
-                return a + 1
-            else:
-                return a + 2
-
-        # Test both ListVariable and ShapeVariable
-        torch._dynamo.testing.standard_test(
-            self, lambda a, b: compare_shapes(a, b, to_list=True), 2
-        )
-        torch._dynamo.testing.standard_test(
-            self, lambda a, b: compare_shapes(a, b, to_list=False), 2
-        )
-
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
@@ -182,13 +165,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return res
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
-
-    def test_int_neg(self):
-        def int_neg(a):
-            x = a.shape[0]
-            return -x
-
-        torch._dynamo.testing.standard_test(self, int_neg, 1)
 
     def test_fold(self):
         def fn(a):

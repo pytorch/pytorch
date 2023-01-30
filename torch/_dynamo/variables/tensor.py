@@ -19,24 +19,9 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import typestr, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
-
-supported_tensor_comparison_ops = {
-    ">": operator.gt,
-    "<": operator.lt,
-    ">=": operator.ge,
-    "<=": operator.le,
-    "==": operator.eq,
-    "!=": operator.ne,
-}
-supported_const_comparison_ops = {
-    "is": operator.is_,
-    "is not": operator.is_not,
-    "==": operator.eq,
-    "!=": operator.ne,
-}
 
 
 class TensorVariable(VariableTracker):
@@ -410,17 +395,6 @@ class TensorVariable(VariableTracker):
                 **options,
             )
 
-    def compare(self, tx, op, right, **options):
-        from .builder import wrap_fx_proxy
-
-        if op not in supported_tensor_comparison_ops:
-            unimplemented(f"compare {typestr(self)} {op} {typestr(right)}")
-        return wrap_fx_proxy(
-            tx,
-            supported_tensor_comparison_ops[op](self.as_proxy(), right.as_proxy()),
-            **options,
-        )
-
 
 class DynamicShapeVariable(VariableTracker):
     """
@@ -473,21 +447,6 @@ class DynamicShapeVariable(VariableTracker):
                 name,
                 *proxy_args_kwargs([self] + list(args), kwargs),
             ),
-            **options,
-        )
-
-    def compare(self, tx, op, right, **options):
-        # symint.compare(tensor), tensor impl takes priority (need to return a TensorVariableTracker)
-        if isinstance(right, TensorVariable):
-            return right.compare(tx, op, self, **options)
-
-        if op not in supported_tensor_comparison_ops:
-            unimplemented(f"compare {typestr(self)} {op} {typestr(right)}")
-
-        return DynamicShapeVariable.create(
-            tx,
-            supported_tensor_comparison_ops[op](self.as_proxy(), right.as_proxy()),
-            dyn_shape=None,
             **options,
         )
 

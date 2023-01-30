@@ -1,4 +1,3 @@
-import operator
 from typing import Dict, List, Optional
 
 import torch
@@ -100,49 +99,6 @@ class BaseListVariable(VariableTracker):
             return variables.ConstantVariable(result, **options)
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
-
-    def next_variables(self):
-        return unimplemented(f"{type(self)}.next_variables()")
-
-    @staticmethod
-    def generic_list_compare(left, tx, op, right, **options):
-        # Most list-like variables implement comparison ops the same way,
-        # so they can re-use this helper.
-        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
-        # but `tuple([2]) != list([2])`
-        if len(left.items) != len(right.items):
-            return ConstantVariable(False, **options)
-        if len(left.items) == 0:
-            return ConstantVariable(True, **options)
-
-        left_curr, left_rest = left.next_variables()
-        right_curr, right_rest = right.next_variables()
-        curr_compare = left_curr.compare(tx, op, right_curr, **options)
-        rest_compare = left_rest.compare(tx, op, right_rest)
-        if len(left.items) == 1:
-            return curr_compare
-        # In practice, SymInts and tensors are the only non-constant variables in our graphs,
-        # and comparison ops on lists of tensors are not supported.
-        from .tensor import DynamicShapeVariable
-
-        assert all(
-            isinstance(x, variables.DynamicShapeVariable)
-            for x in [curr_compare, rest_compare]
-        )
-        curr_proxy = curr_compare.as_proxy()
-        rest_proxy = curr_compare.as_proxy()
-        # And the previous comparison ops that we reduce over should have returned SymBools
-        assert all(
-            "example_value" in x.node.meta
-            and isinstance(x.node.meta["example_value"], torch.SymBool)
-            for x in [curr_proxy, rest_proxy]
-        )
-        return DynamicShapeVariable.create(
-            tx,
-            (operator.and_)(curr_proxy, rest_proxy),
-            dyn_shape=None,
-            **options,
-        )
 
 
 class RangeVariable(BaseListVariable):
@@ -282,18 +238,6 @@ class ListVariable(BaseListVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def next_variables(self):
-        return self.items[0].add_options(self), ListVariable(
-            self.items[1:],
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
-
-    def compare(self, tx, op, right, **options):
-        if not isinstance(right, ListVariable):
-            return ConstantVariable(False, **options)
-        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
-
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
@@ -328,19 +272,6 @@ class TupleVariable(BaseListVariable):
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
         return super().call_method(tx, name, args, kwargs)
-
-    def next_variables(self):
-        return self.items[0].add_options(self), ListVariable(
-            self.items[1:],
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
-
-    def compare(self, tx, op, right, **options):
-        # All tuple-like python constructs can be validly compared (e.g. torch.Size vs tuple)
-        if not isinstance(right, TupleVariable):
-            return ConstantVariable(False, **options)
-        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
 
 
 class SizeVariable(TupleVariable):
