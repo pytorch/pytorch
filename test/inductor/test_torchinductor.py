@@ -123,6 +123,12 @@ unary_list = [
     lambda x: F.gelu(x, approximate="tanh"),
     lambda x: F.relu6(x),
     lambda x: F.silu(x),
+    lambda x: torch.relu(x),
+    lambda x: torch.sigmoid(x),
+    lambda x: torch.tanh(x),
+    lambda x: x.relu(),
+    lambda x: x.sigmoid(),
+    lambda x: x.tanh(),
 ]
 
 
