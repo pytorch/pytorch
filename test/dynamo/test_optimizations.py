@@ -119,8 +119,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r1 = model(input)
         for dynamic_shapes in [True, False]:
             torch._dynamo.reset()
-            torch._dynamo.config.dynamic_shapes = dynamic_shapes
-            opt_model = torch._dynamo.optimize("ipex")(model)
+            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
             with torch.no_grad():
                 for _ in range(3):
                     r2 = opt_model(input)
@@ -136,8 +135,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r1 = model(input)
         for dynamic_shapes in [True, False]:
             torch._dynamo.reset()
-            torch._dynamo.config.dynamic_shapes = dynamic_shapes
-            opt_model = torch._dynamo.optimize("ipex")(model)
+            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
             with torch.no_grad(), torch.cpu.amp.autocast():
                 for _ in range(3):
                     r2 = opt_model(input)
