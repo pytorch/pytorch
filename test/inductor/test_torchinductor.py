@@ -5018,7 +5018,7 @@ class CommonTemplate:
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
         def fn(x, y):
-            z = torch.matmul(x, y.transpose(-1, -2)) / 8.
+            z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
             return z
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
