@@ -551,6 +551,10 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__add__", args[1:], kwargs)
 
     def call_sub(self, tx, *args, **kwargs):
+        # Commute sub when the right-hand side is symbolic
+        # (since e.g. int.__sub__(int, SymInt) is not implemented).
+        if len(args) == 2 and args[1].python_type() in (torch.SymInt, torch.SymFloat):
+            return args[1].call_method(tx, "__rsub__", [args[0]], kwargs)
         return args[0].call_method(tx, "__sub__", args[1:], kwargs)
 
     def call_truediv(self, tx, *args, **kwargs):

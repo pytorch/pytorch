@@ -150,6 +150,36 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torch._dynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
+    def test_int_sub_shape(self):
+        def fn(x):
+            return 3 - x.shape[0]
+
+        # expect 3 ops: shape, index, subtract
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=3)
+
+    def test_param_shape_sub_shape(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+                #self.param = torch.randn(3)
+
+            def forward(self, x):
+                return self.param.shape[0] - x.shape[0]
+
+        counts = torch._dynamo.testing.CompileCounter()
+        mod = MyModule()
+        optimized_mod = torch._dynamo.optimize(counts, nopython=True)(mod)
+
+        x = torch.randn(3)
+        ref = mod(x)
+        res = optimized_mod(x)
+
+        self.assertTrue(same(ref, res))
+        # expect 5 ops: shape and index for param, shape and index for input, subtract
+        self.assertEqual(counts.op_count, 5)
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)

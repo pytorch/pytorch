@@ -98,6 +98,10 @@ class ConstantVariable(VariableTracker):
             if name == "__add__":
                 assert len(args) == 1
                 return args[0].call_method(tx, name, [self], {})
+            # For non-commutative op sub, swap args and invoke rsub.
+            if name == "__sub__":
+                assert len(args) == 1
+                return args[0].call_method(tx, '__rsub__', [self], {})
             # Unfortunate constant
             return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
         try:
