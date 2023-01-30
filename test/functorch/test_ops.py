@@ -1043,7 +1043,6 @@ class TestOperators(TestCase):
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
-        xfail('index_fill'),
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
@@ -1114,8 +1113,6 @@ class TestOperators(TestCase):
         xfail('fill'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
-        xfail('index_copy'),
-        xfail('index_fill'),
         xfail('linalg.householder_product'),
         xfail('lu'),
         xfail('lu_solve'),

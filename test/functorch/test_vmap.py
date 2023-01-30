@@ -3613,7 +3613,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
-        xfail('index_fill'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'amax'),
@@ -3861,10 +3860,82 @@ class TestVmapOperatorsOpInfo(TestCase):
         # There's no OpInfo for this
         def test():
             B = 2
-            x = torch.randn(2, 5, 5, device=device)
+            x = torch.randn(B, 5, 5, device=device)
             self.vmap_outplace_test(torch.slogdet, (x,), {}, (0,))
 
         check_vmap_fallback(self, test, torch.slogdet)
+
+    def test_index_fill(self, device):
+        # There's no OpInfo for these tests
+
+        B = 2
+
+        def test1():
+            # negative dim
+            x = torch.randn(B, 5, 5, device=device)
+            dim = -2
+            index = torch.tensor([[2, 3], [0, 4]], device=device)
+            value = 5.0
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test2():
+            # self batched, self logical rank 1, index logical rank 1
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test3():
+            # self batched, self logical rank 1, index logical rank 0
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test4():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([[0], [0]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test5():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([0, 0], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test6():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test7():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test8():
+            # self batched, self logical rank > 1, index logical rank 0
+            x = torch.zeros(B, 3, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        for test in (test1, test2, test3, test4, test5, test6, test7, test8):
+            check_vmap_fallback(self, test, torch.index_fill)
 
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
