@@ -6,11 +6,13 @@ import weakref
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from weakref import ReferenceType
 
 import torch
+from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import is_float_dtype, is_integer_dtype
-from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
+from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -18,12 +20,13 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils.weak import WeakIdRef
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -136,7 +139,7 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
-# structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
+# structure. Like `MetaConverter`, it uses `WeakIdRef` to
 # hold a weak reference for all memoized tensors.
 class FakeTensorConverter(object):
     @property
@@ -144,7 +147,7 @@ class FakeTensorConverter(object):
         return self.meta_converter.tensor_memo
 
     meta_converter: MetaConverter
-    constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
+    constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
     def __init__(self):
         self.meta_converter = MetaConverter()
@@ -182,14 +185,14 @@ class FakeTensorConverter(object):
         del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t):
-        if WeakTensorRefKey(t) in self.tensor_memo:
-            out = self.tensor_memo[WeakTensorRefKey(t)]
+        if WeakIdRef(t) in self.tensor_memo:
+            out = self.tensor_memo[WeakIdRef(t)]
             out._fix_weakref()
             return out
         return None
 
     def set_tensor_memo(self, t, v):
-        th = WeakTensorRefKey(t)
+        th = WeakIdRef(t)
 
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
@@ -213,7 +216,7 @@ class FakeTensorConverter(object):
         shape_env=None,
         ignore_subclass=False,
         *,
-        sname=None,
+        source=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -246,7 +249,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -282,7 +285,7 @@ class FakeTensorConverter(object):
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
-        sname=None,
+        source=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -290,7 +293,7 @@ class FakeTensorConverter(object):
             make_constant,
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
 
 
@@ -1056,18 +1059,18 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         static_shapes=False,
         ignore_subclass=False,
-        sname: Optional[str] = None,
+        source: Optional[Source] = None,
     ):
         if static_shapes:
             return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass, sname=sname
+                self, tensor, ignore_subclass=ignore_subclass, source=source
             )
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
 
 
@@ -1156,5 +1159,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)

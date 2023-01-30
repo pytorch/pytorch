@@ -228,7 +228,7 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
               args[i].name(),
               " does not have a specified value or default value. ");
 
-          stack.push_back(args[i].default_value());
+          stack.emplace_back(args[i].default_value());
         }
         stack.insert(stack.end(), out_args.rbegin(), out_args.rend());
         fn(stack);

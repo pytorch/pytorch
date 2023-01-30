@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -26,9 +27,8 @@ class TORCH_API Reducer {
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
-  Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
-    interaction_ = interaction;
-  }
+  Reducer(ExprHandle init, RI interaction)
+      : init_(init.node()), interaction_(std::move(interaction)) {}
   virtual ~Reducer() = default;
 
   ExprPtr initializer() const {
@@ -114,7 +114,7 @@ class TORCH_API Reducer {
       const std::vector<VarPtr>& reduce_args) {
     ExprHandle accum =
         ExprHandle(alloc<Load>(body.dtype(), accumulator, output_args));
-    auto e = interaction(accum, body);
+    auto e = interaction(std::move(accum), std::move(body));
     return e.node();
   }
   static ExprHandle complete(
@@ -124,7 +124,7 @@ class TORCH_API Reducer {
       const std::vector<ExprHandle>& output_args,
       const std::vector<VarHandle>& reduce_args) {
     ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
-    auto e = interaction(accum, body);
+    auto e = interaction(std::move(accum), std::move(body));
     return e;
   }
 
@@ -164,9 +164,9 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
-        result_buf_(result_buf),
-        acc_buf_(acc_buf),
-        ri_operand_(ri_operand),
+        result_buf_(std::move(result_buf)),
+        acc_buf_(std::move(acc_buf)),
+        ri_operand_(std::move(ri_operand)),
         reducer_(reducer) {}
 
   static ExprHandle make(

@@ -8,10 +8,13 @@ import re
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 import expecttest
+import subprocess
+import sys
 import torch
 import torch.nn as nn
 import torch.optim
@@ -22,6 +25,7 @@ from torch.autograd import (
     _record_function_with_args_exit,
 )
 from torch.autograd.profiler import profile as _profile
+from torch.autograd.profiler import KinetoStepTracker
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     _utils,
@@ -996,6 +1000,8 @@ class TestProfiler(TestCase):
             # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
             called_num[0] += 1
 
+        initial_step = KinetoStepTracker.current_step()
+
         with profile(
             activities=supported_activities(),
             schedule=torch.profiler.schedule(
@@ -1009,6 +1015,7 @@ class TestProfiler(TestCase):
                 p.step()
 
         self.assertEqual(called_num[0], 2)
+        self.assertEqual(KinetoStepTracker.current_step(), initial_step + 8)
 
         # case without schedule
         with profile(
@@ -1044,6 +1051,49 @@ class TestProfiler(TestCase):
         ]
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
+
+    def test_kineto_profiler_multiple_steppers(self):
+        niters = 8
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        net = SimpleNet()
+        opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+        opt.zero_grad()
+        inputs = torch.rand(10)
+
+        with profile(activities=supported_activities()):
+            self.payload(use_cuda=use_cuda)
+
+        def optimizer_step():
+            """This simulates a step() hook in the optimizer"""
+            KinetoStepTracker.increment_step("yet_another_step")
+
+        initial_step = KinetoStepTracker.current_step()
+
+        def run_batch():
+            out = net(inputs)
+            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+            loss.backward()
+            opt.step()
+            # Manually call the hook. TODO: Remove this once we add the
+            # profiler step hooks in the Optimizer class that will get triggered above.
+            # See https://github.com/pytorch/pytorch/issues/88446
+            optimizer_step()
+
+        for idx in range(niters):
+            run_batch()
+
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                wait=1,
+                warmup=1,
+                active=2),
+        ) as p:
+            for idx in range(niters):
+                run_batch()
+                p.step()
+
+        self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
 
     def test_export_stacks(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), experimental_config=_ExperimentalConfig(verbose=True)) as p:
@@ -1277,6 +1327,78 @@ class TestProfiler(TestCase):
                 # of mm to addmm or other impl, or changing internal order of args
                 self.assertTrue(len(e.input_shapes) > 0)
                 self.assertTrue(len(e.input_shapes[0]) > 0)
+
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    def test_kineto_profiler_with_environment_variable(self):
+        script = """
+import torch
+import torch.nn as nn
+from torch.profiler import supported_activities, profile
+from torch.autograd.profiler import KinetoStepTracker
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 5)
+        self.fc2 = nn.Linear(5, 2)
+
+    def forward(self, x):
+        return self.fc2(self.fc1(x))
+
+
+def payload(use_cuda=False):
+    x = torch.randn(10, 10)
+    if use_cuda:
+        x = x.cuda()
+    y = torch.randn(10, 10)
+    if use_cuda:
+        y = y.cuda()
+    z = torch.mm(x, y)
+    z = z + y
+    if use_cuda:
+        z = z.cpu()
+
+niters = 8
+use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+net = SimpleNet()
+opt = torch.optim.SGD(net.parameters(), lr=0.01)
+opt.zero_grad()
+inputs = torch.rand(10)
+
+with profile(activities=supported_activities()):
+    payload(use_cuda=use_cuda)
+
+initial_step = KinetoStepTracker.current_step()
+
+def run_batch():
+    out = net(inputs)
+    loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+    loss.backward()
+    opt.step()
+
+for _ in range(niters):
+    run_batch()
+
+with profile(
+    activities=supported_activities(),
+    schedule=torch.profiler.schedule(
+        wait=1,
+        warmup=1,
+        active=2),
+) as p:
+    for _ in range(niters):
+        run_batch()
+        p.step()
+assert KinetoStepTracker.current_step() == initial_step + 2 * niters
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-W', 'all', '-c', script],
+                cwd=os.path.dirname(os.path.realpath(__file__))
+            )
+        except subprocess.CalledProcessError as e:
+            if e.returncode != 0:
+                self.assertTrue(False, "Kineto is not working properly with the Dynolog environment variable")
 
 
 def find_node_with_name(nodes, name):

@@ -9,7 +9,7 @@
 
 #include <c10/util/Optional.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -269,4 +269,4 @@ void max_unpool3d_kernel_impl(
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
 
-}} // at::native
+} // at::native
