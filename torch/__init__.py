@@ -1161,12 +1161,12 @@ for name in dir(_C._VariableFunctions):
         continue
     obj = getattr(_C._VariableFunctions, name)
     obj.__module__ = 'torch'
+    # Hide some APIs that should not be public
+    if name == "segment_reduce":
+        name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
         __all__.append(name)
-
-# Hide some APIs that should not be public
-globals()['_segment_reduce'] = globals().pop('segment_reduce')
 
 ################################################################################
 # Import interface functions defined in Python
