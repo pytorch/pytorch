@@ -382,12 +382,16 @@ class BuiltinVariable(VariableTracker):
                     tx.replace_all(curr_iter, next_iter)
                     curr_iter = next_iter
             else:
-                assert len(args) > 2, f"min/max was given an invalid set of arguments: {', '.join([type(x) for x in args])}"
+                assert (
+                    len(args) > 2
+                ), f"min/max was given an invalid set of arguments: {', '.join([type(x) for x in args])}"
                 args_to_reduce = args
             # manually handle the base case for lists: max(single_element_list) = single_element_list[0]
             if len(args_to_reduce) == 1:
                 return args_to_reduce[0]
-            return functools.reduce(lambda a, b: self._call_min_max(tx, a, b), args_to_reduce)
+            return functools.reduce(
+                lambda a, b: self._call_min_max(tx, a, b), args_to_reduce
+            )
 
         # The normal case: min/max called with two args.
         a, b = args
