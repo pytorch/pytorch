@@ -181,10 +181,6 @@ def exception_handler(e, code, frame=None):
         e.record_filename = record_filename
 
     augment_exc_message(e)
-    # Only log the exception if we are going to suppress it
-    # if aren't suppressing it, a higher level except block will handle it
-    if config.suppress_errors:
-        log.error(format_error_msg(e, code, record_filename, frame))
 
 
 def convert_frame_assert(
@@ -406,9 +402,8 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
         except (NotImplementedError, Unsupported):
             log.info("converting frame raised unsupported, leaving it unconverted")
         except Exception:
-            if not config.suppress_errors:
-                raise
-            log.info("converting frame raised error, suppressing error")
+            log.info("converting frame raised error")
+            raise
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
