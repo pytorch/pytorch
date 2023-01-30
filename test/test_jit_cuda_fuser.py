@@ -3194,7 +3194,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(os.environ.get('PYTORCH_NO_CUDA_MEMORY_CACHING') is not None,
                      "skipping graph_rng when caching allocator is disabled")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
-    @unittest.skipIf(CUDA_MAJOR < 11, "requires CUDA11 or above")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_graph_rng(self):

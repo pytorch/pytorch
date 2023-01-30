@@ -286,11 +286,11 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
-  if (selfSlicedSizes.size() > 0) {
+  if (!selfSlicedSizes.empty()) {
     selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
   }
   auto sourceSlicedSizes = source.sizes().vec();
-  if (sourceSlicedSizes.size() > 0) {
+  if (!sourceSlicedSizes.empty()) {
     sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }
   if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
@@ -471,7 +471,7 @@ DEFINE_DISPATCH(scatter_reduce_expanded_index_stub);
 DEFINE_DISPATCH(gather_expanded_index_stub);
 
 static bool all_strides_match(TensorList tensors) {
-  TORCH_CHECK(tensors.size() >= 1);
+  TORCH_CHECK(!tensors.empty());
   auto strides = tensors[0].strides();
   for (auto& tensor : tensors.slice(1)) {
     if (!strides.equals(tensor.strides())) {
@@ -2084,7 +2084,7 @@ Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
-  if (dims.size() > 0) {
+  if (!dims.empty()) {
     return (self != 0).sum(dims);
   }
 
