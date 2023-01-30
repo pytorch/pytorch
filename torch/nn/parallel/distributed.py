@@ -1,15 +1,15 @@
-import sys
 import copy
-from dataclasses import dataclass
-from typing import Callable, Any, Type
-from enum import Enum, auto
 import inspect
 import itertools
 import logging
 import os
+import sys
 import warnings
 import weakref
 from contextlib import contextmanager
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum, auto
+from typing import Callable, Any, Type
 
 import torch
 import torch.distributed as dist
@@ -79,6 +79,11 @@ def _find_tensors(obj):
         return itertools.chain(*map(_find_tensors, obj))
     if isinstance(obj, dict):
         return itertools.chain(*map(_find_tensors, obj.values()))
+    if is_dataclass(obj):
+        return itertools.chain(
+            *map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
+        )
+
     return []
 
 
@@ -710,8 +715,9 @@ class DistributedDataParallel(Module, Joinable):
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
+            param_to_handle_map = dist.optim.apply_optimizer_in_backward.param_to_optim_hook_handle_map
             for p in self._module_parameters:
-                for handle in getattr(p, '_optimizer_hook_handles', []):
+                for handle in param_to_handle_map.get(p, []):
                     handle.remove()
 
             # Need a weakref to the reducer in order to run all_reduce.
@@ -1139,7 +1145,6 @@ class DistributedDataParallel(Module, Joinable):
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
-            buffer_hook_registered = hasattr(self, "buffer_hook")
             if self._check_sync_bufs_pre_fwd():
                 self._sync_buffers()
 
