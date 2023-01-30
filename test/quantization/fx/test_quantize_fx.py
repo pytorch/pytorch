@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 import contextlib
+import warnings
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -1388,6 +1389,38 @@ class TestQuantizeFx(QuantizationTestCase):
         m(*example_inputs)
         m = convert_fx(m)
         m(*example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_warning_if_no_forward_pass(self):
+        """ Make sure that users are warned if they try to convert
+            their observed models without running any forward passes through them.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return {"output": self.conv(x["input"])}
+
+        example_inputs = ({"input": torch.randn(1, 1, 1, 1)},)
+        m = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        warnings.filterwarnings("error")
+        with self.assertRaisesRegex(
+            UserWarning,
+            "The model's forward pass has not been called. "
+            "This means that any observers in the model would not have recorded any data. "
+            "Please check if you passed the correct model into `convert`."
+        ):
+            convert_fx(m)
+        
+        # Now run with some inputs
+        m(*example_inputs)
+        # There is no exception from warnings
+        convert_fx(m)
+        warnings.resetwarnings()
 
     @override_qengines
     def test_attention(self):

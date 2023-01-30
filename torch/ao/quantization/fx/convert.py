@@ -899,6 +899,14 @@ def convert(
     if backend_config is None:
         backend_config = get_native_backend_config()
 
+    assert _is_observed_module(model)
+    if not model.forward.was_called:
+        warnings.warn(
+            "The model's forward pass has not been called. This means that any observers "
+            "in the model would not have recorded any data. Please check if you passed the "
+            "correct model into `convert`."
+        )
+
     node_name_to_scope, prepare_custom_config, observed_node_names = _restore_state(model)
     node_name_to_qconfig: Dict[str, QConfigAny] = model._node_name_to_qconfig  # type: ignore[assignment]
 

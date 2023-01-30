@@ -1,7 +1,9 @@
+import functools
+from typing_extensions import override
 import torch
 import copy
 from torch.fx import GraphModule
-from torch.fx.graph import Graph
+from torch.fx.graph import Graph, PythonCode
 from typing import Union, Dict, Any, Set
 
 __all__ = [
@@ -53,6 +55,24 @@ class ObservedGraphModule(GraphModule):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
+    
+    @override
+    def recompile(self) -> PythonCode:
+        cls = type(self)
+        previously_called = hasattr(cls.forward, 'was_called') and cls.forward.was_called
+
+        python_code = super().recompile()
+        # Wrap the recompiled forward function so that we can tell if it has been called
+        cls = type(self)
+        cls.forward = was_called(cls.forward, previously_called)
+        return python_code
+
+def was_called(func, init):
+  def wrapper(*args, **kwargs):
+    wrapper.was_called = True
+    return func(*args, **kwargs)
+  wrapper.was_called = init
+  return wrapper
 
 def _is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
