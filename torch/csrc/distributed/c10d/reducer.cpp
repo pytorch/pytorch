@@ -631,12 +631,14 @@ void Reducer::autograd_hook(size_t index) {
     });
   }
 
-  if (static_graph_first_iteration() && !static_graph_first_iteration_cb_enqueued_) {
-    torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      this->delay_all_reduce();
-    });
-    static_graph_first_iteration_cb_enqueued_ = true;
+  if (static_graph_first_iteration()) {
     numGradHooksTriggeredMap_[index] += 1;
+    if (!static_graph_first_iteration_cb_enqueued_) {
+      torch::autograd::Engine::get_default_engine().queue_callback([=] {
+        this->delay_all_reduce();
+      });
+      static_graph_first_iteration_cb_enqueued_ = true;
+    }
     return;
   }
 
