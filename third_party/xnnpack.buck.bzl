@@ -1820,6 +1820,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_NO_X32_OPERATORS",
             "-DXNN_NO_X8_OPERATORS",
             "-DXNN_NO_XX_OPERATORS",
+            "-DXNN_ENABLE_MEMOPT",
         ],
         srcs = [
             "XNNPACK/src/allocator.c",
