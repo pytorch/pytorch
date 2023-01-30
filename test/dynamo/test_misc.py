@@ -19,7 +19,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.utils import ifdyn
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
 from torch._dynamo.output_graph import OutputGraph
@@ -29,6 +28,7 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+from torch._dynamo.utils import ifdyn
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase

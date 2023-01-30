@@ -35,8 +35,8 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 
 import torch
-from torch import fx
 import torch.fx.experimental.symbolic_shapes
+from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -1164,7 +1164,7 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            unimplemented(f"guard on data-dependent symbolic int/float")
+            unimplemented("guard on data-dependent symbolic int/float")
         raise TorchRuntimeError() from e
 
 

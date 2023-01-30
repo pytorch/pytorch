@@ -27,9 +27,9 @@ except ImportError:
     from .test_minifier import requires_cuda
 
 from torch import nn
-from torch._dynamo.utils import ifdyn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.utils import ifdyn
 from torch.nn import functional as F
 
 try:
