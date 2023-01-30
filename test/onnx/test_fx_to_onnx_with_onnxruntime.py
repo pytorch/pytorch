@@ -5,9 +5,10 @@ import io
 import unittest
 from typing import Any, Sequence, Tuple, Union
 
-import onnx_test_common
-import onnxruntime  # type: ignore[import]
 import torch
+import onnx_test_common
+# import onnxruntime  # type: ignore[import]
+import onnx.reference
 import transformers  # type: ignore[import]
 from torch import nn
 from torch.nn import functional as F
@@ -24,10 +25,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def _run_ort(
         self, onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
     ) -> Sequence[Any]:
-        session = onnxruntime.InferenceSession(
-            onnx_model, providers=["CPUExecutionProvider"]
-        )
-        input_names = [ort_input.name for ort_input in session.get_inputs()]
+        session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=5)
+        input_names = session.input_names
         return session.run(
             None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
         )
@@ -76,7 +75,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         self.run_test_with_fx_to_onnx_exporter(MNISTModel(), (tensor_x,))
-
 
     # test single op with no kwargs
     def test_sigmoid(self):
