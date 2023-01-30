@@ -6,7 +6,7 @@ import warnings
 import functools
 import math
 
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -54,17 +54,27 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
     else:
         return math.sqrt(x)
 
-
-# We try to use the foreach implementation on CUDA whenever possible since
-# it is faster than the for-loop implementation. However, the foreach
-# implementation is not differentiable, so we must check differentiable=False.
-def _default_to_foreach(tensorlists: List[List[torch.Tensor]], differentiable: bool = False) -> bool:
+# For any optimizer with a faster implementation, we attempt to default to the
+# fastest whenever possible. For foreach, the requirements are to have native
+# tensors all on CUDA. For fused, there's currently the additional requirement
+# that the tensors' dtypes must be floating point. Neither alternative supports
+# torch.jit.script nor differentiable, so we fall back to the single tensor
+# implementation in those cases.
+def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
+                                 differentiable: bool,
+                                 has_fused: bool = False) -> Tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
-        return False
+        return False, False
     all_tensors = []
     for tensorlist in tensorlists:
         all_tensors.extend(tensorlist)
-    return all(p is None or (p.is_cuda and type(p) == torch.Tensor) for p in all_tensors)
+    fused = has_fused and all(
+        p is None or (type(p) == torch.Tensor and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+    )
+    foreach = not fused and all(
+        p is None or (type(p) == torch.Tensor and p.is_cuda) for p in all_tensors
+    )
+    return fused, foreach
 
 
 # Common doc strings among optimizers
