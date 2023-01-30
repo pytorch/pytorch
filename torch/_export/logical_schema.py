@@ -62,7 +62,6 @@ class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
 #     as_flaot: float = None
 #     as_sym: str = None
 
-# Scalar = Union[int, float, bool]
 
 # This is a Tensor Arugment used in the args of an node
 # We intentionally don't store the tensor's storage, nor the tensor's meta data here,
@@ -103,11 +102,6 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 
     as_symint: SymIntArgument = None         # Symint can be an argument, there are symint in native_function.yaml
     as_symints: List[SymIntArgument] = None   # Symint[] can be an argement, there are symint[] in native_function.yaml
-
-    # !!! Looks like we don't need Scalar type during serialization,
-    # as it will always be a concrete type, one of int, float, bool
-    # as_scalar: Scalar = None
-    # List[Scalar], # !!! Scalar[] is in native_function.yaml, but not used in canonical aten ops yet
 
     as_bool: bool = None
 
@@ -231,16 +225,12 @@ class NodeMetadata:
 
 
 # Maps to fx.Node
+# Node can only be 'call_function' ops
+# 'placeholder' and 'output' are serialized as inputs and outputs of the Graph
+# 'get_attr' is not needed anymore, as it's an implicit lookup from GraphModule's parameters/buffers
+# 'call_method' and 'call_module' is not supported, as it's not used in the canonical FX Graph
 @dataclass
 class Node:
-    # In fx, it can be one of ['placeholder', 'call_function', 'get_attr', 'output']
-    # Only call_function can be present here
-    # call_method and call_module are not supported, as they shouldn't apprear in the Caononical FX Graph
-    # placeholder and output are serialized as inputs and outputs of the Graph
-    # !!! Consider using an enum instead of string
-    # !!! Consider removeing this field, as it can only be call_function
-    op: str
-
     # fully qualified name to the target, e.g. aten.add.Tensnor
     # !!! Consider using a structured operator name instead of string
     target: str
