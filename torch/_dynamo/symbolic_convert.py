@@ -48,18 +48,20 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import ConstantVariable, EnumVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -80,7 +82,7 @@ from .variables.misc import (
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +279,30 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                state = self.copy_graphstate()
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
+                    self.output.guards.update(result.guards)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    # rollback to the state before the __bool__ inline
+                    self.restore_graphstate(state)
+                    unimplemented(
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
+                    )
+            # __bool__ is non-function or not existed in the user defined object
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -306,7 +332,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -831,11 +857,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
-        if sys.version_info < (3, 8):
-            assert exc.is_python_constant()
-            assert exc.as_python_constant() is None
-        else:
-            assert exc is None
+        assert exc is None
         self.push(exc)
         self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
 
@@ -845,13 +867,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def END_FINALLY(self, inst):
         tos = self.pop()
-        if sys.version_info < (3, 8):
-            # python3.7 and 3.8 can have END_FINALLY without BEGIN_FINALLY
-            assert tos is None or (
-                tos.is_python_constant() and tos.as_python_constant() is None
-            )
-        else:
-            assert tos is None
+        assert tos is None
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1135,8 +1151,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.specialized_value is not None
+            assert (
+                isinstance(k, ConstantVariable)
+                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
+                or isinstance(k, EnumVariable)
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1163,11 +1181,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def MAP_ADD(self, inst):
-        if sys.version_info < (3, 8):
-            v, k = self.popn(2)
-        else:
-            k, v = self.popn(2)
-
+        k, v = self.popn(2)
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
@@ -1641,8 +1655,17 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
         self.symbolic_locals = collections.OrderedDict(
-            (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
+            (
+                k,
+                VariableBuilder(
+                    self,
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
+                )(f_locals[k]),
+            )
             for k in vars
             if k in f_locals
         )
@@ -1747,7 +1770,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         _step_logger()(
@@ -1796,9 +1819,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
-        except TypeError as exc:
+        except TypeError as e:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
             )
             unimplemented("arg mismatch inlining")
 
@@ -1822,7 +1845,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
-        tracer.run()
+        try:
+            tracer.run()
+        except exc.SkipFrame as e:
+            msg = f"SKIPPED INLINING {code}: {e}"
+            log.debug(msg)
+            raise Unsupported(msg) from e
+        except Exception as e:
+            log.debug(f"FAILED INLINING {code}")
+            raise
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 
