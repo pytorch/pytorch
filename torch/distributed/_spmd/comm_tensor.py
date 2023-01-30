@@ -5,7 +5,7 @@ from typing import Any, List, Optional, Tuple
 
 import torch
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor_utils import (
+from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
     get_innermost_proxy_mode,
     fetch_tensor_proxy,
