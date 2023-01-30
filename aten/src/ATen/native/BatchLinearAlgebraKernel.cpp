@@ -928,16 +928,15 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
           infos_working_ptr);
     }
   };
-  int64_t matrix_size = std::min(m, n);
-  int64_t computational_complexity =
-      std::log(batch_size) + 3 * std::log(matrix_size);
+  int64_t matrix_rank = std::min(m, n);
   // A threshold test out on 32 core/socket ICX system
-  bool do_parallel = computational_complexity >= std::log(102400);
-  if (do_parallel) {
-    at::parallel_for(0, batch_size, 0, loop);
-  } else {
-    loop(0, batch_size);
-  }
+  int64_t grain_size;
+  float log_grain_size = std::log(3200) - 3 * std::log(matrix_rank);
+  if (log_grain_size < 0)
+    grain_size = 1;
+  else
+    grain_size = int(std::exp(log_grain_size));
+  at::parallel_for(0, batch_size, grain_size, loop);
 #endif
 }
 
