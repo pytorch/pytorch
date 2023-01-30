@@ -34,7 +34,8 @@ class _OptimizerHookState(object):
                 f"{_FUNCTIONAL_OPTIM_STEP_METHOD_NAME}."
             )
 
-# TODO (rohan-varma): Unify the below hooks once DDP MP + optimizer overlap
+# TODO (rohan-varma): Unify this hook with optimizer overlap hook
+# once DDP MP + optimizer overlap
 # is enabled to work together.
 @dataclass
 class _AllreduceUpcastHookState:
@@ -91,6 +92,7 @@ def _reducer_allreduce_and_upcast_hook(
         for p in hook_state.ddp_inst.module.parameters():
             if hasattr(p, '_hook_state'):
                 p._hook_state[1].remove()
+                delattr(p, '_hook_state')
         # TODO: rohan-varma put this in post-backward
         # for p in self.module.parameters():
         #     if hasattr(p, '_hook_state'):

@@ -1,5 +1,6 @@
 import copy
 import functools
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Any, Optional, Type
 from enum import Enum, auto
@@ -800,7 +801,7 @@ class DistributedDataParallel(Module, Joinable):
             _cast_buffers(self.mixed_precision, self.module)
             # Stream used for async low precision copies.
             self._mp_stream = torch.cuda.Stream()
-            self._submodule_to_event = {}
+            self._submodule_to_events = defaultdict(deque)
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
             #print("registering cast_hook")
@@ -901,9 +902,10 @@ class DistributedDataParallel(Module, Joinable):
         self.reducer._autograd_hook(idx)
 
     def _use_low_precision_param(
-        self, mixed_precision_config: MixedPrecision, module, submodule_to_event
+        self, mixed_precision_config: MixedPrecision, submodule_to_event
     ):
-        for submodule in module.modules():
+        # TODO (rohan-varma): figure out module execution order + unused modules
+        for submodule in self.module.modules():
             #print(f"iterating submodule {submodule}")
             for param in submodule.parameters(recurse=False):
                 # TODO (rohan-varma): ignored parameter support (ignored params)
@@ -916,12 +918,11 @@ class DistributedDataParallel(Module, Joinable):
                 param.data = param._mp_param
             copy_event = torch.cuda.Event()
             copy_event.record()
-            submodule_to_event[submodule] = copy_event
+            submodule_to_event[submodule].append(copy_event)
 
 
     def _root_copy_hook(
         self,
-        module,
         *args: Any,
         **kwargs: Any
     ) -> None:
@@ -929,10 +930,13 @@ class DistributedDataParallel(Module, Joinable):
         When training with DDP mixed precision, this root pre-forward hook enqueues
         low precision copies (on a separate stream).
         """
+        # Clear out previous iteration submodule to event. This is because we
+        # may have populated some events for modules that didn't end up being
+        # used.
+        self._submodule_to_event = defaultdict(deque)
         with torch.cuda.stream(self._mp_stream):
             self._use_low_precision_param(
                 mixed_precision_config=self.mixed_precision,
-                module=module,
                 submodule_to_event=self._submodule_to_event,
             )
 
@@ -949,13 +953,23 @@ class DistributedDataParallel(Module, Joinable):
         Before carrying out computation, wait on the appropriate event to ensure
         low precision copies have finished.
         """
-        event = self._submodule_to_event.pop(module)
+        try:
+            event = self._submodule_to_event[module].popleft()
+        except IndexError:
+            # copy event has already been waited on
+            return
+
         event.wait(stream=torch.cuda.current_stream())
         for p in module.parameters(recurse=False):
+            if not p.requires_grad:
+                return
+            # We need to register autograd hook here instead of DDP's ctor
+            # since we're working with the low precision param.
             # Get grad acc
             tmp = p.expand_as(p)
             grad_acc = tmp.grad_fn.next_functions[0][0]
             #print(f"RV: registering hook at {self.num_iterations}")
+
             h=grad_acc.register_hook(functools.partial(self.my_hook, p._idx))
             p._hook_state = (grad_acc, h)
             #assert p.data.dtype == self.mixed_precision.param_dtype
@@ -1372,7 +1386,7 @@ class DistributedDataParallel(Module, Joinable):
             # call _rebuild_buckets before the peak memory usage increases
             # during forward computation.
             # This should be called only once during whole training period.
-            if False and torch.is_grad_enabled() and self.reducer._rebuild_buckets():
+            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logger.info(
                     "Reducer buckets have been rebuilt in this iteration."
                 )

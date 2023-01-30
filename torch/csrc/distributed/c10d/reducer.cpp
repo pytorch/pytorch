@@ -312,6 +312,7 @@ void Reducer::check_grad_layout(
     const at::Tensor& grad,
     const at::Tensor& bucket_view) {
   // Ensure that the gradient type matches the bucket type.
+  // TODO (rohan-varma) make this mixed precision aware.
   // REDUCER_CHECK(
   //     grad.options().type_equal(bucket_view.options()),
   //     logger_,
@@ -610,7 +611,7 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
-  LOG(INFO) << "Running autograd hook!";
+//  LOG(INFO) << "Running autograd hook!";
 
   grad_ready_order_indices_.push_back(index);
 
@@ -913,7 +914,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.sizes_vec,
       variables_for_bucket);
 
-  if (process_group_->getRank() ==0) LOG(INFO) << "RV: running comm hook";
+//  if (process_group_->getRank() ==0) LOG(INFO) << "RV: running comm hook";
   bucket.future_work = run_comm_hook(grad_bucket);
 }
 
@@ -1715,7 +1716,7 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -1811,8 +1812,6 @@ void Reducer::ensure_prior_reduction_finished() {
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
     TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
-    const std::string unmarkedParamIndices =
-        c10::Join(", ", unmarked_param_indices);
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "

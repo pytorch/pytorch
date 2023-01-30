@@ -15,17 +15,14 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+    - name: Get jobid or fail
+      # timeout-minutes is unsupported for composite workflows, see https://github.com/actions/runner/issues/1979
+      # timeout-minutes: 10
+      shell: bash
       id: get-job-id
+      run: |
+        set -eux
+        GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+        echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      with:
-        shell: bash
-        timeout_minutes: 10
-        max_attempts: 5
-        retry_wait_seconds: 30
-        command: |
-          set -eux
-          python3 -m pip install requests==2.26.0
-          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"

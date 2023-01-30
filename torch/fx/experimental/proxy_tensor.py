@@ -18,12 +18,13 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+from torch.utils._stats import count
 
 from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
-from torch import SymInt, SymFloat
+from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
@@ -57,7 +58,7 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
-py_sym_types = (SymInt, SymFloat)
+py_sym_types = (SymInt, SymFloat, SymBool)
 def is_sym_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
@@ -104,7 +105,7 @@ def snapshot_fake(val):
 def unwrap_proxy(proxy_mode, e):
     if isinstance(e, torch.Tensor):
         return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
-    elif isinstance(e, (torch.SymInt, torch.SymFloat)):
+    elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         return get_proxy_slot(e.node, proxy_mode.tracer, e, lambda e: e())
     else:
         return e
@@ -263,7 +264,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
         pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
         # TODO: maybe constant SymInts should also be allowed?  Not sure if
         # this can happen
-        and pytree.tree_all_only((SymInt, SymFloat), lambda _: False, (args, kwargs))
+        and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
     )
 
     if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
@@ -282,7 +283,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
                 "It's likely that this is caused by data-dependent control flow or similar."
             )
     proxy_args, proxy_kwargs = pytree.tree_map_only(
-        (SymInt, SymFloat),
+        (SymInt, SymFloat, SymBool),
         fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
@@ -392,7 +393,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
-        super().__init__()
+        super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
 
@@ -425,7 +426,7 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
-        elif isinstance(a, (SymInt, SymFloat)):
+        elif isinstance(a, (SymInt, SymFloat, SymBool)):
             assert a.node.constant is not None
             return a.node.constant
         return super().create_arg(a)
@@ -459,7 +460,7 @@ def wrap_key(f, tensors, tracer):
             out
         )
         out = pytree.tree_map_only(
-            (SymInt, SymFloat),
+            (SymInt, SymFloat, SymBool),
             lambda t: get_proxy_slot(t.node, tracer)(),
             out
         )
@@ -477,6 +478,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.trace_state = {}
         self._managers = []
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
@@ -526,7 +528,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         finally:
             self.enable_tracing = old
 
-    def _compute_proxy(self, func, args, out: Union[SymInt, SymFloat]):
+    def _compute_proxy(self, func, args, out: Union[SymInt, SymFloat, SymBool]):
         n_args = tuple(
             get_proxy_slot(a.node, self.tracer)().node if isinstance(a, py_sym_types) else a
             for a in args
