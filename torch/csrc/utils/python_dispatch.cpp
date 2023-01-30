@@ -59,7 +59,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = std::string(key) == ""
+  auto mb_key = std::string(key).empty()
       ? c10::nullopt
       : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
@@ -346,7 +346,7 @@ void initDispatchBindings(PyObject* module) {
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
-            std::string(dispatch) == ""
+            std::string(dispatch).empty()
                 ? c10::nullopt
                 : c10::make_optional(c10::parseDispatchKey(dispatch)),
             "/dev/null", // temporary workaround
@@ -591,7 +591,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_print_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -605,7 +605,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -614,7 +614,8 @@ void initDispatchBindings(PyObject* module) {
         names.reserve(op_names.size());
         for (auto& op : op_names) {
           names.push_back(
-              op.name + (op.overload_name == "" ? "" : "." + op.overload_name));
+              op.name +
+              (op.overload_name.empty() ? "" : "." + op.overload_name));
         }
         return names;
       },
