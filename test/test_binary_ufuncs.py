@@ -1110,13 +1110,11 @@ class TestBinaryUfuncs(TestCase):
                         complex(1.0, 0.0),
                         complex(0.0, -1.0),
                         complex(0.0, 0.0)]
-        # using tensor of size-1 because we still need to fix the vectorized path
-        for nom, denom, expected in zip(nom_lst, denom_lst, expected_lst):
-            nom_tens = torch.tensor(nom, dtype=dtype, device=device)
-            denom_tens = torch.tensor(denom, dtype=dtype, device=device)
-            expected_tens = torch.tensor(expected, dtype=dtype, device=device)
-            res_tens = nom_tens / denom_tens
-            self.assertEqual(res_tens, expected_tens)
+        nom = torch.tensor(nom_lst, dtype=dtype, device=device)
+        denom = torch.tensor(denom_lst, dtype=dtype, device=device)
+        expected = torch.tensor(expected_lst, dtype=dtype, device=device)
+        res = nom / denom
+        self.assertEqual(res, expected)
 
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message

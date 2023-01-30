@@ -680,7 +680,12 @@ public:
     return ret;
   }
   __m512 abs_() const {
-    return _mm512_sqrt_ps(abs_2_());                // abs     abs
+    // values: a + ib
+    // not using abs_2_ to prevent overflow/underflow for large/small numbers
+    auto shift = _mm512_permute_ps(values, 0xB1);          // b       a
+    auto a = _mm512_mask_blend_ps(0x5555, values, shift);  // a       a
+    auto b = _mm512_mask_blend_ps(0xAAAA, values, shift);  // b       b
+    return Sleef_hypotf16_u05(a, b);                        // abs     abs
   }
   Vectorized<c10::complex<float>> abs() const {
     const __m512 real_mask = _mm512_castsi512_ps(_mm512_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
@@ -941,16 +946,18 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2()
   //im = (bc - ad)/abs_2()
+  auto b_abs = b.abs_();                     // |c,d|       |c,d|
+  auto a2 = _mm512_div_ps(a, b_abs);         // a/|c,d|     b/|c,d|
+  auto b2 = _mm512_div_ps(b, b_abs);         // c/|c,d|     d/|c,d|
+  auto acbd2 = _mm512_mul_ps(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
+
   const __m512 sign_mask = _mm512_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0,
                                           -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto ac_bd = _mm512_mul_ps(a, b);         //ac       bd
-
-  auto d_c = _mm512_permute_ps(b, 0xB1);    //d        c
-  d_c = _mm512_xor_ps(sign_mask, d_c);      //-d       c
-  auto ad_bc = _mm512_mul_ps(a, d_c);       //-ad      bc
-
-  auto re_im = Vectorized<c10::complex<float>>::hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
-  return _mm512_div_ps(re_im, b.abs_2_());
+  auto dc2 = _mm512_permute_ps(b2, 0xB1);    // d/|c,d|         c/|c,d|
+  dc2 = _mm512_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
+  auto adbc2 = _mm512_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
+  auto res2 = Vectorized<c10::complex<double>>::hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  return res2;
 }
 
 // reciprocal. Implement this here so we can use multiplication.

@@ -174,7 +174,12 @@ public:
     return hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m512d abs_() const {
-    return _mm512_sqrt_pd(abs_2_());                // abs     abs
+    // values: a + ib
+    // not using abs_2_ to prevent overflow/underflow for large/small numbers
+    auto shift = _mm512_permute_pd(values, 0x55);        // b       a
+    auto a = _mm512_mask_blend_pd(0x55, values, shift);  // a       a
+    auto b = _mm512_mask_blend_pd(0xAA, values, shift);  // b       b
+    return Sleef_hypotd8_u05(a, b);                      // abs     abs
   }
   Vectorized<c10::complex<double>> abs() const {
     const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
@@ -440,15 +445,17 @@ template <> Vectorized<c10::complex<double>> inline operator/(const Vectorized<c
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2()
   //im = (bc - ad)/abs_2()
+  auto b_abs = b.abs_();                     // |c,d|       |c,d|
+  auto a2 = _mm512_div_pd(a, b_abs);         // a/|c,d|     b/|c,d|
+  auto b2 = _mm512_div_pd(b, b_abs);         // c/|c,d|     d/|c,d|
+  auto acbd2 = _mm512_mul_pd(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
+
   const __m512d sign_mask = _mm512_setr_pd(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto ac_bd = _mm512_mul_pd(a, b);         //ac       bd
-
-  auto d_c = _mm512_permute_pd(b, 0x55);    //d        c
-  d_c = _mm512_xor_pd(sign_mask, d_c);      //-d       c
-  auto ad_bc = _mm512_mul_pd(a, d_c);       //-ad      bc
-
-  auto re_im = Vectorized<c10::complex<double>>::hadd_pd(ac_bd, ad_bc);//ac + bd  bc - ad
-  return _mm512_div_pd(re_im, b.abs_2_());
+  auto dc2 = _mm512_permute_pd(b2, 0x55);    // d/|c,d|         c/|c,d|
+  dc2 = _mm512_xor_pd(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
+  auto adbc2 = _mm512_mul_pd(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
+  auto res2 = Vectorized<c10::complex<double>>::hadd_pd(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  return res2;
 }
 
 // reciprocal. Implement this here so we can use multiplication.

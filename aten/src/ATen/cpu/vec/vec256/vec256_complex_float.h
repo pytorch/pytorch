@@ -157,7 +157,13 @@ public:
     return _mm256_permute_ps(ret, 0xD8);
   }
   __m256 abs_() const {
-    return _mm256_sqrt_ps(abs_2_());                // abs     abs
+    // values: a + ib
+    // not using abs_2_ to prevent overflow/underflow for large/small numbers
+    auto shift = _mm256_permute_ps(values, 0xB1);   // b       a
+    auto a = _mm256_blend_ps(values, shift, 0x55);  // a       a
+    auto b = _mm256_blend_ps(values, shift, 0xAA);  // b       b
+    return Sleef_hypotf8_u05(a, b);                // abs     abs
+    // return _mm256_hypot_ps(a, b);                   // abs     abs
   }
   Vectorized<c10::complex<float>> abs() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
@@ -404,16 +410,17 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2()
   //im = (bc - ad)/abs_2()
+  auto b_abs = b.abs_();                     // |c,d|       |c,d|
+  auto a2 = _mm256_div_ps(a, b_abs);         // a/|c,d|     b/|c,d|
+  auto b2 = _mm256_div_ps(b, b_abs);         // c/|c,d|     d/|c,d|
+  auto acbd2 = _mm256_mul_ps(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
+
   const __m256 sign_mask = _mm256_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
-
-  auto d_c = _mm256_permute_ps(b, 0xB1);    //d        c
-  d_c = _mm256_xor_ps(sign_mask, d_c);      //-d       c
-  auto ad_bc = _mm256_mul_ps(a, d_c);       //-ad      bc
-
-  auto re_im = _mm256_hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
-  re_im = _mm256_permute_ps(re_im, 0xD8);
-  return _mm256_div_ps(re_im, b.abs_2_());
+  auto dc2 = _mm256_permute_ps(b2, 0x05);    // d/|c,d|         c/|c,d|
+  dc2 = _mm256_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
+  auto adbc2 = _mm256_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
+  auto res2 = _mm256_hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  return res2;
 }
 
 // reciprocal. Implement this here so we can use multiplication.
