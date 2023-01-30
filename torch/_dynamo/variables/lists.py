@@ -1,4 +1,3 @@
-import operator
 from typing import Dict, List, Optional
 
 import torch
@@ -106,6 +105,10 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def generic_list_compare(left, tx, op, right, **options):
+        assert not (
+            left.is_python_constant() and right.is_python_constant()
+        ), "Illegal generic list compare on constant lists"
+
         # Most list-like variables implement comparison ops the same way,
         # so they can re-use this helper.
         # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
@@ -115,34 +118,14 @@ class BaseListVariable(VariableTracker):
         if len(left.items) == 0:
             return ConstantVariable(True, **options)
 
-        left_curr, left_rest = left.next_variables()
-        right_curr, right_rest = right.next_variables()
-        curr_compare = left_curr.compare(tx, op, right_curr, **options)
-        rest_compare = left_rest.compare(tx, op, right_rest)
-        if len(left.items) == 1:
-            return curr_compare
-        # In practice, SymInts and tensors are the only non-constant variables in our graphs,
-        # and comparison ops on lists of tensors are not supported.
-        from .tensor import DynamicShapeVariable
+        for l_r in zip(left.items, right.items):
+            l = l_r[0]
+            r = l_r[1]
+            if type(l) != type(r):
+                return ConstantVariable(False, **options)
+            l.compare(tx, op, r, **options)
 
-        assert all(
-            isinstance(x, variables.DynamicShapeVariable)
-            for x in [curr_compare, rest_compare]
-        )
-        curr_proxy = curr_compare.as_proxy()
-        rest_proxy = curr_compare.as_proxy()
-        # And the previous comparison ops that we reduce over should have returned SymBools
-        assert all(
-            "example_value" in x.node.meta
-            and isinstance(x.node.meta["example_value"], torch.SymBool)
-            for x in [curr_proxy, rest_proxy]
-        )
-        return DynamicShapeVariable.create(
-            tx,
-            (operator.and_)(curr_proxy, rest_proxy),
-            dyn_shape=None,
-            **options,
-        )
+        return left
 
 
 class RangeVariable(BaseListVariable):
