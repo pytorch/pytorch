@@ -263,7 +263,7 @@ void collectNestedUses(
       collectNestedUses(
           closed_over_values, new_values, externalValuesMap, node);
     }
-  } else if (input_node->blocks().size() != 0) {
+  } else if (!input_node->blocks().empty()) {
     TORCH_INTERNAL_ASSERT(false, input_node, " kind not handled yet");
   }
   for (Value* output : input_node->outputs()) {
