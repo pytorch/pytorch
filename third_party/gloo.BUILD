@@ -1,7 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//tools/rules:cu.bzl", "cu_library")
-load("@//third_party:substitution.bzl", "template_rule")
-load("@//tools/config:defs.bzl", "if_cuda")
+load("@pytorch//tools/rules:cu.bzl", "cu_library")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
+load("@pytorch//tools/config:defs.bzl", "if_cuda")
 
 template_rule(
     name = "gloo_config_cmake_macros",

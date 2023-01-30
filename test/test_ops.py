@@ -1753,7 +1753,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.rsub',
-        # duplicated due to efficiency concerns of the ref vs the decomp
+        # duplicated as refs do not have decent support for advanced indexing
+        '_refs.index_copy',
+        '_refs.index_copy_',
+        '_refs.index_add',
         '_refs.index_add_',
         # these are not aten ops?
         '_refs._conversions.bfloat16',

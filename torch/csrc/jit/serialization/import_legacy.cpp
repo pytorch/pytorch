@@ -18,8 +18,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::PyTorchStreamReader;
 void postSetStateValidate(const IValue& v);
@@ -399,5 +398,4 @@ Module LEGACY_deserialize(
   return deserializer.LEGACY_deserialize();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

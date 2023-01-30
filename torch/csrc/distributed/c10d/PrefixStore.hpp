@@ -8,10 +8,10 @@ namespace c10d {
 class TORCH_API PrefixStore : public Store {
  public:
   explicit PrefixStore(
-      const std::string& prefix,
+      std::string  prefix,
       c10::intrusive_ptr<Store> store);
 
-  virtual ~PrefixStore(){};
+  virtual ~PrefixStore()= default;
 
   using Store::set;
   void set(const std::string& key, const std::vector<uint8_t>& value) override;

@@ -136,7 +136,7 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
           (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
         continue;
       }
-      ret.emplace_back(std::make_pair(backend, scalar_type));
+      ret.emplace_back(backend, scalar_type);
     }
   }
 

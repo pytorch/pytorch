@@ -36,8 +36,8 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
       timeout-minutes: 300
 
-  linux-focal-rocm5_3-py3_8-slow-build:
-    name: linux-focal-rocm5.3-py3.8-slow
+  linux-focal-rocm5_3-py3_8-build:
+    name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-rocm5.3-py3.8
@@ -46,39 +46,21 @@ jobs:
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
+      # test-matrix: |
+      #   { include: [
+      #     { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+      #     { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+      #     { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+      #   ]}
 
-  linux-focal-rocm5_3-py3_8-slow-test:
-    name: linux-focal-rocm5.3-py3.8-slow
+  linux-focal-rocm5_3-py3_8-test:
+    name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_3-py3_8-slow-build
+    needs: linux-focal-rocm5_3-py3_8-build
     with:
       build-environment: linux-focal-rocm5.3-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_3-py3_8-slow-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_3-py3_8-slow-build.outputs.test-matrix }}
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
-
-  linux-focal-rocm5_3-py3_8-distributed-build:
-    name: linux-focal-rocm5.3-py3.8-distributed
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-focal-rocm5.3-py3.8
-      docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
-      test-matrix: |
-        { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-        ]}
-
-  linux-focal-rocm5_3-py3_8-distributed-test:
-    name: linux-focal-rocm5.3-py3.8-distributed
-    uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_3-py3_8-distributed-build
-    with:
-      build-environment: linux-focal-rocm5.3-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_3-py3_8-distributed-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_3-py3_8-distributed-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-rocm5_3-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_3-py3_8-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -168,9 +150,9 @@ jobs:
       cuda-version: "11.7"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 

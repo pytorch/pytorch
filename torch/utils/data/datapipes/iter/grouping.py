@@ -227,7 +227,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def group_fn(file):
-        ...    return os.path.basename(file).split(".")[0]
+        ...     return os.path.basename(file).split(".")[0]
         >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
         >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
         >>> list(dp0)

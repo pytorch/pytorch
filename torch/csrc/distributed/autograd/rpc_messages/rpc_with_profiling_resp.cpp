@@ -18,9 +18,9 @@ RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
+      tensors_(wrappedMessage_->tensors()),
       profiledEvents_(std::move(profiledEvents)),
       profilingId_(profilingId) {
-  tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_RESP,
       "Incorrect Message type");
@@ -77,8 +77,7 @@ c10::intrusive_ptr<rpc::Message> RpcWithProfilingResp::toMessageImpl() && {
   // Create ivalues to send over
   std::vector<at::IValue> ivalues{wrappedMsgType, profilingId_.toIValue()};
   // Attach the serialized events.
-  ivalues.emplace_back(
-      at::IValue(static_cast<int32_t>(profiledEvents_.size())));
+  ivalues.emplace_back(static_cast<int32_t>(profiledEvents_.size()));
   for (const auto& e : profiledEvents_) {
     ivalues.emplace_back(e.toIValue());
   }
