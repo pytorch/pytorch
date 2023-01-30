@@ -248,6 +248,12 @@ AdamW.__doc__ = r"""Implements AdamW algorithm.
         {foreach}
         {capturable}
         {differentiable}
+        fused (bool, optional): whether the fused implementation (CUDA only) is used.
+            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
+            are supported. Since the fused implementation is usually significantly faster than
+            the for-loop implementation, we try to use it whenever possible (all parameters
+            are on CUDA and are of a supported type). Else, we continue with the for-loop
+            implementation. (default: None)
 
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
