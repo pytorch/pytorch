@@ -4460,7 +4460,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         # A weird number to catch errors
         values = (make_arg((1,)).item(), make_arg((1,)).squeeze(0))
     else:
-        values = ()
+        values = (None,)
 
     for shape, alpha, value in product(shapes, alphas, values):
         t = make_arg(shape)
