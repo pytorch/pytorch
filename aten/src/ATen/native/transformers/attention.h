@@ -17,7 +17,7 @@ TORCH_API Tensor masked_softmax(
     Tensor& attn_scores,
     c10::optional<Tensor> attn_mask,
     const Tensor& query,
-    c10::optional<int64_t> mask_type = NULL);
+    c10::optional<int64_t> mask_type = {});
 
 TORCH_API Tensor transform0213_gemm_nt_bias(
     const Tensor& a,
