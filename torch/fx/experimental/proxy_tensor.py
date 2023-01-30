@@ -506,8 +506,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        with disable_proxy_modes_tracing():
-            out = proxy_call(self, func, args, kwargs)
+        out = proxy_call(self, func, args, kwargs)
         return out
 
 
@@ -698,8 +697,9 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
+        # We also disable other proxy tracers except the outermost one. This means that 
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
+             sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing_except_current():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
@@ -735,6 +735,19 @@ def disable_proxy_modes_tracing():
         for proxy_mode, old in zip(proxy_tensor_modes, olds):
             proxy_mode.enable_tracing = old
 
+@contextlib.contextmanager
+def disable_proxy_modes_tracing_except_current():
+    # TODO: This probably doesn't correctly also disable ProxySymDispatchMode
+    modes = get_torch_dispatch_modes()
+    proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
+    olds = [m.enable_tracing for m in proxy_tensor_modes[:-1]]
+    for proxy_mode in proxy_tensor_modes[:-1]:
+        proxy_mode.enable_tracing = False
+    try:
+        yield
+    finally:
+        for proxy_mode, old in zip(proxy_tensor_modes[:-1], olds):
+            proxy_mode.enable_tracing = old
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):
     """A helper function used to get the GraphModule for the given func.
