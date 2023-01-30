@@ -1640,6 +1640,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_dynamic_slicing_simple(self):
         def f(x):
             return x[slice(None, None, None)]
@@ -1651,6 +1652,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
             def __init__(self):
