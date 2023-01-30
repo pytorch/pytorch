@@ -809,11 +809,11 @@ def sample_inputs_exponential(op, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_exponential(op, device, **kwargs):
     t = torch.zeros([10], device=device)
-    neg_rate = -1
+    invalid_rate = 0
     yield ErrorInput(
-        SampleInput(t, args=(neg_rate,)),
+        SampleInput(t, args=(invalid_rate,)),
         error_type=RuntimeError,
-        error_regex=r"exponential_ expects lambda >= 0.0, but found lambda={}".format(neg_rate),
+        error_regex=r"exponential_ expects lambda > 0.0, but found lambda={}".format(invalid_rate),
     )
 
 
@@ -8817,8 +8817,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_autograd=False,
            sample_inputs_func=sample_inputs_exponential,
-           # TODO: error_inputs_func -- see why torch.Tensor.exponential_ checks lambda >= 0
-           # while torch.distributions.cauchy.Cauchy checks lambda > 0
            error_inputs_func=error_inputs_exponential,
            skips=(
               # Tests that assume input tensor has a meaningful effect on output tensor
