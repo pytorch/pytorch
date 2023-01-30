@@ -40,7 +40,6 @@ class StatelessDataLoader : public DataLoaderBase<
       Dataset dataset,
       Sampler sampler,
       DataLoaderOptions options)
-      // NOLINTNEXTLINE(performance-move-const-arg)
       : super(std::move(options)), sampler_(std::move(sampler)) {
     for (const auto w : c10::irange(this->options_.workers)) {
       // Here we copy the dataset into the worker thread closure. Each worker

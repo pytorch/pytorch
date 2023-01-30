@@ -15,7 +15,7 @@ from ..allowed_functions import is_allowed
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -582,6 +582,15 @@ class BuiltinVariable(VariableTracker):
             unimplemented(
                 f"isinstance called on UserDefinedClass {arg} {isinstance_type}"
             )
+        # handle __instancecheck__ defined in user class
+        if (
+            isinstance(arg, variables.UserDefinedObjectVariable)
+            and "__instancecheck__" in isinstance_type.__class__.__dict__
+        ):
+            return variables.ConstantVariable(
+                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
+            )
+
         try:
             val = issubclass(arg_type, isinstance_type)
         except TypeError:
@@ -589,7 +598,12 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        return variables.SuperVariable(a, b)
+        source = (
+            None
+            if a.source is None or b.source is None
+            else SuperSource(a.source, b.source)
+        )
+        return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):
         if isinstance(arg, variables.ListIteratorVariable):

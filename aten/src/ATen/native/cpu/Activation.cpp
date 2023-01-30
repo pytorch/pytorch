@@ -19,8 +19,7 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -1403,5 +1402,4 @@ REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
 REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
 REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

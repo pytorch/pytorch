@@ -4,10 +4,7 @@
 
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-namespace analysis {
+namespace torch::jit::tensorexpr::analysis {
 
 const char* AccessToString(AccessType a) {
   switch (a) {
@@ -153,7 +150,7 @@ bool AccessInfo::isWrite() const {
 
 void AccessInfo::print() const {
   std::cout << id_ << ". " << AccessToString(type_) << ": " << *var_ << "[";
-  if (bounds_.size() > 0) {
+  if (!bounds_.empty()) {
     for (size_t i = 0; i < bounds_.size() - 1; ++i) {
       bounds_[i].print();
       std::cout << ", ";
@@ -186,7 +183,7 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
       type_ == AccessType::Alloc) {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
-    if (bounds_.size() > 0) {
+    if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << *IRSimplifier::simplify(
                   alloc<Add>(bounds_[i].end, immLike(bounds_[i].end, 1)))
@@ -208,7 +205,7 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
     os << "label = \"" << AccessToString(type_) << " (#" << id_ << ")\\n";
     os << "buf : " << *var_ << "\\n";
     os << "bounds : \[";
-    if (bounds_.size() > 0) {
+    if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << "(" << *bounds_[i].start << ", " << *bounds_[i].end << "), ";
       }
@@ -1318,7 +1315,4 @@ std::vector<Bound> MemDependencyChecker::getIndicesBounds(
   return bounds;
 }
 
-} // namespace analysis
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr::analysis

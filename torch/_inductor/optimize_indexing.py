@@ -9,7 +9,7 @@ from typing import Dict, Iterable, Union
 import sympy
 
 import torch
-from .ir import IndexingDiv, InterpreterShim, LoopBody, ModularIndexing
+from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import sympy_subs
 from .virtualized import V
 
@@ -84,6 +84,7 @@ class ValueRanges(object):
 
 class ValueRangeAnalysis(object):
     def __init__(self):
+        self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "eq",
             "ne",
@@ -527,7 +528,7 @@ class OptimizeIndexing(object):
                 return x / y
 
             return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                IndexingDiv, indexing_div_rep
+                FloorDiv, indexing_div_rep
             )
 
         symbols = expr.free_symbols
