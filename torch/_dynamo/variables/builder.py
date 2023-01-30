@@ -289,7 +289,8 @@ class VariableBuilder:
         ) and all(
             map(
                 lambda k: ConstantVariable.is_literal(k)
-                or self.tensor_can_be_dict_key(k),
+                or self.tensor_can_be_dict_key(k)
+                or isinstance(k, enum.Enum),
                 value.keys(),
             )
         ):
