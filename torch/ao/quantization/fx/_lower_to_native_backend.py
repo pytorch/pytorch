@@ -194,6 +194,10 @@ def is_getattr_tensor_metadata_node(node):
         node.target == getattr and \
         node.args[1] in ["shape"]
 
+def is_get_tensor_info_node(node):
+    return node.op == "call_method" and \
+        node.target in ["shape", "size"]
+
 def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigAny]):
     """
     Return True if the op is configured with a None qconfig, False otherwise.
@@ -218,6 +222,7 @@ DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
     nnqr.LSTMCell: nnqd.LSTMCell,
     nnqr.RNNCell: nnqd.RNNCell,
     nnqr.LSTM: nnqd.LSTM,
+    nnqr.GRU: nnqd.GRU,
 }
 
 # Mapping from reference module class to the replacement weight only quantized module class for lowering
@@ -511,6 +516,7 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
+        assert(len(ref_node.args) == 1)
         dq_node = ref_node.args[0]
         assert(isinstance(dq_node, Node))
         ref_node.replace_input_with(dq_node, dq_node.args[0])
@@ -926,6 +932,21 @@ def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
             args[0] = n.args[0].args[0]
             n.args = tuple(args)
 
+def _lower_get_tensor_info_op(model: QuantizedGraphModule):
+    """ Modified the graph of the model inplace, to skip extra dequantize op before
+    the general tensor shape ops when possible
+    """
+    for n in model.graph.nodes:
+        if not is_get_tensor_info_node(n):
+            continue
+        maybe_dq = n.args[0]
+        if maybe_dq.op != "call_method" or maybe_dq.target != "dequantize":
+            continue
+        # skip the dequantize node
+        args = list(n.args)
+        args[0] = n.args[0].args[0]
+        n.args = tuple(args)
+
 def _lower_to_native_backend(
     model: QuantizedGraphModule,
     qconfig_map: Dict[str, QConfigAny],
@@ -942,6 +963,7 @@ def _lower_to_native_backend(
     _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
     _lower_getattr_tensor_metadta_op(model)
+    _lower_get_tensor_info_op(model)
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
     model = fold_weight(model, node_name_to_scope)

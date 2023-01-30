@@ -285,6 +285,22 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         reduce_prod = g.op("ReduceProd", input)
         self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
 
+    def test_proceeding_nodes_use_prim_pack_padded_output_dtype_correctly(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([4, 16]))
+        length = g.addInput()
+        length.setType(length.type().with_dtype(torch.long).with_sizes([4]))
+        padded, batch_size = g.op("prim::PackPadded", input, length, outputs=2)
+        # `prim::PackPadded` only occurs in tracing mode. Hence its outputs inherits
+        # shape and data type from traced graph.
+        padded.setType(padded.type().with_dtype(torch.float).with_sizes([None, None]))
+        batch_size.setType(batch_size.type().with_dtype(torch.long).with_sizes([None]))
+        # `Gather` should use the data type of `batch_size` as the data type of its output.
+        gather_idx = self.insert_tensor_constant(g, torch.tensor([0], dtype=torch.long))
+        gather = g.op("Gather", batch_size, gather_idx, axis_i=0)
+        self.run_test(g, gather.node(), expect_tensor("Long", shape=(None,)))
+
 
 class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
     def setUp(self):

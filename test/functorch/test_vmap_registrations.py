@@ -1,13 +1,13 @@
 # Owner(s): ["module: functorch"]
-from functools import wraps
 import typing
 import unittest
 
 from torch.testing._internal.common_utils import (
-    _TestParametrizer,
     TestCase,
     run_tests,
     instantiate_parametrized_tests,
+    parametrize,
+    subtest
 )
 
 from torch._C import (
@@ -22,7 +22,6 @@ xfail_functorch_batched = {
     "aten::isfinite",
     "aten::isreal",
     "aten::item",
-    "aten::linalg_matrix_power",
     "aten::linalg_matrix_rank.atol_rtol_float",
     "aten::linalg_matrix_rank.atol_rtol_tensor",
     "aten::linalg_pinv",
@@ -86,9 +85,6 @@ xfail_not_implemented = {
     "aten::arctanh_",
     "aten::argwhere",
     "aten::bilinear",
-    "aten::bitwise_and_.Scalar",
-    "aten::bitwise_or_.Scalar",
-    "aten::bitwise_xor_.Scalar",
     "aten::can_cast",
     "aten::cat.names",
     "aten::chain_matmul",
@@ -106,7 +102,6 @@ xfail_not_implemented = {
     "aten::ctc_loss.Tensor",
     "aten::cudnn_is_acceptable",
     "aten::cummaxmin_backward",
-    "aten::cumprod_backward",
     "aten::data",
     "aten::diagflat",
     "aten::divide.out_mode",
@@ -138,7 +133,6 @@ xfail_not_implemented = {
     "aten::greater.Scalar",
     "aten::greater_.Scalar",
     "aten::greater_.Tensor",
-    "aten::greater_equal.Scalar",
     "aten::greater_equal_.Scalar",
     "aten::greater_equal_.Tensor",
     "aten::gru.data",
@@ -167,7 +161,6 @@ xfail_not_implemented = {
     "aten::linalg_eigh.eigvals",
     "aten::linalg_ldl_factor",
     "aten::linalg_lu_factor",
-    "aten::linalg_matrix_power",
     "aten::linalg_matrix_rank",
     "aten::linalg_matrix_rank.atol_rtol_float",
     "aten::linalg_matrix_rank.atol_rtol_tensor",
@@ -180,8 +173,6 @@ xfail_not_implemented = {
     "aten::linalg_slogdet",
     "aten::linalg_svd.U",
     "aten::linalg_tensorsolve",
-    "aten::linalg_vander",
-    "aten::linalg_vecdot",
     "aten::linear",
     "aten::log_sigmoid",
     "aten::log_softmax.int",
@@ -324,33 +315,19 @@ xfail_not_implemented = {
     "aten::var_mean.names_dim",
     "aten::where",
     "aten::where.Scalar",
+
 }
 
 
-class dispatch_registrations(_TestParametrizer):
-    def __init__(
-        self,
-        dispatch_key: str,
-        xfails: set,
-        filter_func: typing.Callable = lambda reg: True,
-    ):
-        self.registrations = sorted(get_registrations_for_dispatch_key(dispatch_key))
-        self.xfails = xfails
-        self.filter_func = filter_func
-
-    def _parametrize_test(self, test, generic_cls, device_cls):
-        for registration in self.registrations:
-            if not self.filter_func(registration):
-                continue
-
-            @wraps(test)
-            def test_wrapper(*args, **kwargs):
-                return test(*args, **kwargs)
-
-            if registration in self.xfails:
-                test_wrapper = unittest.expectedFailure(test_wrapper)
-
-            yield (test_wrapper, f"[{registration}]", {"registration": registration})
+def dispatch_registrations(
+        dispatch_key: str, xfails: set, filter_func: typing.Callable = lambda reg: True):
+    registrations = sorted(get_registrations_for_dispatch_key(dispatch_key))
+    subtests = [
+        subtest(reg, name=f"[{reg}]",
+                decorators=([unittest.expectedFailure] if reg in xfails else []))
+        for reg in registrations if filter_func(reg)
+    ]
+    return parametrize("registration", subtests)
 
 
 CompositeImplicitAutogradRegistrations = set(

@@ -183,6 +183,9 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
+cmake_dependent_option(
+    BUILD_NVFUSER "Build NVFUSER" ON
+    "USE_CUDA OR USE_ROCM" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -266,7 +269,6 @@ option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
@@ -530,6 +532,16 @@ if(MSVC)
     string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
   endforeach(flag_var)
 
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS)
+    # https://github.com/pytorch/pytorch/issues/91933: Don't set the manifest filename
+    # explicitly helps fix the linker error when linking torch_python.dll. The manifest
+    # file would still be there in the correct format torch_python.dll.manifest
+    if(${flag_var} MATCHES "/MANIFESTFILE:.*\\.manifest")
+      string(REGEX REPLACE "/MANIFESTFILE:.*\\.manifest" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
   # Try harder
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 
@@ -708,7 +720,7 @@ include(cmake/Dependencies.cmake)
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 if(USE_FLASH_ATTENTION)
     ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
 ENDIF()
@@ -746,9 +758,6 @@ if(USE_VULKAN)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
   endif()
 
-  if(USE_VULKAN_SHADERC_RUNTIME)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -771,7 +780,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
-if(USE_LITE_INTERPRETER_PROFILER)
+if(BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
 endif()
 
@@ -799,6 +808,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
@@ -1147,6 +1157,14 @@ if(BUILD_JNI)
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
+endif()
+
+if(NOT USE_CUDA AND NOT USE_ROCM)
+  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
+endif()
+
+if(BUILD_NVFUSER)
+  add_subdirectory(third_party/nvfuser)
 endif()
 
 include(cmake/Summary.cmake)

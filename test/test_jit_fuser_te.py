@@ -2463,6 +2463,24 @@ class TestTEFuser(JitTestCase):
 
             self.assertEqual(res, f(x, y))
 
+    @unittest.skipIf(not RUN_CUDA_HALF, "half-precision NNC fusion requires CUDA")
+    def test_pow_multiple_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/75476
+        def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
+            p = torch.sigmoid(p)
+            result = p ** gamma
+            return result
+
+        x = torch.rand((2, 2), dtype=torch.half, device='cuda')
+
+        ref = fn(x)
+
+        script_fn = torch.jit.script(fn)
+        for i in range(4):
+            res = script_fn(x)
+
+        self.assertEqual(ref, res)
+
 
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False

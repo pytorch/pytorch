@@ -80,7 +80,13 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  if (device.is_cuda() && !at::detail::getCUDAHooks().hasROCM()) {
+  const bool maybe_support_half = (
+    // Only CUDA supports half precision, but since meta tensors don't have a
+    // device we err on the side of accepting it
+    (device.is_cuda() || device.is_meta()) &&
+    !at::detail::getCUDAHooks().hasROCM()
+  );
+  if (maybe_support_half) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
@@ -473,7 +479,7 @@ static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
                              const c10::optional<c10::string_view>& norm_str) {
   TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
-  TORCH_CHECK(desc.shape.size() > 0, "rfftn must transform at least one axis");
+  TORCH_CHECK(!desc.shape.empty(), "rfftn must transform at least one axis");
   Tensor input = promote_tensor_fft(self, /*require_complex=*/false);
   Tensor x = resize_fft_input(input, desc.dim, desc.shape);
   const auto norm = static_cast<int64_t>(norm_from_string(norm_str, /*forward=*/true));
@@ -501,7 +507,7 @@ ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     const at::OptionalIntArrayRef& dims,
     int64_t& last_dim_size) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dims);
-  TORCH_CHECK(desc.shape.size() > 0, fname, " must transform at least one axis");
+  TORCH_CHECK(!desc.shape.empty(), fname, " must transform at least one axis");
 
   // Expected output size of the hermitian-symmetric dimension
   last_dim_size = [&] {
@@ -601,7 +607,7 @@ static Tensor fft_ihfftn_impl(
     const Tensor& out) {
   constexpr c10::string_view fname = "ihfftn";
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
-  TORCH_CHECK(desc.shape.size() > 0, "ihfftn must transform at least one axis");
+  TORCH_CHECK(!desc.shape.empty(), "ihfftn must transform at least one axis");
   auto input = promote_tensor_fft(self, /*require_complex=*/false);
   auto x = resize_fft_input(input, desc.dim, desc.shape);
   const auto norm = static_cast<int64_t>(
@@ -1180,7 +1186,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   const auto input_sizes = input.sizes();
   const auto input_strides = input.strides();
-  TORCH_CHECK(dim_.size() > 0);
+  TORCH_CHECK(!dim_.empty());
   DimVector dim(dim_.begin(), dim_.end());
   at::maybe_wrap_dims(dim, input_strides.size(), /*wrap_scalars=*/false);
 

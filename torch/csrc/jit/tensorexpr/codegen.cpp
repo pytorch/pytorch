@@ -4,9 +4,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 CodeGen::CodeGen(
     StmtPtr stmt,
@@ -311,7 +309,7 @@ void CodeGen::allocIntermediateBufs() {
       interm_bufs, interm_buf_ranges, bufs_external_allocs);
 
   // Insert memory allocation/mapping nodes.
-  if (buf_allocs.size() > 0) {
+  if (!buf_allocs.empty()) {
     auto stmt_new = insertAllocFree(buf_allocs, bufs_external_allocs, stmt_);
     set_stmt(stmt_new);
   }
@@ -319,6 +317,4 @@ void CodeGen::allocIntermediateBufs() {
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
