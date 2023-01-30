@@ -935,7 +935,7 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   if (log_grain_size < 0)
     grain_size = 1;
   else
-    grain_size = int(std::exp(log_grain_size));
+    grain_size = int64_t(std::exp(log_grain_size));
   at::parallel_for(0, batch_size, grain_size, loop);
 #endif
 }
