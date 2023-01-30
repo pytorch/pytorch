@@ -65,7 +65,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import UserFunctionVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
     ListIteratorVariable,
     ListVariable,
@@ -509,6 +509,11 @@ class VariableBuilder:
                     guards=make_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
                 "apply",
+            )
+        elif istype(value, types.MethodType):
+            obj = UserDefinedObjectVariable(value.__self__)
+            return UserMethodVariable(
+                value.__func__, obj, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif isinstance(value, (int, float)) or (
             HAS_NUMPY and (isinstance(value, np.number))

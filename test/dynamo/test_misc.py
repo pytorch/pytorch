@@ -3444,6 +3444,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
+    def test_aliased_method(self):
+        class C:
+            def __init__(self, x):
+                self.x = x
+
+            def fn(self, y):
+                return self.x + y
+
+        f = C(3).fn
+
+        def g(x):
+            return f(x)
+
+        inp = torch.randn(10)
+        self.assertTrue(
+            torch.allclose(
+                torch._dynamo.optimize("eager", nopython=True)(g)(inp),
+                inp + 3,
+            )
+        )
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
