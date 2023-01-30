@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor_utils import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 
@@ -45,7 +45,7 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
-from torch.fx.experimental import proxy_tensor
+from torch.fx.experimental import proxy_tensor_utils
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
@@ -749,7 +749,7 @@ class TorchPatcher:
         torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
+        proxy_tensor_utils.dispatch_trace = disable(proxy_tensor_utils.dispatch_trace)
 
         optimizers = [
             opt
