@@ -140,7 +140,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
-    "ghostnet_100",  # Accuracy
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
