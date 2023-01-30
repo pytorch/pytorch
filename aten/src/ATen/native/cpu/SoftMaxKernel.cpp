@@ -45,20 +45,7 @@ inline void _vec_log_softmax_lastdim(
       (int64_t)(at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size)));
 
   // we assume that at::GRAIN_SIZE is an appropriate grain-size.
-  // usually, we'd use all the threads in the OpenMP thread pool.
-  int64_t grain_size = (outer_size - 1) /
-      std::max((int64_t)1, (int64_t)(at::get_num_threads() - 1));
-  // assign fewer threads if the number of computations is not large enough
-  // rough estimate for the number of computations
-  int64_t num_computations = (16 * outer_size * dim_size) / Vec::size();
-  if ((num_computations < at::get_num_threads() * at::internal::GRAIN_SIZE) &&
-      (num_computations > at::internal::GRAIN_SIZE)) {
-    int64_t fewer_threads = num_computations / at::internal::GRAIN_SIZE;
-    grain_size = (outer_size - 1) / (fewer_threads);
-  } else if (num_computations <= at::internal::GRAIN_SIZE) {
-    // only 1 thread will be used
-    grain_size = outer_size;
-  }
+  int64_t grain_size = (Vec::size() * internal::GRAIN_SIZE)  / (16 * dim_size);
 
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
