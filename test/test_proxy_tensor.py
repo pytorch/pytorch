@@ -433,7 +433,7 @@ def forward(self, x_1):
                 torch.zeros(3), torch.zeros(3)
             )
 
-        if self.tracing_mode == "symbolic":
+        if self.tracing_mode != "real":
             self.assertRaises(DataDependentOutputException, test_f)
         else:
             self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
@@ -464,10 +464,13 @@ def forward(self, x_1):
             blowup = val.repeat(1000)
             return bool(blowup.sum().item() == 2)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
-        )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
+
+        if self.tracing_mode == "fake":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -475,10 +478,13 @@ def forward(self, x_1):
             val.normal_()
             return bool(val.item() == 2.1)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
-        )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
+
+        if self.tracing_mode == "fake":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
