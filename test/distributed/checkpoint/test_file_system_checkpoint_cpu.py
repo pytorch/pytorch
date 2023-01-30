@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import os
-import shutil
 import tempfile
 from typing import Dict
 
