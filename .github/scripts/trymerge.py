@@ -1320,10 +1320,15 @@ FROM
 where
     j.head_sha in ('{head_sha}','{merge_base}')
 """
-    res = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    ).sql(rockset.Q(query))
-    return cast(List[Dict[str, Any]], res.results())
+    for _ in range(3):
+        try:
+            res = rockset.Client(
+                api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+            ).sql(rockset.Q(query))
+            return cast(List[Dict[str, Any]], res.results())
+        except Exception as e:
+            print(f"Could not download rockset data because: {e}.")
+    return []
 
 def get_classifications(
     head_sha: str,
