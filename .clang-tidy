@@ -58,5 +58,4 @@ readability-container-size-empty,
 HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
-CheckOptions: []
 ...
