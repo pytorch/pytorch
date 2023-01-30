@@ -163,7 +163,6 @@ public:
     auto a = _mm256_blend_ps(values, shift, 0x55);  // a       a
     auto b = _mm256_blend_ps(values, shift, 0xAA);  // b       b
     return Sleef_hypotf8_u05(a, b);                // abs     abs
-    // return _mm256_hypot_ps(a, b);                   // abs     abs
   }
   Vectorized<c10::complex<float>> abs() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
@@ -416,7 +415,7 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   auto acbd2 = _mm256_mul_ps(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
 
   const __m256 sign_mask = _mm256_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto dc2 = _mm256_permute_ps(b2, 0x05);    // d/|c,d|         c/|c,d|
+  auto dc2 = _mm256_permute_ps(b2, 0xB1);    // d/|c,d|         c/|c,d|
   dc2 = _mm256_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
   auto adbc2 = _mm256_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
   auto res2 = _mm256_hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
