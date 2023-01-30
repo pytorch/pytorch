@@ -549,6 +549,21 @@ inline bool isTraceableType(const TypePtr& type) {
 inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.success()) {
+    auto object = py::cast<py::object>(input);
+    if (auto mod = as_module(object)) {
+      // if obj is already a ScriptModule, just return its ivalue
+      auto ptr = mod.value()._ivalue();
+      // explict copy semantics for strong ownership of the resource.
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
+
+    // Check if the obj is a ScriptObject.
+    if (auto script_obj = as_object(object)) {
+      auto ptr = script_obj.value()._ivalue();
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
@@ -907,7 +922,7 @@ inline py::object runAndInsertCall(
   }
 
   TORCH_CHECK(
-      stack.size() > 0,
+      !stack.empty(),
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
@@ -948,7 +963,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (!overloaded_args.empty()) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
             /*overloaded_args=*/overloaded_args,

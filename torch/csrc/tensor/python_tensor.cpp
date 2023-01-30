@@ -233,8 +233,9 @@ static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
   auto storage_name = std::string(toString(dtype)) + "Storage";
   THPObjectPtr storage(
       PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
-  TORCH_CHECK_TYPE(
-      storage.get(), "couldn't find storage object ", storage_name);
+  if (!storage.get()) {
+    throw TypeError("couldn't find storage object %s", storage_name.c_str());
+  }
   return storage;
 }
 

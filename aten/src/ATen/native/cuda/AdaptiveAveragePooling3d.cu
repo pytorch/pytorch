@@ -25,8 +25,7 @@
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -543,5 +542,4 @@ Tensor adaptive_avg_pool3d_backward_cuda(
   return gradInput;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

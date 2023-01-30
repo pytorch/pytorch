@@ -130,13 +130,15 @@ class C10_CUDA_API CUDAKernelLaunchRegistry {
   /// Whether or not to gather stack traces when launching kernels
   bool gather_launch_stacktrace = false;
   /// Whether or not host-side DSA is enabled or disabled at run-time
-  /// Device-side code cannot be adjusted at run-time
-  bool enabled = false;
+  /// Note: Device-side code cannot be enabled/disabled at run-time
+  bool enabled_at_runtime = false;
   /// Whether or not a device has indicated a failure
   bool has_failed() const;
-  /// Since multiple mechanisms can enable/disable, we add a function that
-  /// aggregates them
-  bool is_enabled() const;
+#ifdef TORCH_USE_CUDA_DSA
+  const bool enabled_at_compile_time = true;
+#else
+  const bool enabled_at_compile_time = false;
+#endif
 };
 
 std::string c10_retrieve_device_side_assertion_info();
@@ -147,9 +149,9 @@ std::string c10_retrieve_device_side_assertion_info();
 // Each kernel launched with TORCH_DSA_KERNEL_LAUNCH
 // requires the same input arguments. We introduce the following macro to
 // standardize these.
-#define TORCH_DSA_KERNEL_ARGS                             \
-  c10::cuda::DeviceAssertionsData *const assertions_data, \
-      uint32_t assertion_caller_id
+#define TORCH_DSA_KERNEL_ARGS                                              \
+  [[maybe_unused]] c10::cuda::DeviceAssertionsData *const assertions_data, \
+      [[maybe_unused]] uint32_t assertion_caller_id
 
 // This macro can be used to pass the DSA arguments onward to another
 // function

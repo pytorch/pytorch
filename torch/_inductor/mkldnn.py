@@ -1,9 +1,8 @@
 import copy
 import itertools
 import operator
+from functools import reduce
 from typing import Optional
-
-import numpy
 
 import torch
 import torch.nn as nn
@@ -14,6 +13,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 
@@ -130,7 +130,7 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -204,7 +204,7 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -289,7 +289,7 @@ class ConvBinaryInplace2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -351,7 +351,7 @@ class PackedLinear(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = int(numpy.prod(input_size) / input_size[-1])
+        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
@@ -488,7 +488,9 @@ def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
 
 def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     # make sure the autograd is disabled.

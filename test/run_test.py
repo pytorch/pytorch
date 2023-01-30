@@ -50,6 +50,17 @@ except ImportError:
     )
 
 
+# Note [ROCm parallel CI testing]
+# https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
+# In .jenkins/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
+# This results in multiple test files sharing the same GPU.
+# This should be a supported use case for ROCm, but it exposed issues in the kernel driver resulting in hangs.
+# See https://github.com/pytorch/pytorch/issues/90940.
+#
+# Further, ROCm self-hosted runners have up to 4 GPUs.
+# Device visibility was set to 0 to match CUDA test behavior, but this was wasting available GPU resources.
+# Assigning each Pool worker their own dedicated GPU avoids the ROCm oversubscription issues.
+# This should also result in better overall wall clock time since all GPUs can be utilized.
 def maybe_set_hip_visible_devies():
     # Special handling of ROCm GHA runners for parallel (file granularity) tests.
     if torch.version.hip:
@@ -127,7 +138,6 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
-        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -308,6 +318,7 @@ CI_SERIAL_LIST = [
     'test_modules',  # failed test due to mismatched elements
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
+    'test_dataloader',  # frequently hangs for ROCm
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -474,7 +485,8 @@ def run_test(
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
+                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")),
+                                        suffix=".log")
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
@@ -882,6 +894,9 @@ CUSTOM_HANDLERS = {
     "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
+    # not a test_ops file, but takes 2 hrs on some architectures and
+    # run_test_ops is good at parallelizing things
+    "test_decomp": run_test_ops,
 }
 
 
@@ -1319,7 +1334,8 @@ def main():
     print_to_stderr("parallel (file granularity) tests:\n {}".format("\n ".join(selected_tests_parallel)))
     print_to_stderr("serial (file granularity) tests:\n {}".format("\n ".join(selected_tests_serial)))
 
-    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=1)
+    # See Note [ROCm parallel CI testing]
+    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1)
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     def success_callback(err_message):

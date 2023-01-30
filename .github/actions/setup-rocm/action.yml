@@ -16,6 +16,8 @@ runs:
         # ignore expansion of "docker ps -q" since it could be empty
         # shellcheck disable=SC2046
         docker stop $(docker ps -q) || true
+        # Prune all stopped containers.
+        docker container prune -f
 
     - name: Runner health check system info
       if: always()

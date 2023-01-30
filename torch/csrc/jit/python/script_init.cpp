@@ -70,8 +70,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -837,7 +836,7 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  TORCH_CHECK_ATTRIBUTE(false, err.what());
+                  throw AttributeError("%s", err.what());
                 }
               })
           .def(
@@ -858,7 +857,7 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  TORCH_CHECK_ATTRIBUTE(false, err.what());
+                  throw AttributeError("%s", err.what());
                 }
               })
           .def(
@@ -888,7 +887,7 @@ void initJitScriptBindings(PyObject* module) {
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
-                  TORCH_CHECK_ATTRIBUTE(false, err.what());
+                  throw AttributeError("%s", err.what());
                 }
               })
           .def(
@@ -1011,8 +1010,9 @@ void initJitScriptBindings(PyObject* module) {
           mm_name,
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
-            TORCH_CHECK_NOT_IMPLEMENTED(
-                method, "object has no attribute '", mm_name, "'");
+            if (!method) {
+              throw NotImplementedError();
+            }
             return invokeScriptMethodFromPython(
                 *method,
                 // NOLINTNEXTLINE(performance-move-const-arg)
@@ -1374,7 +1374,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           py::init([](const std::string& lang, const uint32_t _frames_up) {
             auto cu = std::make_shared<CompilationUnit>();
-            if (lang.size() > 0) {
+            if (!lang.empty()) {
               pyCompilationUnitDefine(*cu, lang, nullptr, _frames_up);
             }
             return cu;
@@ -1400,8 +1400,8 @@ void initJitScriptBindings(PyObject* module) {
             if (fn) {
               return StrongFunctionPtr(std::move(self), fn);
             } else {
-              TORCH_CHECK_ATTRIBUTE(
-                  false, "'CompilationUnit' has no attribute '", name, "'");
+              throw AttributeError(
+                  "'CompilationUnit' has no attribute '%s'", name.c_str());
             }
           })
       .def(
@@ -2387,5 +2387,5 @@ void initJitScriptBindings(PyObject* module) {
   initScriptDictBindings(module);
   initScriptListBindings(module);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit
