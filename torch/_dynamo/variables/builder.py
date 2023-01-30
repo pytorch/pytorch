@@ -3,8 +3,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import math
-import numbers
 import operator
 import re
 import types
@@ -90,7 +88,6 @@ from .misc import (
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
     DynamicShapeVariable,
-    FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
