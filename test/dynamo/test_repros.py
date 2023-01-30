@@ -31,13 +31,6 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch.nn import functional as F
 
-try:
-    import torch._refs
-
-    HAS_REFS = True
-except ImportError:
-    HAS_REFS = False
-
 
 _orig_module_call = torch.nn.Module.__call__
 
@@ -1412,7 +1405,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
-    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
     def test_primtorch(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
@@ -1420,7 +1412,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
     @unittest.expectedFailure
     # inline_call [('inline in skipfiles: bind ...python3.10/inspect.py', 1)]
     def test_primtorch_no_graph_break(self):
