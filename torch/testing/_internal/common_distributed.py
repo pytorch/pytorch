@@ -1238,6 +1238,10 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
     Use this for tests that actually run on multiple GPUs.
 
     Decorate tests with @skip_if_lt_x_gpu(ngpu)
+
+    Note: MultiProcTestCase spawns processes per test and is slow.
+    Prefer MultiThreadedTestCase for most tests. Perhaps use this one
+    sparingly for integration tests.
     """
     def setUp(self):
         super().setUp()
