@@ -697,7 +697,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        # We also disable other proxy tracers except the outermost one. This means that 
+        # We also disable other proxy tracers except the current one. This means that a trace from the resultant
+        # function will not be contaminated by nested proxy traces.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
              sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing_except_current():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
