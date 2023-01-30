@@ -4,7 +4,7 @@
 # If you want to build with CUDA, run this with USE_CUDA=1
 # If you want to build without CUDA, run this with USE_CUDA=0
 
-if [ ! -f setup.bat ]; then
+if [ ! -f setup.py ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
   exit 1
 fi
