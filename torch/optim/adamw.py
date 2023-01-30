@@ -62,6 +62,8 @@ class AdamW(Optimizer):
                 for pg in self.param_groups for p in pg['params']
             ):
                 raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
+            if foreach:
+                raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -71,7 +73,7 @@ class AdamW(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
-            group.setdefault("fused", False)
+            group.setdefault("fused", None)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -590,6 +592,8 @@ def _fused_adamw(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
+    if differentiable:
+        raise RuntimeError("_fused_adamw is not differentiable")
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
     grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])

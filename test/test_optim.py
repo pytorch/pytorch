@@ -1777,6 +1777,15 @@ class TestOptim(TestCase):
         opt2.step()
         self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
 
+    def test_fused_optimizer_raises(self):
+        if not torch.cuda.is_available():
+            self.skipTest("Requires CUDA devices")
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            with self.assertRaisesRegex(RuntimeError, "`fused` and `foreach` cannot be `True` together."):
+                optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
+            with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
+                optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
