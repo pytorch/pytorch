@@ -273,6 +273,11 @@ class GitRepo:
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
 
+    def diff(self, from_ref: str, to_ref: Optional[str] = None) -> str:
+        if to_ref is None:
+            return self._run_git("diff", f"{from_ref}^!")
+        return self._run_git("diff", f"{from_ref}..{to_ref}")
+
 
 def clone_repo(username: str, password: str, org: str, project: str) -> GitRepo:
     path = tempfile.mkdtemp()
