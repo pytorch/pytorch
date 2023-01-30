@@ -737,8 +737,22 @@ def _short_circuit_binary_broadcasting_op(a, b):
     in_shapes = [a.shape, b.shape] # Note(voz): Must be list as we cannot hash symint
     a_broadcast, b_broadcast = refs._maybe_broadcast(a, b)
 
-    if not a_broadcast.device == b_broadcast.device:
+    if not a_broadcast.dtype == b_broadcast.dtype:
+        # breakpoint()
         return None
+    
+    if not a_broadcast.device == b_broadcast.device:
+        # breakpoint()
+        return None
+
+    # Easy case - both match
+    safe_both_match = (a_broadcast.shape == b_broadcast.shape) or (a_broadcast.shape in in_shapes and b_broadcast.shape in in_shapes)
+
+    # Complex case, we allow no more than 1 non trivial dim (non-0, non-1)
+    # TODO(Support this?) never hit it on bench yet...
+    if not safe_both_match:
+        return None
+        # breakpoint()
 
     simple_safe_strides = a.stride() == b.stride()
     if not simple_safe_strides:
@@ -747,24 +761,6 @@ def _short_circuit_binary_broadcasting_op(a, b):
         # If one side of strides is nontrivial in only a single dim, it should be fine. 
         if a_strides_non_trivial > 1 and b_strides_non_trivial > 1:
             return None
-    
-    # Easy case - both match
-    safe_both_match = a_broadcast.shape in in_shapes and b_broadcast.shape in in_shapes
-
-    # Complex case, we allow no more than 1 non trivial dim (non-0, non-1)
-    if not safe_both_match:
-        return None
-        # safe_a_or_b = False
-        # if a_broadcast.shape in in_shapes:
-        #     # a matches, b must not have
-        #     breakpoint()
-        #     safe_a_or_b = True
-        # if b.a_broadcast.shape in in_shapes:
-        #     breakpoint() 
-        #     safe_a_or_b = True
-
-        # if not safe_a_or_b:
-        #     return None
     
     return FakeTensor(
         a_broadcast.fake_mode,
@@ -955,6 +951,7 @@ class FakeTensorMode(TorchDispatchMode):
             r = _short_circuit_unary_op(*args)
         if r is not None:
             return r
+        print("RUNNING ", func)
 
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
