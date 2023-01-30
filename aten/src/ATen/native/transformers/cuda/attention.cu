@@ -580,8 +580,9 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
 
-      auto y = at::scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, false);
+      Tensor y, weights;
+      std::tie(y, weights) = at::_scaled_dot_product_attention(
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false, false);
       auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
           at::linear(past_sdp, proj_weight, proj_bias), Tensor());
