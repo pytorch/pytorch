@@ -712,10 +712,33 @@ PyTypeObject* get_{name}_namedtuple() {{
     static PyStructSequence_Field NamedTuple_fields[] = {{ {fields},  {{nullptr}} }};
     static PyTypeObject {typename};
     static bool is_initialized = false;
-    static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, NamedTuple_fields, {len(fieldnames)} }};
+    static PyStructSequence_Desc desc = {{
+        .name = "torch.return_types.{name}",
+        .doc = nullptr,
+        .fields = NamedTuple_fields,
+        .n_in_sequence = {len(fieldnames)}
+    }};
     if (!is_initialized) {{
         PyStructSequence_InitType(&{typename}, &desc);
         {typename}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
+        // Set `_fields` attribute for namedtuple subclass check
+        PyObject* keys = PyTuple_New(desc.n_in_sequence);
+        if (!keys) {{
+            throw python_error();
+        }}
+        for (Py_ssize_t i = 0; i < desc.n_in_sequence; ++i) {{
+            PyObject* key = PyUnicode_FromString(desc.fields[i].name);
+            if (!key) {{
+                Py_DECREF(keys);
+                throw python_error();
+            }}
+            PyTuple_SET_ITEM(keys, i, key);
+        }}
+        if (PyDict_SetItemString({typename}.tp_dict, "_fields", keys) < 0) {{
+            Py_DECREF(keys);
+            throw python_error();
+        }}
+        Py_DECREF(keys);
         is_initialized = true;
     }}
     return &{typename};
