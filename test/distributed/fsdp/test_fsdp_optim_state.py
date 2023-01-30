@@ -1521,7 +1521,7 @@ class TestFSDPOptimState(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         state_dict = optim.state_dict()
         gathered_state_dict = FSDP._optim_state_dict(model, optim)
-        self.assertEqual (gathered_state_dict["state"], state_dict["state"])
+        self.assertEqual(gathered_state_dict["state"], state_dict["state"])
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
