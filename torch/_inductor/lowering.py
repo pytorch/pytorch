@@ -3351,20 +3351,30 @@ def pow_integer(a, b, a_dtype, b_dtype):
     assert int(num_loops) == num_loops
     num_loops = int(num_loops)
 
-    acc = ops.constant(1, a_dtype)
+    ilp_factor = 2 if b_dtype != torch.int64 else 4
+    acc = [ops.constant(1, a_dtype)] * ilp_factor
     x = a
     b_orig = b
     for i in range(num_loops):
-        mask = ops.bitwise_and(b, f"0x{1 << i:x}")
-        acc = ops.where(mask, ops.mul(acc, x), acc)
+        j = i % ilp_factor
+        mask = ops.ne(ops.bitwise_and(b, f"0x{1 << i:x}"), "0")
+        acc[j] = ops.where(mask, ops.mul(acc[j], x), acc[j])
         if i + 1 < num_loops:
             x = ops.mul(x, x)
 
+    result = acc[0]
+    for j in range(1, ilp_factor):
+        result = ops.mul(result, acc[j])
+
+    if b_dtype == torch.uint8:
+        return result
+
+    # Fixup for negative exponents
     neg_res = ops.where(ops.eq(a, "1"), "1", "0")
     sign = ops.where(ops.bitwise_and(b_orig, "1"), "-1", "1")
     neg_res = ops.where(ops.eq(a, "-1"), sign, neg_res)
 
-    return ops.where(ops.lt(b_orig, "0"), neg_res, acc)
+    return ops.where(ops.lt(b_orig, "0"), neg_res, result)
 
 
 def _is_ir_node_and_cuda(x):
@@ -3398,7 +3408,7 @@ def pow(a, b):
         b,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     )
-    a = constant_like(a)(b) if isinstance(a, Number) else to_dtype(a, promoted_dtype)
+    a = to_dtype(a, promoted_dtype) if isinstance(a, TensorBox) else constant_like(a)(b)
 
     is_integer_pow = is_integer_dtype(promoted_dtype)
     embed_exponent = isinstance(b, int) and (-32 < b < 32 or is_integer_pow)
@@ -3415,9 +3425,7 @@ def pow(a, b):
             ranges=a.get_size(),
         )
 
-    if is_integer_pow and _is_ir_node_and_cuda(a):
-        # Unroll powi loop for fixed width integer types, only required for
-        # triton which doesn't support ops.pow for integers
+    if is_integer_pow:
         a_loader = a.make_loader()
         b_loader = b.make_loader()
 
@@ -3433,8 +3441,7 @@ def pow(a, b):
             ranges=a.get_size(),
         )
 
-    b = to_dtype(b, promoted_dtype)
-    a = constant_like(a)(b) if isinstance(a, Number) else to_dtype(a, promoted_dtype)
+    b = to_dtype(b, promoted_dtype) if isinstance(b, TensorBox) else constant_like(b)(a)
     return pow_native(a, b)
 
 
