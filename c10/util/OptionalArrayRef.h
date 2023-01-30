@@ -21,7 +21,7 @@ class OptionalArrayRef final {
  public:
   // Constructors
 
-  constexpr OptionalArrayRef() noexcept {}
+  constexpr OptionalArrayRef() noexcept = default;
 
   constexpr OptionalArrayRef(nullopt_t) noexcept {}
 

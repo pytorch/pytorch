@@ -264,6 +264,30 @@ def parse_args():
         default=DASHBOARD_DEFAULTS["dashboard_gh_cli_path"],
         help="Github CLI path",
     )
+    parser.add_argument(
+        "--batch_size", type=int, default=None, help="batch size for benchmarking"
+    )
+    parser.add_argument(
+        "--threads",
+        "-t",
+        type=int,
+        default=None,
+        help="number of threads to use for eager and inductor.",
+    )
+    launcher_group = parser.add_argument_group("CPU Launcher Parameters")
+    launcher_group.add_argument(
+        "--enable_cpu_launcher",
+        action="store_true",
+        default=False,
+        help="Use torch.backends.xeon.run_cpu to get the peak performance on Intel(R) Xeon(R) Scalable Processors.",
+    )
+    launcher_group.add_argument(
+        "--cpu_launcher_args",
+        type=str,
+        default="",
+        help="Provide the args of torch.backends.xeon.run_cpu. "
+        "To look up what optional arguments this launcher offers: python -m torch.backends.xeon.run_cpu --help",
+    )
     args = parser.parse_args()
     return args
 
@@ -300,7 +324,14 @@ def generate_csv_name(args, dtype, suite, device, compiler, testing):
 
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     mode = get_mode(args)
-    with open("run.sh", "w") as runfile:
+    suites_str = "_".join(suites)
+    devices_str = "_".join(devices)
+    dtypes_str = "_".join(dtypes)
+    compilers_str = "_".join(compilers)
+    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
+        mode, devices_str, dtypes_str, suites_str, compilers_str
+    )
+    with open(generated_file, "w") as runfile:
         lines = []
 
         lines.append("# Setup the output directory")
@@ -318,9 +349,11 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 for compiler in compilers:
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
-                    cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
+                    launcher_cmd = "python"
+                    if args.enable_cpu_launcher:
+                        launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
+                    cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
 
@@ -336,9 +369,16 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         "inductor_no_cudagraphs",
                     ):
                         cmd = f"{cmd} --cold_start_latency"
+
+                    if args.batch_size is not None:
+                        cmd = f"{cmd} --batch_size {args.batch_size}"
+
+                    if args.threads is not None:
+                        cmd = f"{cmd} --threads {args.threads}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
+    return generated_file
 
 
 def generate_dropdown_comment(title, body):
@@ -368,7 +408,10 @@ def build_summary(args):
             out_io.write(f"{name} Absent\n")
 
     def env_var(name):
-        out_io.write(f"{name} = {os.environ[name]}\n")
+        if name in os.environ:
+            out_io.write(f"{name} = {os.environ[name]}\n")
+        else:
+            out_io.write(f"{name} = {None}\n")
 
     out_io.write("\n")
     out_io.write("### Run name ###\n")
@@ -398,14 +441,15 @@ def build_summary(args):
     env_var("CUDA_HOME")
     env_var("USE_LLVM")
 
-    out_io.write("\n")
-    out_io.write("### GPU details ###\n")
-    out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
-    out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
-    out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
-    out_io.write(
-        f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
-    )
+    if "cuda" in args.devices:
+        out_io.write("\n")
+        out_io.write("### GPU details ###\n")
+        out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
+        out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
+        out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
+        out_io.write(
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+        )
 
     title = "## Build Summary"
     comment = generate_dropdown_comment(title, out_io.getvalue())
@@ -682,12 +726,19 @@ class ParsePerformanceLogs(Parser):
         return str_io.getvalue()
 
     def generate_executive_summary(self):
+        machine = "A100 GPUs"
+        if "cpu" in self.devices:
+            get_machine_cmd = "lscpu| grep 'Model name' | awk -F':' '{print $2}'"
+            machine = subprocess.getstatusoutput(get_machine_cmd)[1].strip()
         description = (
             "We evaluate different backends "
             "across three benchmark suites - torchbench, huggingface and timm. We run "
-            "these experiments on A100 GPUs. Each experiment runs one iteration of forward "
-            "and backward pass. For accuracy, we check the numerical correctness of forward "
-            "pass outputs and gradients by comparing with native pytorch. We measure speedup "
+            "these experiments on "
+            + machine
+            + ". Each experiment runs one iteration of forward pass "
+            "and backward pass for training and forward pass only for inference. "
+            "For accuracy, we check the numerical correctness of forward pass outputs and gradients "
+            "by comparing with native pytorch. We measure speedup "
             "by normalizing against the performance of native pytorch. We report mean "
             "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
             "Caveats\n"
@@ -696,7 +747,6 @@ class ParsePerformanceLogs(Parser):
             "2) Experiments do not cover dynamic shapes.\n"
             "3) Experimental setup does not have optimizer.\n\n"
         )
-
         comment = generate_dropdown_comment("", description)
         str_io = io.StringIO()
         str_io.write("\n")
@@ -1314,20 +1364,27 @@ if __name__ == "__main__":
     args.suites = suites
 
     if args.print_run_commands:
-        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(
+            args, dtypes, suites, devices, compilers, output_dir
+        )
+        print(
+            f"Running commands are generated in file {generated_file}. Please run (bash {generated_file})."
+        )
     elif args.visualize_logs:
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
-        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(
+            args, dtypes, suites, devices, compilers, output_dir
+        )
         # generate memoized archive name now so that the date is reflective
         # of when the run started
         get_archive_name(args, dtypes[0])
         # TODO - Do we need to worry about segfaults
         try:
-            os.system("bash run.sh")
+            os.system(f"bash {generated_file}")
         except Exception as e:
             print(
-                "Running commands failed. Please run manually (bash run.sh) and inspect the errors."
+                f"Running commands failed. Please run manually (bash {generated_file}) and inspect the errors."
             )
             raise e
         if not args.log_operator_inputs:

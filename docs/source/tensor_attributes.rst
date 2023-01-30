@@ -177,6 +177,20 @@ Via a string and device ordinal:
     >>> torch.device('cpu', 0)
     device(type='cpu', index=0)
 
+The device object can also be used as a context manager to change the default
+device tensors are allocated on:
+
+::
+
+    >>> with torch.device('cuda:1'):
+    ...     r = torch.randn(2, 3)
+    >>> r.device
+    device(type='cuda', index=1)
+
+This context manager has no effect if a factory function is passed an explicit,
+non-None device argument.  To globally change the default device, see also
+:func:`torch.set_default_device`.
+
 .. note::
    The :class:`torch.device` argument in functions can generally be substituted with a string.
    This allows for fast prototyping of code.
