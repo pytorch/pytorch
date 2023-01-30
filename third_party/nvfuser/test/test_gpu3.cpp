@@ -6524,7 +6524,6 @@ TEST_F(NVFuserTest, FusionHuggingFaceRepro2064_CUDA) {
 #ifndef USE_ROCM
 
 TEST_F(NVFuserTest, FusionCastings_CUDA) {
-  // TODO: this test is failing
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
