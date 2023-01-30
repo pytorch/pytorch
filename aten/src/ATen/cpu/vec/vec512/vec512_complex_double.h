@@ -454,7 +454,7 @@ template <> Vectorized<c10::complex<double>> inline operator/(const Vectorized<c
   auto dc2 = _mm512_permute_pd(b2, 0x55);    // d/|c,d|         c/|c,d|
   dc2 = _mm512_xor_pd(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
   auto adbc2 = _mm512_mul_pd(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
-  auto res2 = Vectorized<c10::complex<double>>::hadd_pd(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  auto res2 = hadd_pd(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
   return res2;
 }
 

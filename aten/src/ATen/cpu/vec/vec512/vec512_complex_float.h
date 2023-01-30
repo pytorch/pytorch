@@ -676,7 +676,7 @@ public:
   }
   __m512 abs_2_() const {
     auto val_2 = _mm512_mul_ps(values, values);     // a*a     b*b
-    auto ret = hadd_ps(val_2, val_2);        // a*a+b*b a*a+b*b
+    auto ret = hadd_ps(val_2, val_2);               // a*a+b*b a*a+b*b
     return ret;
   }
   __m512 abs_() const {
@@ -956,7 +956,7 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   auto dc2 = _mm512_permute_ps(b2, 0xB1);    // d/|c,d|         c/|c,d|
   dc2 = _mm512_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
   auto adbc2 = _mm512_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
-  auto res2 = Vectorized<c10::complex<double>>::hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  auto res2 = hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
   return res2;
 }
 
