@@ -24,7 +24,7 @@ class TestInductorConfig(TestCase):
 
     def tearDown(self):
         super().tearDown()
-        config.update(self._saved_config)
+        config.to_dict().update(self._saved_config)
 
     def test_set(self):
         config.max_fusion_size = 13337
@@ -56,6 +56,9 @@ class TestInductorConfig(TestCase):
         self.assertEqual(config.max_fusion_size, 321)
         self.assertEqual(config.triton.cudagraphs, False)
 
+        # check for pickle errors in dynamo config (e.g. PyCapsule)
+        dynamo_config.load_config(dynamo_config.save_config())
+
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
         self.assertFalse(hasattr(config, "missing_name"))
@@ -86,6 +89,18 @@ class TestInductorConfig(TestCase):
             with config.patch("cpp.threads", 8999):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
+
+    @config.patch(max_fusion_size=123)
+    def test_unittest_mock_patch(self):
+        from unittest.mock import patch
+
+        self.assertEqual(config.max_fusion_size, 123)
+        with patch.object(config, "max_fusion_size", 444):
+            self.assertEqual(config.max_fusion_size, 444)
+        self.assertEqual(config.max_fusion_size, 123)
+        with patch(f"{config.__name__}.max_fusion_size", 555):
+            self.assertEqual(config.max_fusion_size, 555)
+        self.assertEqual(config.max_fusion_size, 123)
 
     def test_log_level_property(self):
         old = dynamo_config.log_level
