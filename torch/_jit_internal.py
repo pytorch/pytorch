@@ -22,6 +22,7 @@ from typing import (  # noqa: F401
     Any,
     Callable,
     Dict,
+    Final,
     Generic,
     List,
     Optional,
@@ -41,11 +42,6 @@ import torch.package._mangling as package_mangling
 from torch._C import Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
-
-if sys.version_info[:2] > (3, 7):
-    from typing import Final
-else:
-    from typing_extensions import Final
 
 LockType: Type
 try:
@@ -1216,12 +1212,7 @@ def _get_named_tuple_properties(obj):
 def _create_named_tuple(
     t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]
 ):
-    # mypy: namedtuple() expects a string literal as the first argument
-    if sys.version_info < (3, 7, 0):
-        TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[no-redef, misc]
-        TupleType.__new__.__defaults__ = defaults  # type: ignore[attr-defined]
-    else:
-        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
+    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
 
 

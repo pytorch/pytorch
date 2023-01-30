@@ -140,7 +140,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
-    "ghostnet_100",  # Accuracy
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -180,7 +179,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    "twins_pcpvt_base",  # timeout
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -192,19 +190,10 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
     "pytorch_unet",  # ValueError: floor is not defined
-    # The size of tensor a (320) must match the size of tensor b (512) at
-    # non-singleton dimension 2
-    "speech_transformer",
-    # huggingface
-    "MBartForConditionalGeneration",  # OOM
-    "OPTForCausalLM",  # OOM
     # timm_models
-    "eca_halonext26ts",  # 'Pointwise' object has no attribute 'get_stride'
     "hrnet_w18",  # name 'floor' is not defined
-    "jx_nest_base",  # sym_sqrt() missing 1 required positional argument: 'a'
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
-    "twins_pcpvt_base",  # timeout
     "volo_d1_224",  # ceiling is not defined
     "xcit_large_24_p8_224",  # ceiling is not defined
 ]
@@ -1859,11 +1848,6 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
-        "--inductor-dynamic",
-        action="store_true",
-        help="Measure speedup with TorchInductor",
-    )
-    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -1942,7 +1926,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
-        torch._inductor.config.dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
@@ -2087,7 +2070,7 @@ def run(runner, args, original_dir=None):
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
 
-    if args.inductor or args.inductor_dynamic or args.inductor_settings:
+    if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
         if args.float16:
             # TODO(jansel): check if correctness issue is real
@@ -2117,19 +2100,10 @@ def run(runner, args, original_dir=None):
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
-    elif args.inductor or args.inductor_dynamic:
+    elif args.inductor:
         inductor_config.debug = args.verbose
         if args.threads:
             inductor_config.cpp.threads = args.threads
-
-        if args.inductor_dynamic:
-            inductor_config.triton.cudagraphs = False
-            inductor_config.dynamic_shapes = True
-        else:
-            inductor_config.dynamic_shapes = False
-            if args.export_profiler_trace:
-                print("Profiling requested, setting cudagraphs to False")
-                inductor_config.triton.cudagraphs = False
 
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
@@ -2242,7 +2216,7 @@ def run(runner, args, original_dir=None):
         if args.profiler_trace_name is None:
             if args.backend:
                 args.profiler_trace_name = args.backend
-            elif args.inductor or args.inductor_dynamic:
+            elif args.inductor:
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
