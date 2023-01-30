@@ -1140,13 +1140,13 @@ class TestSparseCSR(TestCase):
             # error on a strided
             a_strided = a.to_dense()
             with self.assertRaisesRegex(
-                    RuntimeError, r'"resize_as_sparse_compressed_: src " expected sparse compressed tensor layout'):
+                    RuntimeError, r'resize_as_sparse_compressed_: src  expected sparse compressed tensor layout'):
                 b.resize_as_sparse_(a_strided)
 
             # error on b strided
             b_strided = b.to_dense()
             with self.assertRaisesRegex(
-                    RuntimeError, r'"resize_as_sparse_compressed_: self " expected sparse compressed tensor layout'):
+                    RuntimeError, r'resize_as_sparse_compressed_: self  expected sparse compressed tensor layout'):
                 b_strided.resize_as_sparse_(a)
 
             # error if layout does not match, transpose induces layout flip
@@ -2857,6 +2857,8 @@ class TestSparseCSR(TestCase):
             frozenset({torch.sparse_csr}),
             frozenset({torch.sparse_csc, torch.sparse_csr}),
             frozenset({torch.sparse_csc, torch.sparse_bsc}),
+            frozenset({torch.sparse_csc, torch.sparse_bsr}),
+            frozenset({torch.sparse_csr, torch.sparse_bsc}),
             frozenset({torch.sparse_csr, torch.sparse_bsr}),
             frozenset({torch.sparse_bsc}),
             frozenset({torch.sparse_bsr}),
@@ -2872,11 +2874,25 @@ class TestSparseCSR(TestCase):
             # BSR -> CSR is not yet supported
             if (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr):
                 expect_error = True
+            # BSR -> CSC is not yet supported
+            if (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csc):
+                expect_error = True
+            # BSC -> CSR is not yet supported
+            if (layout_a, layout_b) == (torch.sparse_bsc, torch.sparse_csr):
+                expect_error = True
             # BSC -> CSC is not yet supported
             if (layout_a, layout_b) == (torch.sparse_bsc, torch.sparse_csc):
                 expect_error = True
             # CSR -> BSR only works for non-batched inputs
             if (layout_a, layout_b) == (torch.sparse_csr, torch.sparse_bsr):
+                if a.dim() > 2:
+                    expect_error = True
+            # CSR -> BSC only works for non-batched inputs
+            if (layout_a, layout_b) == (torch.sparse_csr, torch.sparse_bsc):
+                if a.dim() > 2:
+                    expect_error = True
+            # CSC -> BSR only works for non-batched inputs
+            if (layout_a, layout_b) == (torch.sparse_csc, torch.sparse_bsr):
                 if a.dim() > 2:
                     expect_error = True
             # CSC -> BSC only works for non-batched inputs

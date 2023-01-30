@@ -1719,8 +1719,11 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
     }
     return _compressed_to_block_compressed_cpu<kSparseBsr>(self.cpu(), blocksize).to(self.device());
   }
+  if (self.layout() == kSparseCsc) {
+    return self.to_sparse_csr(dense_dim_opt).to_sparse_bsr(blocksize);
+  }
 
-  AT_ERROR("sparse_compressed_to_sparse_bsr: expected SparseCsr, SparseBsr or SparseBsc layout but got ", self.layout());
+  AT_ERROR("sparse_compressed_to_sparse_bsr: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
   return Tensor{};
 }
 
@@ -1738,8 +1741,11 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
     }
     return _compressed_to_block_compressed_cpu<kSparseBsc>(self.cpu(), blocksize).to(self.device());
   }
+  if (self.layout() == kSparseCsr) {
+    return self.to_sparse_csc(dense_dim_opt).to_sparse_bsc(blocksize);
+  }
 
-  AT_ERROR("sparse_compressed_to_sparse_bsc: expected SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
+  AT_ERROR("sparse_compressed_to_sparse_bsc: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
   return Tensor{};
 }
 

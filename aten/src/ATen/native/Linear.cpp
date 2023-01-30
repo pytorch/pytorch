@@ -102,7 +102,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
   TORCH_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
-  if (sum_dims_.size() == 0)
+  if (sum_dims_.empty())
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
   auto sum_dims = at::dim_list_to_bitset(sum_dims_, dim);
