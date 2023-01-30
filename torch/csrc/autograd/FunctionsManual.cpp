@@ -104,7 +104,7 @@ template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
   std::string msg =
       c10::str("the derivative for '", name, "' is not implemented.");
-  if (strlen(reason) > 0) {
+  if (reason[0] != '\0') {
     msg = c10::str(msg, " ", reason);
   };
   TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
