@@ -404,11 +404,7 @@ def build_ignore_context_manager(ctx, stmt):
         outputs = []
         for arg in args:
             var_name = arg.arg
-            if sys.version_info < (3, 8):
-                # Starting python3.8 ast.Str is deprecated
-                var_ann = arg.value.s
-            else:
-                var_ann = arg.value.value
+            var_ann = arg.value.value
             var_decl_type, var_ann = var_ann.split(":")
             if var_decl_type == "inp":
                 inputs.append(InputType(var_name, var_ann))

@@ -934,10 +934,13 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             m.eval()
         else:
             m.train()
+        print("qconfig_dict:", qconfig_dict)
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict, example_inputs=data)
+        print("prepared:", mp)
         mp(*data)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
+        print("quantized:", mq)
 
         if compare_fp32_vs_fp32_prepared:
             m_shadows_mp = add_shadow_loggers(
