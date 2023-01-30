@@ -185,8 +185,8 @@ def asgd(
     """
 
     if foreach is None:
-        foreach = _default_to_fused_or_foreach([params, grads, axs, mus, etas, state_steps],
-                                               differentiable, has_fused=False)[1]
+        _, foreach = _default_to_fused_or_foreach([params, grads, axs, mus, etas, state_steps],
+                                                  differentiable, has_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

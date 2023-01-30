@@ -252,9 +252,9 @@ def adamw(
 
     # Respect when the user inputs False/True for foreach.
     if foreach is None:
-        foreach = _default_to_fused_or_foreach(
+        _, foreach = _default_to_fused_or_foreach(
             [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, has_fused=False)[1]
+            differentiable, has_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
