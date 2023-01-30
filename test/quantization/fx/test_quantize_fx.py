@@ -1401,7 +1401,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.conv = torch.nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
-                return {"output": self.conv(x["input"])}
+                return self.conv(x["input"])
 
         example_inputs = ({"input": torch.randn(1, 1, 1, 1)},)
         m = M().eval()
