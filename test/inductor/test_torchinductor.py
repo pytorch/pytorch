@@ -722,6 +722,16 @@ class CommonTemplate:
 
         self.common(fn, (x, y))
 
+    def test_concat_add_inplace(self):
+        def fn(x, y, z):
+            return torch.cat([x, y], dim=1).add_(z)
+
+        x = torch.randn([2, 12, 14, 14])
+        y = torch.randn([2, 12, 14, 14])
+        z = torch.randn([2, 24, 14, 14])
+
+        self.common(fn, (x, y, z))
+
     def test_abs(self):
         def fn(a):
             return (a / (torch.abs(a) + 1),)
@@ -4071,7 +4081,22 @@ class CommonTemplate:
                 aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2,
             )
 
+        def fn_channels_last(x):
+            return (
+                aten.as_strided(
+                    x, (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0
+                ),
+                aten.as_strided(
+                    x + 1, (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0
+                )
+                + 2,
+            )
+
         self.common(fn, [torch.randn(64, 64)])
+        self.common(
+            fn_channels_last,
+            [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
+        )
 
     def test_as_strided_scatter(self):
         def fn(a, b):
@@ -5204,6 +5229,8 @@ test_skips = {
     "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
     "test_randn_like_empty_dynamic_shapes": ("cpu", "cuda"),
     "test_recompile_on_index_dynamic_shapes": ("cpu", "cuda"),
+    # test_roi_align uses torchvision, which doesn't work with dynamic shapes
+    "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
     "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),

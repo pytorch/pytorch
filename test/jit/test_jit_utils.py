@@ -3,7 +3,6 @@
 import os
 import sys
 from textwrap import dedent
-import unittest
 
 import torch
 
@@ -30,7 +29,6 @@ class TestJitUtils(JitTestCase):
             torch._jit_internal.get_callable_argument_names(fn_positional_or_keyword_args_only))
 
     # Tests that POSITIONAL_ONLY arguments are ignored.
-    @unittest.skipIf(sys.version_info < (3, 8), 'POSITIONAL_ONLY arguments are not supported before 3.8')
     def test_get_callable_argument_names_positional_only(self):
         code = dedent('''
             def fn_positional_only_arg(x, /, y):
@@ -69,7 +67,6 @@ class TestJitUtils(JitTestCase):
 
     # Tests that a function signature containing various different types of
     # arguments are ignored.
-    @unittest.skipIf(sys.version_info < (3, 8), 'POSITIONAL_ONLY arguments are not supported before 3.8')
     def test_get_callable_argument_names_hybrid(self):
         code = dedent('''
             def fn_hybrid_args(x, /, y, *args, **kwargs):
