@@ -323,10 +323,10 @@ def adamw(
     if fused and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adamw
-    elif fused and not torch.jit.is_scripting():
+    if fused and not torch.jit.is_scripting():
         func = _fused_adamw
+    elif foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adamw
     else:
         func = _single_tensor_adamw
 
@@ -483,6 +483,8 @@ def _multi_tensor_adamw(
         ), "If capturable=True, params and state_steps must be CUDA tensors."
 
     assert not differentiable, "_foreach ops don't support autograd"
+
+    assert grad_scale is None and found_inf is None
 
     grouped_tensors = _group_tensors_by_device_and_dtype([
         params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
