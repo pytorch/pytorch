@@ -681,5 +681,5 @@ def realize_inputs(*args):
     return [realize_inputs(x) for x in args]
 
 
-# ensure lowering is imported to that `extern_kernels.*` is populated
+# ensure lowering is imported so that `extern_kernels.*` is populated
 from . import lowering  # noqa: F401
