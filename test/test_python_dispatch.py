@@ -1579,7 +1579,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
             err_msg = "no implementation found for 'torch.ops.aten.sym_stride'"
             e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(RuntimeError, err_msg):
+            with self.assertRaisesRegex(TypeError, err_msg):
                 e.stride()
 
             e = StridesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
@@ -1631,7 +1631,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
             err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(RuntimeError, err_msg):
+            with self.assertRaisesRegex(TypeError, err_msg):
                 e.size()
 
             e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
