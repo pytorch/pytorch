@@ -104,7 +104,7 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
     const at::Tensor& flat_indices,
     const at::Tensor& flat_values,
     at::TensorList tensors) {
-  if (tensors.size() == 0)
+  if (tensors.empty())
     return {};
 
   auto indices =
