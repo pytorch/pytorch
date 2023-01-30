@@ -2963,6 +2963,19 @@ class CommonTemplate:
         self.assertEqual(y, opt_y)
         self.assertEqual(y.stride(), opt_y.stride())
 
+    def test_cat_inplace(self):
+        def fn(x):
+            rt = torch.cat([x])
+            v = x.sin_()
+            return rt
+
+        # can't use self.common because input is modified inplace
+        inp = torch.ones(2)
+        opt_fn = torch.compile(fn)
+        res = opt_fn(inp.clone())
+        expected = fn(inp.clone())
+        self.assertEqual(res, expected)
+
     def test_stack(self):
         def fn(a, b):
             return torch.stack(
