@@ -153,6 +153,7 @@ def requires_decomp(fn):
 
     return wrap_test
 
+
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
 
 
