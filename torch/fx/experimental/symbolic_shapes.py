@@ -1121,10 +1121,8 @@ class ShapeEnv(object):
             div_replacements = {}
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible and (
-                    isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer)
-                ):
-                    div_replacements[atom] = base / divisor
+                if self.replace(base % divisor) in self.divisible:
+                    div_replacements[atom] = sympy.floor(base / divisor)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
