@@ -7,11 +7,9 @@ from torch._C import DispatchKey
 
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
-from typing import Any, Optional
+from typing import Any, Union
 
 from .distributed_c10d import _find_pg_by_ranks_and_tag, get_rank
-from .constants import default_pg_timeout
-from torch._meta_registrations import register_meta
 
 
 from typing import List
@@ -30,12 +28,11 @@ Issues:
 
 """
 FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
-FIXME wait_tensor should be an op so its traceable
 """
 
 #FIXME we do this way cuz we can't use tensor __eq__, we want id()
 #TODO use a weakref callback
-class StupidWeakDict:
+class IdKeyWeakDict:
     def __init__(self):
         self.kvs = []
 
@@ -56,7 +53,7 @@ class StupidWeakDict:
         self.kvs = new_arr
         return val
 
-tensor_to_work = StupidWeakDict()
+tensor_to_work = IdKeyWeakDict()
 
 lib = torch.library.Library("tr_c10d", "DEF")
 lib.define("wait(Tensor self) -> Tensor")
@@ -64,16 +61,14 @@ lib.define("wait(Tensor self) -> Tensor")
 impl_lib = torch.library.Library("tr_c10d", "IMPL",  "CPU")
 
 def _wait_tensor(tensor: torch.Tensor):
-    print("__wait")
     w = tensor_to_work.get_and_remove(tensor)
     if w:
         w.wait()
-    return tensor * 99
+    return tensor
 
 impl_lib.impl("wait", _wait_tensor)
 
 def wait_tensor(tensor):
-    print("wait")
     return torch._ops.ops.tr_c10d.wait(tensor)
 
 class AsyncCollectiveTensor(torch.Tensor):
@@ -107,7 +102,6 @@ class AsyncCollectiveTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: Any):
             if isinstance(e, AsyncCollectiveTensor):
-                # print(f"unwrapping {e}")
                 return wait_tensor(e._tensor)
             return e
 
@@ -120,30 +114,34 @@ class AsyncCollectiveTensor(torch.Tensor):
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
         out = func(*unwrapped_args, **unwrapped_kwargs)
-        # print(f"hit torchdispatch for func {func}, returning {out}")
         return out
 
 
 # TODO assert if ranks has duplicated entries
-# TODO change signature from int[] to int[][]
-def _all_reduce_cpu(self, reduceOp, tag, ranks):
-    print("all reducing!")
-    #TODO accept SUM - lowercase it
+def _all_reduce_cpu(self, reduceOp, tag, ranks, stride):
+    reduceOp = reduceOp.lower()
     assert reduceOp == "sum", "Unable to convert str to ReduceOp, so only default sum works"
     assert tag == "", "No support for non-empty comms tag"
+    assert len(ranks) % stride == 0, f"Ranks length ({len(ranks)}) must be divisible by stride ({stride})"
 
     my_rank = get_rank()
-    my_ranks = ranks
+    rank_set = None
 
+    for i in range(0, len(ranks), stride):
+        rank_set = ranks[i : i + stride]
+        if my_rank in rank_set:
+            my_ranks = rank_set
 
     assert my_ranks is not None, "Called all_reduce with a set of ranks that doesn't include the current node"
     assert my_rank in my_ranks, "Called all_reduce with a set of ranks that doesn't include the current node"
-    
+
+    my_ranks.sort()
+
     group = _find_pg_by_ranks_and_tag(tag, my_ranks)
     assert group is not None
 
     inplace_tensor = self.clone()
-    work = dist.all_reduce(inplace_tensor,op=dist.ReduceOp.SUM, group=group, async_op=True)
+    work = dist.all_reduce(inplace_tensor, op=dist.ReduceOp.SUM, group=group, async_op=True)
 
     global tensor_to_work
     tensor_to_work.add(inplace_tensor, work)
@@ -152,7 +150,32 @@ def _all_reduce_cpu(self, reduceOp, tag, ranks):
 c10_lib = torch.library.Library("aten", "IMPL",  "CPU")
 c10_lib.impl("all_reduce", _all_reduce_cpu)
 
+RANK_TYPES = Union[List[int], List[List[int]]]
+
 # FIXME not the actual Python API, just here to help try it
-def all_reduce(self, reduceOp, tag, ranks):
-    tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, ranks)
+def all_reduce(self: torch.Tensor, reduceOp: str, tag: str, ranks: RANK_TYPES):
+    """
+    Reduces the tensor data across all machines in such a way that all get
+    the final result.
+
+    The input tensor is left unmodified.
+
+    rank can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: if you don't like all the new cool stuff or has some legacy weigthing on your shoulder.
+        DeviceMesh: Do a SPMD collective over all ranks of a collective
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+    """
+
+    if isinstance(ranks[0], list):
+        rankset = []
+        for rs in ranks:
+            rankset.extend(rs)
+            stride = len(rs)
+    else:
+        rankset = ranks
+        stride = len(rankset)
+
+    tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, rankset, stride)
     return AsyncCollectiveTensor(tensor)

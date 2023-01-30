@@ -14732,8 +14732,8 @@
   autogen: _fused_adam, _fused_adam.out
 
 # Collectives
-# TODO figure out how to encode list[list[int]]
-- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks) -> Tensor
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int stride) -> Tensor
   dispatch:
     CompositeExplicitAutograd: all_reduce
   variants: function
+
