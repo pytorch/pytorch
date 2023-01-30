@@ -19,18 +19,6 @@ def unwrap_local_tensor(e: DTensor) -> torch.Tensor:
     return e._local_tensor if isinstance(e, DTensor) else e
 
 
-@register_impl("aten.cat.default")
-def dist_cat(tensor_list: List[DTensor], dim: int = 0) -> DTensor:
-    local_inputs = pytree.tree_map(unwrap_local_tensor, tensor_list)
-    local_tensor = torch.ops.aten.concat(local_inputs, dim=dim)
-    return DTensor.from_local(
-        local_tensor,
-        tensor_list[0].device_mesh,
-        tensor_list[0].placements,
-        run_check=False,
-    )
-
-
 @register_impl("aten.split.Tensor")
 # pyre-fixme[2]: Parameter must be annotated.
 def dist_split(self: DTensor, split_size_or_sections, dim=0) -> List[DTensor]:
