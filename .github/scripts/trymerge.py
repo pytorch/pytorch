@@ -29,6 +29,7 @@ from pathlib import Path
 
 from gitutils import (
     GitRepo,
+    are_ghstack_branches_in_sync,
     get_git_remote_name,
     get_git_repo_dir,
     patterns_to_regex,
@@ -618,22 +619,6 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
     if comment.editor_login is not None:
         return False
     return comment.author_login == "facebook-github-bot"
-
-
-def _shasum(value: str) -> str:
-    import hashlib
-    m = hashlib.sha256()
-    m.update(value.encode("utf-8"))
-    return m.hexdigest()
-
-
-def are_ghstack_branches_in_sync(repo: GitRepo, head_ref: str) -> None:
-    """ Checks that diff between base and head is the same as diff between orig and its parent """
-    orig_ref = re.sub(r'/head$', '/orig', head_ref)
-    base_ref = re.sub(r'/head$', '/base', head_ref)
-    orig_diff_sha = _shasum(repo.diff(f"{repo.remote}/{orig_ref}"))
-    head_diff_sha = _shasum(repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}"))
-    return orig_diff_sha == head_diff_sha
 
 
 def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:

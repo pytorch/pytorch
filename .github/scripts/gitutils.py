@@ -336,3 +336,18 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
                 rc += c
     rc += ")"
     return re.compile(rc)
+
+def _shasum(value: str) -> str:
+    import hashlib
+    m = hashlib.sha256()
+    m.update(value.encode("utf-8"))
+    return m.hexdigest()
+
+
+def are_ghstack_branches_in_sync(repo: GitRepo, head_ref: str) -> bool:
+    """ Checks that diff between base and head is the same as diff between orig and its parent """
+    orig_ref = re.sub(r'/head$', '/orig', head_ref)
+    base_ref = re.sub(r'/head$', '/base', head_ref)
+    orig_diff_sha = _shasum(repo.diff(f"{repo.remote}/{orig_ref}"))
+    head_diff_sha = _shasum(repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}"))
+    return orig_diff_sha == head_diff_sha
