@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import os
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
 
@@ -13,6 +14,8 @@ from torch.distributed.distributed_c10d import (
     get_rank,
     get_world_size,
     GroupMember,
+    init_process_group,
+    is_initialized,
     new_group,
     ProcessGroup,
     reduce_scatter,
@@ -109,20 +112,20 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        default_pg = _get_default_group()
+        default_pg = self._get_or_create_default_group()
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
         if device_type == "cpu":
             assert (
-                self._backend == "gloo" or self._backend == "local"
+                self._backend == "gloo" or self._backend == "threaded"
             ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
         elif device_type == "cuda":
             if self._backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "local"
+            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type, but got {device_type}"
@@ -215,6 +218,39 @@ class DeviceMesh(object):
                             )
                         self._dim_groups.append(new_subgroup)
 
+    def _get_or_create_default_group(self):
+        if not is_initialized():
+            # TODO: we will support mesh on a subset of WORLD in future
+            world_size = int(os.getenv("WORLD_SIZE", 1))
+            if self.mesh.numel() < world_size:
+                raise RuntimeError(
+                    "DeviceMesh must include every process in WORLD, "
+                    f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
+                )
+
+            unique_mesh_values = self.mesh.unique(sorted=True)
+            if unique_mesh_values.numel() != self.mesh.numel():
+                raise RuntimeError(
+                    f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
+                )
+
+            # ranks in mesh must start from 0
+            if unique_mesh_values[0] != 0:
+                raise RuntimeError(
+                    "DeviceMesh ranks must start from 0, "
+                    f"but found min rank = {unique_mesh_values[0]}"
+                )
+
+            # mesh must be contiguous (i.e. from 0 to N-1)
+            if 2 * unique_mesh_values.sum().item() != world_size * (world_size - 1):
+                raise RuntimeError(
+                    f"DeviceMesh should have all ranks of WORLD, but found {self.mesh.tolist()}"
+                )
+
+            _backend = "gloo" if self.device_type == "cpu" else "nccl"
+            init_process_group(backend=_backend)
+        return _get_default_group()
+
     def __enter__(self) -> "DeviceMesh":
         # set global device_mesh to this instance
         set_global_device_mesh(self)
@@ -227,6 +263,9 @@ class DeviceMesh(object):
 
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
+
+    def __hash__(self):
+        return hash((self.mesh, id(self)))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
@@ -283,6 +322,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if output.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
@@ -330,6 +375,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if tensor.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0

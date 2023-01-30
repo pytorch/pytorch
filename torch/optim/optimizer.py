@@ -6,7 +6,7 @@ import warnings
 import functools
 import math
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -53,6 +53,40 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
         return x.sqrt()
     else:
         return math.sqrt(x)
+
+
+# We try to use the foreach implementation on CUDA whenever possible since
+# it is faster than the for-loop implementation. However, the foreach
+# implementation is not differentiable, so we must check differentiable=False.
+def _default_to_foreach(tensorlists: List[List[torch.Tensor]], differentiable: bool = False) -> bool:
+    if torch.jit.is_scripting() or differentiable:
+        return False
+    all_tensors = []
+    for tensorlist in tensorlists:
+        all_tensors.extend(tensorlist)
+    return all(p is None or (p.is_cuda and type(p) == torch.Tensor) for p in all_tensors)
+
+
+# Common doc strings among optimizers
+_foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
+            is used. If unspecified by the user (so foreach is None), we will try to use
+            foreach over the for-loop implementation on CUDA, since it is usually
+            significantly more performant. (default: None)"""
+
+_capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
+            capture in a CUDA graph. Passing True can impair ungraphed performance,
+            so if you don't intend to graph capture this instance, leave it False
+            (default: False)"""
+
+_differentiable_doc = r"""differentiable (bool, optional): whether autograd should
+            occur through the optimizer step in training. Otherwise, the step()
+            function runs in a torch.no_grad() context. Setting to True can impair
+            performance, so leave it False if you don't intend to run autograd
+            through this instance (default: False)"""
+
+_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
+            objective, instead of minimizing (default: False)"""
+
 
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following
@@ -371,7 +405,7 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none: bool = False):
+    def zero_grad(self, set_to_none: bool = True):
         r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Args:

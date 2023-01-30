@@ -43,7 +43,7 @@ from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
-from torch.distributed.checkpoint._nested_tensor import flatten_sharded_tensors
+from torch.distributed.checkpoint._sharded_tensor_utils import _flatten_sharded_tensors
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import (
     find_state_dict_object,
@@ -81,11 +81,11 @@ class DefaultSavePlanner(SavePlanner):
         self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
 
-    def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
-            state_dict = flatten_sharded_tensors(state_dict)
+            state_dict = _flatten_sharded_tensors(state_dict)
         self.state_dict = state_dict
         self.is_coordinator = is_coordinator
 
@@ -173,14 +173,14 @@ class DefaultLoadPlanner(LoadPlanner):
         self.original_state_dict = {}
         self.mappings = {}
 
-    def init(
+    def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
         if self.flatten_sharded_tensors:
-            state_dict = flatten_sharded_tensors(state_dict)
+            state_dict = _flatten_sharded_tensors(state_dict)
 
         self.original_state_dict = state_dict
 

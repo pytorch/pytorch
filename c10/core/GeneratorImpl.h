@@ -67,7 +67,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   GeneratorImpl(GeneratorImpl&& other) = delete;
   GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
 
-  virtual ~GeneratorImpl() = default;
+  ~GeneratorImpl() override = default;
   c10::intrusive_ptr<GeneratorImpl> clone() const;
 
   // Common methods for all generators

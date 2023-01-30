@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unittest
 import warnings
+import subprocess
 from random import randint
 
 import torch
@@ -644,20 +645,24 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
-        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
             int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        # this is really just checking that the environment variable is respected during testing
+        # and not overwritten by another function that doesn't revert it to the intitial value
         if not skip_tf32_cublas:
             self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+            self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        else:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
         for p in ('medium', 'high'):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
-            if not skip_tf32_cublas:
-                self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
         torch.set_float32_matmul_precision('highest')
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
-        if not skip_tf32_cublas:
-            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        torch.set_float32_matmul_precision(orig)
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -3329,6 +3334,38 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_error(self):
+        # We need to run this test in a separate thread as the error we trigger
+        # puts the cuda context in a bad state
+        script = """
+import torch
+
+g = torch.cuda.CUDAGraph()
+try:
+    g.capture_begin()
+except RuntimeError as e:
+    if "CUDA graphs must be captured on a non-default stream." in str(e):
+        exit(0)
+    else:
+        exit(1)
+exit(2)
+"""
+        try:
+            a = subprocess.check_output(
+                [sys.executable, '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),)
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                self.assertTrue(False, "Error raise by starting capture without a stream is not the expected one")
+            elif e.returncode == 2:
+                self.assertTrue(False, "Error raised by starting capture without a stream was not caught")
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
