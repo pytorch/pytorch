@@ -367,84 +367,81 @@ Attempted to convert a derivative formula for a mutable operator
         ):
             ref_native_op_name = base_op_name.base.split("_foreach_")[-1]
             for function_schema in functional_info_by_signature:
-                if (
+                if not (
                     function_schema.name.name.base == ref_native_op_name
                     and not function_schema.name.name.inplace
                 ):
-                    all_saved_inputs = []
-                    all_saved_outputs = []
-                    diff_info_dict = copy.deepcopy(
-                        differentiability_infos[function_schema]
+                    continue
+                all_saved_inputs = []
+                all_saved_outputs = []
+                diff_info_dict = copy.deepcopy(differentiability_infos[function_schema])
+                diff_info = diff_info_dict["Default"]
+                modified_derivative_formulas = []
+                for derivative in diff_info.derivatives:
+                    saved_inputs = []
+                    saved_outputs = []
+                    modified_formula = (
+                        derivative.formula.replace("grad", "grads[i]")
+                        .replace("self", "self[i]")
+                        .replace("result", "result[i]")
                     )
-                    diff_info = diff_info_dict["Default"]
-                    modified_derivative_formulas = []
-                    for derivative in diff_info.derivatives:
-                        saved_inputs = []
-                        saved_outputs = []
-                        modified_formula = (
-                            derivative.formula.replace("grad", "grads[i]")
-                            .replace("self", "self[i]")
-                            .replace("result", "result[i]")
-                        )
-                        if "self" in modified_formula:
-                            saved_inputs.append(
-                                SavedAttribute(
-                                    nctype=NamedCType(
-                                        name="self", type=BaseCType(tensorListT)
-                                    ),
-                                    expr="self",
-                                )
-                            )
-                            all_saved_inputs.append(saved_inputs[-1])
-                        if "result" in modified_formula:
-                            saved_outputs.append(
-                                SavedAttribute(
-                                    nctype=NamedCType(
-                                        name="result", type=BaseCType(tensorListT)
-                                    ),
-                                    expr="result",
-                                )
-                            )
-                            all_saved_outputs.append(saved_outputs[-1])
-                        modified_derivative = Derivative(
-                            formula=modified_formula,
-                            original_formula=derivative.original_formula,
-                            var_names=("self",),
-                            saved_inputs=tuple(saved_inputs),
-                            saved_outputs=tuple(saved_outputs),
-                            named_gradients=set(),
-                        )
-                        modified_derivative_formulas.append(modified_derivative)
-                    assert f.func.arguments.self_arg is not None
-                    diff_info = DifferentiabilityInfo(
-                        name=base_op_name.base,
-                        func=f,
-                        op=f"Foreach{diff_info.op}",
-                        derivatives=modified_derivative_formulas,
-                        forward_derivatives=[],
-                        all_saved_inputs=tuple(set(all_saved_inputs)),
-                        all_saved_outputs=tuple(set(all_saved_outputs)),
-                        available_named_gradients=(),
-                        used_named_gradients=set(),
-                        args_with_derivatives=[
-                            Binding(
-                                name="self",
+                    if "self" in modified_formula:
+                        saved_inputs.append(
+                            SavedAttribute(
                                 nctype=NamedCType(
                                     name="self", type=BaseCType(tensorListT)
                                 ),
-                                argument=f.func.arguments.self_arg.argument,
-                                default=None,
+                                expr="self",
                             )
-                        ],
-                        non_differentiable_arg_names=[],
-                        output_differentiability=None,
-                        output_differentiability_conditions=None,
+                        )
+                        all_saved_inputs.append(saved_inputs[-1])
+                    if "result" in modified_formula:
+                        saved_outputs.append(
+                            SavedAttribute(
+                                nctype=NamedCType(
+                                    name="result", type=BaseCType(tensorListT)
+                                ),
+                                expr="result",
+                            )
+                        )
+                        all_saved_outputs.append(saved_outputs[-1])
+                    modified_derivative = Derivative(
+                        formula=modified_formula,
+                        original_formula=derivative.original_formula,
+                        var_names=("self",),
+                        saved_inputs=tuple(saved_inputs),
+                        saved_outputs=tuple(saved_outputs),
+                        named_gradients=set(),
                     )
-                    diff_info_dict["Default"] = diff_info
-                    if f.func not in differentiability_infos:
-                        differentiability_infos[f.func] = diff_info_dict
-                        functional_info_by_signature[f.func] = diff_info_dict
-                    return diff_info_dict, True
+                    modified_derivative_formulas.append(modified_derivative)
+                assert f.func.arguments.self_arg is not None
+                diff_info = DifferentiabilityInfo(
+                    name=base_op_name.base,
+                    func=f,
+                    op=f"Foreach{diff_info.op}",
+                    derivatives=modified_derivative_formulas,
+                    forward_derivatives=[],
+                    all_saved_inputs=tuple(set(all_saved_inputs)),
+                    all_saved_outputs=tuple(set(all_saved_outputs)),
+                    available_named_gradients=(),
+                    used_named_gradients=set(),
+                    args_with_derivatives=[
+                        Binding(
+                            name="self",
+                            nctype=NamedCType(name="self", type=BaseCType(tensorListT)),
+                            argument=f.func.arguments.self_arg.argument,
+                            default=None,
+                        )
+                    ],
+                    non_differentiable_arg_names=[],
+                    output_differentiability=None,
+                    output_differentiability_conditions=None,
+                )
+                diff_info_dict["Default"] = diff_info
+                if f.func not in differentiability_infos:
+                    differentiability_infos[f.func] = diff_info_dict
+                    functional_info_by_signature[f.func] = diff_info_dict
+                return diff_info_dict, True
 
         return None, False
 
