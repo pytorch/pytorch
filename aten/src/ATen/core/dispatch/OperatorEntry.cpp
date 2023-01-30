@@ -145,7 +145,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
   if (k[0].kernel.isValid()) {
 #else
-  if (k.size() > 0) {
+  if (!k.empty()) {
 #endif
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
@@ -221,12 +221,12 @@ bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
   auto it = kernels_.find(k);
   if (it == kernels_.end()) return false;
-  return it->second.size() > 0;
+  return !it->second.empty();
 }
 
 const KernelFunction& OperatorEntry::kernelForDispatchKey(DispatchKey k) const {
   auto it = kernels_.find(k);
-  TORCH_CHECK(it != kernels_.end() && it->second.size(), "no kernel for ", k, " on ", name_);
+  TORCH_CHECK(it != kernels_.end() && !it->second.empty(), "no kernel for ", k, " on ", name_);
   auto jt = it->second.begin();
   TORCH_INTERNAL_ASSERT(jt->kernel.isValid())
   return jt->kernel;
@@ -462,7 +462,7 @@ void OperatorEntry::checkInvariants() const {
   }
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end(), dumpState());
   for (const auto& kv : kernels_) {
-    TORCH_INTERNAL_ASSERT(kv.second.size() > 0, dumpState());
+    TORCH_INTERNAL_ASSERT(!kv.second.empty(), dumpState());
   }
   for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);

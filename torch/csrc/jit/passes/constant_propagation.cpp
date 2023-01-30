@@ -358,7 +358,7 @@ struct ConstantPropagator {
     }
     return no_mutation && !n->kind().is_onnx() &&
         skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-        !n->hasSideEffects() && n->blocks().size() == 0;
+        !n->hasSideEffects() && n->blocks().empty();
   }
 
   void ConstantPropagation(at::ArrayRef<Block*> blocks) {
