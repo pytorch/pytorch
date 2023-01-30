@@ -13,6 +13,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 
@@ -129,7 +130,7 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -203,7 +204,7 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -288,7 +289,7 @@ class ConvBinaryInplace2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -350,7 +351,7 @@ class PackedLinear(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = int(reduce(lambda x, y: x * y, input_size) / input_size[-1])
+        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
@@ -487,7 +488,9 @@ def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
 
 def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     # make sure the autograd is disabled.
@@ -513,7 +516,9 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 
 
 def create_unary_module(node: torch.fx.node):
-    assert node.op == "call_function", "The current node should be a function node"
+    assert (
+        node.op == "call_function" or node.op == "call_method"
+    ), "The current node should be a function/method node"
     unary_map = {
         F.relu: nn.ReLU,
         F.sigmoid: nn.Sigmoid,
@@ -524,6 +529,12 @@ def create_unary_module(node: torch.fx.node):
         F.gelu: nn.GELU,
         F.relu6: nn.ReLU6,
         F.silu: nn.SiLU,
+        torch.relu: nn.ReLU,
+        torch.sigmoid: nn.Sigmoid,
+        torch.tanh: nn.Tanh,
+        "relu": nn.ReLU,
+        "sigmoid": nn.Sigmoid,
+        "tanh": nn.Tanh,
     }
     return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
 
@@ -545,7 +556,7 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 ):  # Output of computation_node is used by other nodes
                     continue
                 computation_node = modules[node.args[0].target]
-                if node.op == "call_function":
+                if node.op == "call_function" or node.op == "call_method":
                     # make sure unary function's inputs only one fx.node(others should be constant value).
                     if any(isinstance(v, torch.fx.Node) for v in node.args[1:]) or any(
                         isinstance(v, torch.fx.Node) for _, v in node.kwargs.items()
@@ -778,6 +789,13 @@ unary_ops = [
     F.gelu,
     F.relu6,
     F.silu,
+    torch.relu,
+    torch.sigmoid,
+    torch.tanh,
+    # methods (torch.Tensor.xxx)
+    "relu",
+    "sigmoid",
+    "tanh",
 ]
 
 

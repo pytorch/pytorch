@@ -32,7 +32,12 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import gather_origins, get_dtype_size, sympy_product
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_dtype_size,
+    sympy_product,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -62,15 +67,14 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            size = ex.size()
-            stride = ex.stride()
+            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
+                ex.stride()
+            )
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
-        stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
-        ]
+        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
+        stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
@@ -261,7 +265,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.static_weight_shapes
             and (
                 len(self.graph_inputs) < self.num_static_inputs
-                or not config.dynamic_shapes
+                or not dynamo_config.dynamic_shapes
             )
             and not example._has_symbolic_sizes_strides
         ):
@@ -384,11 +388,20 @@ class GraphLowering(torch.fx.Interpreter):
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
-            # so that user-land view() will not throw because inductor
+            # 1. user-land view() will not throw because inductor
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            if any(user.op == "output" for user in n.users):
+            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # eager model to align with eager behavior.
+            as_strided_ops = [
+                torch.ops.aten.as_strided.default,
+                torch.ops.aten.as_strided_.default,
+                torch.ops.aten.as_strided_scatter.default,
+            ]
+            if any(
+                user.op == "output" or user.target in as_strided_ops for user in n.users
+            ) and isinstance(n.meta["val"], torch.Tensor):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't

@@ -48,18 +48,20 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import ConstantVariable, EnumVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -80,7 +82,7 @@ from .variables.misc import (
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +279,30 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                state = self.copy_graphstate()
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
+                    self.output.guards.update(result.guards)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    # rollback to the state before the __bool__ inline
+                    self.restore_graphstate(state)
+                    unimplemented(
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
+                    )
+            # __bool__ is non-function or not existed in the user defined object
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -662,8 +688,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
-        value = importlib.import_module(module_name)
-        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        if "torch_package" in module_name:
+            value = torch.package.package_importer._package_imported_modules[
+                module_name
+            ]
+            alias = (
+                module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            )
+        else:
+            value = importlib.import_module(module_name)
+            alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -823,11 +857,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
-        if sys.version_info < (3, 8):
-            assert exc.is_python_constant()
-            assert exc.as_python_constant() is None
-        else:
-            assert exc is None
+        assert exc is None
         self.push(exc)
         self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
 
@@ -837,13 +867,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def END_FINALLY(self, inst):
         tos = self.pop()
-        if sys.version_info < (3, 8):
-            # python3.7 and 3.8 can have END_FINALLY without BEGIN_FINALLY
-            assert tos is None or (
-                tos.is_python_constant() and tos.as_python_constant() is None
-            )
-        else:
-            assert tos is None
+        assert tos is None
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1127,8 +1151,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.specialized_value is not None
+            assert (
+                isinstance(k, ConstantVariable)
+                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
+                or isinstance(k, EnumVariable)
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1155,11 +1181,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def MAP_ADD(self, inst):
-        if sys.version_info < (3, 8):
-            v, k = self.popn(2)
-        else:
-            k, v = self.popn(2)
-
+        k, v = self.popn(2)
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
@@ -1633,8 +1655,17 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
         self.symbolic_locals = collections.OrderedDict(
-            (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
+            (
+                k,
+                VariableBuilder(
+                    self,
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
+                )(f_locals[k]),
+            )
             for k in vars
             if k in f_locals
         )
