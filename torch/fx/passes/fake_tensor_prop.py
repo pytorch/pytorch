@@ -7,9 +7,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 
 __all__ = ['FakeTensorProp']
 
-from torch.utils._python_dispatch import push_if_not_on_stack
-
-
 @compatibility(is_backward_compatible=False)
 class FakeTensorProp(torch.fx.Interpreter):
     """
@@ -36,6 +33,6 @@ class FakeTensorProp(torch.fx.Interpreter):
         return result
 
     def propagate(self, *args):
-        with push_if_not_on_stack(self._mode):
+        with self._mode:
             fake_args = [self._mode.from_tensor(a) for a in args]
             return super().run(*fake_args)
