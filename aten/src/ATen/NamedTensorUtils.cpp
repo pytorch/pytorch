@@ -207,7 +207,7 @@ void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntA
     return;
   }
   // This actually means "full reduction"
-  if (reduced_dims.size() == 0) {
+  if (reduced_dims.empty()) {
     return;
   }
   propagate_names_except(result, src, reduced_dims);
@@ -303,7 +303,7 @@ static int64_t num_batch_dims(DimnameList names) {
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
-  TORCH_CHECK(self_names.size() >= 1 && other_names.size() >= 1,
+  TORCH_CHECK(!self_names.empty() && !other_names.empty(),
       "both arguments to matmul need to be at least 1D, but they are ",
       self_names.size(), "D and ", other_names.size(), "D");
 
@@ -430,7 +430,7 @@ std::vector<Dimname> compute_cat_outnames(const MaterializedITensorListRef& tens
   std::vector<Dimname> result;
   for (const Tensor& tensor : tensors) {
     const auto tensor_names = tensor.names();
-    TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
+    TORCH_CHECK(!tensor_names.empty(), "zero-dimensional tensor cannot be concatenated");
     TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),
         "Tensors must have same number of dimensions: got ", result.size(),
         " and ", tensor_names.size());
