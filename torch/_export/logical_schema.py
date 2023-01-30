@@ -69,14 +69,14 @@ class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
 # In another word, this field is an reference to the tensor, not the tensor itself.
 @dataclass
 class TensorArgument:
-    name: str   # identifier of the tensor, which must exist in graph's ivalues map
+    name: str   # identifier of the tensor, which must exist in graph's tensor_values
 
 # This is a SymInt Arugment used in the args of an node
 # We intentionally don't store the SymInt's value here, as the same SymInt argument can be used in multiple nodes
 # This field is an reference to the SymInt
 @dataclass
 class SymIntArgument:
-    name: str   # identifier of the symint, which must exist in graph's symint_values map
+    name: str   # identifier of the symint, which must exist in graph's symint_values
 
 #  Permissible return types for operators
 # !!! Notice: this assumes that a node can only return Tensor(s) and Symint(s), and not other int/float/bool types...
@@ -147,7 +147,7 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 #     - This is used in the serialization of a concrete tensor, e.g. model weight
 #     - In this case, sizes and strides must be concrete ints, and cannot be symbolic
 #     - stride and storage_offset have to used to correctly reconstruct the tensor from the storage
-#   2. Represent the property of a virtual tensor (see IValue below)
+#   2. Represent the property of a virtual tensor (see TensorValue below)
 #     - In this case, sizes and strides can be either concrete ints or symbolic ints.
 #     - device/strides/storage_offset/layout/memory_format are tied to pytorch's implementation.
 #       These are faithful capture of tensor's detail in pytorch's executions during tracing
@@ -206,16 +206,21 @@ class Tensor:
 
 
 ################################################################################
-# Following section is the defining the schema of 3 level construct: GraphModule, Graph, Node
+# Following section is defining the schema of 3 level construct: GraphModule, Graph, Node
 
-# IValue has no corresponding class in fx
-# IValue is the "values" that are passed between nodes in the graph
-# IValue is a named virtual tensor, with an optional TensorMeta that describes the properties of the tensor
-# !!! Consider using a more descriptive name, e.g. TensorValue, TensorPlaceholder, TensorArgument, etc.
+# TensorValue has no corresponding class in fx
+# TensorValue is the "tensor results" that are passed between nodes in the graph
+# TensorValue is a named virtual tensor, with an TensorMeta that describes the properties of the tensor
 @dataclass
-class IValue:
-    meta: TensorMeta
+class TensorValue:
+    name: str           # unique identifier of the TensorValue, referenced in Argument.as_tensor field
+    meta: TensorMeta    # tensor meta
 
+
+@dataclass
+class SymIntValue:
+    name: str       # unique identifier of the SymIntValue, referenced in Argument.as_symint field
+    value: SymInt
 
 @dataclass
 class NodeMetadata:
@@ -267,14 +272,11 @@ class Graph:
     nodes: List[Node]
 
     # Tensor values that appear in the graph
-    # They could be graph inputs, graph outputs, or intermediate values produced by nodes
-    # The key is a unique identifider name for the IValue
-    # The name will be used in the graph and node to refer to the IValue
-    ivalues: Dict[str, IValue]
+    # They could be graph inputs, graph outputs, or intermediate tensor values produced by nodes
+    tensor_values: List[TensorValue]
 
-    # SymInts that appear in the graph
-    # Key is the name/identifier of the SymInt, not the expression of the SymInt
-    symint_values: Dict[str, SymInt]
+    # SymInt values that appear in the graph
+    symint_values: List[SymIntValue]
 
 
 # Maps to fx.GraphModule
@@ -292,7 +294,7 @@ class GraphModule:
 
     # Stateful fields of the graph module
 
-    # The name of the tensor will be used to bind to the IValues of Graph Inputs
+    # The name of the tensor will be used to bind to the TensorValues of Graph
     # !!! Consider storing them in the Graph.
     # There are functional difference between buffers and parameters, so they are stored separately.
     parameters: Dict[str, Tensor]
