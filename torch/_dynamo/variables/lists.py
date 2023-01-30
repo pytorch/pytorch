@@ -139,10 +139,6 @@ class BaseListVariable(VariableTracker):
                     type(comp) == list_type
                 ), "Only single-type list comparison is supported atm"
             comps.append(comp)
-            # breakpoint()
-            # if equal:
-            # No equality in this trace does not mean we do not want to record
-            # equal = (comp.as_python_constant() == True)
 
         if len(comps) == 1:
             return comps[0]
