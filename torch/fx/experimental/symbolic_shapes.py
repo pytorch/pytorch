@@ -1190,28 +1190,25 @@ class ShapeEnv:
             var_name = var_name.replace(".", "_D_").replace(",", "_C_")
             return var_name
 
-        def flat_source_name(source: Source, with_index: bool = True) -> str:
-            if isinstance(source, TensorPropertySource):
-                base_name = f"{flat_name(source.base.name())}_{source.prop.name.lower()}"
-                if with_index and source.idx is not None:
-                    return f"{base_name}[{source.idx}]"
-                else:
-                    return base_name
-            else:
-                return flat_name(source.name())
-
         def flat_source_ref(source: Source) -> str:
             # We need to call 'source_ref' here due to its side effects.
             ref = source_ref(source)
-            return source_expr_to_info[source.name()].name
+            info = source_expr_to_info[source.name()]
+            index_expr = ""
+            if isinstance(source, TensorPropertySource) and source.idx is not None:
+                index_expr = f"[{source.idx}]"
+            return f"{info.name}{index_expr}"
 
-        def get_unique_name(source: Source) -> str:
-            source_name = flat_source_name(source)
-            unique_source_name = source_name
+        def register_unique_name(source: Source) -> str:
+            if isinstance(source, TensorPropertySource):
+                source_name = f"{source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
+            else:
+                source_name = flat_name(source.name())
 
             # Makes sure there are no repeated names.
             # It's very unlikely the loop-body will be executed more than once.
-            counter = 0
+            counter = 1
+            unique_source_name = source_name
             while unique_source_name in unique_names:
                 unique_source_name = source_name + str(counter)
                 counter += 1
@@ -1242,10 +1239,7 @@ class ShapeEnv:
         # not be available to inner levels.  For example, Dynamo can guard on
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
-        def track_symint(source, val, type=None):
-            source_expr_to_info[source.name()] = \
-                SourceInfo(get_unique_name(source), source, type=type)
-
+        def track_symint(source, val):
             if isinstance(val, SymInt):
                 s = val.node.expr
 
@@ -1258,6 +1252,10 @@ class ShapeEnv:
             else:
                 input_guards.append((source, sympy.Integer(val)))
 
+        def track_tensor_property(source, val, name):
+            source_expr_to_info[source.name()] = SourceInfo(name, source, None)
+            track_symint(source, val)
+
         for t, source in zip(placeholders, sources):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
@@ -1266,22 +1264,29 @@ class ShapeEnv:
             if t is None:
                 continue
 
-            source_name = get_unique_name(source)
-
             if isinstance(t, SymInt):
-                track_symint(source, t, type=type(t))
+                symint_name = register_unique_name(source)
+                source_expr_to_info[source.name()] = SourceInfo(symint_name, source, SymInt)
                 parameter_source_infos.append(source_expr_to_info[source.name()])
+
+                track_symint(source, t)
                 continue
 
             assert isinstance(t, torch.Tensor)
-            source_expr_to_info[source.name()] = SourceInfo(source_name, source, torch.Tensor)
+            tensor_name = register_unique_name(source)
+            source_expr_to_info[source.name()] = SourceInfo(tensor_name, source, torch.Tensor)
             parameter_source_infos.append(source_expr_to_info[source.name()])
 
+            tensor_size_name = register_unique_name(TensorPropertySource(source, TensorProperty.SIZE, 0))
             for i, s in enumerate(t.size()):
-                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
+                track_tensor_property(TensorPropertySource(source, TensorProperty.SIZE, i), s, tensor_size_name)
+
+            tensor_stride_name = register_unique_name(TensorPropertySource(source, TensorProperty.STRIDE, 0))
             for i, s in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+                track_tensor_property(TensorPropertySource(source, TensorProperty.STRIDE, i), s, tensor_stride_name)
+
+            tensor_storage_name = register_unique_name(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+            track_tensor_property(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset(), tensor_storage_name)
 
         exprs = []
 
@@ -1350,9 +1355,15 @@ class ShapeEnv:
                         tensor_property_str = f"{tensor_property.name.lower()}s"
                         tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
 
+                    if tensor_property_source.name() not in source_expr_to_info:
+                        # Skip if there are no SymInts tracked for this property.
+                        # Usually true for scalar tensors.
+                        continue
+
+                    tensor_property_info = source_expr_to_info[tensor_property_source.name()]
                     source_creation.append(
-                        f"auto {flat_source_name(tensor_property_source, with_index=False)} = "
-                        f"{variable_name}->cdata->{tensor_property_str}();"
+                        f"auto {tensor_property_info.name} = {variable_name}->cdata->{tensor_property_str}();"
+                    )
                     )
 
             source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
