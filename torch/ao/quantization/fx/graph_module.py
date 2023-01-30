@@ -68,11 +68,12 @@ class ObservedGraphModule(GraphModule):
         return python_code
 
 def was_called(func, init):
-  def wrapper(*args, **kwargs):
-    wrapper.was_called = True
-    return func(*args, **kwargs)
-  wrapper.was_called = init
-  return wrapper
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        wrapper.was_called = True
+        return func(*args, **kwargs)
+    wrapper.was_called = init
+    return wrapper
 
 def _is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
