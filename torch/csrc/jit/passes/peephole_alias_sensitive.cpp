@@ -52,7 +52,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
         auto dim_uses = c10::filter(node->output()->uses(), [](const Use& use) {
           return use.user->kind() == aten::dim;
         });
-        if (dim_uses.size() == 0) {
+        if (dim_uses.empty()) {
           continue;
         }
         auto kind = node->kind();

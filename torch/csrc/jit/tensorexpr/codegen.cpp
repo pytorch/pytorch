@@ -309,7 +309,7 @@ void CodeGen::allocIntermediateBufs() {
       interm_bufs, interm_buf_ranges, bufs_external_allocs);
 
   // Insert memory allocation/mapping nodes.
-  if (buf_allocs.size() > 0) {
+  if (!buf_allocs.empty()) {
     auto stmt_new = insertAllocFree(buf_allocs, bufs_external_allocs, stmt_);
     set_stmt(stmt_new);
   }
