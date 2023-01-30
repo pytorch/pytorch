@@ -1299,7 +1299,7 @@ def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
         # NamedOptimizer has eagerly initialization.
         return False
     try:
-        key = next(state.keys())
+        key = next(iter(state))
     except Exception as e:
         raise Exception(optim_state_dict) from e
     return isinstance(key, str)
