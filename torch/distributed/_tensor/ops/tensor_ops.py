@@ -469,7 +469,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         return result
 
 
-@register_prop_rule("aten.cat.default")
+@register_prop_rule(aten.cat.default)
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
     # the first arg is a list of input tensors' specs
     tensor_list_specs = cast(List[DTensorSpec], op_schema.args_schema[0])
