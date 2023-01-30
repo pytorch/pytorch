@@ -849,6 +849,18 @@ def _create_wrapped_func(orig_fn):
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
+        
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call
+
+        # If there is no input with proxy, see if we are proxying fake tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped fn while evaluating
+            with proxy_mode.enable(False):
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs, external_call=True)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
