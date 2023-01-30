@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, Tuple
 from torch import _VF
 from torch.nn.utils.rnn import PackedSequence
 
-__all__ = ['RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell', 'RNNBase', 'LSTM', 'get_quantized_weight']
+__all__ = ['RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell', 'RNNBase', 'LSTM', 'GRU', 'get_quantized_weight']
 
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
@@ -15,7 +15,7 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
 def _get_weight_and_quantization_params(module, wn):
     weight = getattr(module, wn)
     params = [weight]
-    for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis"]]:
+    for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis_int"]]:
         if hasattr(module, param_name):
             param = getattr(module, param_name)
         else:
@@ -41,6 +41,7 @@ class RNNCellBase(nn.RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
                  device=None, dtype=None, weight_qparams_dict=None) -> None:
         super().__init__(input_size, hidden_size, bias, num_chunks, device=device, dtype=dtype)
+        # TODO(jerryzh168): maybe make this arg a required arg
         if weight_qparams_dict is None:
             weight_qparams = {
                 "qscheme": torch.per_tensor_affine,
@@ -50,14 +51,18 @@ class RNNCellBase(nn.RNNCellBase):
             }
             weight_qparams_dict = {
                 "weight_ih": weight_qparams,
-                "weight_hh": weight_qparams
+                "weight_hh": weight_qparams,
+                "is_decomposed": False,
             }
-        assert len(weight_qparams_dict) == 2, "Expected length for weight_qparams_dict to be 2 for QuantizedRNNCellBase(Reference)"
+        assert len(weight_qparams_dict) == 3, "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
         assert weight_qparams_dict is not None
+        self.is_decomposed = weight_qparams_dict["is_decomposed"]
         for key, weight_qparams in weight_qparams_dict.items():
+            if key == "is_decomposed":
+                continue
             # TODO: refactor the duplicated code to utils.py
             weight_qscheme = weight_qparams["qscheme"]
             weight_dtype = weight_qparams["dtype"]
@@ -86,6 +91,7 @@ class RNNCellBase(nn.RNNCellBase):
                     # added for TorchScriptability, not used
                     self.register_buffer(
                         key + "_axis", torch.tensor(0, dtype=torch.int, device=device))
+                setattr(self, key + "_axis_int", getattr(self, key + "_axis").item())
 
     def _get_name(self):
         return "QuantizedRNNCellBase(Reference)"
@@ -109,7 +115,7 @@ class RNNCell(RNNCellBase):
     e.g. weight_ih, to the weight_qparams for that weight
     """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
         self.nonlinearity = nonlinearity
@@ -176,7 +182,7 @@ class LSTMCell(RNNCellBase):
     e.g. weight_ih, to the weight_qparams for that weight
     """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
-                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
@@ -228,7 +234,7 @@ class GRUCell(RNNCellBase):
     e.g. weight_ih, to the weight_qparams for that weight
     """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
-                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
@@ -278,11 +284,12 @@ class RNNBase(nn.RNNBase):
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
                  device=None, dtype=None,
-                 weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(
             mode, input_size, hidden_size, num_layers, bias, batch_first, dropout,
             bidirectional, proj_size, device, dtype
         )
+        # TODO(jerryzh168): maybe make this arg a required arg
         if weight_qparams_dict is None:
             weight_qparams = {
                 'qscheme': torch.per_tensor_affine,
@@ -290,14 +297,17 @@ class RNNBase(nn.RNNBase):
                 'scale': 1.0,
                 'zero_point': 0
             }
-            weight_qparams_dict = {}
+            weight_qparams_dict = {"is_decomposed": False}  # type: ignore[dict-item]
             for wn in self._flat_weights_names:
                 if wn.startswith("weight"):
                     weight_qparams_dict[wn] = weight_qparams
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
+        self.is_decomposed = weight_qparams_dict["is_decomposed"]
         for key, weight_qparams in weight_qparams_dict.items():
+            if key == "is_decomposed":
+                continue
             weight_qscheme = weight_qparams["qscheme"]
             weight_dtype = weight_qparams["dtype"]
             setattr(self, key + "_qscheme", weight_qscheme)
@@ -319,6 +329,7 @@ class RNNBase(nn.RNNBase):
                     # added for TorchScriptability, not used
                     self.register_buffer(
                         key + "_axis", torch.tensor(0, dtype=torch.int, device=device))
+                setattr(self, key + "_axis_int", getattr(self, key + "_axis").item())
 
 class LSTM(RNNBase):
     """ Reference Quantized LSTM Module
@@ -462,6 +473,132 @@ class LSTM(RNNBase):
 
     def _get_name(self):
         return "QuantizedLSTM(Reference)"
+
+    @classmethod
+    def from_float(cls, mod, weight_qparams_dict):
+        ref_mod = cls(
+            mod.input_size,
+            mod.hidden_size,
+            mod.num_layers,
+            mod.bias,
+            mod.batch_first,
+            mod.dropout,
+            mod.bidirectional,
+            weight_qparams_dict=weight_qparams_dict)
+        for wn in mod._flat_weights_names:
+            setattr(ref_mod, wn, getattr(mod, wn))
+        return ref_mod
+
+class GRU(RNNBase):
+    """ Reference Quantized GRU Module
+    We'll store weight_qparams for all the weights in _flat_weights, we need to pass in
+    a `weight_qparams_dict` that maps from weight name, e.g. weight_ih_l0,
+    to the weight_qparams for that weight
+    """
+    def __init__(self, *args, **kwargs):
+        if 'proj_size' in kwargs:
+            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
+        super().__init__('GRU', *args, **kwargs)
+
+    def get_quantized_weight_bias_dict(self):
+        """ dictionary from flat_weight_name to quantized weight or (unquantized) bias
+        e.g.
+        {
+          "weight_ih_l0": quantized_weight,
+          "bias_ih_l0": unquantized_bias,
+          ...
+        }
+        """
+        quantized_weight_bias_dict = {}
+        for wn in self._flat_weights_names:
+            if hasattr(self, wn):
+                if wn.startswith("weight"):
+                    weight_or_bias = get_quantized_weight(self, wn)
+                else:
+                    weight_or_bias = getattr(self, wn)
+            else:
+                weight_or_bias = None
+            quantized_weight_bias_dict[wn] = weight_or_bias
+        return quantized_weight_bias_dict
+
+    def get_flat_weights(self):
+        flat_weights = []
+        for wn in self._flat_weights_names:
+            if hasattr(self, wn):
+                weight = getattr(self, wn)
+                if wn.startswith("weight"):
+                    params = _get_weight_and_quantization_params(self, wn)
+                    weight = _quantize_and_dequantize_weight(*params)
+            else:
+                weight = None
+            flat_weights.append(weight)
+        return flat_weights
+
+    def forward(self, input, hx=None):  # noqa: F811
+        # Note: this is copied from the forward of GRU in https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/rnn.py
+        # only changed self._flat_weights to self.get_flat_weights()
+        # TODO: maybe we can try inheriting from that class and define get_flat_weights
+        # as a @property? this might interfere with TorchScript, if we remove that
+        # requirement in the future we should be able to do this
+        orig_input = input
+        # xxx: isinstance check needs to be in conditional for TorchScript to compile
+        if isinstance(orig_input, PackedSequence):
+            input, batch_sizes, sorted_indices, unsorted_indices = input
+            max_batch_size = batch_sizes[0]
+            max_batch_size = int(max_batch_size)
+        else:
+            batch_sizes = None
+            assert (input.dim() in (2, 3)), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            is_batched = input.dim() == 3
+            batch_dim = 0 if self.batch_first else 1
+            if not is_batched:
+                input = input.unsqueeze(batch_dim)
+                if hx is not None:
+                    if hx.dim() != 2:
+                        raise RuntimeError(
+                            f"For unbatched 2-D input, hx should also be 2-D but got {hx.dim()}-D tensor")
+                    hx = hx.unsqueeze(1)
+            else:
+                if hx is not None and hx.dim() != 3:
+                    raise RuntimeError(
+                        f"For batched 3-D input, hx should also be 3-D but got {hx.dim()}-D tensor")
+            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            sorted_indices = None
+            unsorted_indices = None
+
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is None:
+            result = _VF.gru(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            result = _VF.gru(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+                             self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+        hidden = result[1]
+
+        # xxx: isinstance check needs to be in conditional for TorchScript to compile
+        if isinstance(orig_input, PackedSequence):
+            output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+            return output_packed, self.permute_hidden(hidden, unsorted_indices)
+        else:
+            if not is_batched:
+                output = output.squeeze(batch_dim)
+                hidden = hidden.squeeze(1)
+
+            return output, self.permute_hidden(hidden, unsorted_indices)
+
+    def _get_name(self):
+        return "QuantizedGRU(Reference)"
 
     @classmethod
     def from_float(cls, mod, weight_qparams_dict):

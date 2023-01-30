@@ -13,14 +13,13 @@ import itertools
 import random
 import contextlib
 import math
-import builtins
 import atexit
-import io
 import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, \
+    sym_sqrt, sym_int, to_node, GuardOnDataDependentSymNode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymInt
 
@@ -121,12 +120,17 @@ class FakeSymbolicTensor(torch.Tensor):
         raise RuntimeError(f"operator {func_overload} not supported")
 
 
-def create_symbolic_tensor(name, arg, shape_env, storage_offset=0):
-    sym_shapes, sym_strides = shape_env.create_symbolic_sizes_strides(arg)
-    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, storage_offset)
+def create_symbolic_tensor(name, arg, shape_env):
+    from torch._dynamo.source import ConstantSource
+    sym_shapes, sym_strides, sym_storage_offset = \
+        shape_env.create_symbolic_sizes_strides_storage_offset(arg, source=ConstantSource(name))
+    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i):
-    return shape_env.create_symintnode(shape_env.create_symbol(i))
+    from torch._dynamo.source import ConstantSource
+    return shape_env.create_symintnode(
+        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"))
+    )
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -179,15 +183,9 @@ class TestPySymInt(TestCase):
         self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), SymInt))
 
-        offset = create_symint(shape_env, 2)
-        y = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env, offset)
+        y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
-        self.assertTrue(y.storage_offset() == 2)
-
-        offset = 2
-        z = create_symbolic_tensor("z", torch.randn(5, 4, 3), shape_env, offset)
-        self.assertTrue(isinstance(z.storage_offset(), int))
-        self.assertTrue(z.storage_offset() == 2)
+        self.assertTrue(y.storage_offset() == 12)
 
     @skipIfNoSympy
     def test_binary(self):
@@ -201,7 +199,7 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[2] == 3)
 
         # broadcasting
-        y = create_symbolic_tensor("y", torch.randn(1, 4, 1), shape_env)
+        y = create_symbolic_tensor("y2", torch.randn(1, 4, 1), shape_env)
         z = x + y
         self.assertTrue(z.shape[0] == 5)
         self.assertTrue(z.shape[1] == 4)
@@ -285,11 +283,22 @@ class TestPySymInt(TestCase):
         else:
             result = expand_x + expand_x
 
-        gt_op = shape_env.guards[0][0]
+        gt_op, _bt = shape_env.guards[-1]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
+
+    @skipIfNoSympy
+    def test_numel(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
+        self.assertIsInstance(x.numel(), torch.SymInt)
+        self.assertIsInstance(torch.numel(x), torch.SymInt)
+
+        x = torch.rand(3, 3)
+        self.assertIsInstance(x.numel(), int)
+        self.assertIsInstance(torch.numel(x), int)
 
     @skipIfNoSympy
     def test_int_to_float(self):
@@ -306,7 +315,7 @@ class TestPySymInt(TestCase):
         torch.ops.aten.narrow_copy.default(x, 0, 0, x.shape[0])
 
         shape_env = ShapeEnv()
-        x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
+        x = create_symbolic_tensor("x2", torch.randn(5, 4, 3), shape_env)
         torch.ops.aten.expand.default(x, [x.shape[0], x.shape[1], x.shape[2]])
 
     def test_fx_trace_intlist(self):
@@ -333,7 +342,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(a0), 2)
-        self.assertEqual(str(shape_env.guards[0][0]), "Eq(s0, 2)")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
     @skipIfNoSympy
     def test_sym_int(self):
@@ -342,19 +351,19 @@ class TestPySymInt(TestCase):
         r = sym_int(a0)
         self.assertEqual(r, 5)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertEqual(str(shape_env.guards[0][0]), "Eq(s0, 5)")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 5)""")
 
         a1 = create_symint(shape_env, 7)
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertEqual(str(shape_env.guards[1][0]), "Eq(floor(s1/2), 3)")
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
 
         a2 = create_symint(shape_env, -3)
         r = sym_int(a2 / 2)
         self.assertEqual(guard_int(r), -1)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertEqual(str(shape_env.guards[2][0]), "Eq(ceiling(-s2/2), -1)")
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(ceiling(-s2/2), -1)""")
 
     @skipIfNoSympy
     def test_sym_sqrt(self):
@@ -363,7 +372,7 @@ class TestPySymInt(TestCase):
         r = sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertEqual(str(shape_env.guards[0][0]), "Eq(sqrt(s0), 2)")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
 
     @skipIfNoSympy
     def test_sym_floor(self):
@@ -372,13 +381,26 @@ class TestPySymInt(TestCase):
         r = math.floor(a0 / 2)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertEqual(str(shape_env.guards[0][0]), "Eq(floor(s0/2), 2)")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
 
     @skipIfNoSympy
     def test_int_conversion(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
+
+    @skipIfNoSympy
+    def test_data_dependent_guard(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
+
+    @skipIfNoSympy
+    def test_non_overlapping_and_dense(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = torch.empty_strided((a0, 7), (1, a0), device='meta')
+        self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
 
     @skipIfNoSympy
     def test_symint_as_scalar(self):
@@ -405,8 +427,7 @@ class TestPySymInt(TestCase):
         self.assertTrue(sym_int_encountered)
 
     @skipIfNoSympy
-    @unittest.mock.patch('sys.stdout', new_callable=io.StringIO)
-    def test_print_readable_with_symints(self, mock_stdout):
+    def test_print_readable_with_symints(self):
         def f(a, b):
             dim0 = a.shape[0] + b.shape[0]
             dim1 = a.shape[1] + b.shape[1]
@@ -415,9 +436,9 @@ class TestPySymInt(TestCase):
             return d
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5, 3), torch.randn(4, 3))
-        fx_g.print_readable()
+        out = fx_g.print_readable(print_output=False)
 
-        self.assertExpectedInline(mock_stdout.getvalue().strip(), """\
+        self.assertExpectedInline(out.strip(), """\
 class f(torch.nn.Module):
     def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
         # No stacktrace found for following nodes
@@ -474,13 +495,17 @@ expected_failure_sym_magic_methods = {
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
-        seed_node = (create_symint(shape_env, 1) / 1.).get_pyobj()
+        seed_node = (create_symint(shape_env, 1) / 1.).node
+        bool_seed_node = (create_symint(shape_env, 1) == 1).node
 
         def get_sym_inp(inp):
-            if isinstance(inp, int):
-                return torch.SymInt(seed_node.to_node(inp))
+            # NB: this must come before int
+            if isinstance(inp, bool):
+                return torch.SymBool(to_node(bool_seed_node, inp))
+            elif isinstance(inp, int):
+                return torch.SymInt(to_node(seed_node, inp))
             else:
-                return torch.SymFloat(seed_node.to_node(inp))
+                return torch.SymFloat(to_node(seed_node, inp))
 
         def maybe_xfail(inp1, inp2):
             key = (fn, type(inp1).__name__, type(inp2).__name__)
@@ -498,14 +523,12 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        # These functions might return plain int/float
-        has_valid_downcast = fn in ["min", "max"]
-        if fn in symbolic_shapes.magic_methods_on_builtins:
-            lambda_apply = getattr(builtins, fn)
-        elif fn in symbolic_shapes.magic_methods_on_math:
+        if fn in symbolic_shapes.magic_methods_on_math:
             lambda_apply = getattr(math, fn)
         elif fn in symbolic_shapes.magic_methods_on_submodule:
             lambda_apply = getattr(symbolic_shapes, fn)
+        elif fn in symbolic_shapes.magic_methods_on_operator_with_trailing_underscore:
+            lambda_apply = getattr(operator, f"{fn}_")
         else:
             lambda_apply = getattr(operator, fn)
 
@@ -513,22 +536,15 @@ class TestSymNumberMagicMethods(TestCase):
             tp = "float"
         elif fn in symbolic_shapes.always_int_magic_methods:
             tp = "int"
+        elif fn in symbolic_shapes.always_bool_magic_methods:
+            tp = "bool"
         elif is_unary_fn:
             tp = "float" if isinstance(inp1, float) else "int"
         else:
             tp = "float" if any(isinstance(i, float) for i in [inp1, inp2]) else "int"
 
         def guard_fn(v):
-            try:
-                if fn in symbolic_shapes.always_bool_magic_methods:
-                    return bool(v)
-                else:
-                    return getattr(v.node, f"guard_{tp}")("", 0)
-            except Exception as e:
-                if has_valid_downcast:
-                    return v
-                else:
-                    raise e
+            return getattr(v.node, f"guard_{tp}")("", 0)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
@@ -562,16 +578,30 @@ class TestSymNumberMagicMethods(TestCase):
 
 
     @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
+    def test_bool_method(self, fn):
+        if fn not in symbolic_shapes.bool_magic_methods:
+            self.skipTest(f"{fn} is non-bool")
+
+        is_unary_fn = fn in symbolic_shapes.unary_magic_methods
+        shape_env = ShapeEnv()
+        self._do_test(fn, True, False, shape_env, is_unary_fn)
+
+
+    @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
     def test_method(self, fn, first_type, second_type):
         if first_type == "float":
+            # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
         is_unary_fn = fn in symbolic_shapes.unary_magic_methods
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")
+
+        if fn in symbolic_shapes.bool_magic_methods:
+            self.skipTest(f"{fn} is bool")
 
         # We could pass int/float directly for types but then the
         # mangled test name is bad

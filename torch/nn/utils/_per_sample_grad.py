@@ -1,13 +1,11 @@
 import functools
 
 import torch
-from torch.nn.utils.stateless import functional_call
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 from torch.utils._pytree import tree_flatten
 
-# dependency on `functional_call` means that this can't be exposed in utils
-# without creating circular dependency
+
 def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
     r"""
     call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum")
@@ -28,17 +26,17 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
           running mean across a batch. Must be "mean" or "sum". Default: "sum"
 
     Examples::
+        >>> # xdoctest: +SKIP
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
-        >>> # xdoctest: +SKIP
         >>> res = call_for_per_sample_grads(model)(batched_input).sum()
         >>> res.backward()
         >>> assert model.weight.shape == (3, 4)
         >>> assert model.weight.grad_sample.shape == (5, 3, 4)
-        >>> assert model.weight.grad == None
+        >>> assert model.weight.grad is None
         >>> assert model.bias.shape == (3,)
         >>> assert model.bias.grad_sample.shape == (5, 3)
-        >>> assert model.bias.grad == None
+        >>> assert model.bias.grad is None
 
     An example using "mean" loss reduction. The grad_sample fields will be scaled by batch_size from what they would be
     if we ran the same code with loss_reduction="sum". This is because the mean at the end will scale all
@@ -100,5 +98,5 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
             wrapper_batch_size = compute_batch_size(*args, **kwargs)
 
         params = {name: maybe_build_expanded_weight(value, wrapper_batch_size) for (name, value) in module.named_parameters()}
-        return functional_call(module, params, args, kwargs)
+        return torch.func.functional_call(module, params, args, kwargs)
     return wrapper

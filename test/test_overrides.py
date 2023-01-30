@@ -760,7 +760,7 @@ class Wrapper:
         val = getattr(self._data, name)
 
         # If it's a method
-        if callable(val):
+        if not isinstance(val, torch.device) and callable(val):
             c = getattr(type(self._data), name)
             # Don't append self to args if classmethod/staticmethod
             if c is val:
@@ -901,7 +901,6 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
-                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
@@ -1152,8 +1151,8 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.tensor([1]), -1)
             self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
             self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
-            self.assertEqual(torch._sparse_coo_tensor_unsafe(1, 1, (1, 1)), -1)
-            self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
+            self.assertEqual(torch.sparse_coo_tensor(1, 1, (1, 1), check_invariants=False), -1)
+            self.assertEqual(torch.sparse_csr_tensor(1, 1, 1, (1, 1), check_invariants=False), -1)
             self.assertEqual(torch.as_tensor([1]), -1)
 
     def test_modes_handle_first(self):

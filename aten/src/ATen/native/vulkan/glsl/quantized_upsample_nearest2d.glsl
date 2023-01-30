@@ -25,8 +25,7 @@ void main() {
         ivec2(0),
         uBlock.isize);
 
-    vec4 texel = texelFetch(uInput, ivec3(ipos, pos.z), 0);
-    uvec4 ret = uvec4(int(texel.r), int(texel.g), int(texel.b), int(texel.a));
+    uvec4 ret = texelFetch(uInput, ivec3(ipos, pos.z), 0);
 
     imageStore(
         uOutput,

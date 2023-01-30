@@ -375,7 +375,7 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 
 Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.size() > 0) {
+  if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
     bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
@@ -841,42 +841,6 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
     self.add_(res);
     return self;
   }
-}
-
-Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
-  // // TODO: Use a specialized CSR kernel for performance if needed
-  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
-    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
-  }
-  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
-    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
-  }
-  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
-  Tensor t = t_.to_sparse();
-  Tensor src = src_.to_sparse();
-  Tensor tmp_result = t.mul(src);
-  auto r_sparse_csr = tmp_result.to_sparse_csr();
-  r.resize_as_sparse_(r_sparse_csr);
-  r.copy_(r_sparse_csr);
-  return r;
-}
-
-Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
-  auto commonDtype = at::result_type(self, other);
-  if (self.is_sparse_csr() && other.layout() == kStrided) {
-    return mul_sparse_csr(self, other.sparse_mask(self));
-  }
-  if (self.layout() == kStrided && other.is_sparse_csr()) {
-    return mul_sparse_csr(self.sparse_mask(other), other);
-  }
-  auto result_options = self.options().dtype(commonDtype);
-  // CSR is 2d!
-  Tensor result = at::empty({0, 0}, result_options);
-  return at::mul_out(result, self, other); // redispatch!
-}
-
-Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
-  return at::mul_out(self, self, other); // redispatch!
 }
 
 // A generic function to implement pointwise-like operations
@@ -1694,7 +1658,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
   const int64_t sparse_dims_to_sum_size = dims_to_sum_v.size() - dense_dims_to_sum_v.size();
   const bool sum_all_sparse_dim = (sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
 
   // new values
   Tensor new_values;
@@ -1816,7 +1780,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {

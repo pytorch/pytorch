@@ -18,7 +18,8 @@ class DiagnosticEngine:
 
     Examples:
         Step 1: Create a set of rules.
-        >>> rules = infra.RuleCollection.from_list(
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
+        >>> rules = infra.RuleCollection.custom_collection_from_list(
         ...     "CustomRuleCollection",
         ...     [
         ...         infra.Rule(
@@ -34,6 +35,7 @@ class DiagnosticEngine:
 
         Step 3: Start a new diagnostic context.
         >>> with engine.create_diagnostic_context("torch.onnx.export", version="1.0") as context:
+        ...     ...
 
         Step 4: Add diagnostics in your code.
         ...     context.diagnose(rules.rule1, infra.Level.ERROR)
@@ -85,8 +87,23 @@ class DiagnosticEngine:
         Returns:
             A new diagnostic context.
         """
+        if options is None:
+            options = infra.DiagnosticOptions()
         context = infra.DiagnosticContext(
             name, version, options, diagnostic_type=diagnostic_type
         )
         self.contexts.append(context)
         return context
+
+    def pretty_print(
+        self, verbose: bool = False, level: infra.Level = infra.Level.ERROR
+    ) -> None:
+        """Pretty prints all diagnostics in the diagnostic contexts.
+
+        Args:
+            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
+            level: The minimum level of diagnostics to print.
+        """
+        formatter.pretty_print_title(f"{len(self.contexts)} Diagnostic Run")
+        for context in self.contexts:
+            context.pretty_print(verbose, level)

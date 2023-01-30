@@ -64,12 +64,11 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
-      : base_(base),
+      : base_(std::move(base)),
         fn_(std::move(fn)),
         inputs_(std::move(inputs)),
         isShutdownTask_(isShutdownTask) {}
@@ -245,7 +244,7 @@ struct TORCH_API Engine {
     // Data structures used by the threads for executing reentrant backwards
     // tasks. See Note [Reentrant backwards]
     // Number of available threads for processing new GraphTasks.
-    unsigned int num_workers_;
+    unsigned int num_workers_{0};
     // The threads will wait on work_ to be notified of GraphTasks
     std::condition_variable work_;
     // To protect reads and writes to graphtask_queue_ and num_workers_
@@ -255,8 +254,7 @@ struct TORCH_API Engine {
     // allocated inside Engine::execute and lives for the duration of execute
     std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    ThreadPoolShared() : num_workers_(0) {}
+    ThreadPoolShared() = default;
   };
 
   // Temporary workaround until shutting down threads is done

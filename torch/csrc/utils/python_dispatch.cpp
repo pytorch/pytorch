@@ -3,12 +3,14 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -57,7 +59,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = std::string(key) == ""
+  auto mb_key = std::string(key).empty()
       ? c10::nullopt
       : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
@@ -131,7 +133,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // means it's a nontrivial tensor subclass)
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
-        auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
+        auto* interpreter =
+            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter &&
             ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
@@ -146,7 +149,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
           if (nv.isNone()) {
             continue;
           }
-          auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
+          auto* interpreter =
+              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
           if (interpreter &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
             (*interpreter)
@@ -342,7 +346,7 @@ void initDispatchBindings(PyObject* module) {
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
-            std::string(dispatch) == ""
+            std::string(dispatch).empty()
                 ? c10::nullopt
                 : c10::make_optional(c10::parseDispatchKey(dispatch)),
             "/dev/null", // temporary workaround
@@ -466,6 +470,16 @@ void initDispatchBindings(PyObject* module) {
       [](c10::DispatchKey dispatch_key) {
         return c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
       });
+  m.def(
+      "_dispatch_tls_set_dispatch_key_included",
+      [](c10::DispatchKey dispatch_key, bool desired_state) {
+        c10::impl::tls_set_dispatch_key_included(dispatch_key, desired_state);
+      });
+  m.def(
+      "_dispatch_tls_is_dispatch_key_included",
+      [](c10::DispatchKey dispatch_key) {
+        return c10::impl::tls_is_dispatch_key_included(dispatch_key);
+      });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
     return at::isTensorSubclassLike(tensor);
@@ -479,14 +493,28 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined)
+  py::enum_<c10::DispatchKey>(m, "DispatchKey")
+      // clang-format off
+      DEF_ONE(Undefined)
       DEF_ONE(CompositeExplicitAutogradNonFunctional)
-          DEF_ONE(CompositeExplicitAutograd)
-              DEF_ONE(CompositeImplicitAutogradNestedTensor)
-                  DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
-                      DEF_ONE(Autograd) DEF_ONE(BackendSelect)
-                          DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
-                              DEF_ONE(Python)
+      DEF_ONE(CompositeExplicitAutograd)
+      DEF_ONE(CompositeImplicitAutogradNestedTensor)
+      DEF_ONE(CompositeImplicitAutograd)
+      DEF_ONE(AutogradOther)
+      DEF_ONE(Autograd)
+      DEF_ONE(BackendSelect)
+      DEF_ONE(ADInplaceOrView)
+      DEF_ONE(PythonTLSSnapshot)
+      DEF_ONE(Python)
+      DEF_ONE(FuncTorchDynamicLayerFrontMode)
+      DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(PythonDispatcher)
+      DEF_ONE(Functionalize)
+      DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastXPU)
+      DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastCUDA)
+  // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
 #define DEF_MULTIPLE(fullname, prefix)              \
@@ -495,11 +523,13 @@ void initDispatchBindings(PyObject* module) {
   C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
   DEF_SINGLE(, EndOf##fullname##Backends)
 
-                                  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+      // clang-format off
+  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+  // clang-format on
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-                                      ;
+          ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
@@ -539,6 +569,9 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
   });
+  m.def("_functionalization_reapply_views_tls", []() {
+    return at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  });
   m.def(
       "_dispatch_is_included_in_alias",
       [](c10::DispatchKey a, c10::DispatchKey b) {
@@ -558,7 +591,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_print_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -572,7 +605,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -581,7 +614,8 @@ void initDispatchBindings(PyObject* module) {
         names.reserve(op_names.size());
         for (auto& op : op_names) {
           names.push_back(
-              op.name + (op.overload_name == "" ? "" : "." + op.overload_name));
+              op.name +
+              (op.overload_name.empty() ? "" : "." + op.overload_name));
         }
         return names;
       },

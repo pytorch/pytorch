@@ -3,8 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
+#include <c10/util/Logging.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -555,7 +557,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #endif
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 ) {
+  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 && !need_weights) {
 
     // We have not done linear projection yet but the input for SDP
     // Is expected to be 4 dimensional. We "cheaply" create view tensors
@@ -564,7 +566,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
     auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
 
-    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, need_weights, false};
+    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
     if (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
@@ -578,10 +580,10 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
 
-      auto y = at::_scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, need_weights, false);
-      auto past_sdp =
-          std::get<0>(y).transpose(1, 2).reshape({x_size_0, -1, embed_dim});
+      Tensor y, weights;
+      std::tie(y, weights) = at::_scaled_dot_product_attention(
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false, false);
+      auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
           at::linear(past_sdp, proj_weight, proj_bias), Tensor());
     }
@@ -678,13 +680,14 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
 
-std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
+std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool need_atten_weights,
     bool is_causal) {
+  // Used for tracking usage statistics
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
@@ -726,8 +729,9 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
   Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  Tensor attention =
-      at::_flash_scaled_dot_product_attention(
+  Tensor attention, log_sumexp;
+  std::tie(attention, log_sumexp) =
+      at::_flash_attention_forward(
           query_reshaped,
           key_reshaped,
           value_reshaped,
@@ -741,12 +745,17 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
   attention =
       attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
 
-  return std::tuple<Tensor, Tensor>(attention, Tensor());
+  return std::make_tuple(attention, log_sumexp);
 }
-std::tuple<Tensor, Tensor> mem_eff_helper(
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& query,
     const Tensor& key,
-    const Tensor& value){
+    const Tensor& value,
+    bool compute_log_sumexp,
+    bool is_causal) {
+  // Used for tracking usage statistics
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
   // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
@@ -754,38 +763,51 @@ std::tuple<Tensor, Tensor> mem_eff_helper(
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  Tensor attention = std::get<0>(at::_efficient_attention_forward(
+  Tensor attention, log_sumexp;
+  std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
       q_t,
       k_t,
       v_t,
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
-      false,
-      false)).transpose(1,2);
-  return std::make_tuple(attention, Tensor());
+      compute_log_sumexp,
+      is_causal);
+  attention = attention.transpose(1,2);
+  return std::make_tuple(std::move(attention), std::move(log_sumexp));
 }
 
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
-        const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-    // Determine which efficient kernel to use
-    sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, need_attn_weights, is_causal};
-    auto backend = select_sdp_backend(kernel_params);
-    switch(backend){
-      case sdp::SDPBackend::flash_attention:
-          return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
-      case sdp::SDPBackend::efficient_attention:
-          return mem_eff_helper(query_, key , value);
-      case sdp::SDPBackend::math:
-        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-      default:
-        TORCH_CHECK(false, "No viable backend for scaled_dot_product_attention was found.");
-        return std::make_tuple(Tensor(), Tensor());
-    }
+int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
+  auto backend = select_sdp_backend(kernel_params);
+  if (backend == sdp::SDPBackend::error) {
+    TORCH_CHECK(
+        false,
+        "No viable backend for scaled_dot_product_attention was found. ",
+        "This is likely due to turning off both the math kernel and the fused kernels.");
+  }
+  return static_cast<int64_t>(backend);
+}
+bool _chunk_grad_outputs_efficient_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool is_causal) {
+
+  int64_t M = query.size(2);
+  int64_t N = key.size(2);
+
+  bool grad_kv_needs_init = is_causal && N > M;
+  bool is_aliased = query.storage().is_alias_of(key.storage()) && query.storage().is_alias_of(value.storage());
+  bool equal_seq_len = query.size(2) == key.size(2);
+  bool q_v_same_head_dim = query.size(3) == value.size(3);
+  bool chunk_grad_outputs = (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
+  return chunk_grad_outputs;
 }
 
-Tensor flash_scaled_dot_product_attention(
+
+std::tuple<Tensor, Tensor> _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -796,25 +818,36 @@ Tensor flash_scaled_dot_product_attention(
     double dropout_p,
     bool is_causal) {
 #if defined(USE_FLASH_ATTENTION)
+  /*
+  num_splits determines how much to parallelize over the seqlen_q dimension
+  num_splits=0 means
+  it will be set by an internal heuristic. We're exposing num_splits mostly for
+  benchmarking. We will hard code it to 0 for now
+  */
+  constexpr int num_splits{0};
   auto softmax_scale = std::pow(query.size(-1), -0.5);
-  std::vector<Tensor> output = fmha::mha_fwd(
+  at::Tensor output = at::empty_like(query);
+  Tensor logsumexp, softmax;
+
+  logsumexp = fmha::mha_fwd(
       query,
       key,
       value,
+      output,
       cumulative_sequence_length_q,
       cumulative_sequence_length_k,
       max_seqlen_batch_q,
       max_seqlen_batch_k,
       dropout_p,
       softmax_scale,
-      false,
+      false, /*zero_tensors = false for all calls here*/
       is_causal,
-      false,
+      num_splits,
       c10::nullopt);
-  return output[0];
+  return std::make_tuple(output, logsumexp);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return Tensor();
+  return std::make_tuple(Tensor(), Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
@@ -984,5 +1017,8 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
   TORCH_CHECK(false, "This operator should be overridden in python before use");
   return at::Tensor();
 }
+
+REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
+
 } // namespace native
 } // namespace at

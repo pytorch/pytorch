@@ -54,6 +54,7 @@ enum class Backend {
   MPS,
   HPU,
   Lazy,
+  MTIA,
   PrivateUse1,
   NumOptions
 };
@@ -111,6 +112,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
+  } else if (t == DispatchKey::MTIA) {
+    return Backend::MTIA;
   } else if (t == DispatchKey::PrivateUse1) {
     return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
@@ -174,6 +177,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MPS;
     case Backend::HPU:
       return DispatchKey::HPU;
+    case Backend::MTIA:
+      return DispatchKey::MTIA;
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
     default:
@@ -232,6 +237,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::MPS;
     case Backend::HPU:
       return DeviceType::HPU;
+    case Backend::MTIA:
+      return DeviceType::MTIA;
     case Backend::PrivateUse1:
       return DeviceType::PrivateUse1;
     case Backend::Undefined:
@@ -296,6 +303,8 @@ static inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::HPU:
       return "HPU";
+    case Backend::MTIA:
+      return "MTIA";
     case Backend::PrivateUse1:
       return "PrivateUseOne";
     default:

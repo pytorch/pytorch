@@ -50,6 +50,9 @@ class SizeVarAllocator(object):
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
+        self.declare = ""
+        self.ending = ""
+        self.as_strided = "as_strided"
 
     def seed(self):
         """
@@ -113,7 +116,7 @@ class SizeVarAllocator(object):
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
         """
-        from .ir import IndexingDiv, ModularIndexing
+        from .ir import FloorDiv, ModularIndexing
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
@@ -134,7 +137,7 @@ class SizeVarAllocator(object):
             return base
 
         def visit_indexing_div(base, divisor):
-            return IndexingDiv(remove_zero_terms(base, divisor), divisor)
+            return FloorDiv(remove_zero_terms(base, divisor), divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
@@ -144,12 +147,17 @@ class SizeVarAllocator(object):
                 base_s = base.args[2] - 1
             elif not base.has(ModularIndexing):
                 # actual iteration range is to size-1
+                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
+                base_lowest = sympy_subs(base, iter_ranges_zero)
+                if self.maybe_guard_lt(base_lowest, 0):
+                    # can't replace with indexing div if base can be negative
+                    return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
                 base_s = base
             if self.maybe_guard_lt(base_s, modulus * divisor):
-                return IndexingDiv(base, divisor)
+                return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
         if expr.has(ModularIndexing):
@@ -162,9 +170,9 @@ class SizeVarAllocator(object):
                 visit_modular_indexing,
             )
 
-        if expr.has(IndexingDiv):
+        if expr.has(FloorDiv):
             expr = expr.replace(
-                IndexingDiv(
+                FloorDiv(
                     sympy.Wild("base"),
                     sympy.Wild("divisor"),
                 ),
@@ -239,36 +247,8 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        left = sympy.expand(left)
-        right = sympy.expand(right)
-        if left == right:
-            return left
-        expr = self.simplify(left - right)
-        assert self.size_hint(expr) == 0, (expr, self.size_hint(expr))
-        free = list(expr.free_symbols)
-        if len(free) == 0:
-            assert expr == 0
-            return left
-        elif len(free) in (1, 2, 3):
-            # remove the largest of the guarded variables
-            free.sort(key=self.size_hint)
-            try:
-                solutions = sympy.solve(expr, free[-1])
-                if (
-                    len(solutions) == 1
-                    and solutions[0]
-                    and "/" not in str(solutions[0])
-                ):
-                    self.replacements[free[-1]] = solutions[0]
-            except NotImplementedError:
-                pass
-
-        self.guards.append(ZeroGuard(expr))
-
-        if len(right.free_symbols) < len(left.free_symbols):
-            return right
-        else:
-            return left
+        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
@@ -342,8 +322,7 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            self.guard_equals(numerator % denominator, 0)
             return True
         return False
 
@@ -353,11 +332,14 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
-        return self.shape_env.create_symbol(val)
+        return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
         return int(out)
+
+    def size_hints(self, exprs: List[Expr]) -> int:
+        return tuple(self.size_hint(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -386,7 +368,13 @@ class SizeVarAllocator(object):
         return stride_vars
 
     def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
-        """Convert an indexing expression back into strides"""
+        """Convert an indexing expression back into strides
+
+        NOTE: This is only valid if the index is a standard strided offset
+        calculation. e.g. 10 * ModularIndexing(i0 + 1, 1, 2) would give a
+        stride of -10 because the index wraps around after the first element
+
+        """
         strides = []
         index = self.simplify(index)
         # remove any offset
@@ -446,17 +434,18 @@ class SizeVarAllocator(object):
 
         @functools.lru_cache(None)
         def sizeof(name):
-            code.writeline(f"{name}_size = {name}.size()")
+            code.writeline(f"{self.declare}{name}_size = {name}.size(){self.ending}")
             return f"{name}_size"
 
         @functools.lru_cache(None)
         def strideof(name):
-            code.writeline(f"{name}_stride = {name}.stride()")
+            code.writeline(
+                f"{self.declare}{name}_stride = {name}.stride(){self.ending}"
+            )
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
-        added = set()
 
         for name, value in graph_inputs.items():
             shapes = value.get_size()
@@ -464,10 +453,9 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    added.add(shape)
-                    code.writeline(f"{shape} = {sizeof(name)}[{dim}]")
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
+                    code.writeline(
+                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
+                    )
 
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
@@ -475,10 +463,9 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    code.writeline(f"{shape} = {strideof(name)}[{dim}]")
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
-        assert not needed
+                    code.writeline(
+                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
+                    )
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr
@@ -492,6 +479,9 @@ class SizeVarAllocator(object):
         if len(parts) == 1:
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
+
+    def codegen_benchmark_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        return self.codegen_shape_tuple(shape)
 
 
 def join_dimensions(expr: Expr) -> Expr:
@@ -508,13 +498,13 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
     becomes
     ModularIndexing(i0, 1, 128)
-    ModularIndexing(i0, 1, 32) + 32 * IndexingDiv(i0, 32)
+    ModularIndexing(i0, 1, 32) + 32 * FloorDiv(i0, 32)
     becomes i0
 
 
     This type of pattern can come from view operations
     """
-    from .ir import IndexingDiv, ModularIndexing
+    from .ir import FloorDiv, ModularIndexing
 
     assert isinstance(expr, sympy.Add)
 
@@ -546,27 +536,47 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
         if m1:
             for term2 in expr.args:
                 m2 = term2.match(
-                    m1[scale] * m1[mod1] * IndexingDiv(m1[base], m1[divisor] * m1[mod1])
+                    m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
                 )
                 if m2 is not None:  # in case of success we get an empty dict here
                     expr = join_dimensions(
                         expr
                         - term1
                         - term2
-                        + m1[scale] * IndexingDiv(m1[base], m1[divisor])
+                        + m1[scale] * FloorDiv(m1[base], m1[divisor])
                     )
                     return expr
     return expr
 
 
+class CppSizeVarAllocator(SizeVarAllocator):
+    def __init__(self, shape_env=None):
+        super().__init__(shape_env)
+        self.declare = "auto "
+        self.ending = ";"
+        self.as_strided = "at::as_strided"
+
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_sizevar, shape))
+        if len(parts) == 0:
+            return "{}"
+        if len(parts) == 1:
+            return f"{{{parts[0]}, }}"
+        return f"{{{', '.join(parts)}}}"
+
+    def codegen_benchmark_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        return super().codegen_shape_tuple(shape)
+
+
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
-    simplify ir.ModularIndexing/ir.IndexingDiv.
+    simplify ir.ModularIndexing/ir.FloorDiv.
     """
 
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
+        self.name = "SimplifyIndexing"
         self._simplify: Callable[
             [Expr], Expr
         ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)

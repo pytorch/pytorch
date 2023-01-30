@@ -29,7 +29,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9, _get_magma_version, \
+from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -1357,17 +1357,16 @@ class TestLinalg(TestCase):
     def test_norm_fused_type_promotion(self, device, dtype):
         x = torch.randn(10, device=device, dtype=dtype)
 
-        def profile_and_check(fn, x, kwargs, fn_name):
+        def profile_and_check(fn, x, kwargs):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 fn(x, **kwargs, dtype=torch.float)
             # smoke check that profiler returned some events
-            self.assertTrue(fn_name in map(lambda e: e.name, p.events()))
+            self.assertTrue("aten::linalg_vector_norm" in (e.name for e in p.events()))
             # test that there was no explicit copy
-            self.assertFalse("aten::to" in map(lambda e: e.name, p.events()))
+            self.assertFalse("aten::to" in (e.name for e in p.events()))
 
-        for f, kwargs, fn_name in zip((torch.norm, torch.linalg.vector_norm), ({"p" : 2}, {}),
-                                      ("aten::norm", "aten::linalg_vector_norm")):
-            profile_and_check(f, x, kwargs, fn_name)
+        for f, kwargs, in zip((torch.linalg.vector_norm, torch.norm), ({}, {"p" : 2})):
+            profile_and_check(f, x, kwargs)
 
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
@@ -2310,10 +2309,10 @@ class TestLinalg(TestCase):
             x = torch.tensor(lst, dtype=torch.double, device=device)
             for axes in (), (0,):
                 self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
-            self.assertRaises(IndexError, torch.norm, x, "nuc", (0, 1))
+            self.assertRaises(RuntimeError, torch.norm, x, "nuc", (0, 1))
 
         x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double, device=device)
-        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
+        self.assertRaisesRegex(RuntimeError, "must be different", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
@@ -4010,6 +4009,8 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-1, torch.complex64: 1e-1,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
+        if TEST_WITH_ROCM and dtype is torch.float32:
+            raise unittest.SkipTest("Skipping for ROCm for Magma backend; unskip when hipSolver backend is enabled")
         # This exercises the API + BLAS CPU + batched cuBLAS
         ks = (3, 1, 0)
         ns = (5, 0)
@@ -4569,8 +4570,8 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not CUDA9 else [],
-                  *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []
+                  torch.half,
+                  *[torch.bfloat16] if SM53OrLater else []
                   ))
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     def test_corner_cases_of_cublasltmatmul(self, device, dtype):
@@ -4596,8 +4597,8 @@ class TestLinalg(TestCase):
         torch.nn.functional.linear(m1, m2, M)
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not CUDA9 else [],
-                  *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []
+                  torch.half,
+                  *[torch.bfloat16] if SM53OrLater else []
                   ))
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     def test_blas_alpha_beta_empty(self, device, dtype):
@@ -5364,8 +5365,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else [],
-                  *[torch.half]))
+                  *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else [],
+                  torch.half))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
@@ -5400,8 +5401,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
-    @dtypesIfCUDA(*floating_types_and(*[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and
-                  SM53OrLater) else []))
+    @dtypesIfCUDA(*floating_types_and(*[torch.bfloat16] if TEST_WITH_ROCM or
+                  SM53OrLater else []))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
@@ -5464,7 +5465,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfMPS(torch.float32)
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
+                  *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
@@ -5473,7 +5474,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
+                  *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addmm_activation(self, device, dtype):
@@ -5681,7 +5682,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
-        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
             # undefined bahavior
@@ -5693,7 +5694,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         is_supported = True
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
-            is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
+            is_supported = TEST_WITH_ROCM or SM53OrLater
 
         if not is_supported:
             for num_batches in batch_sizes:
@@ -5793,7 +5794,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
-        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
             # undefined bahavior
@@ -5807,7 +5808,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             if self.device_type == 'cpu':
                 self.precision = 1  # 43 vs 43.75
             else:
-                is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
+                is_supported = TEST_WITH_ROCM or SM53OrLater
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
@@ -5866,7 +5867,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
-        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
             # undefined bahavior
@@ -5877,7 +5878,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         is_supported = True
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
-            is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
+            is_supported = TEST_WITH_ROCM or SM53OrLater
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)

@@ -119,8 +119,7 @@ Reducer::Reducer(
       param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
-  TORCH_INTERNAL_ASSERT(
-      params_.size() >= 1, "Expected at least one parameter.");
+  TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
   if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
@@ -515,7 +514,7 @@ void Reducer::set_divide_factor() {
       auto results = extractTensors(workHandle->getFuture()->value());
 
       // Guard against the results being empty
-      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      TORCH_INTERNAL_ASSERT(!results.empty());
       at::Tensor& res = results.front();
       div_factor_ = res.item().to<int>();
     }
@@ -574,7 +573,7 @@ void Reducer::delay_all_reduce() {
     }
 
     // Each rank prints out all the unused parameters detected
-    if (unused_parameters_.size() > 0) {
+    if (!unused_parameters_.empty()) {
       LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
                 << "Parameter(s) (in the format of {param_name, index}): "
                 << unused_params_stream.str()
@@ -877,11 +876,16 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_);
-    return allreduce_hook.runHook(grad_bucket);
+    return run_allreduce_hook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
   }
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
+    GradBucket& grad_bucket) {
+  _AllReduceBySumCommHook allreduce_hook(process_group_);
+  return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
@@ -1011,7 +1015,7 @@ void Reducer::initialize_buckets(
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
     REDUCER_CHECK(
-        bucket_indices[bucket_index].size() > 0,
+        !bucket_indices[bucket_index].empty(),
         logger_,
         "Empty bucket specified.");
 
@@ -1443,10 +1447,18 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      RECORD_FUNCTION(
-          "torch.distributed.ddp.reducer::copy_bucket_to_grad",
-          std::vector<c10::IValue>({variable}));
-      copy_bucket_to_grad(variable, bucket, intra_bucket_index, global_unused);
+      if (set_grads_to_none_) {
+        runGradCallbackForVariable(variable, [&](auto& grad) {
+          grad.reset();
+          return true;
+        });
+      } else {
+        RECORD_FUNCTION(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad",
+            std::vector<c10::IValue>({variable}));
+        copy_bucket_to_grad(
+            variable, bucket, intra_bucket_index, global_unused);
+      }
     } else {
       const auto& bucket_view_out = bucket.bucket_views_out[intra_bucket_index];
       auto& bucket_view_in = bucket.bucket_views_in[intra_bucket_index];
@@ -1457,6 +1469,10 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
+        if (set_grads_to_none_) {
+          grad.reset();
+          return true;
+        }
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
           // If grad is globally used but locally unused, let grad point to
@@ -1692,7 +1708,7 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -1773,6 +1789,10 @@ void Reducer::register_builtin_comm_hook(
   }
 }
 
+void Reducer::set_grads_to_none(bool set_to_none) {
+  set_grads_to_none_ = set_to_none;
+}
+
 void Reducer::ensure_prior_reduction_finished() {
   // Check that any prior reduction has finished.
   // The variable `require_finalize_` is true until all gradients
@@ -1783,9 +1803,7 @@ void Reducer::ensure_prior_reduction_finished() {
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
-    TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
-    const std::string unmarkedParamIndices =
-        c10::Join(", ", unmarked_param_indices);
+    TORCH_INTERNAL_ASSERT(!unmarked_param_indices.empty());
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
@@ -1851,7 +1869,7 @@ void Reducer::ensure_prior_reduction_finished() {
     } else {
       // Retrieve set of parameter names that did not receive gradient.
       auto unmarkedParams = getUnmarkedParamsForIteration();
-      TORCH_INTERNAL_ASSERT(unmarkedParams.size() > 0);
+      TORCH_INTERNAL_ASSERT(!unmarkedParams.empty());
       for (const auto& s : unmarkedParams) {
         LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
                   << "Parameter: " << s
@@ -1967,7 +1985,7 @@ compute_bucket_assignment_by_size(
   TORCH_INTERNAL_ASSERT(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
-  TORCH_INTERNAL_ASSERT(tensors.size() > 0);
+  TORCH_INTERNAL_ASSERT(!tensors.empty());
   // Store bucket indices and their sizes together, because we later sort the
   // resulting indices by minimum tensor index and want to keep sizes
   // consistent.
@@ -2101,7 +2119,7 @@ void verify_params_across_processes(
 
   // Allgather and verify parameter size.
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
-  param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
+  param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
   for (size_t i = 0; i < world_size; ++i) {
     param_size_output_tensors.front().emplace_back(

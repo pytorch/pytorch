@@ -10,24 +10,36 @@ namespace ops {
 
 using namespace api::utils;
 
+static api::ShaderInfo get_quantize_per_tensor_shader(
+    const c10::ScalarType dtype) {
+  switch (dtype) {
+    case c10::ScalarType::QUInt8:
+      return VK_KERNEL(quantize_per_tensor_quint8);
+    case c10::ScalarType::QInt8:
+      return VK_KERNEL(quantize_per_tensor_qint8);
+    case c10::ScalarType::QInt32:
+      return VK_KERNEL(quantize_per_tensor_qint32);
+    default:
+      TORCH_CHECK(
+          false,
+          "Vulkan quantization currently not supported for dtype ",
+          dtype);
+  }
+}
+
 Tensor quantize_per_tensor(
     const at::Tensor& input_arg,
     const double scale,
     const int64_t zero_point,
     const c10::ScalarType dtype) {
-  TORCH_CHECK(dtype == c10::ScalarType::QUInt8, "Expected type c10::kQUint8");
+  api::ShaderInfo compute_shader = get_quantize_per_tensor_shader(dtype);
 
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
 
-  vTensor v_output{
-      context,
-      input.sizes(),
-      input.options().dtype(c10::kQUInt8),
-      scale,
-      zero_point};
+  vTensor v_output{context, input.sizes(), scale, zero_point, dtype};
 
   const struct Block final {
     uvec3 extents;
@@ -50,7 +62,7 @@ Tensor quantize_per_tensor(
 
   context->submit_compute_job(
       // shader descriptor
-      VK_KERNEL(quantize_per_tensor),
+      compute_shader,
       // barrier
       pipeline_barrier,
       // global work group size
@@ -87,7 +99,7 @@ Tensor dequantize_helper(
   vTensor v_output{
       context,
       input.sizes(),
-      input.options().dtype(c10::kFloat),
+      c10::kFloat,
   };
 
   const struct Block final {

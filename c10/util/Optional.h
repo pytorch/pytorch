@@ -172,7 +172,7 @@ class bad_optional_access : public std::logic_error {
 
 template <class T>
 union storage_t {
-  unsigned char dummy_;
+  unsigned char dummy_{};
   T value_;
 
 #if __cplusplus >= 202002L
@@ -630,7 +630,7 @@ class optional : private OptionalBase<T> {
   typedef T value_type;
 
   // 20.5.5.1, constructors
-  constexpr optional() noexcept : OptionalBase<T>(){};
+  constexpr optional() noexcept = default;
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;

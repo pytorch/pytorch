@@ -36,6 +36,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"mps", DeviceType::MPS},
           {"meta", DeviceType::Meta},
           {"hpu", DeviceType::HPU},
+          {"mtia", DeviceType::MTIA},
           {"privateuseone", DeviceType::PrivateUse1},
       }};
   auto device = std::find_if(

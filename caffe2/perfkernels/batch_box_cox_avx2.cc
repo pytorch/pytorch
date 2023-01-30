@@ -1,3 +1,4 @@
+#include <immintrin.h>
 #ifdef CAFFE2_PERF_USE_MKL
 #include <c10/util/irange.h>
 #include <caffe2/perfkernels/common.h>
@@ -5,28 +6,66 @@
 
 #include "vectorizer.h"
 
-#ifndef VECTORIZED_KERNEL
+// Enable compiler vectorized version only if numerical consistency is not
+// required between dev and opt versions - disabled for now
+#ifndef FAST_VECTORIZED_KERNEL
 #define CPU_CAPABILITY_AVX2
 #include <ATen/cpu/vec/vec.h>
 
 namespace at::vec {
 
+// Implements the vectorized version of std::max() operation,
+// which DOESNOT propagates NaN for second argument
 template <typename scalar_t>
 Vectorized<scalar_t> max(const Vectorized<scalar_t>& a, const Vectorized<scalar_t>& b);
 
-// Implements the vectorized version of std::max() operation,
-// which DOESNOT propagates NaN for second argument
 template <>
 Vectorized<double> max(const Vectorized<double>& a, const Vectorized<double>& b) {
   // std::max(NaN, nonNan) -> NaN
   return _mm256_max_pd(b, a);
 }
 
-
 template <>
 Vectorized<float> max(const Vectorized<float>& a, const Vectorized<float>& b) {
   // std::max(NaN, nonNan) -> NaN
   return _mm256_max_ps(b, a);
+}
+
+// Implements recieprocal method based on newton-rapson method
+// 1. user RCP approximiation
+// 2. update with RCP = RCP * (2 - X * RCP)
+template <typename scalar_t>
+Vectorized<scalar_t> fast_recieprocal(const Vectorized<scalar_t>& b);
+template <typename scalar_t>
+scalar_t fast_recieprocal(scalar_t b);
+
+template<>
+Vectorized<float> fast_recieprocal(const Vectorized<float>& b) {
+  auto minus2 = _mm256_set1_ps(-2.f);
+  auto rcp = _mm256_rcp_ps(b);
+  rcp = _mm256_mul_ps(rcp,  _mm256_fnmsub_ps(rcp, b, minus2));
+  rcp = _mm256_mul_ps(rcp,  _mm256_fnmsub_ps(rcp, b, minus2));
+  return rcp;
+}
+
+template <>
+float fast_recieprocal(float b) {
+  auto minus2 = _mm_set_ss(-2.f);
+  auto b_reg = _mm_set_ss(b);
+  auto rcp = _mm_rcp_ss(b_reg);
+  rcp = _mm_mul_ss(rcp,  _mm_fnmsub_ss(rcp, b_reg, minus2));
+  rcp = _mm_mul_ss(rcp,  _mm_fnmsub_ss(rcp, b_reg, minus2));
+  return _mm_cvtss_f32(rcp);
+}
+
+template<>
+Vectorized<double> fast_recieprocal(const Vectorized<double>& b) {
+  return b.reciprocal();
+}
+
+template <>
+double fast_recieprocal(double b) {
+  return 1./b;
 }
 
 }
@@ -45,14 +84,6 @@ template <typename T>
 void PackV(const int N, const T* a, const int* ia, T* y);
 template <typename T>
 void UnpackV(const int N, const T* a, T* y, const int* iy);
-template <typename T>
-void Pow(const int N, const T* a, const T* b, T* y);
-template <typename T>
-void Add(const int N, const T* a, const T* b, T* y);
-template <typename T>
-void Div(const int N, const T* a, const T* b, T* y);
-template <typename T>
-void Ln(const int N, const T* a, T* y);
 
 #define DELEGATE_PACKV_FUNCTION(T, OriginalFunc)                \
   template <>                                                   \
@@ -72,29 +103,7 @@ DELEGATE_UNPACKV_FUNCTION(float, vsUnpackV)
 DELEGATE_UNPACKV_FUNCTION(double, vdUnpackV)
 #undef DELEGATE_UNPACKV_FUNCTION
 
-#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Funcname, OriginalFunc) \
-  template <>                                                      \
-  void Funcname<T>(const int N, const T* a, const T* b, T* y) {    \
-    OriginalFunc(N, a, b, y);                                      \
-  }
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Pow, vsPow)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Pow, vdPow)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Add, vsAdd)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Add, vdAdd)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Div, vsDiv)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
-#undef DELEGATE_SIMPLE_BINARY_FUNCTION
-
-#define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc) \
-  template <>                                                     \
-  void Funcname<T>(const int N, const T* a, T* y) {               \
-    OriginalFunc(N, a, y);                                        \
-  }
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Ln, vsLn)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Ln, vdLn)
-#undef DELEGATE_SIMPLE_UNARY_FUNCTION
-
-#ifndef VECTORIZED_KERNEL
+#ifndef FAST_VECTORIZED_KERNEL
 template <typename T>
 void box_cox_zero_lambda(
     size_t D,
@@ -140,7 +149,7 @@ void box_cox_nonzero_lambda(
     auto sum = data + lambda2;
     auto max = at::vec::max(sum, k_eps_vec);
     auto lambda1 = Vec::loadu(lambda1_ptr + j);
-    auto lambda_over_1 = lambda1.reciprocal();
+    auto lambda_over_1 = at::vec::fast_recieprocal(lambda1);
     auto pow = max.pow(lambda1);
     auto res = at::vec::fmsub(pow, lambda_over_1, lambda_over_1);
     res.store(out + j);
@@ -148,7 +157,7 @@ void box_cox_nonzero_lambda(
   for ( ;j < D; ++j) {
     auto sum = data_ptr[j] + lambda2_ptr[j];
     auto max = std::max(sum, k_eps);
-    auto lambda_over_1 = 1 / lambda1_ptr[j];
+    auto lambda_over_1 = at::vec::fast_recieprocal(lambda1_ptr[j]);
     auto pow = std::pow(max, lambda1_ptr[j]);
     out[j] = pow * lambda_over_1 - lambda_over_1;
   }
@@ -181,12 +190,16 @@ void box_cox_nonzero_lambda(
     FAST_MATH
     auto sum = data_ptr[j] + lambda2_ptr[j];
     auto max = std::max(sum, k_eps);
-    auto lambda_over_1 = 1 / lambda1_ptr[j];
-    auto pow = std::pow(max, lambda1_ptr[j]);
+    auto lamda1 = lambda1_ptr[j];
+    auto lambda_over_1 = 1 / lamda1;
+    if constexpr (std::is_same<T, float>::value) {
+      lambda_over_1 = lambda_over_1 * (T{2} - lambda_over_1 * lamda1);
+      lambda_over_1 = lambda_over_1 * (T{2} - lambda_over_1 * lamda1);
+    }
+    auto pow = std::pow(max, lamda1);
     out[j] = pow * lambda_over_1 - lambda_over_1;
   }
 }
-
 #endif
 
 template <typename T>
