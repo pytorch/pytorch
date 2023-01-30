@@ -40,9 +40,7 @@ struct TORCH_API NotImplemented : public Error {
 // @once_differentiable
 struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int num_inputs) : msg(std::move(msg)) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    for (const auto i : c10::irange(num_inputs)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto _ : c10::irange(num_inputs)) {
       add_input_metadata(Node::undefined_input());
     }
   }
