@@ -230,6 +230,7 @@ struct UniformKernel {
 
 template<typename RNG>
 void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, RNG generator) {
+  TORCH_CHECK(isFloatingType(iter.dtype()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "cauchy_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::cauchy_distribution<double> cauchy(median, sigma);

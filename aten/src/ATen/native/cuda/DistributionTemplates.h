@@ -553,6 +553,7 @@ struct ExponentialKernel {
 template<typename RNG>
 void cauchy_kernel(TensorIteratorBase& iter, double median_, double sigma_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cuda", [&] {
+    TORCH_CHECK(isFloatingType(iter.dtype()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto median = static_cast<accscalar_t>(median_);
     auto sigma = static_cast<accscalar_t>(sigma_);
