@@ -548,6 +548,10 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
     def call_add(self, tx, *args, **kwargs):
+        # Commute add when the right-hand side is symbolic
+        # (since e.g. int.__add__(int, SymInt) is not implemented).
+        if len(args) == 2 and args[1].python_type() in (torch.SymInt, torch.SymFloat):
+            return args[1].call_method(tx, "__radd__", [args[0]], kwargs)
         return args[0].call_method(tx, "__add__", args[1:], kwargs)
 
     def call_sub(self, tx, *args, **kwargs):

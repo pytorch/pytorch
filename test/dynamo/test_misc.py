@@ -178,6 +178,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # expect 5 ops: shape and index for param, shape and index for input, subtract
         self.assertEqual(counts.op_count, 5)
 
+    def test_param_shape_add_shape(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                return self.param.shape[0] + x.shape[0]
+
+        counts = torch._dynamo.testing.CompileCounter()
+        mod = MyModule()
+        optimized_mod = torch._dynamo.optimize(counts, nopython=True)(mod)
+
+        x = torch.randn(3)
+        ref = mod(x)
+        res = optimized_mod(x)
+
+        self.assertTrue(same(ref, res))
+        # expect 5 ops: shape and index for param, shape and index for input, subtract
+        self.assertEqual(counts.op_count, 5)
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
