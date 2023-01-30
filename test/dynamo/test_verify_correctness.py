@@ -135,6 +135,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         else:
             self.fail("expected failure")
 
+    @config.patch("verify_correctness", False)
     def test_incorrect_verify_false(self):
         """
         The bad optimization return a graph that
