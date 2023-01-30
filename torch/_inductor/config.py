@@ -204,6 +204,12 @@ class trace:
     upload_tar = None
 
 
+from .._dynamo.config_utils import install_config_module
+
+# adds patch, save_config, etc
+install_config_module(sys.modules[__name__])
+
+
 class InductorConfigContext:
     static_memory: bool
     matmul_padding: bool
@@ -234,44 +240,6 @@ class InductorConfigContext:
         if arg is None:
             return
         # Handle mode
-        if type(arg) is str:
-
-            def default():
-                self.static_memory = False
-
-            def reduce_overhead():
-                self.static_memory = True
-
-            def max_autotune():
-                self.max_autotune = True
-
-            modes = {
-                x.__name__.replace("_", "-"): x
-                for x in [default, reduce_overhead, max_autotune]
-            }
-            if arg not in modes:
-                raise RuntimeError(
-                    f"Unrecognized mode {arg}, should be one of {', '.join(modes.keys())}"
-                )
-            modes[arg]()
-            return
-        # Handle passes
-        for (name, val) in arg.items():
-            attr_name = name.replace("-", "_")
-            if not hasattr(self, attr_name):
-                known_passes = ", ".join(
-                    [x.replace("_", "-") for x in dir(self) if not x.startswith("_")]
-                )
-                raise RuntimeError(
-                    f"Unexpected optimization pass {name}, known passes are {known_passes}"
-                )
-            if type(val) != type(getattr(self, attr_name)):
-                val_type_str = type(val).__name__
-                expected_type_str = type(getattr(self, attr_name)).__name__
-                raise RuntimeError(
-                    f"Unexpected type of attr {name}, got {val_type_str} should be {expected_type_str}"
-                )
-            setattr(self, attr_name, val)
 
     def __enter__(self):
         self._prev = InductorConfigContext()
@@ -279,8 +247,3 @@ class InductorConfigContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._prev._apply()
-
-
-from .._dynamo.config_utils import get_config_serialization_fns
-
-save_config, load_config = get_config_serialization_fns(sys.modules[__name__])

@@ -25,6 +25,10 @@ def set_loggers_level(level):
         logger.setLevel(level)
 
 
+def get_loggers_level():
+    return get_loggers()[0].level
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
