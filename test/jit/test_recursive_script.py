@@ -186,18 +186,17 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M2(), (torch.randn(2, 2),))
 
-        if sys.version_info[:2] >= (3, 8):
-            class M3(torch.nn.Module):
-                x : typing.Final[int]
+        class M3(torch.nn.Module):
+            x : typing.Final[int]
 
-                def __init__(self):
-                    super().__init__()
-                    self.x = 2
+            def __init__(self):
+                super().__init__()
+                self.x = 2
 
-                def forward(self, t):
-                    return t + self.x
+            def forward(self, t):
+                return t + self.x
 
-            self.checkModule(M3(), (torch.randn(2, 2),))
+        self.checkModule(M3(), (torch.randn(2, 2),))
 
     def test_ignore_class(self):
         @torch.jit.ignore
