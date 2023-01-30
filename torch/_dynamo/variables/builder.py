@@ -422,6 +422,7 @@ class VariableBuilder:
             )
         elif (
             not is_allowed(value)
+            and hasattr(value, "__name__")
             and value.__name__ in dir(torch.ops.aten)
             and isinstance(
                 getattr(torch.ops.aten, value.__name__), torch._ops.OpOverloadPacket
