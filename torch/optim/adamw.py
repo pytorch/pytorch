@@ -298,8 +298,22 @@ def adamw(
             [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
             differentiable, has_fused=False)
 
+    if fused is None:
+        all_tensors = []
+        all_tensors.extend(params)
+        all_tensors.extend(grads)
+        all_tensors.extend(exp_avgs)
+        all_tensors.extend(exp_avg_sqs)
+        all_tensors.extend(max_exp_avg_sqs)
+        all_tensors.extend(state_steps)
+        fused = not torch.jit.is_scripting() and not differentiable and all(
+            p.is_cuda and torch.is_floating_point(p) for p in all_tensors
+        )
+
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+    if fused and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamw
