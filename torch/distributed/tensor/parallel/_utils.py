@@ -143,8 +143,8 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
     # swap the current dim to the last dim then reshape to flatten out other
     # dims, so we can just extract the list of ranks which contains cur_rank.
     cur_rank = device_mesh.get_rank()
-    pg_ranks_by_dim = device_mesh.mesh.swapaxes(-1, tp_mesh_dim).reshape(
-        -1, device_mesh.size(tp_mesh_dim)
+    pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, tp_mesh_dim).reshape(
+        -1, device_mesh.mesh.size(tp_mesh_dim)
     )
     dim_mesh_1d = pg_ranks_by_dim[torch.any(pg_ranks_by_dim == cur_rank, 1), :]
 
