@@ -158,12 +158,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=3)
 
     def test_param_shape_sub_shape(self):
-
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(3))
-                #self.param = torch.randn(3)
 
             def forward(self, x):
                 return self.param.shape[0] - x.shape[0]
