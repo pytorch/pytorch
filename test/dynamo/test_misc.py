@@ -28,7 +28,6 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
-from torch._dynamo.utils import ifdyn
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
@@ -449,6 +448,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=8
         )
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_item_capture(self):
         def fn(a, b):
@@ -463,6 +463,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):
         def fn(a, b):
@@ -475,7 +476,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize((cnts))(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, ifdyn(3, 2))
+        self.assertEqual(cnts.op_count, 2)
 
     def test_namedtuple1(self):
         def fn(a, b):
@@ -2011,6 +2012,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_f(x, n)
         self.assertEqual(cnts.frame_count, 1)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item(self):
         class MyMod(torch.nn.Module):
@@ -2024,6 +2026,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 11)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item_changes(self):
         class MyMod(torch.nn.Module):
@@ -2040,6 +2043,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item_changes_new_shape(self):
         class MyMod(torch.nn.Module):
