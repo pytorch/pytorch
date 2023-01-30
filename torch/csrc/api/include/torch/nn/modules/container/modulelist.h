@@ -147,7 +147,14 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::at with an nn::Module type");
     TORCH_CHECK(index < size(), "Index out of range");
-    return *modules_[index]->as<T>();
+    auto module = modules_[index]->as<T>();
+    TORCH_CHECK(
+        module,
+        "Unable to cast module[",
+        index,
+        "] to ",
+        c10::demangle(typeid(T).name()));
+    return *module;
   }
 
   /// Attempts to return the module at the given index as the requested type.
@@ -159,7 +166,14 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::at with an nn::Module type");
     TORCH_CHECK(index < size(), "Index out of range");
-    return *modules_[index]->as<T>();
+    const auto module = modules_[index]->as<T>();
+    TORCH_CHECK(
+        module,
+        "Unable to cast module[",
+        index,
+        "] to ",
+        c10::demangle(typeid(T).name()));
+    return *module;
   }
 
   /// Attempts to return a `std::shared_ptr` whose dynamic type is that of the
