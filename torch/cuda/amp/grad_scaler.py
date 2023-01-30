@@ -337,7 +337,8 @@ class GradScaler(object):
             # to skip the parameter updates or unscale gradients before updating parameters in
             # the fused kernel, e.g. `FusedAdamMathFunctor`.
             kwargs_ = kwargs
-            if "grad_scaler" in inspect.signature(optimizer.step).parameters:
+            has_grad_scaler_kwarg = "grad_scaler" in inspect.signature(optimizer.step).parameters
+            if has_grad_scaler_kwarg:
                 warnings.warn(
                     "GradScaler is going to stop passing itself as a keyword argument to the passed "
                     "optimizer. In the near future GradScaler registers `grad_scale: Tensor` and "
@@ -356,6 +357,9 @@ class GradScaler(object):
                 optimizer.found_inf = found_inf
             retval = optimizer.step(*args, **kwargs_)
             optimizer_state["stage"] = OptState.STEPPED
+            if not has_grad_scaler_kwarg:
+                del optimizer.grad_scale
+                del optimizer.found_inf
             return retval
 
         if optimizer_state["stage"] is OptState.READY:
