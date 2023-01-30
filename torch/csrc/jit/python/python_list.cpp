@@ -63,7 +63,7 @@ void initScriptListBindings(PyObject* module) {
       .def(py::init([](py::list list) {
         TypePtr type = nullptr;
 
-        if (list.size() > 0) {
+        if (!list.empty()) {
           // If the source list is nonempty, try to infer its type.
           auto inferred_type = tryToInferType(list);
 
@@ -289,7 +289,7 @@ void initScriptListBindings(PyObject* module) {
           [](py::list list) { // __setstate__
             TypePtr type = nullptr;
 
-            if (list.size() > 0) {
+            if (!list.empty()) {
               // If the source list is nonempty, try to infer its type.
               auto inferred_type = tryToInferType(list);
 
