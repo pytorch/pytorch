@@ -492,7 +492,7 @@ class AccuracyError(Exception):
     pass
 
 
-def wrap_compiler_debug(compiler_fn, compiler_name: str):
+def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
