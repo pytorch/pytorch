@@ -232,7 +232,7 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case RET:
           leaveFrame();
-          if (frames_.size() > 0) {
+          if (!frames_.empty()) {
             continue;
           }
           return false;
