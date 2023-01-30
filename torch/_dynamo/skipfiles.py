@@ -30,6 +30,8 @@ import unittest
 import weakref
 
 import torch
+import torch._inductor.test_operators
+
 
 try:
     import torch._prims
@@ -47,7 +49,7 @@ try:
 except ImportError:
     HAS_PRIMS_REFS = False
 
-from . import config
+from . import comptime, config, external_utils
 
 """
 A note on skipfiles:
@@ -117,11 +119,25 @@ SKIP_DIRS = [
         _weakrefset,
     )
 ]
+
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
+    torch._inductor.test_operators.__file__,
+    # These are dynamo files!
+    external_utils.__file__,
+    comptime.__file__,  # Want to inline these helpers
 }
 
+# Include optimizer code for tracing
+FILENAME_ALLOWLIST |= set(
+    [
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    ]
+)
+FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {

@@ -66,7 +66,7 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_pod<ArgumentInfo>::value,
+    std::is_standard_layout<ArgumentInfo>::value,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
@@ -134,7 +134,7 @@ struct ArgumentSpec {
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (tensor_args.size() == 0)
+    if (tensor_args.empty())
       return true;
     return std::memcmp(
                tensor_args.data(),

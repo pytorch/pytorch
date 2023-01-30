@@ -1,4 +1,14 @@
-from typing import List, Callable, Optional, Union, TypeVar, Dict, Any, cast
+from typing import (
+    List,
+    Callable,
+    Optional,
+    Union,
+    TypeVar,
+    Dict,
+    Any,
+    cast,
+    Sequence,
+)
 import torch.distributed as dist
 from .api import (
     CheckpointException,
@@ -331,3 +341,11 @@ def find_state_dict_object(
             f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'"
         )
     return obj
+
+
+def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
+    return [i_a + i_b for i_a, i_b in zip(a, b)]
+
+
+def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
+    return [i_a - i_b for i_a, i_b in zip(a, b)]

@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import logging
 import os
 import random
 import unittest
@@ -21,7 +20,6 @@ from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     import_transformers_or_skip,
@@ -68,7 +66,10 @@ def get_custom_model(device):
             self.weight = nn.Parameter(torch.randn(512, 512))
 
         def forward(self, x):
-            return torch.mm(x, self.weight.t())
+            tmp = torch.mm(x, self.weight.t())
+            # test an edge case where torch.where.scalar was decomposed to aten.where.self(tensor, tensor, tensor)
+            # and the tensors T(0.4) and T(0.5) were not wrapped in FakeTensors during DDPOptimizer compilation
+            return tmp + torch.where(tmp < 0.5, 0.3, 0.6)
 
     class MyLinear(torch.nn.Module):
         def __init__(self):
@@ -83,19 +84,24 @@ def get_custom_model(device):
             super(MyModule, self).__init__()
             mods = [
                 (MyLinear(), torch.nn.ReLU()),
-                # sandwitch the custom in the middle so it comes before and after
+                # sandwich the custom in the middle so it comes before and after
                 (MyCustomLinear(), torch.nn.ReLU()),
                 (MyLinear(), torch.nn.ReLU()),
             ]
             self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
 
-        def forward(self, x):
-            return self.seq(x)
+        def forward(self, x, y):
+            # test special case where the 0th bucket (layers close to graph input) is at capacity, which would
+            # trigger a new bucket, but there are only trivial ops without parameters to put into the new bucket.
+            # optimize this case by fusing that 'empty bucket' back together with the previous full one
+            return self.seq(x + y)
 
     m = MyModule().to(device)
     m.apply(init_weights)
     inputs = torch.rand((512, 512)).to(device)
-    correct_outputs = m(inputs)
+    # test duplicated inputs
+    inputs = (inputs, inputs)
+    correct_outputs = m(*inputs)
     return m, inputs, correct_outputs
 
 def get_hf_bert(rank):
@@ -103,8 +109,8 @@ def get_hf_bert(rank):
     # in a multiprocessing test
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
-    except ImportError:
-        raise unittest.SkipTest("Unable to import transformers")
+    except ImportError as e:
+        raise unittest.SkipTest("Unable to import transformers") from e
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
@@ -181,7 +187,7 @@ def run_hf_bert_ddp(self, model, inputs, backend):
     opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
     self.assertTrue(same(correct_results, opt_results))
 
-class TestFakeDistributedSingleProc(TestCase):
+class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -195,6 +201,18 @@ class TestFakeDistributedSingleProc(TestCase):
         model, inputs = get_hf_bert(0)
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "aot_eager")
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_issue90375(self):
+        class Model(nn.Module):
+            def forward(self):
+                return torch.randn(3) * torch.randn(3)
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch._dynamo.optimize("aot_eager")(model)
+        opt_model()
 
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
@@ -379,7 +397,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 },
             )
         )
-        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
         cls.device_ids = None if "cuda" in cls.device else [cls.rank]
@@ -508,7 +525,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize(check_splits_compiler.compile_fn)
         def opt_fn(inputs):
-            return ddp_m(inputs)
+            return ddp_m(*inputs)
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
@@ -551,7 +568,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.optimize(ddp_optimizer.compile_fn)
         def opt_fn(inputs):
-            return ddp_m(inputs)
+            return ddp_m(*inputs)
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
@@ -560,6 +577,12 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
 
+    def test_fsdp_orig_params_assert(self):
+        # Test with basic FSDP wrapping (outer wrap around whole model)
+        m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+        fsdp_m = FSDP(m, use_orig_params=False)
+        fsdp_m = torch._dynamo.optimize()(fsdp_m)
+        self.assertRaisesRegex(AssertionError, "Dynamo only supports FSDP with use_orig_params=True", fsdp_m, inputs)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

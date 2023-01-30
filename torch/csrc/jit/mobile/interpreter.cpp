@@ -135,7 +135,7 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case OPN: {
-          stack.push_back(inst.N);
+          stack.emplace_back(inst.N);
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
           code.operators_[inst.X](stack);
@@ -232,7 +232,7 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case RET:
           leaveFrame();
-          if (frames_.size() > 0) {
+          if (!frames_.empty()) {
             continue;
           }
           return false;

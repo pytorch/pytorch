@@ -920,7 +920,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ]
 
         def run_test(benchmark):
-            with torch.backends.cudnn.flags(benchmark=benchmark):
+            with torch.backends.cudnn.flags(enabled=True, benchmark=benchmark):
                 conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to(device, dtype)
                 for size in sizes:
                     x = torch.randn(size, device=device, dtype=dtype)
@@ -994,8 +994,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
-    @tf32_on_and_off(0.005)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @tf32_on_and_off(0.005)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -1034,7 +1034,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(m.weight.grad.data,
                              torch.cat([m1.weight.grad.data,
                                         m2.weight.grad.data], 0),
-                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                             atol=atol, rtol=rtol)
 
 
     @onlyCUDA
@@ -1058,7 +1058,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.double)
     def test_conv_double_backward(self, device, dtype):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             # Double backward only runs with DoubleTensor due to precision reason
             batch_size = 1
             for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:

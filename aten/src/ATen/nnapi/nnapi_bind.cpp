@@ -1,3 +1,4 @@
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -37,7 +38,7 @@ void NnapiCompilation::init(
     std::vector<at::Tensor> parameter_buffers
 ) {
   init2(
-    serialized_model_tensor,
+    std::move(serialized_model_tensor),
     std::move(parameter_buffers),
     ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
     false);
@@ -72,7 +73,7 @@ void NnapiCompilation::init2(
     ser_model_ptr,
     serialized_model_tensor.nbytes()
   };
-  TORCH_CHECK(ser_model.size() > 0);
+  TORCH_CHECK(!ser_model.empty());
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ANeuralNetworksModel* model;

@@ -10,9 +10,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using namespace analysis;
 
@@ -76,7 +74,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(s);
-  for (auto b : bufs) {
+  for (const auto& b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;
@@ -86,7 +84,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(e);
-  for (auto b : bufs) {
+  for (const auto& b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;
@@ -369,6 +367,4 @@ bool isOverlapping(
   return hasConflictingOverlap(sBounds, lBounds, kStore, kLoad);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

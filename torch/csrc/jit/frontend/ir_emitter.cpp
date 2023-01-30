@@ -43,8 +43,7 @@
 #include <set>
 #include <stack>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
@@ -656,7 +655,7 @@ struct to_ir {
     // Type annotations exclude explicitly typing the "self" parameter, so in
     // the case that this is a method with self we expect one fewer parameter
     // annotation than the number of parameters this Def takes.
-    if (self && def.decl().params().size() == 0) {
+    if (self && def.decl().params().empty()) {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
@@ -2159,7 +2158,7 @@ struct to_ir {
       if (lhs_type == AnyType::get()) {
         isinstance_types.insert(
             isinstance_types.end(), rhs_types.begin(), rhs_types.end());
-        not_isinstance_types.push_back(AnyType::get());
+        not_isinstance_types.emplace_back(AnyType::get());
         // Edge case: we can still say that all lhs types subtype some
         // rhs type if `lhs` is `Any` and `rhs` is `Any`
         if (isinstance_types.size() != 1 ||
@@ -2777,7 +2776,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(stmt.lhs().range(), "self", sliced);
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      if (tensorIndices.size() == 0) {
+      if (tensorIndices.empty()) {
         // Common case: we only tried to index with int and slices. Emit the
         // correct augmented assignment op to the sliced value
         emitBuiltinCall(
@@ -2870,7 +2869,7 @@ struct to_ir {
       // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
-      if (tensorIndices.size() == 0) {
+      if (tensorIndices.empty()) {
         // Common case: we only tried to index with int and slices. Copy the
         // RHS into the resulting tensor.
         graph->insert(aten::copy_, {slicedArg, convertedRhs}, {}, stmtRange);
@@ -3285,7 +3284,7 @@ struct to_ir {
           << expected_inputs << " arguments but found "
           << apply.inputs().size();
     }
-    if (apply.attributes().size() > 0) {
+    if (!apply.attributes().empty()) {
       throw ErrorReport(loc)
           << Var(apply.callee()).name().name() << " takes no keyword arguments";
     }
@@ -3305,7 +3304,7 @@ struct to_ir {
           << min_expected_inputs << " and " << max_expected_inputs
           << " but found " << position_arg_size;
     }
-    if (apply.attributes().size() > 0) {
+    if (!apply.attributes().empty()) {
       throw ErrorReport(loc)
           << Var(apply.callee()).name().name() << " takes no keyword arguments";
     }
@@ -3338,7 +3337,7 @@ struct to_ir {
     switch (form) {
       case prim::fork: {
         auto& trees = apply.inputs().tree()->trees();
-        if (trees.size() < 1) {
+        if (trees.empty()) {
           throw ErrorReport(apply)
               << "Expected at least one argument to fork()";
         }
@@ -3475,7 +3474,7 @@ struct to_ir {
         bool all_ints = std::all_of(args.begin(), args.end(), [](Value* v) {
           return v->type()->cast<IntType>();
         });
-        if (args.size() == 0) {
+        if (args.empty()) {
           // empty inputs == torch.tensor([], dtype=....)
           auto inp_list =
               graph->insertNode(graph->createList(IntType::get(), {}))
@@ -3620,7 +3619,7 @@ struct to_ir {
         // zip(x, y) can be rewrite as subtrees:
         // IterableTree(IterableTree(x), IterableTree(y))
         auto inputs = apply.inputs();
-        if (inputs.size() == 0) {
+        if (inputs.empty()) {
           throw ErrorReport(apply)
               << "zip expected at least 1 arguments, got 0";
         }
@@ -3664,7 +3663,7 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplySpecialFormForList(
       Apply& apply,
       const TypePtr& type_hint = nullptr) {
-    if (apply.inputs().size() == 0) {
+    if (apply.inputs().empty()) {
       TypePtr type = type_hint ? type_hint : ListType::ofTensors();
       if (!type->cast<ListType>()) {
         throw ErrorReport(apply.range())
@@ -4141,7 +4140,7 @@ struct to_ir {
           << op_name << "(dst_worker_name, user_callable)\n"
           << "Now the number of arguments is " << apply.inputs().size();
     }
-    if (apply.attributes().size() != 0) {
+    if (!apply.attributes().empty()) {
       throw ErrorReport(apply)
           << op_name << "(dst_worker_name, user_callable, args, kwargs)"
           << "does not support kwargs yet";
@@ -4188,7 +4187,7 @@ struct to_ir {
     std::vector<NamedValue> kwargs;
     // Get args and kwargs as `NamedValue`s.
     // Similar to getNamedValues(..) and emitAttributes(..).
-    if (args_kwargs_timeout_trees.size() >= 1) {
+    if (!args_kwargs_timeout_trees.empty()) {
       // Unroll args from a Var that is known to be a Tuple.
       auto& args_tree = args_kwargs_timeout_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
@@ -4299,7 +4298,7 @@ struct to_ir {
     // This is also the same behavior that C++ allows with {}
     // (cannot assign to a variable typed as auto)
     // These nodes will be removed in a later pass after initial compilation
-    if (values.size() == 0 && type_hint == nullptr) {
+    if (values.empty() && type_hint == nullptr) {
       auto node = graph->insertNode(graph->create(prim::EmptyListLiteral));
       node->output()->setType(ListType::ofTensors());
       return node->output();
@@ -5056,7 +5055,7 @@ struct to_ir {
     }
     auto idx = toIValue(idx_val);
     if (!idx) {
-      if (elems.size() == 0 ||
+      if (elems.empty() ||
           !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
         throw ErrorReport(loc)
             << "Cannot index into a " << tuple_typ->repr_str()
@@ -5472,8 +5471,8 @@ void CompilationUnit::define_hooks(
         typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
     // need to add self as the first because we skipped it
     std::vector<Argument> arguments;
-    arguments.emplace_back(Argument(
-        hook_def.decl().params()[0].ident().name(), self->getClassType()));
+    arguments.emplace_back(
+        hook_def.decl().params()[0].ident().name(), self->getClassType());
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     return schema.cloneWithArguments(arguments);
@@ -5616,7 +5615,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
 // and do not record it as a unique name. This allows python printing to
 // be able to export and import more consistently named graphs
 bool meaningfulName(const std::string& name) {
-  if (name.size() == 0)
+  if (name.empty())
     return false;
   if (name[0] == '$')
     return false;
@@ -5651,8 +5650,7 @@ void CompilationUnit::define_interface(
         typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
     // need to add self as the first because we skipped it
     std::vector<Argument> arguments;
-    arguments.emplace_back(
-        Argument(method_def.decl().params()[0].ident().name(), iface));
+    arguments.emplace_back(method_def.decl().params()[0].ident().name(), iface);
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
@@ -5683,5 +5681,4 @@ void CompilationUnit::define_interface(
   this->register_type(iface);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

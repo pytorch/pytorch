@@ -9,7 +9,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.flat_param import (
     FlatParamHandle,
     FlatParamShardMetadata,
-    HandleConfig,
     HandleShardingStrategy,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -39,7 +38,7 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
-        return HandleConfig(HandleShardingStrategy.FULL_SHARD, False, None, None)
+        return (HandleShardingStrategy.FULL_SHARD, False, None, None, False)
 
     def _get_transformer(self, seed=0):
         torch.manual_seed(seed)  # keep everything deterministic
@@ -148,7 +147,7 @@ class TestFlattenParams(FSDPTest):
                 [],
                 module,
                 torch.device("cuda"),
-                self._get_default_config(),
+                *self._get_default_config(),
                 self.process_group,
                 False,
             )
@@ -220,7 +219,7 @@ class TestFlattenParams(FSDPTest):
             params_to_flatten,
             module,
             torch.device("cuda"),
-            self._get_default_config(),
+            *self._get_default_config(),
             self.process_group,
             False,
         )
@@ -321,7 +320,7 @@ class TestFlattenParams(FSDPTest):
             params_to_flatten,
             module,
             torch.device("cuda"),
-            self._get_default_config(),
+            *self._get_default_config(),
             self.process_group,
             False,
         )

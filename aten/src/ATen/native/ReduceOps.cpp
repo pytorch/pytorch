@@ -26,6 +26,8 @@
 #include <ATen/ops/_cummin_helper_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/_sparse_sum.h>
+#include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -66,6 +68,7 @@
 #include <ATen/ops/gradient_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/isnan_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/logcumsumexp.h>
 #include <ATen/ops/logcumsumexp_native.h>
 #include <ATen/ops/logical_xor.h>
@@ -90,6 +93,7 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/special_logsumexp_native.h>
 #include <ATen/ops/sqrt.h>
+#include <ATen/ops/squeeze.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/std.h>
 #include <ATen/ops/std_mean.h>
@@ -113,12 +117,13 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <numeric>
-#include <vector>
-#include <cmath>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -727,7 +732,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     for (const auto k : c10::irange(dim_size)) {
       if (k == 0) {
         prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
-        omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+        omitted_products = at::cat({ones, std::move(prods_from_k_plus_1)}, dim);
       } else if (k == dim_size - 1) {
         const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
         omitted_products = prods_until_k;
@@ -751,7 +756,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       }
     }
 
-    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : grad_input;
+    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : std::move(grad_input);
   }
 }
 
@@ -1059,7 +1064,7 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   std::vector<Tensor> result;
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
-      auto ax_dx = spacing[i];
+      const auto& ax_dx = spacing[i];
       Tensor prepend, append;
       auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
       if (edge_order==1) {
@@ -1219,6 +1224,18 @@ Tensor nansum(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, c10
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
+namespace {
+template<typename scalar_t, typename accscalar_t = at::acc_type<scalar_t, false>>
+void inline set_result(Tensor& result, accscalar_t sum)
+{
+    if constexpr (std::is_integral_v<accscalar_t>) {
+      // all integer types get promoted to kLong
+      *result.data_ptr<int64_t>() = sum;
+    } else {
+      *result.data_ptr<scalar_t>() = sum;
+    }
+}
+}
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
@@ -1244,12 +1261,8 @@ Tensor trace_cpu(const Tensor& self) {
     for (const auto i : c10::irange(t_diag_size)) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
+    set_result<scalar_t>(result, sum);
 
-    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
-      // all integer types get promoted to kLong
-      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
-      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
-    );
   });
 
   return result;
@@ -1308,7 +1321,7 @@ TORCH_IMPL_FUNC(mean_out)
   // in lieu of the sum + divide implementation below.
   if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
-    if (!opt_dim.has_value() || opt_dim.value().size() == 0 || self.ndimension() == 0) {
+    if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
     } else {
       auto dim = opt_dim.value();
@@ -1372,23 +1385,11 @@ Tensor nanmean(
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
-static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
-  int ndims = self.sizes().size();
-  auto dims_to_squeeze = at::dim_list_to_bitset(dims, ndims);
-  Tensor result = self;
-  for (int i = ndims - 1; i >= 0; --i) {
-    if (dims_to_squeeze[i]) {
-      result = result.squeeze(i);
-    }
-  }
-  return result;
-}
-
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::amax(self, dims, true);
-    auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
+    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
     at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
     result.log_().add_(maxes_squeezed);
@@ -1453,34 +1454,10 @@ void impl_func_norm(
     bool keepdim,
     optional<ScalarType> opt_dtype,
     const Tensor& result) {
+  // Left this implementation without deprecating it as it is called in a number of places
+  // in the codebase. We should swap those by linalg_vector_norm
   auto p = opt_p.has_value() ? opt_p.get() : Scalar(2.0).to<double>();
-  auto in_dtype = opt_dtype.value_or(self.scalar_type());
-  auto out_dtype = result.scalar_type();
-
-  // See the note [Reductions do not use vectorized ops]
-  Tensor self_;
-  if (self.is_cpu() && self.is_complex() && std::abs(p.toDouble()) == INFINITY) {
-    if (opt_dtype.has_value()) {
-      self_ = self.to(*opt_dtype).abs();
-    } else {
-      self_ = self.abs();
-    }
-  } else {
-    self_ = self;
-  }
-
-
-  // omit in_dtype in the following call, to avoid make_reduction explicitly
-  // casting input to out_dtype
-  auto iter = isComplexType(self_.scalar_type())
-      ? meta::make_reduction(self_, result, dim, keepdim, in_dtype)
-      : meta::make_reduction_from_out_ty(self_, result, dim, keepdim, out_dtype);
-
-  if (iter.numel() == 0) {
-    result.zero_();
-  } else {
-    norm_stub(iter.device_type(), iter, p);
-  }
+  at::linalg_vector_norm_out(const_cast<Tensor&>(result), self, p, dim, keepdim, opt_dtype);
 }
 
 TORCH_IMPL_FUNC(norm_out)
@@ -1744,6 +1721,9 @@ static Tensor& std_var_out(
   const auto correction = correction_opt.value_or(1);
   ScalarType dtype = get_dtype_from_result(result, {});
   auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
+  TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
+              "result type ", self.scalar_type(), " can't be cast to the "
+              "desired output type ", result.scalar_type());
 
   if (iter.numel() == 0) {
     // Trivial reduction
@@ -2034,6 +2014,14 @@ Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
 Tensor& all_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
   reportNYIDimnameOverload("all");
 }
+Tensor _is_all_true(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
+  return self.all();
+}
+Tensor _is_any_true(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
+  return self.any();
+}
 Tensor logcumsumexp(const Tensor& self, Dimname dim) {
   return at::logcumsumexp(self, dimname_to_position(self, dim));
 }
@@ -2134,7 +2122,7 @@ Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim
         return grad_in.scatter_(dim, indices_, grad_out);
       };
 
-  if (!keepdim && sizes.size() > 0) {
+  if (!keepdim && !sizes.empty()) {
     auto grad_ = grad.unsqueeze(dim);
     auto indices_ = indices.unsqueeze(dim);
     return inplace_scatter_if_not_tensor_subclass(grad_, indices_);
@@ -2148,6 +2136,32 @@ Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
 
 Tensor sum_coo(const Tensor &self, c10::optional<ScalarType> dtype) {
   return self._values().sum(dtype);
+}
+
+Tensor sum_sparse_coo(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  if (dim.has_value()) {
+    if (dtype.has_value()) {
+      result = at::_sparse_sum(self, *dim, *dtype);
+    } else {
+      if (c10::isIntegralType(self.scalar_type(), true)) {
+        result = at::_sparse_sum(self, *dim, at::kLong);
+      } else {
+        result = at::_sparse_sum(self, *dim);
+      }
+    }
+  } else {
+    result = sum_coo(self, dtype);
+  }
+  if (keepdim) {
+    auto dim_mask = make_dim_mask(dim, self.dim());
+    for (int dim = 0; dim < self.dim(); dim++) {
+      if (dim_mask[dim]) {
+        result = result.unsqueeze(dim);
+      }
+    }
+  }
+  return result;
 }
 
 } // namespace native

@@ -3,8 +3,8 @@ from torch.fx import map_arg, Node
 from torch.fx.graph import Graph
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
@@ -194,6 +194,10 @@ def is_getattr_tensor_metadata_node(node):
         node.target == getattr and \
         node.args[1] in ["shape"]
 
+def is_get_tensor_info_node(node):
+    return node.op == "call_method" and \
+        node.target in ["shape", "size"]
+
 def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigAny]):
     """
     Return True if the op is configured with a None qconfig, False otherwise.
@@ -218,6 +222,7 @@ DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
     nnqr.LSTMCell: nnqd.LSTMCell,
     nnqr.RNNCell: nnqd.RNNCell,
     nnqr.LSTM: nnqd.LSTM,
+    nnqr.GRU: nnqd.GRU,
 }
 
 # Mapping from reference module class to the replacement weight only quantized module class for lowering
@@ -253,6 +258,11 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   2) The replacement static quantized module class for lowering
 STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
+    # TODO: LinearLeakyReLU is registered as global but it is only fused and
+    # lowered when ondnn's backend config is used. Maybe need to separate
+    # registration and lowering functions for different backends in the future.
+    nni.LinearLeakyReLU: (nnqr.Linear, nniq.LinearLeakyReLU),
+    nni.LinearTanh: (nnqr.Linear, nniq.LinearTanh),
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
@@ -506,6 +516,7 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
+        assert(len(ref_node.args) == 1)
         dq_node = ref_node.args[0]
         assert(isinstance(dq_node, Node))
         ref_node.replace_input_with(dq_node, dq_node.args[0])
@@ -829,7 +840,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
         is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
             continue
-        dq_node_or_nodes = ref_node.args[0]
+        assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
+        dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
         assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):
@@ -920,6 +932,21 @@ def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
             args[0] = n.args[0].args[0]
             n.args = tuple(args)
 
+def _lower_get_tensor_info_op(model: QuantizedGraphModule):
+    """ Modified the graph of the model inplace, to skip extra dequantize op before
+    the general tensor shape ops when possible
+    """
+    for n in model.graph.nodes:
+        if not is_get_tensor_info_node(n):
+            continue
+        maybe_dq = n.args[0]
+        if maybe_dq.op != "call_method" or maybe_dq.target != "dequantize":
+            continue
+        # skip the dequantize node
+        args = list(n.args)
+        args[0] = n.args[0].args[0]
+        n.args = tuple(args)
+
 def _lower_to_native_backend(
     model: QuantizedGraphModule,
     qconfig_map: Dict[str, QConfigAny],
@@ -936,6 +963,7 @@ def _lower_to_native_backend(
     _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
     _lower_getattr_tensor_metadta_op(model)
+    _lower_get_tensor_info_op(model)
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
     model = fold_weight(model, node_name_to_scope)

@@ -10,16 +10,16 @@ namespace c10 {
 struct FunctionalityOffsetAndMask {
   // empty constructor shouldn't be used; only needed to initialize
   // the array before populating it.
-  FunctionalityOffsetAndMask() {}
+  FunctionalityOffsetAndMask() = default;
   FunctionalityOffsetAndMask(uint16_t offset, uint16_t mask)
       : offset(offset), mask(mask) {}
   // This needs to big enough to cover the size of the operator table.
-  uint16_t offset;
+  uint16_t offset{};
   // See Note [No More Than 16 Backends]
   // This mask needs to be big enough to mask all of the backend bits.
   // We probably don't ever want to have more than 16 backend bits, so uint16_t
   // should be enough.
-  uint16_t mask;
+  uint16_t mask{};
 };
 static_assert(
     c10::num_runtime_entries < 65536,
@@ -157,7 +157,7 @@ class DispatchKeySet final {
 
   // NB: default constructor representation as zero is MANDATORY as
   // use of DispatchKeySet in TLS requires this.
-  constexpr DispatchKeySet() : repr_(0) {}
+  constexpr DispatchKeySet() = default;
 
   constexpr DispatchKeySet(Full)
       : repr_((1ULL << (num_backends + num_functionality_keys - 1)) - 1) {}
@@ -756,6 +756,9 @@ constexpr auto functorch_transforms_ks = DispatchKeySet(
      DispatchKey::Batched,
      DispatchKey::VmapMode,
      DispatchKey::FuncTorchGradWrapper});
+
+constexpr auto functorch_batched_ks =
+    DispatchKeySet({DispatchKey::FuncTorchBatched});
 
 // This keyset has:
 // (1) the functionality bits corresponding to backends (dense, sparse,

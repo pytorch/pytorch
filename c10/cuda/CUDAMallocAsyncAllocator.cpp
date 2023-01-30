@@ -33,9 +33,9 @@ namespace {
 struct UsageStream {
   cudaStream_t stream;
   int device;
-  UsageStream() {}
+  UsageStream() = default;
   UsageStream(cudaStream_t s, int d) : stream(s), device(d) {}
-  UsageStream(const UsageStream& us) : stream(us.stream), device(us.device) {}
+  UsageStream(const UsageStream& us) = default;
   UsageStream(const UsageStream&& us) : stream(us.stream), device(us.device) {}
   UsageStream& operator=(UsageStream other) {
     stream = other.stream;
@@ -430,7 +430,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     (void)called;
   }
 
-  bool initialized() {
+  bool initialized() override {
     return devs_initialized_flags.size() > 0;
   }
 

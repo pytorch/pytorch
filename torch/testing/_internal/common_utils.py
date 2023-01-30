@@ -90,6 +90,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import assert_equal as assert_equal
 from torch.testing._internal.common_dtype import get_all_dtypes
+import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
@@ -157,11 +158,12 @@ class _TestParametrizer(object):
                 if the tests are not part of a device-specific set
 
         Returns:
-            Generator object returning 3-tuples of:
+            Generator object returning 4-tuples of:
                 test (fn): Parametrized test function; must support a device arg and args for any params
                 test_name (str): Parametrized suffix for the test (e.g. opname_int64); will be appended to
                     the base name of the test
                 param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
+                decorator_fn (callable): Callable[[Dict], List] for list of decorators to apply given param_kwargs
         """
         raise NotImplementedError
 
@@ -195,10 +197,9 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     def composite_fn(test, generic_cls, device_cls,
                      old_parametrize_fn=old_parametrize_fn,
                      new_parametrize_fn=new_parametrize_fn):
-        old_tests = [(test, test_name, param_kwargs) for (test, test_name, param_kwargs) in
-                     old_parametrize_fn(test, generic_cls, device_cls)]
-        for (old_test, old_test_name, old_param_kwargs) in old_tests:
-            for (new_test, new_test_name, new_param_kwargs) in \
+        old_tests = list(old_parametrize_fn(test, generic_cls, device_cls))
+        for (old_test, old_test_name, old_param_kwargs, old_dec_fn) in old_tests:
+            for (new_test, new_test_name, new_param_kwargs, new_dec_fn) in \
                     new_parametrize_fn(old_test, generic_cls, device_cls):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
@@ -210,7 +211,11 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
                                                    old_test_name)
-                yield (new_test, merged_test_name, full_param_kwargs)
+
+                def merged_decorator_fn(param_kwargs, old_dec_fn=old_dec_fn, new_dec_fn=new_dec_fn):
+                    return list(old_dec_fn(param_kwargs)) + list(new_dec_fn(param_kwargs))
+
+                yield (new_test, merged_test_name, full_param_kwargs, merged_decorator_fn)
 
     return composite_fn
 
@@ -249,9 +254,14 @@ def instantiate_parametrized_tests(generic_cls):
             assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
             setattr(generic_cls, name, instantiated_test)
 
-        for (test, test_suffix, param_kwargs) in class_attr.parametrize_fn(
+        for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
+
+            # Apply decorators based on full param kwargs.
+            for decorator in decorator_fn(param_kwargs):
+                test = decorator(test)
+
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
     return generic_cls
 
@@ -328,7 +338,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -361,7 +371,7 @@ class parametrize(_TestParametrizer):
         if len(self.arg_names) == 0:
             # No additional parameters needed for the test.
             test_name = ''
-            yield (test, test_name, {})
+            yield (test, test_name, {}, lambda _: [])
         else:
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
@@ -369,19 +379,18 @@ class parametrize(_TestParametrizer):
             values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
+
+                decorators = []
                 if isinstance(values, subtest):
                     sub = values
                     values = sub.arg_values
                     maybe_name = sub.name
 
-                    # Apply decorators.
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in sub.decorators:
-                        test_wrapper = decorator(test_wrapper)
-
+                    decorators = sub.decorators
                     gen_test = test_wrapper
                 else:
                     gen_test = test
@@ -397,10 +406,11 @@ class parametrize(_TestParametrizer):
                 }
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
-                if '.' in test_name:
-                    raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
-                yield (gen_test, test_name, param_kwargs)
+                def decorator_fn(_, decorators=decorators):
+                    return decorators
+
+                yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
                 raise ValueError('An empty arg_values was passed to @parametrize. '
@@ -942,6 +952,9 @@ if TEST_WITH_TORCHDYNAMO:
     # TODO: Remove this; this is grandfathered in because we suppressed errors
     # on test suite previously
     torch._dynamo.config.suppress_errors = True
+    if TEST_WITH_TORCHINDUCTOR:
+        import torch._inductor.config
+        torch._inductor.config.fallback_random = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -1443,7 +1456,9 @@ class CudaNonDefaultStream():
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
             self.beforeStreams[-1].synchronize()
-            torch._C._cuda_setStream(deviceStream._cdata)
+            torch._C._cuda_setStream(stream_id=deviceStream.stream_id,
+                                     device_index=deviceStream.device_index,
+                                     device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
     def __exit__(self, exec_type, exec_value, traceback):
@@ -1451,7 +1466,9 @@ class CudaNonDefaultStream():
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
         for d in range(torch.cuda.device_count()):
-            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+            torch._C._cuda_setStream(stream_id=self.beforeStreams[d].stream_id,
+                                     device_index=self.beforeStreams[d].device_index,
+                                     device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
@@ -1844,31 +1861,6 @@ class TensorOrArrayPair(TensorLikePair):
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
 
-        # This is a slow and ugly hack to allow the comparison of hybrid sparse CSR tensors with strided ones. If
-        # `check_layout=False` (default), the tensors will be converted to strided by calling `.to_dense()` on them.
-        # However, this is not yet supported for hybrid sparse CSR and thus we need to do it manually for now.
-        # FIXME: Remove this as soon as `.to_dense` is supported for hybrid sparse CSR tensors
-        if not self.check_layout:
-            self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
-
-    def _handle_hybrid_sparse_csr(self, actual, expected):
-        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-        if not ((actual.layout in compressed_sparse_layouts) ^ (expected.layout in compressed_sparse_layouts)):
-            return actual, expected
-
-        def to_dense(tensor):
-            if tensor.layout not in compressed_sparse_layouts:
-                return tensor
-
-            def partial_to_dense(tensor):
-                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
-                    return tensor.to_dense()
-                return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
-
-            return partial_to_dense(tensor)
-
-        return [to_dense(input) for input in [actual, expected]]
-
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
@@ -1876,6 +1868,28 @@ class TensorOrArrayPair(TensorLikePair):
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
+
+
+class TypedStoragePair(TensorLikePair):
+    """Pair for :class:`torch.storage.TypedStorage` inputs."""
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
+        self._check_inputs_isinstance(actual, expected, cls=torch.storage.TypedStorage)
+        super().__init__(actual, expected, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
+
+    def _to_tensor(self, typed_storage):
+        return torch.tensor(
+            typed_storage._untyped_storage,
+            dtype={
+                torch.quint8: torch.uint8,
+                torch.quint4x2: torch.uint8,
+                torch.quint2x4: torch.uint8,
+                torch.qint32: torch.int32,
+                torch.qint8: torch.int8
+            }.get(typed_storage.dtype, typed_storage.dtype),
+            device=typed_storage.device,
+        )
 
 
 class UnittestPair(Pair):
@@ -2108,8 +2122,10 @@ class TestCase(expecttest.TestCase):
             return
 
         if using_unittest:
-            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
-            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+            # Keep track of the number of tests marked as failures, errors, and skipped before starting
+            failures_before = 0 if result is None else len(result.failures)
+            errors_before = 0 if result is None else len(result.errors)
+            skipped_before = 0 if result is None else len(result.skipped)
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
@@ -2163,7 +2179,7 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and skipped_before == len(result.skipped):
             # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
             # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
             # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
@@ -2203,6 +2219,29 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         check_if_enable(self)
         set_rng_seed(SEED)
+
+        # Save global check sparse tensor invariants state that can be
+        # restored from tearDown:
+        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @torch.sparse.check_sparse_tensor_invariants(False)
+        # decorator to disable the invariant checks.
+        torch.sparse.check_sparse_tensor_invariants.enable()
+
+    def tearDown(self):
+        # There exists test cases that override TestCase.setUp
+        # definition, so we cannot assume that _check_invariants
+        # attribute is defined in general.
+        if hasattr(self, '_check_invariants'):
+            # Restore the global check sparse tensor invariants state
+            if self._check_invariants:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+            else:
+                torch.sparse.check_sparse_tensor_invariants.disable()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -2318,15 +2357,7 @@ class TestCase(expecttest.TestCase):
             q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
                           (n_cols - m) * (n_cols - m + 1) // 2)
             p = 1 + q * (n_cols - m + 1)
-            if sys.version_info >= (3, 8):
-                k = math.isqrt(2 * r)
-            else:
-                # math.isqrt(x) is available starting from Python 3.8.
-                # Here we use int(math.sqrt(x)) as an approximation
-                # that appers to give exaxt result for all x values
-                # less than 2**35, at least, the upper limit of x is
-                # TBD.
-                k = int(math.sqrt(2 * r))
+            k = math.isqrt(2 * r)
             if k * (k + 1) > 2 * r:
                 k -= 1
             corr = r - k * (k + 1) // 2
@@ -2445,6 +2476,333 @@ class TestCase(expecttest.TestCase):
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
             x = x.detach().clone()._coalesced_(False)
         return x, x._indices().clone(), x._values().clone()
+
+    def generate_simple_inputs(self, layout,
+                               device=None,
+                               dtype=None,
+                               index_dtype=None,
+                               enable_batch=True,
+                               enable_hybrid=True,
+                               enable_zero_sized=True,
+                               enable_non_contiguous_indices=True,
+                               enable_non_contiguous_values=True,
+                               enable_batch_variable_nse=False,
+                               output_tensor=True,
+                               patterns=None):
+        """Generator of simple inputs for tensor constructors of the given layout.
+
+        The generated tensor inputs have the following properties:
+
+        - tensor shapes are minimal but not trivial
+        - tensor values are sorted sequences for COO and CSR formats, e.g. [1, 2, 3, 4]
+        - the generated tensors represent the same mathematical tensor for all layouts
+        - the generated tensors include regular, zero-sized, and optionally, batched or/and hybrid tensors.
+        - the generated tensors include contiguous or non-contiguous tensors both in indices and values
+
+        If output_tensor is True, yield tensors with the given
+        layout. Otherwise, yield inputs to the corresponding tensor
+        constructors:
+
+          - sparse compressed input is defined as
+            (compressed_indices, plain_indices, values), dict(size=expected_size_from_shape_inference, device=device, dtype=dtype)
+
+          - sparse COO input is defined as
+            (indices, values), dict(size=expected_size_from_shape_inference, device=device, dtype=dtype)
+
+          - strided input is defined as
+            (values,), dict(device=device, dtype=dtype)
+        """
+        if index_dtype is None:
+            index_dtype = torch.int64
+
+        is_compressed_sparse_layout = layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+
+        if output_tensor:
+            for args, kwargs in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype,
+                                                            enable_batch=enable_batch, enable_hybrid=enable_hybrid,
+                                                            enable_zero_sized=enable_zero_sized,
+                                                            enable_non_contiguous_indices=enable_non_contiguous_indices,
+                                                            enable_non_contiguous_values=enable_non_contiguous_values,
+                                                            enable_batch_variable_nse=enable_batch_variable_nse,
+                                                            output_tensor=False):
+                if layout is torch.strided:
+                    assert len(args) == 1
+                    size = kwargs.pop('size', None)  # to ensure that a zero-sized tensor has the desired shape
+                    assert size is not None
+                    yield args[0].reshape(size)
+                elif layout is torch.sparse_coo:
+                    yield torch.sparse_coo_tensor(*args, **kwargs)
+                elif is_compressed_sparse_layout:
+                    kwargs.update(layout=layout)
+                    yield torch.sparse_compressed_tensor(*args, **kwargs)
+                else:
+                    assert 0  # unreachable
+            return
+
+        def get_blockpattern(pattern, blocksize):
+            basesize = pattern.shape
+            assert basesize[0] % blocksize[0] == 0, (basesize, blocksize)
+            assert basesize[1] % blocksize[1] == 0, (basesize, blocksize)
+            blockpattern = pattern.reshape(-1,
+                                           blocksize[0],
+                                           basesize[1] // blocksize[1],
+                                           blocksize[1]).transpose(-3, -2).any(-1).any(-1)
+            block_ids = torch.arange(1, blockpattern.numel() + 1).reshape(blockpattern.shape)
+            return (blockpattern != 0) * block_ids
+
+        def get_sparse_data(pattern):
+            basesize = pattern.shape
+            assert len(basesize) == 2, basesize  # pattern is expected to be a matrix
+
+            # We cannot use `torch.sparse_xyz_tensor(pattern)` to
+            # compute the sparse layout indices and values because
+            # generate_simple_inputs is used to generate the inputs to
+            # test `torch.sparse_xyz_tensor` factory functions, so
+            # we'll compute the indices and values independently of
+            # the factory functions.
+
+            indices = torch.where(pattern != 0)
+            coo_indices = torch.stack(indices)
+            crow_indices = torch.zeros(basesize[0] + 1, dtype=torch.int64)
+            crow_indices[1:] = torch.cumsum(coo_indices[0].bincount(minlength=basesize[0]), 0)
+            col_indices = coo_indices[1]
+            strided_values = torch.zeros(basesize, dtype=torch.int64)
+
+            # the property of `values == range(1, 1+nnz)` is used in
+            # get_sparse_data_with_block to relate BSR and BSC values,
+            # so, don't change the following line:
+            values = torch.arange(1, 1 + len(indices[0]), dtype=torch.int64)
+            strided_values[indices] = values
+
+            indices_T = torch.where(pattern.transpose(0, 1) != 0)
+            coo_indices_T = torch.stack(indices_T)
+            ccol_indices = torch.zeros(basesize[1] + 1, dtype=torch.int64)
+            ccol_indices[1:] = torch.cumsum(coo_indices_T[0].bincount(minlength=basesize[1]), 0)
+            row_indices = coo_indices_T[1]
+            csc_values = strided_values.transpose(0, 1)[indices_T]
+
+            return {torch.sparse_coo: (coo_indices, values),
+                    torch.sparse_csr: (crow_indices, col_indices, values),
+                    torch.sparse_csc: (ccol_indices, row_indices, csc_values),
+                    torch.strided: (strided_values,)}
+
+        def get_sparse_data_with_block(pattern, blocksize):
+            nonblock_data = get_sparse_data(pattern)
+            blockpattern = get_blockpattern(pattern, blocksize)
+            block_data = get_sparse_data(blockpattern)
+
+            strided_values = nonblock_data[torch.strided][0]
+            block_indices = block_data[torch.sparse_coo][0]
+            bsr_values = torch.stack([strided_values[bi * blocksize[0]:(bi + 1) * blocksize[0],
+                                                     bj * blocksize[1]:(bj + 1) * blocksize[1]]
+                                      for bi, bj in block_indices.transpose(0, 1)])
+
+            # here we use the property `values == range(1, 1+nnz)` and
+            # `values` relation to `csc_values` (see get_sparse_data)
+            # to get BSC blocks via reordering the BSR blocks:
+            bsc_values = bsr_values[block_data[torch.sparse_csc][2] - 1]
+
+            return {torch.sparse_bsr: (*block_data[torch.sparse_csr][:2], bsr_values),
+                    torch.sparse_bsc: (*block_data[torch.sparse_csc][:2], bsc_values),
+                    **nonblock_data}
+
+        def get_batch_sparse_data(pattern, blocksize):
+            size = pattern.shape
+            if len(size) <= 2:  # non-batch
+                return get_sparse_data_with_block(pattern, blocksize)
+
+            # batch data is created recursively:
+            batch_data = {}
+            for i, item in enumerate(pattern):
+                for layout, d in get_batch_sparse_data(item, blocksize).items():
+                    target = batch_data.get(layout)
+                    if layout is torch.sparse_coo:
+                        # a "batch COO" means a COO with the leading
+                        # sparse dimensions interpreted as batch
+                        # dimensions
+                        ext_coo_indices1 = torch.cat((torch.full((1, len(d[1])), i, dtype=torch.int64), d[0]))
+                        if target is None:
+                            target = batch_data[layout] = (ext_coo_indices1, d[1])
+                        else:
+                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))
+                            target[1].set_(torch.cat((target[1], d[1])))
+                    else:
+                        if target is None:
+                            target = batch_data[layout] = tuple(d[j].unsqueeze(0) for j in range(len(d)))
+                        else:
+                            for j in range(len(d)):
+                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))
+            return batch_data
+
+        def generate_values(base, densesize):
+            """Generates a tensor of shape densesize with values equal to
+
+              base + i_1 * 10^0 + ... + i_d * 10^{d - 1}
+
+            at indices i_1, ..., i_d (with 0 <= i_j < densesize[j] for any 1 <= j <=
+            len(densesize))
+
+            This mapping produces unique values as long as
+            densesize[i] < 10 for all i in range(len(densesize)).
+            """
+
+            if not densesize:
+                return base
+            if not isinstance(base, int) and base.ndim > 0:
+                return torch.stack([generate_values(b, densesize) for b in base])
+            if base == 0:
+                return torch.zeros(densesize, dtype=torch.int64)
+            r = torch.arange(densesize[0], dtype=torch.int64)
+            for i, d in enumerate(densesize[1:]):
+                y = torch.arange(d, dtype=torch.int64) * (10 ** (i + 1))
+                r = r[..., None] + y[None, ...]
+            r.add_(base)
+            return r
+
+        if patterns is None:
+            # A pattern is a 3-tuple with the following items:
+            #
+            # - a list of integers with the depth of two or more. The
+            #   integers define the sparsity patterns of the generated
+            #   inputs: zero values correspond to unspecified
+            #   elements/blocks, and non-zero values to the specified
+            #   elements.
+            #
+            #   For debugging convenience, the elements with the same
+            #   value typically belong to the same block. However, it
+            #   is not a hard requirement: as long as the shape of a
+            #   pattern divides with block sizes, the pattern will be
+            #   a valid one.
+            #
+            #   If the depth of the list is larger than two, inputs
+            #   with batch dimensions will be generated.
+            #
+            # - a list of 2-tuples of block sizes, used to generate
+            #   BSR/BSC tensors with various block size parameters
+            #
+            # - a list of tuples of dense dimensions, used to generate
+            #   hybrid tensors with various dense dimensions
+            #
+            patterns = [
+                # a simple 3 x 2 tensor: non-hybrid, hybrid with 1 and 2 dense dimensions
+                ([[1, 2, 0],
+                  [1, 0, 3]], [(2, 1), (1, 3)], [(), (2,), (4, 5)]),
+                # 2 x 3 batch of 3 x 2 tensors: non-hybrid and hybrid with 2 dense dimensions
+                ([[[[1, 2, 0],
+                    [1, 0, 3]],
+                   [[1, 2, 3],
+                    [1, 0, 0]],
+                   [[1, 0, 0],
+                    [1, 2, 3]]],
+                  [[[0, 2, 0],
+                    [1, 2, 3]],
+                   [[1, 0, 3],
+                    [1, 2, 0]],
+                   [[1, 2, 3],
+                    [0, 2, 0]]]], [(2, 1), (2, 3)], [(), (2,)]),
+                # tensor with non-trivial blocksize
+                ([[0, 1, 0, 2, 0, 2],
+                  [0, 1, 0, 0, 2, 0],
+                  [3, 3, 3, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0],
+                  [0, 5, 0, 6, 6, 6],
+                  [5, 0, 5, 6, 6, 6],
+                  [0, 0, 0, 0, 8, 8],
+                  [7, 7, 7, 0, 8, 8]], [(2, 3)], [(), (4, 5)]),
+                # batch tensor with variable NSE
+                # Requires https://github.com/pytorch/pytorch/pull/84843 or similar.
+                ([[[1, 2],
+                   [3, 4]],
+                  [[1, 0],
+                   [0, 0]]], [(1, 1)], ([()] if enable_batch_variable_nse else []))]
+
+        def non_contiguous_copy(t, dim=-1, offset=0):
+            # return a copy of t that is non-contiguous along the
+            # given dimension and with the given storage offset
+            self.assertTrue(t.is_contiguous())
+            if dim < 0:
+                dim = dim + t.ndim
+            assert dim >= 0 and dim < t.ndim
+            step = max(2, offset + 1)
+            tmp = torch.zeros((*t.shape[:dim], t.shape[dim] * step, *t.shape[dim + 1:]), dtype=t.dtype, device=t.device)
+            dim_slices = (*((slice(None),) * dim), slice(offset, None, step))
+            r = tmp[dim_slices].copy_(t)
+            self.assertFalse(r.is_contiguous())
+            self.assertEqual(t, r)
+            return r
+
+        # the main loop of the method:
+        for pattern, blocksizes, densesizes in patterns:
+            if not enable_hybrid:
+                densesizes = [s for s in densesizes if not s]
+            if not (densesizes and blocksizes):
+                continue
+            pattern = torch.tensor(pattern, dtype=torch.int64)
+            if not enable_batch and pattern.ndim > 2:
+                continue
+            for blocksize in blocksizes:
+                data = get_batch_sparse_data(pattern, blocksize)[layout]
+                for densesize in densesizes:
+                    indices = [a.to(device=device, dtype=index_dtype) for a in data[:-1]]
+                    values = generate_values(data[-1], densesize).to(device=device, dtype=dtype)
+                    yield (*indices, values), dict(device=device, dtype=dtype,
+                                                   size=pattern.shape + densesize)
+
+                    if enable_non_contiguous_indices and pattern.ndim > 2:
+                        # sparse compressed indices can be sliced only along batch dimensions
+                        for (dim, offset) in {(0, 1), (-2, 0)}:
+                            indices_copy = [non_contiguous_copy(a, dim=dim, offset=offset) for a in indices]
+                            yield (*indices_copy, values), dict(device=device, dtype=dtype,
+                                                                size=pattern.shape + densesize)
+
+                            if enable_non_contiguous_values:
+                                values_copy = non_contiguous_copy(values, dim=-1, offset=1)
+                                yield (*indices_copy, values_copy), dict(device=device, dtype=dtype,
+                                                                         size=pattern.shape + densesize)
+
+                    if enable_non_contiguous_values:
+                        values_copy = non_contiguous_copy(values, dim=-1, offset=1)
+                        yield (*indices, values_copy), dict(device=device, dtype=dtype,
+                                                            size=pattern.shape + densesize)
+
+        # zero-sized tensor inputs, non-batch, non-hybrid/hybrid
+        if enable_zero_sized:
+            for basesize, blocksizes, densesizes in [
+                    ((2, 0), [(1, 2)], [(), (2,), (2, 3)] if enable_hybrid else [()]),
+                    ((0, 2), [(1, 2), (2, 1), (3, 2)], [()]),
+                    ((0, 0), [(1, 2)], [()]),
+            ]:
+                for blocksize in blocksizes:
+                    for densesize in densesizes:
+                        if layout == torch.strided:
+                            indices = ()
+                            values = torch.empty((basesize + densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_coo:
+                            indices = (torch.empty(len(basesize), 0, device=device, dtype=index_dtype),)
+                            values = torch.empty((0, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_csr:
+                            crow_indices = torch.tensor([0] * (basesize[0] + 1), device=device, dtype=index_dtype)
+                            col_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (crow_indices, col_indices)
+                            values = torch.empty((0, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_csc:
+                            ccol_indices = torch.tensor([0] * (basesize[1] + 1), device=device, dtype=index_dtype)
+                            row_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (ccol_indices, row_indices)
+                            values = torch.empty((0, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_bsr:
+                            crow_indices = torch.tensor([0] * (basesize[0] // blocksize[0] + 1), device=device, dtype=index_dtype)
+                            col_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (crow_indices, col_indices)
+                            values = torch.empty((0, *blocksize, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_bsc:
+                            ccol_indices = torch.tensor([0] * (basesize[1] // blocksize[1] + 1), device=device, dtype=index_dtype)
+                            row_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (ccol_indices, row_indices)
+                            values = torch.empty((0, *blocksize, *densesize), device=device, dtype=dtype)
+                        else:
+                            assert 0  # unreachable
+                        yield (*indices, values), dict(device=device, dtype=dtype, size=basesize + densesize)
 
     def safeToDense(self, t):
         # coalesce is only implemented for COO
@@ -2573,6 +2931,7 @@ class TestCase(expecttest.TestCase):
                 RelaxedBooleanPair,
                 RelaxedNumberPair,
                 TensorOrArrayPair,
+                TypedStoragePair,
                 StringPair,
                 SetPair,
                 TypePair,
@@ -2580,7 +2939,6 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
@@ -2969,7 +3327,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
                 if any(connect_error in str(error) for connect_error in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
-                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}")
+                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}") from error
                     time.sleep(random.random())
                     continue
                 raise
@@ -3481,6 +3839,25 @@ def coalescedonoff(f):
     return wrapped
 
 
+def is_coalesced_indices(s):
+    indices = s._indices()
+    hash_coeffs = (1,) + s.shape[s.sparse_dim() - 1:0:-1]
+    hash_indices = torch.tensor(hash_coeffs, device=s.device).cumprod(-1).flip(-1)
+    if s.sparse_dim() > 1:
+        hash_indices.unsqueeze_(-1)
+        hash_indices = (indices * hash_indices).sum(0)
+    else:
+        hash_indices = indices * hash_indices
+
+    # check if indices are sorted
+    res = torch.allclose(hash_indices, hash_indices.sort()[0])
+
+    # check if there are no repeated indices
+    res = res and torch.allclose(hash_indices, hash_indices.unique())
+
+    return res
+
+
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():
@@ -3710,8 +4087,8 @@ def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
     """
     try:
         return next(iter(samples))
-    except StopIteration:
-        raise unittest.SkipTest('Skipped! Need at least 1 sample input')
+    except StopIteration as e:
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input') from e
 
 # this helper method is to recursively
 # clone the tensor-type input of operators tested by OpInfo
@@ -3733,6 +4110,23 @@ def custom_op(opname, symbolic_fn, opset_version):
     finally:
         unregister_custom_op_symbolic(opname, opset_version)
 
+
+def outs_and_grads(fn, graph_inps, inps):
+    outs = fn(*graph_inps)
+    for out in pytree.tree_flatten(outs)[0]:
+        if isinstance(out, torch.Tensor) and out.requires_grad:
+            out.sum().backward(retain_graph=True)
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_flatten(inps)[0]:
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
+    return outs, grads
+
+def compare_equal_outs_and_grads(test, m1, m2, inps):
+    r1, g1 = outs_and_grads(m1, inps, inps)
+    r2, g2 = outs_and_grads(m2, inps, inps)
+    test.assertEqual(r1, r2)
+    test.assertEqual(g1, g2)
 
 class TestGradients(TestCase):
     exact_dtype = True
