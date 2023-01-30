@@ -1173,6 +1173,16 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_add(
 }
 
 template <int kSpatialDim>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_add_relu(
+    const at::Tensor& input,
+    const at::Tensor& accum,
+    double output_scale,
+    int64_t output_zero_point) {
+  TORCH_CHECK(kSpatialDim == 2, " Currently, only conv2d add relu is supported.");
+  return apply_impl<true>(input, accum, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
 template <bool kReluFused>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
@@ -1294,7 +1304,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   int32_t sum_zero_point = has_accum ? accum.value().q_zero_point() : 0;
   if (has_accum) {
     // Just tells we have these post op, the actual value such as scale and zero point will be setted later.
-    op_attr = kReluFused ? ideep::attr_t::residual() : ideep::attr_t::fuse_sum();
+    op_attr = kReluFused ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
     const ideep::scale_t accum_scale = ideep::scale_t(1, 1.0/sum_scale);
     const ideep::zero_point_t accum_zero_points = ideep::zero_point_t(1, sum_zero_point);
     // Set the dst scale and zero point with the value of accum.
@@ -1475,7 +1485,8 @@ class QConvAddInt8 final {
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {
-        TORCH_CHECK(false, "Operation quantized::conv2d_add does not support fuse with relu yet.");
+        return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add_relu(
+          act, accum, output_scale, output_zero_point);
       } else {
         return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add(
           act, accum, output_scale, output_zero_point);
@@ -1545,6 +1556,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"),      QConvInt8<2, false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_add"),      QConvAddInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_add_relu"), QConvAddInt8<2, true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d.new"),      QConvInt8<3, false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu.new"), QConvInt8<3, true>::run);
   // for backward compatibility
