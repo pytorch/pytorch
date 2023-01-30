@@ -4351,17 +4351,16 @@ class TestSparseAny(TestCase):
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
-            if from_layout is torch.sparse_coo and to_layout in {
-                    torch.sparse_bsr, torch.sparse_bsc} and t.sparse_dim() == 2 and is_hybrid:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+            if from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and is_batch:
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and (is_batch or is_hybrid):
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and is_batch:
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
@@ -4384,16 +4383,16 @@ class TestSparseAny(TestCase):
                 continue
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
                                               (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc),
-                                              (torch.sparse_csc, torch.sparse_bsr), (torch.sparse_csc, torch.sparse_bsc),
+                                              (torch.sparse_csc, torch.sparse_bsr),
                                               (torch.sparse_csr, torch.sparse_bsc)}:
                 with self.assertRaisesRegex(
                         RuntimeError,
-                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(SparseCsr[,]|)\s*Sparse(Csr|Bsr)"
+                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
                         " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
                 with self.assertRaisesRegex(
                         RuntimeError,
-                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(SparseCsr[,]|)\s*Sparse(Csr|Bsr)"
+                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
                         " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
                     explicit_to_sparse(t)
                 self.skipTest('NOT IMPL')
@@ -4440,6 +4439,21 @@ class TestSparseAny(TestCase):
                 # Also, check consistency with explicit conversion methods:
                 r2 = explicit_to_sparse(t)
                 self.assertEqual(r2, r)
+
+                # Check inverse conversion from sparse compressed block tensors
+                if from_layout == torch.sparse_bsr:
+                    batch_ndim = t.crow_indices().dim() - 1
+                    from_blocksize = t.values().shape[batch_ndim + 1:batch_ndim + 3]
+                elif from_layout == torch.sparse_bsc:
+                    batch_ndim = t.ccol_indices().dim() - 1
+                    from_blocksize = t.values().shape[batch_ndim + 1:batch_ndim + 3]
+                else:
+                    continue
+                if r.ndim != 2:
+                    continue
+
+                t2 = r.to_sparse(layout=from_layout, blocksize=from_blocksize)
+                self.assertEqual(t2, t)
 
         # extra tests
         if (from_layout, to_layout) == (torch.sparse_csr, torch.sparse_bsr):
@@ -4507,6 +4521,51 @@ class TestSparseAny(TestCase):
         if count == 0:
             # we count samples to avoid false-positive test reports
             self.skipTest('no sample inputs')
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @parametrize("mth", [subtest(mth, name=mth.__name__)
+                         for mth in [torch.Tensor.is_coalesced,
+                                     torch.Tensor.coalesce,
+                                     torch.Tensor.indices,
+                                     torch.Tensor.values,
+                                     torch.Tensor.crow_indices,
+                                     torch.Tensor.col_indices,
+                                     torch.Tensor.ccol_indices,
+                                     torch.Tensor.row_indices,
+                                     ]])
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_unsupported_backend_error_message(self, mth, layout, device):
+        inp = torch.tensor([[1, 2], [3, 4]], device=device).to_sparse(
+            layout=layout,
+            blocksize=(1, 1) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None)
+        assert inp.layout is layout
+
+        expected_behaviour = dict(
+            # <mth name> = (<supported layouts>, <exception message on other layouts>)
+            is_coalesced=({torch.sparse_coo},
+                          "is_coalesced expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"),
+            coalesce=({torch.sparse_coo},
+                      "coalesce expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"),
+            indices=({torch.sparse_coo},
+                     "indices expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"),
+            values=({torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc},
+                    "values expected sparse tensor layout but got Strided"),
+            crow_indices=({torch.sparse_csr, torch.sparse_bsr},
+                          "crow_indices expected sparse row compressed tensor layout but got (Sparse(Csc|Bsc|)|Strided)"),
+            col_indices=({torch.sparse_csr, torch.sparse_bsr},
+                         "col_indices expected sparse row compressed tensor layout but got (Sparse(Csc|Bsc|)|Strided)"),
+            ccol_indices=({torch.sparse_csc, torch.sparse_bsc},
+                          "ccol_indices expected sparse column compressed tensor layout but got (Sparse(Csr|Bsr|)|Strided)"),
+            row_indices=({torch.sparse_csc, torch.sparse_bsc},
+                         "row_indices expected sparse column compressed tensor layout but got (Sparse(Csr|Bsr|)|Strided)"),
+        )[mth.__name__]
+
+        if layout in expected_behaviour[0]:
+            mth(inp)
+        else:
+            with self.assertRaisesRegex(RuntimeError, expected_behaviour[1]):
+                mth(inp)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
