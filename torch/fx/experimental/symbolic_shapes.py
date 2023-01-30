@@ -21,6 +21,9 @@ SymTypes = (SymInt, SymFloat, SymBool)
 
 log = logging.getLogger(__name__)
 
+class GuardOnDataDependentSymNode(RuntimeError):
+    pass
+
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
@@ -297,6 +300,7 @@ if HAS_SYMPY:
                 ))
             return None
 
+@lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         return sympy.expand(r)
@@ -1063,9 +1067,10 @@ class ShapeEnv(object):
             f"Data dependent variable '{s}' allocated at:\n{s.stack}"
             for s in expr.free_symbols
         )
-        return RuntimeError(
+        return GuardOnDataDependentSymNode(
             f"\n\n{accesses}\n"
-            "RuntimeError: It appears that you're trying to get a value out of symbolic int/float "
+            "GuardOnDataDependentSymNode: It appears that you're trying to get "
+            "a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr}.  "
             "Scroll up to see where each of these data-dependent accesses originally occurred."

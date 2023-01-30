@@ -1476,8 +1476,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    # Bug with storage meta - torch.BoolStorage is becoming torch.storage._LegacyStorageMeta
-    @unittest.expectedFailure
     def test_isinstance_storage(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
@@ -1533,6 +1531,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
+    def test_sort_out2(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("sorted", torch.ones(4, 4))
+                self.register_buffer("indices", torch.ones(4, 4, dtype=torch.long))
+
+            def forward(self, x):
+                torch.sort(x, out=(self.sorted, self.indices))
+                return (x + 1, self.sorted, self.indices)
+
+        x = torch.randn(4, 4)
+        m = MyModule()
+        ref = m(x)
+        opt_m = torch._dynamo.optimize("eager")(m)
+        res = opt_m(x)
+        self.assertTrue(same(ref, res))
+
     def test_sigmoid_out(self):
 
         dtype = torch.float32
@@ -1547,6 +1563,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         fn()
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
+
+    def test_sigmoid_out2(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("base", torch.ones(4, 4))
+
+            def forward(self, x):
+                torch.sigmoid(x, out=self.base)
+                return x + self.base
+
+        x = torch.randn(4, 4)
+        m = MyModule()
+        ref = m(x)
+        opt_m = torch._dynamo.optimize("eager")(m)
+        res = opt_m(x)
+        self.assertTrue(same(ref, res))
 
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
@@ -1600,6 +1633,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.stride()
 
         self.assertEqual(f(), torch._dynamo.optimize("eager")(f)())
+
+    def test_out_none(self):
+        # https://github.com/pytorch/pytorch/issues/92814
+        def fn(input):
+            return torch.nn.functional.normalize(input, dim=0, out=None)
+
+        x = torch.rand([1])
+        self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
     @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):

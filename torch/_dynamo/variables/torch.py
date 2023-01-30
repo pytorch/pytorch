@@ -3,7 +3,6 @@ import logging
 import math
 import re
 import types
-from collections import OrderedDict
 from typing import Dict, List
 
 import torch._C
@@ -11,6 +10,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
+from torch._dynamo.variables import DynamicShapeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -478,7 +478,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 **options,
             )
 
-            if "out" in kwargs:
+            if "out" in kwargs and not (
+                isinstance(kwargs["out"], variables.ConstantVariable)
+                and kwargs["out"].as_python_constant() is None
+            ):
                 # out variants of torch operators like torch.sort and
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
@@ -488,13 +491,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
                     ]
                     for idx, name in enumerate(output_tensor_names):
-                        assert name in tx.symbolic_locals
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                        if name in tx.symbolic_locals:
+                            tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     name = tx.find_symbolic_locals_name(kwargs["out"])
-                    assert name in tx.symbolic_locals
-                    tx.symbolic_locals[name] = tensor_variable
+                    if name in tx.symbolic_locals:
+                        tx.symbolic_locals[name] = tensor_variable
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -710,9 +713,6 @@ class TorchPyOperator(VariableTracker):
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
-                    # Meh (problem is the nodes don't compare equal;
-                    # maybe nub out outputs only)
-                    name_to_input=OrderedDict(),
                     # Unused in branches
                     graphargs=[],
                 )
@@ -768,7 +768,9 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
+            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+                type(args[0])
+            )  # predicate
             assert isinstance(
                 args[1], (UserFunctionVariable, NestedUserFunctionVariable)
             ), str(

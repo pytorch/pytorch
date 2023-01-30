@@ -104,7 +104,7 @@ template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
   std::string msg =
       c10::str("the derivative for '", name, "' is not implemented.");
-  if (strlen(reason) > 0) {
+  if (reason[0] != '\0') {
     msg = c10::str(msg, " ", reason);
   };
   TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
@@ -135,7 +135,7 @@ Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
 
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   int64_t size = 1;
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return 1;
   }
   for (auto d : dim) {
@@ -147,7 +147,7 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
 
 c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
   c10::SymInt size = 1;
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return 1;
   }
   for (auto d : dim) {
@@ -613,8 +613,8 @@ Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     OptionalIntArrayRef opt_dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    if (opt_dims.has_value() && opt_dims.value().size() > 0) {
+  if (!keepdim && !sizes.empty()) {
+    if (opt_dims.has_value() && !opt_dims.value().empty()) {
       return unsqueeze_multiple(grad, opt_dims, sizes.size())
           .expand_symint(sizes);
     }
@@ -627,7 +627,7 @@ Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     c10::IntArrayRef dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+  if (!keepdim && !sizes.empty() && !dims.empty()) {
     // we are only using `keepdim=true` path for SymInts for now
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
@@ -652,7 +652,7 @@ Tensor mean_backward(
     OptionalIntArrayRef opt_dim,
     c10::SymInt numel,
     bool keepdim) {
-  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto n =
       is_all_reduce ? std::move(numel) : _safe_size(shape, opt_dim.value());
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
@@ -814,26 +814,33 @@ Tensor logcumsumexp_backward(
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_TYPES_AND(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
         auto grad_min = at::empty_like(grad);
-        grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
-        auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
-        auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
-
         auto reverse_logcumsumexp = [dim](auto x) {
           return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
         };
 
-        auto output_pos =
-            (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
-        auto output_neg =
-            (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+        if (!at::is_complex(grad)) {
+          grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
+          auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
+          auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
 
-        return output_pos - output_neg;
+          auto output_pos =
+              (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+          auto output_neg =
+              (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+          return output_pos - output_neg;
+        } else {
+          // no trick separating the positive and negative required
+          auto log_grad = grad.conj().log();
+          auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
+          return output.conj();
+        }
       });
 }
 
@@ -991,7 +998,7 @@ std::vector<Tensor> block_diag_backward(
                      .slice(1, cur_dim1, cur_dim1 + dim1);
     if (shape.size() == 1) {
       slice = slice.squeeze(-1);
-    } else if (shape.size() == 0) {
+    } else if (shape.empty()) {
       slice = slice.squeeze(-1).squeeze(-1);
     }
     grad_inputs[i] = slice;
@@ -2730,7 +2737,7 @@ Tensor softplus_double_backward(
 static inline bool _maybe_overlapping_memory(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
-  if (sizes.size() > 0) {
+  if (!sizes.empty()) {
     std::vector<std::size_t> argsort(sizes.size());
     std::iota(argsort.begin(), argsort.end(), 0);
     std::sort(
@@ -3472,7 +3479,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(
   auto dL = is_hermitian && dA.is_complex() ? at::real(dP.diagonal(0, -2, -1))
                                             : dP.diagonal(0, -2, -1);
   auto dV = [&dP, &V, &L, is_hermitian] {
-    const auto dX = [&] {
+    auto dX = [&] {
       auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
       ret.diagonal(0, -2, -1).zero_();
       ret = at::matmul(V, ret);
