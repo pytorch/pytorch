@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
@@ -20,14 +21,15 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    FloorDiv,
     IndexingConstant,
-    IndexingDiv,
     PermuteView,
     Pointwise,
     Reduction,
@@ -737,9 +739,9 @@ def as_strided(x, size, stride, storage_offset=None):
         # as_strided ignores views
         x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_contiguous_storage_and_layout(x):
+    if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
-    storage, old_layout = ir.as_contiguous_storage_and_layout(x)
+    storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
         old_layout.device,
         old_layout.dtype,
@@ -1098,17 +1100,19 @@ fast_randn = make_rand("randn")
 
 @register_lowering([aten.rand, torch.rand])
 def rand(*args, **kwargs):
-    if config.fallback_random:
+    if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_rand(*args, **kwargs)
     else:
+        kwargs.pop("generator", None)
         return fast_rand(*args, **kwargs)
 
 
 @register_lowering([aten.randn, torch.randn])
 def randn(*args, **kwargs):
-    if config.fallback_random:
+    if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_randn(*args, **kwargs)
     else:
+        kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
 
 
@@ -1397,7 +1401,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = ir.IndexingDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = ir.FloorDiv(sympy.expand(end - start), sympy.expand(step))
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -1408,7 +1412,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
 
         idx_dim = ops.index_expr(idx[dim], torch.int32)
         src_idx = list(idx)
-        src_idx[dim] = ir.IndexingDiv(idx[dim] - start, step)
+        src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
 
         mask = []
         if start != 0:
@@ -1537,7 +1541,8 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
-    if isinstance(value, (int, float)):
+
+    if isinstance(value, (int, float, sympy.Expr)):
 
         def inner_fn(index):
             return ops.constant(value, dtype)
@@ -1638,6 +1643,7 @@ empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):
@@ -2502,12 +2508,12 @@ def constant_boundary_condition_2d(x, fill_value, padding):
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
-    x_out = ir.IndexingDiv(
+    x_out = ir.FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
 
     if ceil_mode:
-        x_alt = ir.IndexingDiv(
+        x_alt = ir.FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
 
@@ -2691,13 +2697,13 @@ def max_pool2d_with_indices_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -2838,10 +2844,10 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     def start_index(index, out_dim, inp_dim):
-        return ir.IndexingDiv((index * inp_dim), out_dim)
+        return ir.FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
-        return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+        return ir.FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -3119,13 +3125,13 @@ def avg_pool2d_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -3399,7 +3405,9 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
+    if isinstance(changed_data, ir.StorageBox) and not (
+        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+    ):
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data
@@ -3593,6 +3601,11 @@ register_pointwise(
 )
 
 register_pointwise(
+    aten.tan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
     aten.tanh,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
@@ -3661,6 +3674,11 @@ def sym_size(a, dim):
     return a.get_size()[dim]
 
 
+@register_lowering(aten.sym_stride)
+def sym_stride(a, dim):
+    return a.get_stride()[dim]
+
+
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
     return a.get_numel()
@@ -3676,9 +3694,39 @@ def op_add(a, b):
     return a + b
 
 
+@register_lowering(operator.sub)
+def op_sub(a, b):
+    return a - b
+
+
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
-    return IndexingDiv(a, b)
+    return FloorDiv(a, b)
+
+
+@register_lowering(operator.truediv)
+def op_truediv(a, b):
+    return a / b
+
+
+@register_lowering(math.ceil)
+def op_ceil(a):
+    return sympy.ceiling(a)
+
+
+@register_lowering(math.floor)
+def op_floor(a):
+    return sympy.floor(a)
+
+
+@register_lowering(sym_sqrt)
+def op_sqrt(a):
+    return sympy.sqrt(a)
+
+
+@register_lowering(torch.sym_float)
+def op_sym_float(a):
+    return a
 
 
 @register_lowering(aten._foobar)

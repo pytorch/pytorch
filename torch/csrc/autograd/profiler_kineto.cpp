@@ -27,6 +27,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -257,7 +258,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       std::set<torch::profiler::impl::ActivityType> activities)
       : ProfilerStateBase(config),
         start_time_(getTimeUs()),
-        record_queue_(config, activities) {}
+        record_queue_(config, std::move(activities)) {}
   ~KinetoThreadLocalState() override = default;
 
   static KinetoThreadLocalState* get(bool global) {
@@ -329,7 +330,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     std::lock_guard<std::mutex> guard(state_mutex_);
     auto converter = clock_converter_.makeConverter();
     auto records_and_trace =
-        record_queue_.getRecords(converter, start_time_, end_time);
+        record_queue_.getRecords(std::move(converter), start_time_, end_time);
 
     materializeOpEvents(records_and_trace.first);
 
@@ -576,7 +577,7 @@ void prepareProfiler(
   torch::profiler::impl::kineto::prepareTrace(
       /*cpuOnly=*/!at::hasCUDA(), activities, config.experimental_config);
 
-  if (config.experimental_config.performance_events.size()) {
+  if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
     TORCH_CHECK(
         activities.count(torch::autograd::profiler::ActivityType::CPU),

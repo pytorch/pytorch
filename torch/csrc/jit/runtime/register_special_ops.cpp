@@ -68,7 +68,7 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
   auto seq_recur = seq.toList();
   while (true) {
     sizes.push_back(seq_recur.size());
-    if (seq_recur.size() == 0 || !seq_recur.get(0).isList()) {
+    if (seq_recur.empty() || !seq_recur.get(0).isList()) {
       break;
     }
     seq_recur = seq_recur.get(0).toList();
