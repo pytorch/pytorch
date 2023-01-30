@@ -3458,7 +3458,7 @@ Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
-  return self.view(other.sizes());
+  return self.view_symint(other.sym_sizes());
 }
 
 int64_t numel(const Tensor& self) {
