@@ -22,6 +22,8 @@ decompositions = get_decompositions(
         aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
+        aten.addcmul_,
+        aten.addcdiv_,
         aten.avg_pool2d_backward,
         aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
