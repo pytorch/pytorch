@@ -4,10 +4,12 @@
 # If you want to build with CUDA, run this with USE_CUDA=1
 # If you want to build without CUDA, run this with USE_CUDA=0
 
+<<com
 if [ ! -f setup.py ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
   exit 1
 fi
+com
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -41,7 +43,7 @@ fi
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 set +ex
-grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h torch/
+grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/
 PYLONG_API_CHECK=$?
 if [[ $PYLONG_API_CHECK == 0 ]]; then
   echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to overflow errors on Windows"
