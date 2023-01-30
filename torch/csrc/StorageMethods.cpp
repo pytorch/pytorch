@@ -174,7 +174,7 @@ static PyObject* THPStorage_fromBuffer(
   c10::ScalarType scalar_type = at::kByte;
   Py_buffer buffer = {};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static const char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "buffer", "byte_order", "count", "offset", "dtype", nullptr};
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char* argtypes;
@@ -338,7 +338,7 @@ static PyObject* THPStorage_fromFile(
   Py_ssize_t nbytes = 0;
   int shared = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static const char* kwlist[] = {"filename", "shared", "nbytes", nullptr};
+  constexpr const char* kwlist[] = {"filename", "shared", "nbytes", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args, keywds, "s|in", kwlist, &filename, &shared, &nbytes)) {
     return nullptr;

@@ -230,7 +230,7 @@ PyObject* THCPModule_setStream_wrap(
   int64_t device_type = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static const char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
+  constexpr const char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
