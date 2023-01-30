@@ -31,6 +31,7 @@ from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
@@ -476,6 +477,20 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('wrapped_decorated_fn', m.code)
         self.assertEqual(m(1), 1)
+    
+    def test_wrap_with_make_fx(self):
+        def to_trace(y):
+            return a_lifted_leaf((4, y), 3) + a_lifted_leaf((3, 4), 5) + a_lifted_leaf((y, y), y)
+
+        m = make_fx(to_trace, tracing_mode="real")(10)
+        self.assertIn('a_lifted_leaf', m.code)
+        
+        m = make_fx(to_trace, tracing_mode="fake")(12)
+        self.assertIn('a_lifted_leaf', m.code)
+
+        m = make_fx(to_trace, tracing_mode="symbolic")(15)
+        self.assertIn('a_lifted_leaf', m.code)
+
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
