@@ -1855,13 +1855,8 @@ if(BUILD_PYTHON)
   pycmd(PY_EXT_SUFFIX "
       def get_ext_suffix():
           import sys
-          if sys.version_info < (3, 8) and sys.platform == 'win32':
-              # Workaround for https://bugs.python.org/issue39825
-              import _imp
-              return _imp.extension_suffixes()[0]
-          else:
-              import sysconfig
-              return sysconfig.get_config_var('EXT_SUFFIX')
+          import sysconfig
+          return sysconfig.get_config_var('EXT_SUFFIX')
 
       suffix = get_ext_suffix()
       if suffix is not None:
