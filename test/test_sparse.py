@@ -4331,7 +4331,8 @@ class TestSparseAny(TestCase):
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
-            if from_layout in {torch.sparse_csr, torch.sparse_csc} and to_layout in {torch.sparse_bsr, torch.sparse_bsc} and is_batch:
+            if from_layout in {
+                    torch.sparse_csr, torch.sparse_csc} and to_layout in {torch.sparse_bsr, torch.sparse_bsc} and is_batch:
                 with self.assertRaisesRegex(RuntimeError,
                                             r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
