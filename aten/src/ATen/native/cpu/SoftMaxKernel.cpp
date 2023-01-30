@@ -46,7 +46,7 @@ inline void _vec_log_softmax_lastdim(
 
   // we assume that at::GRAIN_SIZE is an appropriate grain-size.
   int64_t grain_size = std::max(
-      (Vec::size() * internal::GRAIN_SIZE) / (16 * dim_size), 
+      (Vec::size() * internal::GRAIN_SIZE) / (16 * dim_size),
       (int64_t)1);
 
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
