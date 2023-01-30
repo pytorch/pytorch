@@ -375,7 +375,7 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 
 Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.size() > 0) {
+  if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
     bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
@@ -1658,7 +1658,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
   const int64_t sparse_dims_to_sum_size = dims_to_sum_v.size() - dense_dims_to_sum_v.size();
   const bool sum_all_sparse_dim = (sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
 
   // new values
   Tensor new_values;
@@ -1780,7 +1780,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
