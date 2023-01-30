@@ -274,7 +274,6 @@ def clone_preserve_strides(x):
     return out
 
 
-@patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
     model,
@@ -421,7 +420,7 @@ def check_model(
     torch._dynamo.reset()
 
 
-@patch.object(torch._inductor.config.triton, "cudagraphs", False)
+@torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_cuda(
     self: TestCase,
     model,
