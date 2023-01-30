@@ -482,13 +482,13 @@ class TestFX(JitTestCase):
         def to_trace(y):
             return a_lifted_leaf((4, y), 3) + a_lifted_leaf((3, 4), 5) + a_lifted_leaf((y, y), y)
 
-        m = make_fx(to_trace, tracing_mode="real")(10)
-        self.assertIn('a_lifted_leaf', m.code)
-        
-        m = make_fx(to_trace, tracing_mode="fake")(12)
+        m = make_fx(to_trace, tracing_mode="real")(torch.tensor([10]))
         self.assertIn('a_lifted_leaf', m.code)
 
-        m = make_fx(to_trace, tracing_mode="symbolic")(15)
+        m = make_fx(to_trace, tracing_mode="fake")(torch.tensor([12]))
+        self.assertIn('a_lifted_leaf', m.code)
+
+        m = make_fx(to_trace, tracing_mode="symbolic")(torch.tensor([15]))
         self.assertIn('a_lifted_leaf', m.code)
 
 

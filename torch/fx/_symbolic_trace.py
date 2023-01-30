@@ -851,13 +851,13 @@ def _create_wrapped_func(orig_fn):
             return return_proxy
         
         # import here to avoid circular imports
-        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
 
         # If there is no input with proxy, see if we are proxying fake tensors
         proxy_mode = get_innermost_proxy_mode()
         if proxy_mode is not None:
             # Disable tracing of the interior of the wrapped fn while evaluating
-            with proxy_mode.enable(False):
+            with disable_proxy_modes_tracing():
                 out = proxy_call(proxy_mode, orig_fn, args, kwargs, external_call=True)
             return out
 
@@ -925,7 +925,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -935,6 +935,7 @@ class _Patcher(object):
                 _PatchedFnSetItem(frame_dict, name, frame_dict[name])
             )
         frame_dict[name] = new_fn
+        assert(getattr(frame_dict[name], "__fx_already_patched", False))
 
     def patch_method(
         self, cls: type, name: str, new_fn: Callable, deduplicate: bool = True
@@ -942,7 +943,7 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # type: ignore[attr-defined]
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
