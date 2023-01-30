@@ -419,6 +419,8 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   dc2 = _mm256_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
   auto adbc2 = _mm256_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
   auto res2 = _mm256_hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  // res2 above is not interleaved, needs permute_ps to make real and imag interleaved
+  res2 = _mm256_permute_ps(res2, 0xD8);
   return res2;
 }
 
