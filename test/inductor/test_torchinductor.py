@@ -5017,10 +5017,11 @@ class CommonTemplate:
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
-        def fn(x):
-            return aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2
+        def fn(x, y):
+            z = torch.matmul(x, y.transpose(-1, -2)) / 8.
+            return z
 
-        inps = [torch.randn(64, 64)]
+        inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
         code = run_and_get_cpp_code(fn_opt, inps)
         self.assertTrue("in_out_ptr" in code)
