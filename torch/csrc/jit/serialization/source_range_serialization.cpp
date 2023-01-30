@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // "Whether to emit compact debug_pkl when saving a model to .pt file."
 // "Compact file is smaller but cannot be loaded by old torch binaries."
@@ -85,7 +84,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
 
     source = std::make_shared<Source>(str_cord, filename, starting_line_no_);
   } else {
-    std::string text_ = tup_elems[0].toString()->string();
+    std::string text_ = tup_elems[0].toStringRef();
     c10::optional<std::string> filename_ =
         tup_elems[1].toOptional<std::string>();
     int64_t starting_line_no_ = tup_elems[2].toInt();
@@ -180,7 +179,7 @@ std::vector<char> SourceRangePickler::pickle(
   } else {
     result = jit::pickle(ivalue, &table);
   }
-  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
+  TORCH_CHECK(table.empty(), "Expected 0 tensors to be written");
   return result;
 }
 
@@ -252,5 +251,4 @@ TORCH_API void setShouldUseFormatWithStringTable(
   should_use_format_with_string_table_ = should_use_format_with_string_table;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

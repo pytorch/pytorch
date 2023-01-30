@@ -1,10 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>         // for _empty_affine_q...
+#include <ATen/ops/mean.h>                            // for mean
+#include <ATen/ops/mean_native.h>                     // for mean_out_quanti...
+#include <ATen/ops/quantize_per_tensor.h>             // for quantize_per_te...
+#include <ATen/ops/std.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 namespace at {
 namespace native {
@@ -187,7 +200,7 @@ inline bool is_std_inner_dim_fast_path(
   auto all_dims = std::vector<int64_t>(self.dim());
   std::iota(all_dims.begin(), all_dims.end(), 0);
   dims = dims.empty() ? all_dims : dims;
-  bool is_unbiased = unbiased.has_value() ? unbiased.value() : 0;
+  bool is_unbiased = unbiased.has_value() ? unbiased.value() : false;
   int64_t num_ele = 1;
   for (auto d : dims) {
     num_ele *= self.size(d);

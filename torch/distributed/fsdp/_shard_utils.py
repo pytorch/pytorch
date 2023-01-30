@@ -210,7 +210,7 @@ def _create_chunk_sharded_tensor(
     tensor: torch.Tensor,
     rank: int,
     world_size: int,
-    device_per_node: int,
+    num_devices_per_node: int,
     pg: dist.ProcessGroup,
 ) -> ShardedTensor:
     """
@@ -234,7 +234,7 @@ def _create_chunk_sharded_tensor(
     offsets = [0] * (len(chunk_sizes[0]) - 1)
     chunk_offsets = [[d0] + offsets for d0 in dim0_offsets]
     placements = [
-        f"rank:{r}/cuda:{r % device_per_node}" for r in range(len(chunk_sizes))
+        f"rank:{r}/cuda:{r % num_devices_per_node}" for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
     shard_metadata = [
@@ -250,10 +250,8 @@ def _create_chunk_sharded_tensor(
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
-        )
+        ),
     )
     return ShardedTensor._init_from_local_shards_and_global_metadata(
-        local_shards,
-        sharded_tensor_metadata=sharded_tensor_metadata,
-        process_group=pg
+        local_shards, sharded_tensor_metadata=sharded_tensor_metadata, process_group=pg
     )

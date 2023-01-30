@@ -97,13 +97,19 @@ class DecorateInfo(object):
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
-    def is_active(self, cls_name, test_name, device_type, dtype):
+    def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
+            # Support callables over kwargs to determine if the decorator is active.
+            and (
+                self.active_if(param_kwargs)
+                if isinstance(self.active_if, Callable)
+                else self.active_if
+            )
         )
 
 
@@ -126,32 +132,70 @@ class SampleInput(object):
     def __init__(
         self,
         input,
-        *,
-        args=tuple(),
+        *var_args,
+        args=None,
         kwargs=None,
-        output_process_fn_grad=lambda x: x,
-        broadcasts_input=False,
-        name="",
+        output_process_fn_grad=None,
+        broadcasts_input=None,
+        name=None,
+        **var_kwargs,
     ):
         # input is the first input to the op and is typically either a Tensor or TensorList (Sequence[Tensor]).
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         self.input = input
-        self.args = args
+
+        # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
+        # SampleInput(input, *args, **kwargs) but not to mix the two forms
+        if args is not None or kwargs is not None:
+            assert (
+                not var_args and not var_kwargs
+            ), """
+A SampleInput can be constructed "naturally" with *args and **kwargs or by
+explicitly setting the "args" and "kwargs" paremeters, but the two
+methods of construction cannot be mixed!"""
+        elif len(var_args) or len(var_kwargs):
+            assert (
+                output_process_fn_grad is None
+                and broadcasts_input is None
+                and name is None
+            ), """
+A SampleInput constructed "naturally" with *args and **kwargs
+cannot specify additional metadata in keyword arguments"""
+
+        self.args = args if args is not None else var_args
         assert isinstance(self.args, tuple)
-        self.kwargs = kwargs if kwargs is not None else {}
+        self.kwargs = kwargs if kwargs is not None else var_kwargs
         assert isinstance(self.kwargs, dict)
-        self.output_process_fn_grad = output_process_fn_grad
-        self.name = name
+
+        self.output_process_fn_grad = (
+            output_process_fn_grad
+            if output_process_fn_grad is not None
+            else lambda x: x
+        )
+        self.name = name if name is not None else ""
 
         # Specifies if `self.input` is broadcasted or not,
         # given that the operator supports broadcasting.
         # This field is used to verify the behavior for inplace variant.
         #
         # If a SampleInput is marked with `broadcasts_input=True`,
-        # it is verified that we get a `RuntimerError` with this sample,
+        # it is verified that we get a `RuntimeError` with this sample,
         # and inplace variant. Also inplace grad{grad} tests are skipped,
         # for such inputs (as they will error out otherwise).
-        self.broadcasts_input = broadcasts_input
+        self.broadcasts_input = (
+            broadcasts_input if broadcasts_input is not None else False
+        )
+
+    def with_metadata(
+        self, *, output_process_fn_grad=None, broadcasts_input=None, name=None
+    ):
+        if output_process_fn_grad is not None:
+            self.output_process_fn_grad = output_process_fn_grad
+        if broadcasts_input is not None:
+            self.broadcasts_input = broadcasts_input
+        if name is not None:
+            self.name = name
+        return self
 
     def _repr_helper(self, formatter):
         # Helper function to return the details of the SampleInput as `str`
@@ -713,6 +757,10 @@ class OpInfo(object):
     # If the value is False, we test that forward grad is not implemented
     supports_forward_ad: bool = False
 
+    # Whether the operation has a varargs variant
+    # (e.g. functions like ones, zeros, methods like view, permute)
+    supports_varargs: bool = False
+
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
 
@@ -1119,6 +1167,17 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def sample_inputs_sparse(
+        self, layout, device, dtype, requires_grad=False, **kwargs
+    ):
+        """Returns an iterable of SampleInputs that contain inputs with a
+        specified sparse layout.
+        """
+        sample_inputs_mth = getattr(
+            self, "sample_inputs_" + str(layout).split(".", 1)[-1]
+        )
+        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
+
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         coo layout.
@@ -1159,12 +1218,14 @@ class OpInfo(object):
             self, device, dtype, requires_grad, **kwargs
         )
 
-    def get_decorators(self, test_class, test_name, device, dtype):
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(test_class, test_name, device, dtype):
+                if decorator.is_active(
+                    test_class, test_name, device, dtype, param_kwargs
+                ):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)
@@ -1690,11 +1751,11 @@ def generate_elementwise_binary_extremal_value_tensors(
     lhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    lhs.flatten()[::3] = nan
+    lhs.view(-1)[::3] = nan
     rhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    rhs.flatten()[::3] = nan
+    rhs.view(-1)[::3] = nan
 
     yield SampleInput(lhs, args=(rhs,))
 
@@ -2377,52 +2438,39 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         )
 
     if self.ndimensional == SpectralFuncType.ND:
-        return [
-            SampleInput(
-                nd_tensor(),
-                kwargs=dict(
-                    s=(3, 10) if not is_fp16_or_chalf else (4, 8),
-                    dim=(1, 2),
-                    norm="ortho",
-                ),
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(norm="ortho")),
-            SampleInput(nd_tensor(), kwargs=dict(s=(8,))),
-            SampleInput(oned_tensor()),
-            *(
-                SampleInput(nd_tensor(), kwargs=dict(dim=dim))
-                for dim in [-1, -2, -3, (0, -1)]
-            ),
-        ]
+        yield SampleInput(
+            nd_tensor(),
+            s=(3, 10) if not is_fp16_or_chalf else (4, 8),
+            dim=(1, 2),
+            norm="ortho",
+        )
+        yield SampleInput(nd_tensor(), norm="ortho")
+        yield SampleInput(nd_tensor(), s=(8,))
+        yield SampleInput(oned_tensor())
+        yield from (SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3, (0, -1)])
     elif self.ndimensional == SpectralFuncType.TwoD:
-        return [
-            SampleInput(
-                nd_tensor(),
-                kwargs=dict(
-                    s=(3, 10) if not is_fp16_or_chalf else (4, 8),
-                    dim=(1, 2),
-                    norm="ortho",
-                ),
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(norm="ortho")),
-            SampleInput(
-                nd_tensor(), kwargs=dict(s=(6, 8) if not is_fp16_or_chalf else (4, 8))
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(dim=0)),
-            SampleInput(nd_tensor(), kwargs=dict(dim=(0, -1))),
-            SampleInput(nd_tensor(), kwargs=dict(dim=(-3, -2, -1))),
-        ]
+        yield SampleInput(
+            nd_tensor(),
+            s=(3, 10) if not is_fp16_or_chalf else (4, 8),
+            dim=(1, 2),
+            norm="ortho",
+        )
+        yield SampleInput(nd_tensor(), norm="ortho")
+        yield SampleInput(nd_tensor(), s=(6, 8) if not is_fp16_or_chalf else (4, 8))
+        yield SampleInput(nd_tensor(), dim=0)
+        yield SampleInput(nd_tensor(), dim=(0, -1))
+        yield SampleInput(nd_tensor(), dim=(-3, -2, -1))
     else:
-        return [
-            SampleInput(
-                nd_tensor(),
-                kwargs=dict(n=10 if not is_fp16_or_chalf else 8, dim=1, norm="ortho"),
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(norm="ortho")),
-            SampleInput(nd_tensor(), kwargs=dict(n=7 if not is_fp16_or_chalf else 8)),
-            SampleInput(oned_tensor()),
-            *(SampleInput(nd_tensor(), kwargs=dict(dim=dim)) for dim in [-1, -2, -3]),
-        ]
+        yield SampleInput(
+            nd_tensor(),
+            n=10 if not is_fp16_or_chalf else 8,
+            dim=1,
+            norm="ortho",
+        )
+        yield SampleInput(nd_tensor(), norm="ortho")
+        yield SampleInput(nd_tensor(), n=7 if not is_fp16_or_chalf else 8)
+        yield SampleInput(oned_tensor())
+        yield from (SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3])
 
 
 SpectralFuncType = Enum("SpectralFuncType", ("OneD", "TwoD", "ND"))
@@ -2534,6 +2582,7 @@ class ForeachFuncInfo(OpInfo):
         dtypesIfROCM=None,
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
+        supports_autograd=False,
         **kwargs,
     ):
         super().__init__(
@@ -2542,6 +2591,7 @@ class ForeachFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
             **kwargs,
         )
 
@@ -2559,6 +2609,14 @@ class ForeachFuncInfo(OpInfo):
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
+        elif name == "minimum":
+            # because minimum ref does not support inplace or scalar
+            self.ref = torch.clamp_max
+            self.ref_inplace = torch.Tensor.clamp_max_
+        elif name == "maximum":
+            # because maximum ref does not support inplace or scalar
+            self.ref = torch.clamp_min
+            self.ref_inplace = torch.Tensor.clamp_min_
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -2610,7 +2668,7 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     output = op(input, *args, **kwargs)
     mask = kwargs.get("mask")
     if mask is not None:
-        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
+        output_mask = torch.masked._output_mask(op, input, *args, **kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
@@ -2630,7 +2688,7 @@ def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
     if input_mask is not None and other_mask is not None:
         combined_mask = torch.logical_and(input_mask, other_mask)
         new_kwargs = dict(mask=combined_mask, **kwargs)
-        output_mask = torch._masked._input_mask(input, *args, **new_kwargs)
+        output_mask = torch.masked._input_mask(input, *args, **new_kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 

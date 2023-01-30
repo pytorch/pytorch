@@ -1,6 +1,13 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/equal.h>
+#endif
 
 namespace at {
 
@@ -24,7 +31,9 @@ namespace at {
 //    or returning a regular non-Tensor-subclass Tensor!
 
 constexpr auto kFunctorchWrappedTensors = DispatchKeySet(
-    {DispatchKey::FuncTorchGradWrapper, DispatchKey::FuncTorchBatched});
+    {DispatchKey::FuncTorchGradWrapper,
+     DispatchKey::FuncTorchBatched,
+     DispatchKey::Functionalize});
 
 constexpr auto kTensorSubclassLike =
     kFunctorchWrappedTensors |
@@ -61,6 +70,18 @@ inline bool areAnyOptionalTensorSubclassLike(
         return (
             opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
       });
+}
+
+// Helper function to deal testing truthfulness of a scalar tensor
+// in a Composite Compliant manner.
+// NOTE: This function expects a scalar tensor of boolean dtype.
+// Eg.
+// Non-Composite Compliant Pattern : (t == 0).all().item<bool>()
+// Composite Compliant Patter : is_salar_tensor_true((t == 0).all())
+inline bool is_scalar_tensor_true(const Tensor& t) {
+  TORCH_INTERNAL_ASSERT(t.dim() == 0)
+  TORCH_INTERNAL_ASSERT(t.scalar_type() == kBool)
+  return at::equal(t, t.new_ones({}, t.options()));
 }
 
 } // namespace at

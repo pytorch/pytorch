@@ -1,7 +1,6 @@
 # Python dependencies required for development
 astunparse
 expecttest
-future
 hypothesis
 numpy
 psutil
@@ -12,3 +11,6 @@ six
 types-dataclasses
 typing_extensions
 sympy
+filelock
+networkx
+jinja2

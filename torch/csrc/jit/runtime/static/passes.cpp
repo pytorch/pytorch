@@ -505,7 +505,7 @@ std::vector<TupleUnpackBlock> CollectVariadicTupleUnpackFusionCandidates(
 }
 
 void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
-  TORCH_CHECK(nodes.size() > 0);
+  TORCH_CHECK(!nodes.empty());
   auto graph = nodes[0]->owningGraph();
   auto var_unpack = graph->create(
       fromQualString("static_runtime::VarTupleUnpack"),
@@ -987,7 +987,7 @@ void RemoveImmutableInputDictLookups(
     }
     iter->second.push_back(getitem_node);
   }
-  if (keys.size() == 0) {
+  if (keys.empty()) {
     return;
   }
   // Move all keys to the beginning of the graph and insert new dict_unpack
@@ -996,7 +996,7 @@ void RemoveImmutableInputDictLookups(
   graph->prependNode(marker);
   graph->setInsertPoint(marker);
   for (Node* key : keys) {
-    DCHECK(key->inputs().size() == 0);
+    DCHECK(key->inputs().empty());
     key->moveBefore(marker);
   }
   const c10::Symbol static_runtime_dict_unpack_symbol =
@@ -1004,7 +1004,7 @@ void RemoveImmutableInputDictLookups(
   for (auto& it : dict_to_getitems) {
     Value* dict = it.first;
     std::vector<Node*>& getitems = it.second;
-    DCHECK(getitems.size() > 0);
+    DCHECK(!getitems.empty());
     auto* dict_unpack =
         graph->create(static_runtime_dict_unpack_symbol, getitems.size());
     graph->insertNode(dict_unpack);
@@ -1429,6 +1429,28 @@ void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph, clampValuesAreConstant);
 #endif
+}
+
+void PrepackWeights(std::shared_ptr<Graph>& graph) {
+  const auto pattern = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %result: Tensor = fb::quantized_linear_unpacked_weight_v2(%input, %weight, %bias, %scale, %zero_point)
+        return (%result)
+  )IR";
+
+  const auto split_pattern = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %packed_params = quantized::linear_prepack(%weight, %bias)
+        %scale_float: float = aten::item(%scale)
+        %zero_point_int: int = aten::item(%zero_point)
+        %result: Tensor = quantized::linear(%input, %packed_params, %scale_float, %zero_point_int)
+        return (%result)
+  )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, split_pattern);
+  fuse.runOnGraph(graph);
+  // Constant propagation should be called after this pass + others.
 }
 
 } // namespace jit

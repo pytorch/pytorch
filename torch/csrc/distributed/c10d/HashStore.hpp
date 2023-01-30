@@ -6,13 +6,13 @@
 #include <mutex>
 #include <unordered_map>
 
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace c10d {
 
 class TORCH_API HashStore : public Store {
  public:
-  ~HashStore() override {}
+  ~HashStore() override = default;
 
   void set(const std::string& key, const std::vector<uint8_t>& data) override;
 

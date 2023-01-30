@@ -69,6 +69,10 @@ if hasattr(torch.__config__, "_cxx_flags"):
         CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
         if CXX_FLAGS is not None and "-g" not in CXX_FLAGS:
             CXX_FLAGS.append("-g")
+        # remove "-W" flags to allow build benchmarks
+        # with a relaxed constraint of compiler versions
+        if CXX_FLAGS is not None:
+            CXX_FLAGS = list(filter(lambda x: not x.startswith("-W"), CXX_FLAGS))
 
     except RuntimeError:
         # We are in FBCode.

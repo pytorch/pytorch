@@ -1002,9 +1002,9 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
         module (nn.Module): modified (i.e. pruned) version of the input module
 
     Examples:
-        >>> # xdoctest: +SKIP
+        >>> from torch.nn.utils import prune
         >>> m = prune.ln_structured(
-        ...    nn.Conv2d(5, 3, 2), 'weight', amount=0.3, dim=1, n=float('-inf')
+        ...     nn.Conv2d(5, 3, 2), 'weight', amount=0.3, dim=1, n=float('-inf')
         ... )
     """
     LnStructured.apply(
@@ -1055,7 +1055,8 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
         scope of global pruning to unstructured methods.
 
     Examples:
-        >>> # xdoctest: +SKIP
+        >>> from torch.nn.utils import prune
+        >>> from collections import OrderedDict
         >>> net = nn.Sequential(OrderedDict([
         ...     ('first', nn.Linear(10, 4)),
         ...     ('second', nn.Linear(4, 1)),
@@ -1070,7 +1071,7 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
         ...     amount=10,
         ... )
         >>> print(sum(torch.nn.utils.parameters_to_vector(net.buffers()) == 0))
-        tensor(10, dtype=torch.uint8)
+        tensor(10)
 
     """
     # ensure parameters is a list or generator of tuples
@@ -1156,7 +1157,7 @@ def custom_from_mask(module, name, mask):
         module (nn.Module): modified (i.e. pruned) version of the input module
 
     Examples:
-        >>> # xdoctest: +SKIP
+        >>> from torch.nn.utils import prune
         >>> m = prune.custom_from_mask(
         ...     nn.Linear(5, 3), name='bias', mask=torch.tensor([0, 1, 0])
         ... )
@@ -1211,8 +1212,8 @@ def is_pruned(module):
         binary answer to whether ``module`` is pruned.
 
     Examples:
+        >>> from torch.nn.utils import prune
         >>> m = nn.Linear(5, 7)
-        >>> # xdoctest: +SKIP
         >>> print(prune.is_pruned(m))
         False
         >>> prune.random_unstructured(m, name='weight', amount=0.2)

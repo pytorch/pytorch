@@ -5,10 +5,11 @@
 #include <ATen/Utils.h>
 #include <torch/library.h>
 #include <ATen/mps/EmptyTensor.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/TensorFactory.h>
-namespace at { namespace native {
+namespace at::native {
 
 static inline void maybe_resize_storage_mps(TensorImpl* self, uint64_t new_size) {
   if (new_size == 0) {
@@ -69,17 +70,6 @@ Tensor empty_mps(
     c10::optional<c10::MemoryFormat> memory_format_opt) {
 
   return at::detail::empty_mps(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
-Tensor empty_symint_mps(
-    c10::SymIntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
-
-  return at::native::empty_mps(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
 Tensor empty_strided_mps(
@@ -143,5 +133,5 @@ Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset
   at::native::resize_impl_mps_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }
-} // namespace native
-} // namespace at
+
+} // namespace at::native

@@ -10,8 +10,7 @@
 #include <cmath>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 struct RangeCachedGraph : public mps::MPSCachedGraph {
@@ -95,7 +94,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto stream = getCurrentMPSStream();
     auto mpsDataType = getMPSDataType(result.scalar_type());
     @autoreleasepool {
-      string key = "arange_mps_out:" + getTensorsStringKey({result}) + ":" + to_string(size);
+      string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
       auto cachedGraph = static_cast<RangeCachedGraph *>(cache_->LookUp(key));
       if (!cachedGraph) {
         auto *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph *() {
@@ -106,8 +105,10 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       }
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
       NSMutableDictionary *feeds   = [[NSMutableDictionary new] autorelease];
-      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, start, mpsDataType);
-      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, Scalar(step), mpsDataType);
+      MPSScalar startScalar = getMPSScalar(start, result.scalar_type());
+      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, startScalar);
+      MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
+      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
       NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
         outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
@@ -167,13 +168,16 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       }
 
       NSMutableDictionary *feeds   = [[NSMutableDictionary new] autorelease];
-      auto multiplyScalar = (end.to<double>() - start.to<double>()) / ((double)steps - 1.0f);
+      auto multiply = (end.to<double>() - start.to<double>()) / ((double)steps - 1.0f);
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
 
       // Create dictionary of inputs and outputs
-      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, start, MPSDataTypeFloat32);
-      feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, end, MPSDataTypeFloat32);
-      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, Scalar(multiplyScalar), MPSDataTypeFloat32);
+      MPSScalar startScalar = getMPSScalar(start, ScalarType::Float);
+      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, startScalar);
+      MPSScalar endScalar = getMPSScalar(end, ScalarType::Float);
+      feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, endScalar);
+      MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
+      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
       NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
         outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
@@ -187,4 +191,5 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   }
   return result;
 }
-}} // namespace at::native
+
+} // namespace at::native

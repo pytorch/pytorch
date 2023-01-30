@@ -7,11 +7,13 @@
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
+#include <c10/core/SymFloat.h>
+#include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/macros/Export.h>
 #include <typeindex>
+#include <utility>
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -27,6 +29,8 @@ template <class Key, class Value>
 class Dict;
 template <class T>
 class List;
+template <class T>
+class IListRef;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -50,6 +54,7 @@ TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
 namespace ivalue {
 struct Tuple;
 struct Future;
+struct Await;
 struct ConstantString;
 struct GenericDict;
 struct Object;
@@ -65,9 +70,20 @@ struct ComplexHolder : c10::intrusive_ptr_target {
     ComplexHolder(c10::complex<T> c) {
       val = convert<decltype(val), c10::complex<T>>(c);
     }
-    ComplexHolder() {}
+    ComplexHolder() = default;
     c10::complex<double> val;
 };
+
+// Similar to ComplexHolder, for StreamData3
+struct StreamData3Holder : c10::intrusive_ptr_target {
+  public:
+    StreamData3Holder(struct c10::StreamData3 d) {
+      val = d;
+    }
+    StreamData3Holder() = default;
+    struct c10::StreamData3 val;
+};
+
 } // namespace ivalue
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -79,7 +95,7 @@ template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray(){}
+  OptionalArray()= default;
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
@@ -145,6 +161,7 @@ struct Capsule {
   _(ComplexDouble)           \
   _(Int)                     \
   _(SymInt)                  \
+  _(SymFloat)                \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -152,6 +169,7 @@ struct Capsule {
   _(GenericList)             \
   _(GenericDict)             \
   _(Future)                  \
+  _(Await)                   \
   _(Device)                  \
   _(Stream)                  \
   _(Object)                  \
@@ -421,6 +439,7 @@ public:
   at::Tensor& toTensor() &;
   const at::Tensor& toTensor() const&;
   at::TensorImpl* unsafeToTensorImpl() const {
+    TORCH_INTERNAL_ASSERT(isTensor());
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
@@ -534,6 +553,13 @@ public:
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const&;
 
+  IValue(c10::intrusive_ptr<ivalue::Await> v);
+  bool isAwait() const {
+    return Tag::Await == tag;
+  }
+  c10::intrusive_ptr<ivalue::Await> toAwait() &&;
+  c10::intrusive_ptr<ivalue::Await> toAwait() const&;
+
   // RRef
   IValue(c10::intrusive_ptr<c10::RRefInterface> v);
   bool isRRef() const {
@@ -558,20 +584,36 @@ public:
   IValue(c10::SymInt i) {
     if (i.is_symbolic()) {
       tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = i.toSymIntNodeImpl().release();
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
     } else {
       tag = Tag::Int;
       payload.u.as_int = i.as_int_unchecked();
     }
   }
 
-  IValue(c10::SymIntArrayRef v);
-
   bool isSymInt() const {
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const;
+  c10::SymInt toSymInt() &&;
+  c10::SymInt toSymInt() const&;
+
+  IValue(c10::SymFloat i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    } else {
+      tag = Tag::Double;
+      payload.u.as_double = i.as_float_unchecked();
+    }
+  }
+
+  bool isSymFloat() const {
+    return Tag::SymFloat == tag;
+  }
+
+  c10::SymFloat toSymFloat() &&;
+  c10::SymFloat toSymFloat() const&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -665,21 +707,58 @@ public:
   c10::ArrayRef<IValue> toListRef() const;
 
   // Some template constructors of IValue calls another constructor recursively.
-  // This SNIFAEs the called constructor exists.
+  // This SFINAEs the called constructor exists.
   template <class T>
   using enable_if_ivalue_constructible =
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  // The rule for lists is more complicated; the generic constructor is only
+  // acceptable if your element isn't SymInt.  If you do have a SymInt element,
+  // then you must also, at construction time, check if you can decay the list
+  // into an int list (this is MANDATORY, as at a use site we may expect
+  // toIntList to work even if at the call site you had a SymIntArrayRef
+  // argument).  In practice, only SymIntArrayRef is used this way, so we
+  // didn't bother making it work for the other constructors, we just make sure
+  // they're not selectable.
+  template <class T>
+  using enable_if_list_is_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value &&
+        !std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T>&& v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const c10::List<T>& v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
   template <class T, size_t N>
   IValue(std::array<T, N> v);
+
+  // Manual constructors for lists of symints, which decay to int list if
+  // possible.  To avoid ambiguous overload situations, we template them
+  // to prevent implicit conversions
+  template <class T>
+  using enable_if_symint =
+      std::enable_if_t<std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::ArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::OptionalArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(const std::vector<T>& v);
+
+  template <class T>
+  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
+      std::is_constructible<IValue, T>::value &&
+          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value &&
+          !std::is_same<T, c10::SymInt>::value,
+      std::nullptr_t>;
+
+  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+  IValue(c10::IListRef<T> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
@@ -702,7 +781,7 @@ public:
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
@@ -753,7 +832,15 @@ public:
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
-    if (s.isFloatingPoint()) {
+    // NB: do the symbolic versions first, as isFloatingPoint is true
+    // for both SymFloat and double
+    if (s.isSymInt()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymNodeImpl().release();
+    } else if (s.isSymFloat()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = s.toSymFloat().toSymNodeImpl().release();
+    } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
@@ -769,7 +856,7 @@ public:
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat();
   }
 
   at::Scalar toScalar() const {
@@ -781,6 +868,10 @@ public:
       return toComplexDouble();
     else if (isBool())
       return toBool();
+    else if (isSymInt())
+      return toSymInt();
+    else if (isSymFloat())
+      return toSymFloat();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -797,10 +888,11 @@ public:
     return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 
-  //Stream
-  IValue(c10::Stream stream)
+  // Stream
+  IValue(c10::Stream s)
     : tag(Tag::Stream) {
-    payload.u.as_int = stream.pack();
+    auto v = c10::make_intrusive<ivalue::StreamData3Holder>(s.pack3());
+    payload.u.as_intrusive_ptr = v.release();
   }
   c10::Stream toStream() &&;
   c10::Stream toStream() const &;
@@ -1077,6 +1169,8 @@ public:
         return false;
       case Tag::SymInt:
         return true;
+      case Tag::SymFloat:
+        return true;
       case Tag::Bool:
         return false;
       case Tag::Tuple:
@@ -1091,10 +1185,12 @@ public:
         return true;
       case Tag::Future:
         return true;
+      case Tag::Await:
+        return true;
       case Tag::Device:
         return false;
       case Tag::Stream:
-        return false;
+        return true;
       case Tag::Object:
         return true;
       case Tag::PyObject:
@@ -1126,6 +1222,7 @@ public:
   }
 
   union Payload {
+    // [TriviallyCopyablePayload]
     // We use a nested union here so that we can make the copy easy
     // and efficient in the non-tensor (i.e., trivially copyable)
     // case. Specifically, we do not have to do a switch-on-tag to
@@ -1314,16 +1411,10 @@ struct TORCH_API WeakTypePtr {
 // internal build errors with std::variant :/
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
-      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
-    strong_ptr_ = shared_cu;
-    weak_ptr_ = c10::nullopt;
-  }
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
-      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
-    strong_ptr_ = c10::nullopt;
-    weak_ptr_ = weak_cu;
-  }
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
     TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
@@ -1339,6 +1430,10 @@ struct WeakOrStrongCompilationUnit {
     return strong_ptr_ != c10::nullopt;
   }
 
+  bool holdingEmptyStrongRef() const {
+    return holdingStrongRef() && *strong_ptr_ == nullptr;
+  }
+
   c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
   c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
@@ -1347,23 +1442,22 @@ struct WeakOrStrongCompilationUnit {
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
   explicit WeakOrStrongTypePtr(WeakTypePtr weak)
-      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
-    type_ = weak.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(weak.cu_))), type_(std::move(weak.type_)) {}
   explicit WeakOrStrongTypePtr(StrongTypePtr strong)
-      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
-    type_ = strong.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(strong.cu_))), type_(std::move(strong.type_)) {}
   explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
-      : cu_(cu) {
-    type_ = type;
-  }
+      : cu_(std::move(cu)), type_(std::move(type)) {}
   WeakTypePtr asWeakTypePtr() const;
 
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
+
   bool holds_strong_ref() const {
     return cu_.holdingStrongRef();
+  }
+
+  bool holds_empty_strong_ref() const {
+    return cu_.holdingEmptyStrongRef();
   }
 };
 

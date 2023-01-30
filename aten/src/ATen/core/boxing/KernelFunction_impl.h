@@ -8,20 +8,27 @@ namespace c10 {
 inline KernelFunction::KernelFunction()
     : boxed_kernel_func_()
     , unboxed_kernel_func_(nullptr)
+    , sym_unboxed_kernel_func_(nullptr)
 {}
 
-inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, void* sym_unboxed_kernel_func = nullptr)
   : boxed_kernel_func_(std::move(functor), boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
+  , sym_unboxed_kernel_func_(sym_unboxed_kernel_func)
 {}
 
-inline KernelFunction::KernelFunction(BoxedKernel boxed_fn, void* unboxed_kernel_func)
+inline KernelFunction::KernelFunction(BoxedKernel boxed_fn, void* unboxed_kernel_func, void* sym_unboxed_kernel_func = nullptr)
   : boxed_kernel_func_(std::move(boxed_fn))
   , unboxed_kernel_func_(unboxed_kernel_func)
+  , sym_unboxed_kernel_func_(sym_unboxed_kernel_func)
 {}
 
 inline bool KernelFunction::isValidUnboxed() const {
   return unboxed_kernel_func_ != nullptr;
+}
+
+inline bool KernelFunction::isValidSymUnboxed() const {
+  return sym_unboxed_kernel_func_ != nullptr;
 }
 
 inline bool KernelFunction::isValid() const {
@@ -43,16 +50,58 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
     return (*func)(functor, dispatchKeySet, std::forward<Args>(args)...);
 }
 
+// This template requires you to explicitly specify the argument you want to
+// forward; it doesn't work if you try to deduce it
+// NB: keep this in sync with cloneWithRealTypes in function_schema.cpp
+
+template <typename T>
+inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
+
+template <>
+inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
+  return x.expect_int();
+}
+
+template <>
+inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIntArrayRef x) {
+  return C10_AS_INTARRAYREF_SLOW(x);
+}
+
+template <>
+inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10::optional<c10::SymInt> x) {
+  return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
+}
+
+template <>
+inline typename remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(at::OptionalSymIntArrayRef x) {
+  return x.has_value() ? c10::make_optional(C10_AS_INTARRAYREF_SLOW(*x)) : c10::nullopt;
+}
+
 template<class Return, class... Args>
 C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
-    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-      auto *functor = boxed_kernel_func_.getFunctor();
-      return callUnboxedKernelFunction<Return, Args...>(
-          unboxed_kernel_func_, functor, dispatchKeySet, std::forward<Args>(args)...);
+    // This should get inlined by compiler
+    if (guts::disjunction<has_symint<Args>...>::value) {
+      if (sym_unboxed_kernel_func_ != nullptr) {
+        auto *functor = boxed_kernel_func_.getFunctor();
+        return callUnboxedKernelFunction<Return, Args...>(
+            sym_unboxed_kernel_func_, functor, dispatchKeySet, std::forward<Args>(args)...);
+      }
+
+      if (unboxed_kernel_func_ != nullptr) {
+        auto *functor = boxed_kernel_func_.getFunctor();
+        return callUnboxedKernelFunction<Return, typename remove_symint<Args>::type...>(
+            unboxed_kernel_func_, functor, dispatchKeySet, unpackSymInt<Args>(args)...);
+      }
+    } else {
+      if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
+        auto *functor = boxed_kernel_func_.getFunctor();
+        return callUnboxedKernelFunction<Return, Args...>(
+            unboxed_kernel_func_, functor, dispatchKeySet, std::forward<Args>(args)...);
+      }
     }
 
     return impl::BoxedKernelWrapper<Return(Args...)>::call(
@@ -102,10 +151,14 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
 #endif
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
+    auto* unboxed_fn = &impl::wrap_kernel_functor_unboxed<KernelFunctor>::call;
+    void* void_unboxed_fn = reinterpret_cast<void*>(unboxed_fn);
+    bool is_symint = fn_has_symint<decltype(unboxed_fn)>::value;
     return KernelFunction(
         std::move(kernelFunctor),
         &impl::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
-        reinterpret_cast<void*>(&impl::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+        is_symint ? nullptr : void_unboxed_fn,
+        is_symint ? void_unboxed_fn : nullptr
     );
 }
 

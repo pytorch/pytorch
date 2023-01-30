@@ -1,8 +1,17 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_rowwise_prune_native.h>
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace native {

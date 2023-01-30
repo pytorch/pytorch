@@ -294,7 +294,6 @@ CPU Ops that can autocast to ``float32``
 ``cholesky_solve``,
 ``inverse``,
 ``lu_solve``,
-``matrix_rank``,
 ``orgqr``,
 ``inverse``,
 ``ormqr``,

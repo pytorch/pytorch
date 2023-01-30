@@ -10,6 +10,8 @@ from typing import Dict, List, Tuple, Optional
 import bisect
 import math
 
+__all__ = ["EventList", "FormattedTimesMixin", "Interval", "Kernel", "FunctionEvent", "FunctionEventAvg",
+           "StringTable", "MemRecordsAcc"]
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
@@ -146,7 +148,16 @@ class EventList(list):
     def self_cpu_time_total(self):
         return sum([event.self_cpu_time_total for event in self])
 
-    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
+    def table(
+            self,
+            sort_by=None,
+            row_limit=100,
+            max_src_column_width=75,
+            max_name_column_width=55,
+            max_shapes_column_width=80,
+            header=None,
+            top_level_events_only=False
+    ):
         """Prints an EventList as a nicely formatted table.
 
         Args:
@@ -169,6 +180,8 @@ class EventList(list):
             sort_by=sort_by,
             row_limit=row_limit,
             max_src_column_width=max_src_column_width,
+            max_name_column_width=max_name_column_width,
+            max_shapes_column_width=max_shapes_column_width,
             header=header,
             profile_memory=self._profile_memory,
             with_flops=self._with_flops,
@@ -670,6 +683,8 @@ def _build_table(
         header=None,
         row_limit=100,
         max_src_column_width=75,
+        max_name_column_width=55,
+        max_shapes_column_width=80,
         with_flops=False,
         profile_memory=False,
         top_level_events_only=False):
@@ -687,13 +702,13 @@ def _build_table(
             events, key=lambda evt: getattr(evt, sort_by), reverse=True
         ), use_cuda=has_cuda_time, profile_memory=profile_memory, with_flops=with_flops)
 
-    MAX_NAME_COLUMN_WIDTH = 55
     name_column_width = max([len(evt.key) for evt in events]) + 4
-    name_column_width = min(name_column_width, MAX_NAME_COLUMN_WIDTH)
+    if max_name_column_width is not None:
+        name_column_width = min(name_column_width, max_name_column_width)
 
-    MAX_SHAPES_COLUMN_WIDTH = 80
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    shapes_column_width = min(shapes_column_width, MAX_SHAPES_COLUMN_WIDTH)
+    if max_shapes_column_width is not None:
+        shapes_column_width = min(shapes_column_width, max_shapes_column_width)
 
     DEFAULT_COLUMN_WIDTH = 12
     flops_column_width = DEFAULT_COLUMN_WIDTH
@@ -706,7 +721,8 @@ def _build_table(
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
-        src_column_width = min(src_column_width, max_src_column_width)
+        if max_src_column_width is not None:
+            src_column_width = min(src_column_width, max_src_column_width)
 
     headers = [
         'Name',
@@ -844,8 +860,8 @@ def _build_table(
         else:
             event_limit += 1
         name = evt.key
-        if len(name) >= MAX_NAME_COLUMN_WIDTH - 3:
-            name = name[:(MAX_NAME_COLUMN_WIDTH - 3)] + "..."
+        if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
+            name = name[:(max_name_column_width - 3)] + "..."
         row_values = [
             name,
             # Self CPU total %, 0 for async events.

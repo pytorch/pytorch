@@ -76,8 +76,8 @@ struct sha1 {
     get_digest(digest);
 
     std::ostringstream buf;
-    for (int i = 0; i < 5; ++i) {
-      buf << std::hex << std::setfill('0') << std::setw(8) << digest[i];
+    for (unsigned int i : digest) {
+      buf << std::hex << std::setfill('0') << std::setw(8) << i;
     }
 
     return buf.str();
@@ -301,6 +301,14 @@ struct hash<std::tuple<Types...>> {
 
   size_t operator()(const std::tuple<Types...>& t) const {
     return tuple_hash<sizeof...(Types) - 1, Types...>()(t);
+  }
+};
+
+template <typename T1, typename T2>
+struct hash<std::pair<T1, T2>> {
+  size_t operator()(const std::pair<T1, T2>& pair) const {
+    std::tuple<T1, T2> tuple = std::make_tuple(pair.first, pair.second);
+    return _hash_detail::simple_get_hash(tuple);
   }
 };
 

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple, Union
 
 from torchgen.api import cpp, dispatcher
@@ -8,6 +9,7 @@ from torchgen.api.types import (
     CType,
     DispatcherSignature,
     FunctionalizationLambda,
+    iTensorListRefT,
     NativeSignature,
     tensorListT,
     tensorT,
@@ -15,6 +17,7 @@ from torchgen.api.types import (
     ViewInverseSignature,
 )
 from torchgen.context import (
+    method_with_native_function,
     native_function_manager,
     with_native_function,
     with_native_function_and,
@@ -72,96 +75,73 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 
 # Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
 # See Note [view_copy NativeFunctions]
-@with_native_function
-def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]:
+@dataclass(frozen=True)
+class GenCompositeViewCopyKernel:
+    backend_index: BackendIndex
 
-    if g.view_copy is None:
-        return None
+    @method_with_native_function
+    def __call__(self, g: NativeFunctionsViewGroup) -> Optional[str]:
+        if g.view_copy is None:
+            return None
 
-    # For view_copy.SymInt overloads,
-    # See gen_symint_view_copy_kernel.
-    if g.view_copy.func.name.overload_name == "SymInt":
-        return None
+        metadata = self.backend_index.get_kernel(g.view_copy)
+        assert metadata is not None
 
-    # We can make view_copy work in more cases by using reshape()
-    # when a normal view call would ordinarily fail.
-    # This also makes LTC more efficient, because they don't need to include
-    # clone() calls in their graph (which is normally needed by reshape).
-    if str(g.view_copy.func.name) == "view_copy":
-        return """\
-at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
-  DimVector shape = infer_size_dv(size, self.numel());
-  if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
-    return self.reshape(size);
+        # We can make view_copy work in more cases by using reshape()
+        # when a normal view call would ordinarily fail.
+        # This also makes LTC more efficient, because they don't need to include
+        # clone() calls in their graph (which is normally needed by reshape).
+        if str(g.view_copy.func.name) == "view_copy":
+            assert metadata.kernel == "view_copy_symint"
+            return """\
+at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
+  c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
+  if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
+    return self.reshape_symint(size);
   } else {
     auto output = at::_ops::view::call(self, size);
-    return output.clone();
+    return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 """
-    # view_copy is a native signature, since we're generating an at::native:: kernel
-    view_copy_sig = NativeSignature(g.view_copy.func)
+        # view_copy is a native signature, since we're generating an at::native:: kernel
+        # Functionalization always operates on symints though
+        view_copy_sig = NativeSignature(
+            g.view_copy.func, symint=metadata.supports_symint()
+        )
 
-    # view is a dispatcher signature, since we're calling into the at::_ops API
-    view_sig = DispatcherSignature(g.view.func)
+        # view is a dispatcher signature, since we're calling into the at::_ops API
+        view_sig = DispatcherSignature(g.view.func)
 
-    view_api_name = g.view.func.name.unambiguous_name()
-    exprs = ", ".join(
-        [e.expr for e in translate(view_copy_sig.arguments(), view_sig.arguments())]
-    )
+        view_api_name = g.view.func.name.unambiguous_name()
+        exprs = ", ".join(
+            [e.expr for e in translate(view_copy_sig.arguments(), view_sig.arguments())]
+        )
 
-    # view ops today always return either a Tensor or a list of Tensors
-    assert len(g.view.func.returns) == 1
-    assert g.view.func.returns[0].type == BaseType(
-        BaseTy.Tensor
-    ) or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+        # view ops today always return either a Tensor or a list of Tensors
+        assert len(g.view.func.returns) == 1
+        assert g.view.func.returns[0].type == BaseType(
+            BaseTy.Tensor
+        ) or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
 
-    if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
-        return_cloned_output = """\
-  return output.clone();"""
-    else:
-        # If the return type is a list, we need to clone each tensor in the list.
-        return_cloned_output = f"""\
+        if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
+            return_cloned_output = """\
+  return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);"""
+        else:
+            # If the return type is a list, we need to clone each tensor in the list.
+            return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
   for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(output[i].clone());
+    out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
 
-    # The default generated composite kernel for {view}_copy() operators just clones
-    # the input tensor, and runs the underlying view on the clone.
-    return f"""
-{view_copy_sig.defn()} {{
+        # The default generated composite kernel for {view}_copy() operators just clones
+        # the input tensor, and runs the underlying view on the clone.
+        return f"""
+{view_copy_sig.defn(name=metadata.kernel)} {{
   auto output = at::_ops::{view_api_name}::call({exprs});
   {return_cloned_output}
-}}
-"""
-
-
-# For symint view copy kernels, we want to generate them to call into
-# their concrete view_copy counterparts.
-@with_native_function_and
-def gen_symint_view_copy_kernel(
-    view_copy: NativeFunction, view_copy_symint: NativeFunction
-) -> str:
-    # view_copy.symint is a native signature, since we're generating an at::native:: kernel
-    view_copy_symint_sig = NativeSignature(view_copy_symint.func)
-
-    # view_copy is a dispatcher signature, since we're calling into the at::_ops API
-    view_copy_sig = DispatcherSignature(view_copy.func)
-
-    exprs = ", ".join(
-        [
-            e.expr
-            for e in translate(
-                view_copy_symint_sig.arguments(), view_copy_sig.arguments()
-            )
-        ]
-    )
-
-    return f"""
-{view_copy_symint_sig.defn()} {{
-  return at::_ops::{view_copy.func.name.unambiguous_name()}::call({exprs});
 }}
 """
 
@@ -203,6 +183,8 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
+    if t == BaseCType(iTensorListRefT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{{{x}.begin(), {x}.end()}}"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x
@@ -364,11 +346,14 @@ def emit_view_functionalization_body(
           return {reverse_lambda.inner_call()}
         }}
       );
+      auto compute_reference_meta =
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      {{
+      if (compute_reference_meta) {{
+        {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
       // This function adds the above view meta to the current tensor and replays them off the base,
@@ -380,7 +365,9 @@ def emit_view_functionalization_body(
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
       // having the correct stride info)
-      at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      if (compute_reference_meta) {{
+        at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      }}
       return {view_tensor_name};
     }}
 """
@@ -395,11 +382,14 @@ def emit_view_functionalization_body(
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+      auto compute_reference_meta =
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      {{
+      if (compute_reference_meta) {{
+        {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
       {return_type} tmp_output;
@@ -425,7 +415,9 @@ def emit_view_functionalization_body(
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
-      at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
+      if (compute_reference_meta) {{
+        at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
+      }}
       return out;
     }}
 """
@@ -508,7 +500,8 @@ def wrap_propagate_mutations_and_return(
         updates.append(
             f"""\
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
-  at::functionalization::impl::commit_update({outer_arg});"""
+  at::functionalization::impl::commit_update({outer_arg});
+  at::functionalization::impl::sync({outer_arg});"""
         )
 
     # Finally, we return:
@@ -604,16 +597,24 @@ def emit_inplace_functionalization_body(
         )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
+    # We don't want to run the inplace meta func for ops like .set_(), because:
+    # (1) they're unnecessary: inplace meta checks are only useful for ops like add_(),
+    #     where broadcasting will work for the out-of-place case but should fail on the inplace call
+    # (2) They'll also fail without adding extra infra: we'd need to convert the input storage argument
+    #     into a meta storage
+    any_storage_args = any(
+        a.type == BaseType(BaseTy.Storage) for a in f.func.arguments.flat_all
+    )
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({str(f.func.kind() == SchemaKind.inplace).lower()}) {{
+      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        {meta_conversion_str}
         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
@@ -671,7 +672,7 @@ def gen_functionalization_registration(
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
-            sig = DispatcherSignature.from_schema(f.func)
+            sig = NativeSignature(f.func, symint=metadata.supports_symint())
             # Note [Composite view ops in the functionalization pass]
             # We don't need to worry about implemententing functionalization kernels for views with
             # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.

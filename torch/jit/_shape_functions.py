@@ -355,6 +355,10 @@ def upsample_nearest2d(
     out: List[int] = []
     out.append(input[0])
     out.append(input[1])
+
+    if (scale_factors is None and output_size is None):
+        assert 0, "Either output_size or scale_factors must be presented"
+
     if output_size is not None:
         assert (
             scale_factors is None
@@ -362,7 +366,6 @@ def upsample_nearest2d(
         assert len(output_size) == 2
         out.append(output_size[0])
         out.append(output_size[1])
-        return out
 
     if scale_factors is not None:
         assert (
@@ -371,8 +374,8 @@ def upsample_nearest2d(
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
         out.append(int(input[3] * scale_factors[1]))
-        return out
-    assert 0, "Either output_size or scale_factors must be presented"
+
+    return out
 
 
 def mm(self: List[int], mat2: List[int]):
@@ -876,6 +879,37 @@ def permute(input: List[int], dims: List[int]):
             assert seen_dims[i] != seen_dims[j]
     return newSizes
 
+def movedim(self: List[int], source: List[int], destination: List[int]) -> List[int]:
+    self_dim = len(self)
+    if self_dim <= 1:
+        return self
+    normalized_src : List[int] = []
+    normalized_dst : List[int] = []
+    for i in range(len(source)):
+        normalized_src.append(maybe_wrap_dim(source[i], self_dim))
+        normalized_dst.append(maybe_wrap_dim(destination[i], self_dim))
+    order = [-1 for i in range(self_dim)]
+    src_dims = [i for i in range(self_dim)]
+    dst_dims = [i for i in range(self_dim)]
+
+    for i in range(len(source)):
+        order[normalized_dst[i]] = normalized_src[i]
+        src_dims[normalized_src[i]] = -1
+        dst_dims[normalized_dst[i]] = -1
+
+    source_dims : List[int] = []
+    destination_dims : List[int] = []
+    for ele in src_dims:
+        if ele != -1:
+            source_dims.append(ele)
+    for ele in dst_dims:
+        if ele != -1:
+            destination_dims.append(ele)
+
+    rest_dim = self_dim - len(source)
+    for i in range(rest_dim):
+        order[destination_dims[i]] = source_dims[i]
+    return permute(self, order)
 
 def flatten(input: List[int], start_dim: int, end_dim: int):
     start_dim = maybe_wrap_dim(start_dim, len(input))
@@ -1067,6 +1101,7 @@ add_shape_compute_mapping("aten::conv_transpose2d.input(Tensor input, Tensor wei
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
+add_shape_compute_mapping("aten::movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)", movedim)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
@@ -1088,6 +1123,8 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
 # add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp

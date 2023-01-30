@@ -15,12 +15,16 @@ same class methods that :class:`torch.TypedStorage` has.
 
 A :class:`torch.TypedStorage` is a contiguous, one-dimensional array of
 elements of a particular :class:`torch.dtype`. It can be given any
-:class:`torch.dtype`, and the internal data will be interpretted appropriately.
+:class:`torch.dtype`, and the internal data will be interpreted appropriately.
 :class:`torch.TypedStorage` contains a :class:`torch.UntypedStorage` which
 holds the data as an untyped array of bytes.
 
 Every strided :class:`torch.Tensor` contains a :class:`torch.TypedStorage`,
 which stores all of the data that the :class:`torch.Tensor` views.
+
+.. warning::
+  All storage classes except for :class:`torch.UntypedStorage` will be removed
+  in the future, and :class:`torch.UntypedStorage` will be used in all cases.
 
 .. autoclass:: torch.TypedStorage
    :members:

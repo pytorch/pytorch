@@ -36,6 +36,8 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#include <utility>
+
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -254,8 +256,8 @@ struct VectorizedLoop2d {
   static constexpr int ntensors = traits::arity + 1;
   using data_t = std::array<char*, ntensors>;
 
-  VectorizedLoop2d(const op_t &op, const vop_t &vop):
-    op(op), vop(vop) {}
+  VectorizedLoop2d(const op_t &op, vop_t vop):
+    op(op), vop(std::move(vop)) {}
 
   static void advance(data_t &data, const int64_t *outer_strides) {
     for (const auto arg : c10::irange(data.size())) {
@@ -269,8 +271,7 @@ struct VectorizedLoop2d {
     const int64_t *outer_strides = &strides[ntensors];
 
     if (is_contiguous<traits>(strides)) {
-      for (const auto i : c10::irange(size1)) {
-        (void)i;
+      for (const auto i C10_UNUSED : c10::irange(size1)) {
         vectorized_loop(data.data(), size0, 0, op, vop);
         advance(data, outer_strides);
       }
@@ -278,14 +279,12 @@ struct VectorizedLoop2d {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
         if (idx) {
-          for (const auto i : c10::irange(size1)) {
-            (void)i;
+          for (const auto i C10_UNUSED : c10::irange(size1)) {
             vectorized_loop(data.data(), size0, idx, op, vop);
             advance(data, outer_strides);
           }
         } else {
-          for (const auto i : c10::irange(size1)) {
-            (void)i;
+          for (const auto i C10_UNUSED : c10::irange(size1)) {
             basic_loop(data.data(), strides, 0, size0, op);
             advance(data, outer_strides);
           }

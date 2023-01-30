@@ -63,11 +63,14 @@ void CommandBuffer::begin() {
 
 void CommandBuffer::end() {
   TORCH_CHECK(
-      state_ == CommandBuffer::State::RECORDING,
+      state_ == CommandBuffer::State::RECORDING ||
+          state_ == CommandBuffer::State::SUBMITTED,
       "Vulkan CommandBuffer: called end() on a command buffer whose state "
-      "is not RECORDING.");
+      "is not RECORDING or SUBMITTED.");
 
-  VK_CHECK(vkEndCommandBuffer(handle_));
+  if (state_ == CommandBuffer::State::RECORDING) {
+    VK_CHECK(vkEndCommandBuffer(handle_));
+  }
   state_ = CommandBuffer::State::READY;
 }
 
@@ -166,6 +169,29 @@ void CommandBuffer::dispatch(const utils::uvec3& global_workgroup_size) {
       utils::div_up(
           global_workgroup_size.data[2u],
           bound_.local_workgroup_size.data[2u]));
+
+  state_ = CommandBuffer::State::RECORDING;
+}
+
+void CommandBuffer::copy_buffer_to_buffer(
+    const api::VulkanBuffer& source,
+    const api::VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_buffer_to_buffer() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
+
+  const VkBufferCopy copy_details{
+      src_offset.data[0u], // srcOffset
+      dst_offset.data[0u], // dstOffset
+      copy_range.data[0u], // size
+  };
+
+  vkCmdCopyBuffer(
+      handle_, source.handle(), destination.handle(), 1u, &copy_details);
 
   state_ = CommandBuffer::State::RECORDING;
 }
@@ -323,8 +349,9 @@ VkCommandBuffer CommandBuffer::get_submit_handle() {
 
   const VkCommandBuffer handle = handle_;
 
-  handle_ = VK_NULL_HANDLE;
-  bound_.reset();
+  if (!is_reusable()) {
+    invalidate();
+  }
   state_ = CommandBuffer::State::SUBMITTED;
 
   return handle;
@@ -365,7 +392,7 @@ CommandPool::~CommandPool() {
   vkDestroyCommandPool(device_, pool_, nullptr);
 }
 
-CommandBuffer CommandPool::get_new_cmd() {
+CommandBuffer CommandPool::get_new_cmd(bool reusable) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // No-ops if there are command buffers available
@@ -373,8 +400,13 @@ CommandBuffer CommandPool::get_new_cmd() {
 
   const VkCommandBuffer handle = buffers_[in_use_];
 
+  VkCommandBufferUsageFlags cmd_flags = 0u;
+  if (!reusable) {
+    cmd_flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  }
+
   in_use_++;
-  return CommandBuffer(handle);
+  return CommandBuffer(handle, cmd_flags);
 }
 
 void CommandPool::flush() {

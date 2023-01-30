@@ -47,7 +47,9 @@ from .dependency import fork, join
 from .microbatch import Batch
 from .phony import get_phony
 
-__all__ = ["is_checkpointing", "is_recomputing"]
+__all__ = ["Function", "checkpoint", "Checkpointing", "ThreadLocal", "enable_checkpointing",
+           "enable_recomputing", "is_checkpointing", "is_recomputing", "Context", "save_rng_states",
+           "restore_rng_states", "Checkpoint", "Recompute"]
 
 
 Tensors = Sequence[Tensor]

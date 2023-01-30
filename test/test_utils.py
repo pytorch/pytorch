@@ -7,19 +7,30 @@ import shutil
 import random
 import subprocess
 import tempfile
+import traceback
 import textwrap
 import unittest
-from typing import List
+from typing import Any, List, Dict
 import torch
 import torch.nn as nn
 import torch.utils.data
 from torch.utils.data import DataLoader
+from torch.testing._internal.common_device_type import (
+    ops,
+    onlyCPU,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
+from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch import set_default_device
+from torch.utils._device import set_device
+from torch.utils._traceback import report_compile_source_on_error
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -51,8 +62,8 @@ class TestCheckpoint(TestCase):
         module_lists_to_compare,
         num_chunks,
         input,
+        use_reentrant,
     ):
-
         # not checkpointed
         out = model(input)
         out_not_checkpointed = out.detach().clone()
@@ -69,7 +80,9 @@ class TestCheckpoint(TestCase):
             detached.requires_grad = True
 
             # pass list of modules to checkpoint
-            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
+            out = checkpoint_sequential(
+                model_to_compare, num_chunks, detached, use_reentrant=use_reentrant
+            )
             out_checkpointed = out.detach().clone()
             model.zero_grad()
             out.sum().backward()
@@ -96,21 +109,26 @@ class TestCheckpoint(TestCase):
 
             def forward(self, input_var):
                 self.counter += 1
-                return input_var
+                # For reentrant, need to have autograd actually
+                # pack a tensor to trigger recomp
+                ret = input_var * torch.tensor(2.)
+                return ret
 
         # checkpointed
-        modules = [Net() for _ in range(10)]
-        for m in modules:
-            self.assertEqual(m.counter, 0)
-        input_var = torch.randn(3, 4, requires_grad=True)
-        out = checkpoint_sequential(modules, 2, input_var)
-        for m in modules:
-            self.assertEqual(m.counter, 1)
-        out.sum().backward()
-        for m in modules[:(len(modules) // 2)]:
-            self.assertEqual(m.counter, 2)
-        for m in modules[(len(modules) // 2):]:
-            self.assertEqual(m.counter, 1)
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                modules = [Net() for _ in range(10)]
+                for m in modules:
+                    self.assertEqual(m.counter, 0)
+                input_var = torch.randn(3, 4, requires_grad=True)
+                out = checkpoint_sequential(modules, 2, input_var, use_reentrant=use_reentrant)
+                for m in modules:
+                    self.assertEqual(m.counter, 1)
+                out.sum().backward()
+                for m in modules[:(len(modules) // 2)]:
+                    self.assertEqual(m.counter, 2)
+                for m in modules[(len(modules) // 2):]:
+                    self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
         model = nn.Sequential(
@@ -132,27 +150,42 @@ class TestCheckpoint(TestCase):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
+        # works with use_reentrant=False, and grads are the same
+        out = model(input_var)
+        grads_no_checkpoint = torch.autograd.grad(
+            outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        out_checkpoint = checkpoint_sequential(modules, chunks, input_var, use_reentrant=False)
+        # check outputs are the same
+        self.assertEqual(out_checkpoint, out)
+        grads_checkpoint = torch.autograd.grad(
+            outputs=[out_checkpoint], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        self.assertEqual(grads_no_checkpoint, grads_checkpoint)
 
     def test_checkpoint(self):
-        model = nn.Sequential(
-            nn.Linear(100, 50),
-            nn.ReLU(),
-            nn.Linear(50, 20),
-            nn.ReLU(),
-            nn.Linear(20, 5),
-            nn.ReLU()
-        )
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = nn.Sequential(
+                    nn.Linear(100, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU()
+                )
 
-        # Compare uncheckpointed model with its checkpointed counterparts
-        # In addition to running checkpoint_sequential on the nn.Sequential
-        # instance, we also run the function on the list of functions within
-        # the module.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.children()), model],
-            2,
-            torch.randn(1, 100, requires_grad=True)
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts
+                # In addition to running checkpoint_sequential on the nn.Sequential
+                # instance, we also run the function on the list of functions within
+                # the module.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.children()), model],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
@@ -173,15 +206,18 @@ class TestCheckpoint(TestCase):
                     input = layer(input)
                 return input
 
-        model = ModuleListNet()
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = ModuleListNet()
 
-        # Compare uncheckpointed model with its checkpointed counterparts.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.module_list.children()), model.module_list],
-            2,
-            torch.randn(1, 100, requires_grad=True),
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.module_list.children()), model.module_list],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_sequential_deprecated_multiple_args(self):
         class Two(nn.Module):
@@ -192,8 +228,10 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -201,9 +239,10 @@ class TestCheckpoint(TestCase):
                 pass
 
         model = nn.Sequential(Noop())
-
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -422,7 +461,10 @@ class TestCheckpoint(TestCase):
         self.assertEqual(retain_stats, checkpoint_retain_stats)
 
 class TestDataLoaderUtils(TestCase):
+    MAX_TIMEOUT_IN_SECOND = 300
+
     def setUp(self):
+        super().setUp()
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
 
@@ -431,7 +473,8 @@ class TestDataLoaderUtils(TestCase):
             dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
                                                      batch_size=2,
                                                      num_workers=4,
-                                                     shuffle=True)
+                                                     shuffle=True,
+                                                     timeout=self.MAX_TIMEOUT_IN_SECOND)
             return next(iter(dataloader))
 
         torch.manual_seed(2018)
@@ -464,7 +507,8 @@ class TestDataLoaderUtils(TestCase):
         dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
                                              batch_size=self.batch_size,
                                              num_workers=2,
-                                             drop_last=False)
+                                             drop_last=False,
+                                             timeout=self.MAX_TIMEOUT_IN_SECOND)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
@@ -472,7 +516,8 @@ class TestDataLoaderUtils(TestCase):
         dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
                                              batch_size=self.batch_size,
                                              num_workers=2,
-                                             drop_last=True)
+                                             drop_last=True,
+                                             timeout=self.MAX_TIMEOUT_IN_SECOND)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -581,6 +626,7 @@ class TestBottleneck(TestCase):
 from torch.utils.collect_env import get_pretty_env_info
 
 
+@unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
@@ -761,12 +807,99 @@ class TestExtensionUtils(TestCase):
             torch._register_device_module('xpu', DummyXPUModule)
 
 
+class TestDeviceUtils(TestCase):
+    def test_basic(self):
+        with torch.device('meta') as dev:
+            x = torch.empty(3, 3)
+        self.assertEqual(x.device.type, 'meta')
+        self.assertEqual(dev, torch.device('meta'))
+
+    def test_decorator(self):
+        @set_device('meta')
+        def f():
+            return torch.empty(3, 3)
+        self.assertEqual(f().device.type, 'meta')
+
+    def test_decorator_generator(self):
+        @set_device('meta')
+        def f():
+            yield torch.empty(3, 3)
+            yield torch.empty(3, 3)
+        r1, r2 = list(f())
+        self.assertEqual(r1.device.type, 'meta')
+        self.assertEqual(r2.device.type, 'meta')
+
+
+    def test_nn_module(self):
+        with torch.device('meta'):
+            m = nn.Linear(40, 50)
+        self.assertEqual(m.weight.device.type, 'meta')
+
+    def test_set_default_device(self):
+        try:
+            set_default_device('meta')
+            r = torch.empty(2, 2)
+        finally:
+            set_default_device(None)
+
+        self.assertEqual(r.device.type, 'meta')
+
+    @onlyCPU
+    @ops(op_db)
+    def test_device_mode_ops(self, device, dtype, op):
+        func = op.get_op()
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            # Only test samples which don't have Tensor inputs.  However,
+            # we don't test the factory property on OpInfo as it is very,
+            # very incomplete
+            if tree_any(
+                lambda x: isinstance(x, torch.Tensor),
+                (sample.input, sample.args, sample.kwargs)
+            ):
+                continue
+            # Many OpInfos will explicitly pass in a device.  DeviceContext
+            # will respect device if it is explicitly specified.  To test
+            # DeviceContext, we have to remove the device kwarg in this case.
+            # NB: Can't pass None to sample_inputs, the function can't
+            # handle it.
+            kwargs = sample.kwargs.copy()
+            kwargs.pop('device', None)
+            with torch.device('meta'):
+                r = func(sample.input, *sample.args, **kwargs)
+            self.assertTrue(
+                tree_all_only(torch.Tensor, lambda x: x.device.type == 'meta', r)
+            )
+
+
+instantiate_device_type_tests(TestDeviceUtils, globals())
+
+
 class TestCppExtensionUtils(TestCase):
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
 
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
+
+
+class TestTraceback(TestCase):
+    def test_basic(self):
+        source = '''\
+def f(x):
+    x = x * 3
+    raise RuntimeError()  # HEYA
+'''
+
+        out: Dict[str, Any] = {}
+        scope = {"__compile_source__": source}
+        exec(source, scope, out)
+
+        try:
+            with report_compile_source_on_error():
+                out["f"](1)
+        except RuntimeError as e:
+            self.assertIn("HEYA", ''.join(traceback.format_tb(e.__traceback__)))
 
 
 if __name__ == '__main__':

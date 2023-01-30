@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <memory>
 
 namespace c10d {
@@ -8,13 +8,15 @@ namespace c10d {
 class TORCH_API PrefixStore : public Store {
  public:
   explicit PrefixStore(
-      const std::string& prefix,
+      std::string  prefix,
       c10::intrusive_ptr<Store> store);
 
-  virtual ~PrefixStore(){};
+  ~PrefixStore() override = default;
 
+  using Store::set;
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
+  using Store::compareSet;
   std::vector<uint8_t> compareSet(
       const std::string& key,
       const std::vector<uint8_t>& expectedValue,
@@ -41,6 +43,8 @@ class TORCH_API PrefixStore : public Store {
   void setTimeout(const std::chrono::milliseconds& timeout) override;
 
   void watchKey(const std::string& key, WatchKeyCallback callback) override;
+
+  c10::intrusive_ptr<Store> getUnderlyingStore();
 
  protected:
   std::string prefix_;

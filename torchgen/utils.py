@@ -7,7 +7,7 @@ import sys
 import textwrap
 from argparse import Namespace
 from dataclasses import fields, is_dataclass
-from enum import Enum
+from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -64,21 +64,18 @@ class YamlLoader(Loader):
 # This is an OPEN enum (we may add more cases to it in the future), so be sure
 # to explicitly specify with Union[Literal[Target.XXX]] what targets are valid
 # for your use.
-Target = Enum(
-    "Target",
-    (
-        # top level namespace (not including at)
-        "DEFINITION",
-        "DECLARATION",
-        # TORCH_LIBRARY(...) { ... }
-        "REGISTRATION",
-        # namespace { ... }
-        "ANONYMOUS_DEFINITION",
-        # namespace cpu { ... }
-        "NAMESPACED_DEFINITION",
-        "NAMESPACED_DECLARATION",
-    ),
-)
+class Target(Enum):
+    # top level namespace (not including at)
+    DEFINITION = auto()
+    DECLARATION = auto()
+    # TORCH_LIBRARY(...) { ... }
+    REGISTRATION = auto()
+    # namespace { ... }
+    ANONYMOUS_DEFINITION = auto()
+    # namespace cpu { ... }
+    NAMESPACED_DEFINITION = auto()
+    NAMESPACED_DECLARATION = auto()
+
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurrence of a parameter in the derivative formula
@@ -292,6 +289,14 @@ class FileManager:
             "\n    ".join('"' + name + '"' for name in sorted(self.filenames)),
         )
         self._write_if_changed(filename, content)
+
+    def template_dir_for_comments(self) -> str:
+        """
+        This needs to be deterministic. The template dir is an absolute path
+        that varies across builds. So, just use the path relative to this file,
+        which will point to the codegen source but will be stable.
+        """
+        return os.path.relpath(self.template_dir, os.path.dirname(__file__))
 
 
 # Helper function to generate file manager

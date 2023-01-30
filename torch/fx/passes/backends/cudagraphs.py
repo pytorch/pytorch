@@ -21,15 +21,18 @@ class CudaGraphsSupport(OperatorSupport):
 
         found_not_cuda = False
 
+        def meta_fk(meta):
+            return meta["val"] if "val" in meta else meta["fake_result"]
+
         def find_not_cuda(t):
             nonlocal found_not_cuda
             if isinstance(t, torch.Tensor) and t.device.type != 'cuda':
                 found_not_cuda = True
 
         for n in node.all_input_nodes:
-            tree_map(find_not_cuda, n.meta['fake_result'])
+            tree_map(find_not_cuda, meta_fk(n.meta))
 
-        tree_map(find_not_cuda, node.meta['fake_result'])
+        tree_map(find_not_cuda, meta_fk(node.meta))
 
         # NB: factory function is accounted for because the result would be
         # cpu or cuda

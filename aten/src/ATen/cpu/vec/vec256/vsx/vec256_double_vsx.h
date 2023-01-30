@@ -171,7 +171,7 @@ class Vectorized<double> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
@@ -239,6 +239,9 @@ class Vectorized<double> {
   }
   Vectorized<double> C10_ALWAYS_INLINE exp() const {
      return {Sleef_expd2_u10vsx(_vec0), Sleef_expd2_u10vsx(_vec1)};
+  }
+  Vectorized<double> C10_ALWAYS_INLINE exp2() const {
+    return {Sleef_exp2d2_u10vsx(_vec0), Sleef_exp2d2_u10vsx(_vec1)};
   }
   Vectorized<double> expm1() const {
      return {Sleef_expm1d2_u10vsx(_vec0), Sleef_expm1d2_u10vsx(_vec1)};

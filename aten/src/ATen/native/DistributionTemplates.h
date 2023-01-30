@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -11,6 +12,15 @@
 #include <c10/util/Optional.h>
 #include <limits>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/view_as_real.h>
+#endif
 
 namespace at {
 namespace native {
@@ -302,7 +312,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   exponential_kernel<RNG>()(iter, lambda, gen);
   return self;

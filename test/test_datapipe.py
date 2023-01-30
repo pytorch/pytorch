@@ -33,7 +33,7 @@ import torch
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
-from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
+from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings, skipIfTorchDynamo
 from torch.utils.data import (
     DataLoader,
     DataChunk,
@@ -44,7 +44,7 @@ from torch.utils.data import (
     runtime_validation,
     runtime_validation_disabled,
 )
-from torch.utils.data.graph import traverse
+from torch.utils.data.graph import traverse_dps
 from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
@@ -54,6 +54,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
 
 try:
     import dill
@@ -219,6 +220,7 @@ class TestStreamWrapper(TestCase):
         for api in ['open', 'read', 'close']:
             self.assertTrue(api in s)
 
+    @skipIfTorchDynamo
     def test_api(self):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
@@ -432,6 +434,31 @@ class TestIterableDataPipeBasic(TestCase):
             for i in [0, 1]:
                 self.assertEqual(rec[i][1].read(), b'12345abcde')
                 rec[i][1].close()
+        self.assertEqual(count, 8)
+
+        # testing the keep_key option
+        datapipe4 = dp.iter.Grouper(datapipe1, group_key_fn=group_fn, keep_key=True, group_size=2)
+
+        def order_fn(data):
+            data[1].sort(key=lambda f: f[0], reverse=True)
+            return data
+
+        datapipe5 = dp.iter.Mapper(datapipe4, fn=order_fn)  # type: ignore[var-annotated]
+
+        expected_result = [
+            ("a", ("a.png", "a.json")), ("c", ("c.png", "c.json")), ("b", ("b.png", "b.json")),
+            ("d", ("d.png", "d.json")), ("f", ("f.png", "f.json")), ("g", ("g.png", "g.json")),
+            ("e", ("e.png", "e.json")), ("h", ("h.txt", "h.json"))]
+
+        count = 0
+        for rec, expected in zip(datapipe5, expected_result):
+            count = count + 1
+            self.assertEqual(rec[0], expected[0])
+            self.assertEqual(rec[1][0][0], expected[1][0])
+            self.assertEqual(rec[1][1][0], expected[1][1])
+            for i in [0, 1]:
+                self.assertEqual(rec[1][i][1].read(), b'12345abcde')
+                rec[1][i][1].close()
         self.assertEqual(count, 8)
 
     def test_demux_mux_datapipe(self):
@@ -985,10 +1012,10 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Pickle Test:
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
-        traverse(dp1)  # This should not raise any error
+        traverse_dps(dp1)  # This should not raise any error
         for _ in zip(dp1, dp2, dp3):
             pass
-        traverse(dp2)  # This should not raise any error either
+        traverse_dps(dp2)  # This should not raise any error either
 
     def test_mux_iterdatapipe(self):
 
@@ -1155,10 +1182,10 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Pickle Test:
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=odd_or_even)
-        traverse(dp1)  # This should not raise any error
+        traverse_dps(dp1)  # This should not raise any error
         for _ in zip(dp1, dp2):
             pass
-        traverse(dp2)  # This should not raise any error either
+        traverse_dps(dp2)  # This should not raise any error either
 
     def test_map_iterdatapipe(self):
         target_length = 10
@@ -1293,6 +1320,10 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (*data, (-data[1], data[1])), fn_1n, 1, -1)
         _helper(lambda data: (*data, data[0] + data[2]), fn_n1, [0, 2], -1)
         _helper(lambda data: (*data, (-data[1], -data[2], data[1] + data[2])), fn_nn, [1, 2], -1)
+
+        # Handling built-in functions (e.g. `dict`, `iter`, `int`, `str`) whose signatures cannot be inspected
+        _helper(lambda data: (str(data[0]), data[1], data[2]), str, 0)
+        _helper(lambda data: (data[0], data[1], int(data[2])), int, 2)
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_dict_with_col_iterdatapipe(self):
@@ -1765,7 +1796,7 @@ class TestFunctionalMapDataPipe(TestCase):
         _ = next(it)
         self._serialization_test_helper(dp, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
-        _ = list(it)
+        _ = list(dp)
         self._serialization_test_helper(dp, use_dill)
 
     def test_serializable(self):
@@ -1888,15 +1919,15 @@ class TestFunctionalMapDataPipe(TestCase):
         with self.assertRaisesRegex(IndexError, r"out of range"):
             input_dp1.zip(input_dp2, input_dp3)[5]
 
-        # Functional Test: Ensure `zip` can combine `Shuffler` with others
+        # Functional Test: Ensure `zip` can combine `Batcher` with others
         dp1 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp1 = dp1.shuffle()
+        shuffle_dp1 = dp1.batch(2)
         dp2 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp2 = dp2.shuffle()
-        zip_dp = shuffle_dp1.zip(shuffle_dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        shuffle_dp2 = dp2.batch(3)
+        zip_dp1 = shuffle_dp1.zip(shuffle_dp2)
+        self.assertEqual(4, len(list(zip_dp1)))
         zip_dp2 = shuffle_dp1.zip(dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        self.assertEqual(5, len(list(zip_dp2)))
 
         # __len__ Test: returns the length of the shortest DataPipe
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
@@ -1911,10 +1942,27 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(set(range(10)), set(shuffler_dp))
 
         # Functional Test: Custom indices are working
-        shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
+        shuffler_dp = input_dp2.shuffle(indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
 
-        # # Reset Test:
+        # Functional Test: With global seed
+        torch.manual_seed(123)
+        shuffler_dp = input_dp1.shuffle()
+        res = list(shuffler_dp)
+        torch.manual_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
+
+        # Functional Test: Set seed
+        shuffler_dp = input_dp1.shuffle().set_seed(123)
+        res = list(shuffler_dp)
+        shuffler_dp.set_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
+
+        # Functional Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_dp1.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_dp1))
+
+        # Reset Test:
         shuffler_dp = input_dp1.shuffle()
         n_elements_before_reset = 5
         res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
@@ -1926,6 +1974,19 @@ class TestFunctionalMapDataPipe(TestCase):
         # __len__ Test: returns the length of the input DataPipe
         shuffler_dp = input_dp1.shuffle()
         self.assertEqual(10, len(shuffler_dp))
+
+        # Serialization Test
+        from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+
+        shuffler_dp = input_dp1.shuffle()
+        it = iter(shuffler_dp)
+        for _ in range(2):
+            next(it)
+        shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+
+        exp = list(it)
+        shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
+        self.assertEqual(exp, list(shuffler_dp_copy))
 
     def test_map_mapdatapipe(self):
         arr = range(10)
@@ -2318,6 +2379,9 @@ class NumbersDataset(IterDataPipe):
         for i in range(self.size):
             yield i
 
+    def __len__(self):
+        return self.size
+
 
 class TestGraph(TestCase):
     class CustomIterDataPipe(IterDataPipe):
@@ -2337,15 +2401,25 @@ class TestGraph(TestCase):
 
     def test_simple_traverse(self):
         numbers_dp = NumbersDataset(size=50)
-        mapped_dp = numbers_dp.map(lambda x: x * 10)
-        graph = torch.utils.data.graph.traverse(mapped_dp, only_datapipe=True)
-        expected: Dict[Any, Any] = {id(mapped_dp): (mapped_dp, {id(numbers_dp): (numbers_dp, {})})}
+        shuffled_dp = numbers_dp.shuffle()
+        sharded_dp = shuffled_dp.sharding_filter()
+        mapped_dp = sharded_dp.map(lambda x: x * 10)
+        graph = traverse_dps(mapped_dp)
+        expected: Dict[Any, Any] = {
+            id(mapped_dp): (mapped_dp, {
+                id(sharded_dp): (sharded_dp, {
+                    id(shuffled_dp): (shuffled_dp, {
+                        id(numbers_dp): (numbers_dp, {})
+                    })
+                })
+            })
+        }
         self.assertEqual(expected, graph)
 
         dps = torch.utils.data.graph_settings.get_all_graph_pipes(graph)
-        self.assertEqual(len(dps), 2)
-        self.assertTrue(numbers_dp in dps)
-        self.assertTrue(mapped_dp in dps)
+        self.assertEqual(len(dps), 4)
+        for datapipe in (numbers_dp, shuffled_dp, sharded_dp, mapped_dp):
+            self.assertTrue(datapipe in dps)
 
     def test_traverse_forked(self):
         numbers_dp = NumbersDataset(size=50)
@@ -2353,7 +2427,7 @@ class TestGraph(TestCase):
         dp0_upd = dp0.map(lambda x: x * 10)
         dp1_upd = dp1.filter(lambda x: x % 3 == 1)
         combined_dp = dp0_upd.mux(dp1_upd, dp2)
-        graph = torch.utils.data.graph.traverse(combined_dp, only_datapipe=True)
+        graph = traverse_dps(combined_dp)
         expected = {
             id(combined_dp): (combined_dp, {
                 id(dp0_upd): (dp0_upd, {
@@ -2387,21 +2461,21 @@ class TestGraph(TestCase):
     def test_traverse_mapdatapipe(self):
         source_dp = dp.map.SequenceWrapper(range(10))
         map_dp = source_dp.map(partial(_fake_add, 1))
-        graph = torch.utils.data.graph.traverse(map_dp)
+        graph = traverse_dps(map_dp)
         expected: Dict[Any, Any] = {id(map_dp): (map_dp, {id(source_dp): (source_dp, {})})}
         self.assertEqual(expected, graph)
 
     def test_traverse_mixdatapipe(self):
         source_map_dp = dp.map.SequenceWrapper(range(10))
         iter_dp = dp.iter.IterableWrapper(source_map_dp)
-        graph = torch.utils.data.graph.traverse(iter_dp)
+        graph = traverse_dps(iter_dp)
         expected: Dict[Any, Any] = {id(iter_dp): (iter_dp, {id(source_map_dp): (source_map_dp, {})})}
         self.assertEqual(expected, graph)
 
     def test_traverse_circular_datapipe(self):
         source_iter_dp = dp.iter.IterableWrapper(list(range(10)))
         circular_dp = TestGraph.CustomIterDataPipe(source_iter_dp)
-        graph = torch.utils.data.graph.traverse(circular_dp, only_datapipe=True)
+        graph = traverse_dps(circular_dp)
         # See issue: https://github.com/pytorch/data/issues/535
         expected: Dict[Any, Any] = {
             id(circular_dp): (circular_dp, {
@@ -2420,7 +2494,7 @@ class TestGraph(TestCase):
     def test_traverse_unhashable_datapipe(self):
         source_iter_dp = dp.iter.IterableWrapper(list(range(10)))
         unhashable_dp = TestGraph.CustomIterDataPipe(source_iter_dp)
-        graph = torch.utils.data.graph.traverse(unhashable_dp, only_datapipe=True)
+        graph = traverse_dps(unhashable_dp)
         with self.assertRaises(NotImplementedError):
             hash(unhashable_dp)
         expected: Dict[Any, Any] = {
@@ -2448,11 +2522,11 @@ class TestSerialization(TestCase):
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
-        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1).shuffle()
+        mdp = dp.map.SequenceWrapper(range(3)).map(lambda x: x + 1).shuffle()
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(result))
+        self.assertEqual([1, 1, 2, 2, 3, 3], sorted(result))
 
 
 class TestCircularSerialization(TestCase):
@@ -2489,28 +2563,14 @@ class TestCircularSerialization(TestCase):
         m1_1 = m2_1.datapipe
         src_1 = m1_1.datapipe
 
-        res1 = traverse(dp1, only_datapipe=True)
-        res2 = traverse(dp1, only_datapipe=False)
-
+        res1 = traverse_dps(dp1)
         exp_res_1 = {id(dp1): (dp1, {
             id(src_1): (src_1, {}),
             id(child_1): (child_1, {id(dm_1): (dm_1, {
                 id(m2_1): (m2_1, {id(m1_1): (m1_1, {id(src_1): (src_1, {})})})
             })})
         })}
-        exp_res_2 = {id(dp1): (dp1, {
-            id(src_1): (src_1, {}),
-            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                id(m2_1): (m2_1, {
-                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                    id(src_1): (src_1, {})
-                })
-            })})
-        })}
-
         self.assertEqual(res1, exp_res_1)
-        self.assertEqual(res2, exp_res_2)
-
         dp2 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(pickle.loads(pickle.dumps(dp2))))
 
@@ -2519,9 +2579,8 @@ class TestCircularSerialization(TestCase):
         m2_2 = dm_2.main_datapipe
         m1_2 = m2_2.datapipe
 
-        res3 = traverse(dp2, only_datapipe=True)
-        res4 = traverse(dp2, only_datapipe=False)
-        exp_res_3 = {id(dp2): (dp2, {
+        res2 = traverse_dps(dp2)
+        exp_res_2 = {id(dp2): (dp2, {
             id(dp1): (dp1, {
                 id(src_1): (src_1, {}),
                 id(child_1): (child_1, {id(dm_1): (dm_1, {
@@ -2539,44 +2598,7 @@ class TestCircularSerialization(TestCase):
                 })})
             })})
         })}
-        exp_res_4 = {id(dp2): (dp2, {
-            id(dp1): (dp1, {
-                id(src_1): (src_1, {}),
-                id(child_1): (child_1, {id(dm_1): (dm_1, {
-                    id(m2_1): (m2_1, {
-                        id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                        id(src_1): (src_1, {})
-                    })
-                })})
-            }),
-            id(child_2): (child_2, {id(dm_2): (dm_2, {
-                id(m2_2): (m2_2, {
-                    id(m1_2): (m1_2, {
-                        id(dp1): (dp1, {
-                            id(src_1): (src_1, {}),
-                            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                                id(m2_1): (m2_1, {
-                                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                    id(src_1): (src_1, {})
-                                })
-                            })})
-                        })
-                    }),
-                    id(dp1): (dp1, {
-                        id(src_1): (src_1, {}),
-                        id(child_1): (child_1, {id(dm_1): (dm_1, {
-                            id(m2_1): (m2_1, {
-                                id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                id(src_1): (src_1, {})
-                            })
-                        })})
-                    })
-                })
-            })})
-        })}
-
-        self.assertEqual(res3, exp_res_3)
-        self.assertEqual(res4, exp_res_4)
+        self.assertEqual(res2, exp_res_2)
 
     class LambdaIterDataPipe(CustomIterDataPipe):
 
@@ -2599,8 +2621,7 @@ class TestCircularSerialization(TestCase):
         m1_1 = m2_1.datapipe
         src_1 = m1_1.datapipe
 
-        res1 = traverse(dp1, only_datapipe=True)
-        res2 = traverse(dp1, only_datapipe=False)
+        res1 = traverse_dps(dp1)
 
         exp_res_1 = {id(dp1): (dp1, {
             id(src_1): (src_1, {}),
@@ -2608,18 +2629,8 @@ class TestCircularSerialization(TestCase):
                 id(m2_1): (m2_1, {id(m1_1): (m1_1, {id(src_1): (src_1, {})})})
             })})
         })}
-        exp_res_2 = {id(dp1): (dp1, {
-            id(src_1): (src_1, {}),
-            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                id(m2_1): (m2_1, {
-                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                    id(src_1): (src_1, {})
-                })
-            })})
-        })}
 
         self.assertEqual(res1, exp_res_1)
-        self.assertEqual(res2, exp_res_2)
 
         dp2 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(dill.loads(dill.dumps(dp2))))
@@ -2629,9 +2640,8 @@ class TestCircularSerialization(TestCase):
         m2_2 = dm_2.main_datapipe
         m1_2 = m2_2.datapipe
 
-        res3 = traverse(dp2, only_datapipe=True)
-        res4 = traverse(dp2, only_datapipe=False)
-        exp_res_3 = {id(dp2): (dp2, {
+        res2 = traverse_dps(dp2)
+        exp_res_2 = {id(dp2): (dp2, {
             id(dp1): (dp1, {
                 id(src_1): (src_1, {}),
                 id(child_1): (child_1, {id(dm_1): (dm_1, {
@@ -2649,45 +2659,7 @@ class TestCircularSerialization(TestCase):
                 })})
             })})
         })}
-        exp_res_4 = {id(dp2): (dp2, {
-            id(dp1): (dp1, {
-                id(src_1): (src_1, {}),
-                id(child_1): (child_1, {id(dm_1): (dm_1, {
-                    id(m2_1): (m2_1, {
-                        id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                        id(src_1): (src_1, {})
-                    })
-                })})
-            }),
-            id(child_2): (child_2, {id(dm_2): (dm_2, {
-                id(m2_2): (m2_2, {
-                    id(m1_2): (m1_2, {
-                        id(dp1): (dp1, {
-                            id(src_1): (src_1, {}),
-                            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                                id(m2_1): (m2_1, {
-                                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                    id(src_1): (src_1, {})
-                                })
-                            })})
-                        })
-                    }),
-                    id(dp1): (dp1, {
-                        id(src_1): (src_1, {}),
-                        id(child_1): (child_1, {id(dm_1): (dm_1, {
-                            id(m2_1): (m2_1, {
-                                id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                id(src_1): (src_1, {})
-                            })
-                        })})
-                    })
-                })
-            })})
-        })}
-
-        self.assertEqual(res3, exp_res_3)
-        self.assertEqual(res4, exp_res_4)
-
+        self.assertEqual(res2, exp_res_2)
 
 class TestSharding(TestCase):
 
@@ -2721,6 +2693,40 @@ class TestSharding(TestCase):
             items += list(sharded_dp)
         self.assertEqual(sorted(all_items), sorted(items))
 
+    def test_sharding_groups(self):
+        def construct_sharded_pipe():
+            sharding_pipes = []
+            dp = NumbersDataset(size=90)
+            dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.DISTRIBUTED)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.MULTIPROCESSING)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=300)
+            sharding_pipes.append(dp)
+            return dp, sharding_pipes
+
+        dp, sharding_pipes = construct_sharded_pipe()
+
+        for pipe in sharding_pipes:
+            pipe.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
+            pipe.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+            pipe.apply_sharding(3, 1, sharding_group=300)
+
+        actual = list(dp)
+        expected = [17, 47, 77]
+        self.assertEqual(expected, actual)
+        self.assertEqual(3, len(dp))
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
+
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
         sharded_dp0 = numbers_dp.sharding_filter()
@@ -2753,6 +2759,46 @@ class TestSharding(TestCase):
             items.append(i)
 
         self.assertEqual(sorted(expected), sorted(items))
+
+    def test_multi_sharding(self):
+        # Raises Error when multiple sharding on the single branch
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        sharded_dp = numbers_dp.sharding_filter()
+        sharded_dp = sharded_dp.sharding_filter()
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
+            torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 0)
+
+        # Raises Error when sharding on both data source and branch
+        numbers_dp = dp.iter.IterableWrapper(range(13)).sharding_filter()
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp = dp1.sharding_filter()
+        zip_dp = dp2.zip(sharded_dp)
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
+            torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+
+        # Raises Error when multiple sharding on the branch and end
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp = dp1.sharding_filter()
+        zip_dp = dp2.zip(sharded_dp).sharding_filter()
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
+            torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+
+        # Single sharding_filter on data source
+        numbers_dp = dp.iter.IterableWrapper(range(13)).sharding_filter()
+        dp1, dp2 = numbers_dp.fork(2)
+        zip_dp = dp1.zip(dp2)
+        torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+        self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
+
+        # Single sharding_filter per branch
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp1 = dp1.sharding_filter()
+        sharded_dp2 = dp2.sharding_filter()
+        zip_dp = sharded_dp1.zip(sharded_dp2)
+        torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+        self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
 
 
 class TestIterDataPipeSingletonConstraint(TestCase):
@@ -3132,7 +3178,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng = rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
 
         # Test Case: fast forward works with list
         rng.manual_seed(0)
@@ -3165,7 +3211,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration,
                                              expected_res=res3)
@@ -3185,7 +3231,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
         rng = rng.manual_seed(100)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph6, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph6, rng)
         res6 = [(x, x) for x in res5]
         self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration,
                                              expected_res=res6)
@@ -3216,7 +3262,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
         it = iter(datapipe)
         for _ in range(n_iter):
             next(it)
@@ -3243,7 +3289,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._snapshot_test_helper(graph3, expected_res=res3)
 
@@ -3273,13 +3319,13 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
 
         # Get expected result
         expected_res = list(graph)
 
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
         it = iter(graph)
         n_iter = 3
         for _ in range(n_iter):

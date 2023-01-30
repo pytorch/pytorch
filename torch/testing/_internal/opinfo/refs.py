@@ -165,6 +165,7 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         op_db=None,  # The database of opinfos to search for the parent opinfo
         torch_opinfo_name,  # the string name of the corresponding torch opinfo
         torch_opinfo_variant_name="",  # the variant name for corresponding torch opinfo
+        validate_view_consistency=True,
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
@@ -174,6 +175,7 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
+        self.validate_view_consistency = validate_view_consistency
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 

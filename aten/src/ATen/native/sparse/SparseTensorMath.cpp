@@ -1,13 +1,14 @@
-#include <ATen/TensorIndexing.h>
-
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIndexing.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
@@ -34,6 +35,7 @@
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/addmm_native.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/any.h>
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/bmm_native.h>
@@ -373,7 +375,7 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 
 Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.size() > 0) {
+  if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
     bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
@@ -841,42 +843,6 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
-  // // TODO: Use a specialized CSR kernel for performance if needed
-  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
-    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
-  }
-  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
-    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
-  }
-  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
-  Tensor t = t_.to_sparse();
-  Tensor src = src_.to_sparse();
-  Tensor tmp_result = t.mul(src);
-  auto r_sparse_csr = tmp_result.to_sparse_csr();
-  r.resize_as_sparse_(r_sparse_csr);
-  r.copy_(r_sparse_csr);
-  return r;
-}
-
-Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
-  auto commonDtype = at::result_type(self, other);
-  if (self.is_sparse_csr() && other.layout() == kStrided) {
-    return mul_sparse_csr(self, other.sparse_mask(self));
-  }
-  if (self.layout() == kStrided && other.is_sparse_csr()) {
-    return mul_sparse_csr(self.sparse_mask(other), other);
-  }
-  auto result_options = self.options().dtype(commonDtype);
-  // CSR is 2d!
-  Tensor result = at::empty({0, 0}, result_options);
-  return at::mul_out(result, self, other); // redispatch!
-}
-
-Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
-  return at::mul_out(self, self, other); // redispatch!
-}
-
 // A generic function to implement pointwise-like operations
 // with index intersection between dense and sparse COO tensors.
 // NOTE: op is always called as op(dense_values, sparse_values),
@@ -1087,6 +1053,13 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   return _mul_dense_sparse_out(scalar_val, other, r);
 }
 
+DEFINE_DISPATCH(mul_sparse_sparse_out_stub);
+
+Tensor& _mul_sparse_sparse_out(const Tensor& x, const Tensor& y, Tensor& res) {
+  mul_sparse_sparse_out_stub(res.device().type(), res, x, y);
+  return res;
+}
+
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -1109,13 +1082,34 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
     return _mul_sparse_sparse_zero_dim_out(t_, src_, r);
   }
 
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"
+  const auto is_equal_size_inputs = t_.sizes().equals(src_.sizes());
+
+  // mul(sparse, sparse) with inputs which broadcast only in dense dims
+  if (!is_equal_size_inputs) {
+    _mul_sparse_sparse_out(t_, src_, r);
+    return r;
+  }
+
+  TORCH_CHECK(is_equal_size_inputs, "mul: expected 'self' and 'other' to have same sizes when both are sparse"
       ", but ", t_.sizes(), " != ", src_.sizes());
 
+  // Short circuit when there is zero nnz
+  // Not strictly necessary, but there are tests checking whether
+  // resize in mul fails if run on tensors coming from .data/.detach.
   if (!t_._nnz() || !src_._nnz()) {
     r.resize_as_(t_);
     return r.zero_();
   }
+
+  // _mul_sparse_sparse_out is faster for large inputs
+  // and when either of the inputs is uncoalesced.
+  if (!t_.is_coalesced() || !src_.is_coalesced()) {
+    _mul_sparse_sparse_out(t_, src_, r);
+    return r;
+  }
+
+  // Otherwise _mul_sparse_sparse_out might be slower
+  // than the brute-force solution below.
 
   SparseTensor t = t_.coalesce();
   SparseTensor src = src_.coalesce();
@@ -1256,6 +1250,9 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha
 ) {
+  AT_ASSERT(r.layout() == kStrided, "addmm_sparse_dense: expected strided result tensor, got tensor with layout ", r.layout());
+  AT_ASSERT(sparse_.layout() == kSparse, "addmm_sparse_dense: expected sparse tensor, got tensor with layout ", sparse_.layout());
+
   // TODO: This error message seems awfully opaque
   TORCH_CHECK(
       t.is_cpu(),
@@ -1378,8 +1375,12 @@ Tensor _sparse_mm(
   if (mat1.is_sparse() && mat2.is_sparse()) {
     return at::_sparse_sparse_matmul(mat1, mat2);
   }
-  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
-  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  if (mat1.is_sparse() || at::sparse_csr::is_sparse_compressed(mat1)) {
+    Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+    return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  }
+  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat1.options());
+  return at::_sparse_addmm(t.transpose(-2, -1), mat2.transpose(-2, -1), mat1.transpose(-2, -1), 0, 1).transpose(-2, -1);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that
@@ -1524,7 +1525,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
   Tensor newi = at::empty({2, r_nnz}, kLong);
-  Tensor newv = native::zeros(
+  Tensor newv = at::zeros(
       {r_nnz},
       optTypeMetaToScalarType(values.options().dtype_opt()),
       values.options().layout_opt(),
@@ -1657,7 +1658,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
   const int64_t sparse_dims_to_sum_size = dims_to_sum_v.size() - dense_dims_to_sum_v.size();
   const bool sum_all_sparse_dim = (sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
 
   // new values
   Tensor new_values;
@@ -1779,7 +1780,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {

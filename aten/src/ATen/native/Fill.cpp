@@ -1,12 +1,23 @@
 // Functions that fill Tensors with constants.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
 #include <ATen/native/Fill.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/Utils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/fill_diagonal_native.h>
+#include <ATen/ops/fill_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/zero_native.h>
+#endif
 
 namespace at {
 namespace native {

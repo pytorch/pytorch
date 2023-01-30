@@ -69,8 +69,8 @@ static OptionalTensorRef make_otr(const TensorBase &tensor) {
 namespace internal {
 
 OpaqueOptionalTensorRef::OpaqueOptionalTensorRef() {
-  static_assert(alignof(OptionalTensorRef) == alignof(TensorBase), "");
-  static_assert(sizeof(OptionalTensorRef) == sizeof(TensorBase), "");
+  static_assert(alignof(OptionalTensorRef) == alignof(TensorBase));
+  static_assert(sizeof(OptionalTensorRef) == sizeof(TensorBase));
   new (data_.data()) OptionalTensorRef();
 }
 
@@ -163,7 +163,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 
 TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims) {
   declare_static_shape(shape);
-  if (!static_shape_->size()) return *this;
+  if (static_shape_->empty()) return *this;
   for (const auto& squash_dim : squash_dims) {
     TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
                 "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
@@ -431,7 +431,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   }
 
   // Computes a common dtype, if needed
-  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
+  if ((has_different_input_dtypes || all_ops_are_scalars_) && config.promote_inputs_to_common_dtype_) {
     common_dtype_ = compute_common_dtype();
   }
 
@@ -715,7 +715,7 @@ void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
   // Update shape and strides
   shape_ = reorder(shape_);
   for (auto& op : operands_) {
-    if (op.stride_bytes.size() > 0) {
+    if (!op.stride_bytes.empty()) {
       op.stride_bytes = reorder(op.stride_bytes);
     }
   }
@@ -1221,8 +1221,11 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
     // the destination tensor.  If the output tensor is also an input, we'll
     // pick it up later in the operands.
     if (config.resize_outputs_ && op.is_output) continue;
+    TORCH_CHECK(!op.tensor_base().unsafeGetTensorImpl()->has_symbolic_sizes_strides(),
+      "TensorIterator does not support symbolic shapes; please implement this operator in torch/_refs "
+      "using the elementwise or reduction helpers (look at backtrace to find out what operator this is)");
     auto shape = op.tensor_base().sizes();
-    if (shape.size() == 0) {
+    if (shape.empty()) {
       has_scalars = true;
     } else {
       has_tensors = true;
@@ -1237,11 +1240,12 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       shape_ = infer_size_dimvector(shape_, shape);
     }
   }
+  all_ops_are_scalars_ = !has_tensors;
 }
 
 void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {
   for (auto& op : operands_) {
-    if (op.tensor_base().defined()) {
+    if (op.tensor_base().defined() && !op.will_resize) {
       IntArrayRef original_shape = config.static_shape_ ? shape_ : op.tensor_base().sizes();
       auto original_stride = op.tensor_base().strides();
       auto element_size_in_bytes = op.tensor_base().element_size();
@@ -1491,10 +1495,19 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
+  auto has_storage = true;
+  for (auto& op : operands_) {
+    has_storage &= op.tensor_base().has_storage();
+  }
+  auto privateuse1_without_storage =
+     common_device_.type() == DeviceType::PrivateUse1 &&
+     !has_storage;
+
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
-  if (common_device_.type() == DeviceType::XLA  ||
+  if (privateuse1_without_storage  ||
+      common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
       common_device_.type() == DeviceType::ORT  ||
@@ -1711,7 +1724,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
 std::array<int64_t, 2> DimCounter::max_2d_step() const {
   int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
   int64_t step1 = 1;
-  if (step0 == shape[0] && shape.size() >= 1) {
+  if (step0 == shape[0] && !shape.empty()) {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
   }
   return {step0, step1};

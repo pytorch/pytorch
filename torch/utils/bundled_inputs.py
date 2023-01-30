@@ -391,7 +391,7 @@ def _inflate_expr(
 
     if isinstance(arg, torch.Tensor):
         # Small-storage tensors can just be saved directly.
-        if arg.storage().size() <= MAX_RAW_TENSOR_SIZE or skip_size_check:
+        if arg._typed_storage().size() <= MAX_RAW_TENSOR_SIZE or skip_size_check:
             return arg, ref, None
         # Small contiguous tensors can be cloned to have small storage.
         # TODO: Should we do this even for non-contiguous tensors?
@@ -407,7 +407,7 @@ def _inflate_expr(
         # TODO: Provide more useful diagnostics.
         raise Exception(
             f"Bundled input argument at position '{ref}' is "
-            f"a tensor with storage size {arg.storage().size()}. "
+            f"a tensor with storage size {arg._typed_storage().size()}. "
             f"You probably don't want to bundle this as an input. "
         )
     else:

@@ -10,7 +10,7 @@ from torchgen.api.python import (
 )
 from torchgen.gen import parse_native_yaml
 
-from torchgen.model import Variant
+from torchgen.model import DispatchKey, Variant
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -74,7 +74,7 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Union[_device, str, None]=None"
+DEVICE_PARAM = "device: Device=None"
 FACTORY_PARAMS = (
     f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
 )
@@ -136,6 +136,9 @@ blocklist = [
     "floor_divide",
     "floor_divide_",
     "floor_divide_out",
+    "to",
+    "_to_copy",
+    "copy_",
 ]
 
 binary_ops = (
@@ -361,14 +364,8 @@ def gen_pyi(
                     f"{n2}_indices: Union[Tensor, List],"
                     " values: Union[Tensor, List], size: Optional[_size]=None,"
                     " *, dtype: Optional[_dtype]=None,"
-                    " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-                ],
-                f"_sparse_{n}_tensor_unsafe": [
-                    f"def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],"
-                    f"{n2}_indices: Union[Tensor, List],"
-                    " values: Union[Tensor, List], size: List[int],"
-                    " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                    " requires_grad: bool = False) -> Tensor: ..."
+                    " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
+                    " check_invariants:_bool=None) -> Tensor: ..."
                 ],
             }
         )
@@ -390,7 +387,7 @@ def gen_pyi(
             ],
             "numel": ["def numel(self: Tensor) -> _int: ..."],
             "as_tensor": [
-                "def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."
+                f"def as_tensor(data: Any, dtype: Optional[_dtype]=None, {DEVICE_PARAM}) -> Tensor: ..."
             ],
             "get_num_threads": ["def get_num_threads() -> _int: ..."],
             "set_num_threads": ["def set_num_threads(num: _int) -> None: ..."],
@@ -408,28 +405,18 @@ def gen_pyi(
             "sparse_coo_tensor": [
                 "def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],"
                 " size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-            ],
-            "_sparse_coo_tensor_unsafe": [
-                "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
-                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
+                " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
+                " check_invariants:_bool=None) -> Tensor: ..."
             ],
             "sparse_compressed_tensor": [
                 "def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],"
                 "plain_indices: Union[Tensor, List],"
                 " values: Union[Tensor, List], size: Optional[_size]=None,"
                 " *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
+                " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
+                " check_invariants:_bool=None) -> Tensor: ..."
             ],
-            "_sparse_compressed_tensor_unsafe": [
-                "def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],"
-                "plain_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: List[int],"
-                " dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,"
-                " device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
-            ],
+            "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
@@ -439,6 +426,10 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_enable_functionalization": [
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+            ],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -593,7 +584,7 @@ def gen_pyi(
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int]: ...",
+                "def stride(self) -> Tuple[_int, ...]: ...",
                 "def stride(self, _int) -> _int: ...",
             ],
             "new_ones": [
@@ -622,7 +613,7 @@ def gen_pyi(
                     DEVICE_PARAM
                 ),
             ],
-            "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
+            "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
                 "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
                 " dispatch_device: _bool=False, device_for_backend_keys: Optional[_device] = None) -> Tensor: ..."
@@ -657,7 +648,7 @@ def gen_pyi(
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
             ],
-            "storage": ["def _storage(self) -> Storage: ..."],
+            "storage": ["def untyped_storage(self) -> Storage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
                 "def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...",
@@ -718,7 +709,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number]{})"
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
@@ -728,7 +719,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number], "
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
                 "*, alpha: Optional[Number]=1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
@@ -863,6 +854,10 @@ def gen_pyi(
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
     all_directive[0] = "__all__ = {}".format(all_directive[0])
 
+    # Dispatch key hints
+    # ~~~~~~~~~~~~~~~~~~
+    dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
 
@@ -873,6 +868,7 @@ def gen_pyi(
         "legacy_class_hints": legacy_class_hints,
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
+        "dispatch_key_hints": dispatch_key_hints,
         "all_directive": all_directive,
     }
     fm.write_with_template(

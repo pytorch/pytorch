@@ -12,10 +12,11 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/quantized/IndexKernel.h>
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 static constexpr int launch_bound2 = 4;
 
@@ -204,8 +205,8 @@ static void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     auto fill_val = source.to<scalar_t>();
@@ -222,8 +223,8 @@ static void index_copy_kernel(
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
   // this kernel will not be called when torch.use_deterministic_algorithms(True)
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
@@ -236,6 +237,21 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_put", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_put_kernel_impl<dtype>(iter, index_size, index_stride);
+  });
+}
+
+void index_put_kernel_quantized_cuda(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+  TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "index_put", [&] {
+    constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
+    constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
+    float inv_scale = 1.0f / static_cast<float>(scale);
+
+    gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+      int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
+      qvalue = min(max(qvalue, qmin), qmax);
+      *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
+    });
   });
 }
 
@@ -451,4 +467,6 @@ REGISTER_DISPATCH(put_stub, &put_kernel);
 REGISTER_DISPATCH(take_stub, &take_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
-}} // namespace at::native
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
+
+} // namespace at::native

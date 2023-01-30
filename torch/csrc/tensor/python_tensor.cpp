@@ -431,7 +431,9 @@ static bool PyTensorType_Check(PyObject* obj) {
 
 void py_set_default_tensor_type(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  TORCH_CHECK_TYPE(PyTensorType_Check(obj), "invalid type object");
+  TORCH_CHECK_TYPE(
+      PyTensorType_Check(obj),
+      "invalid type object: only floating-point types are supported as the default type");
   PyTensorType* type = (PyTensorType*)obj;
   if (type->is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(*type);
@@ -440,7 +442,9 @@ void py_set_default_tensor_type(PyObject* obj) {
 }
 
 void py_set_default_dtype(PyObject* obj) {
-  TORCH_CHECK_TYPE(THPDtype_Check(obj), "invalid dtype object");
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(obj),
+      "invalid dtype object: only floating-point types are supported as the default type");
   auto scalar_type = ((THPDtype*)obj)->scalar_type;
   set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
 }

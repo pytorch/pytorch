@@ -35,7 +35,12 @@ def name(func: FunctionSchema) -> str:
 
 
 def argumenttype_type(
-    t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False
+    t: Type,
+    *,
+    mutable: bool,
+    binds: ArgName,
+    remove_non_owning_ref_types: bool = False,
+    symint: bool = True,
 ) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
@@ -45,24 +50,30 @@ def argumenttype_type(
         t,
         mutable=mutable,
         binds=binds,
+        symint=symint,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
 
 
 def argument_type(
-    a: Argument, *, binds: ArgName, remove_non_owning_ref_types: bool = False
+    a: Argument,
+    *,
+    binds: ArgName,
+    remove_non_owning_ref_types: bool = False,
+    symint: bool = True,
 ) -> NamedCType:
     return argumenttype_type(
         a.type,
         mutable=a.is_write,
         binds=binds,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
+        symint=symint,
     )
 
 
-def returns_type(rs: Sequence[Return]) -> CType:
+def returns_type(rs: Sequence[Return], *, symint: bool = True) -> CType:
     # At present, there is no difference. But there could be!
-    return cpp.returns_type(rs)
+    return cpp.returns_type(rs, symint=symint)
 
 
 def jit_arguments(func: FunctionSchema) -> List[Argument]:
@@ -88,15 +99,20 @@ def jit_arguments(func: FunctionSchema) -> List[Argument]:
     )
 
 
-def argument(a: Argument, *, remove_non_owning_ref_types: bool = False) -> Binding:
+def argument(
+    a: Argument, *, remove_non_owning_ref_types: bool = False, symint: bool = True
+) -> Binding:
     return Binding(
         nctype=argument_type(
-            a, binds=a.name, remove_non_owning_ref_types=remove_non_owning_ref_types
+            a,
+            binds=a.name,
+            remove_non_owning_ref_types=remove_non_owning_ref_types,
+            symint=symint,
         ),
         name=a.name,
         argument=a,
     )
 
 
-def arguments(func: FunctionSchema) -> List[Binding]:
-    return [argument(a) for a in jit_arguments(func)]
+def arguments(func: FunctionSchema, *, symint: bool = True) -> List[Binding]:
+    return [argument(a, symint=symint) for a in jit_arguments(func)]

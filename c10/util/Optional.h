@@ -39,6 +39,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -171,7 +172,7 @@ class bad_optional_access : public std::logic_error {
 
 template <class T>
 union storage_t {
-  unsigned char dummy_;
+  unsigned char dummy_{};
   T value_;
 
 #if __cplusplus >= 202002L
@@ -629,7 +630,7 @@ class optional : private OptionalBase<T> {
   typedef T value_type;
 
   // 20.5.5.1, constructors
-  constexpr optional() noexcept : OptionalBase<T>(){};
+  constexpr optional() noexcept = default;
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;
@@ -1238,7 +1239,7 @@ constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
 namespace std {
 template <typename T>
 struct hash<c10::optional<T>> {
-  typedef typename hash<T>::result_type result_type;
+  typedef c10::invoke_result_t<std::hash<T>, T> result_type;
   typedef c10::optional<T> argument_type;
 
   constexpr result_type operator()(argument_type const& arg) const {

@@ -10,6 +10,7 @@ from typing import Union
 from typing import Optional
 import xml.etree.ElementTree as ET
 import functools
+import pytest
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -144,3 +145,25 @@ class LogXMLReruns(LogXML):
         self.node_reporters_ordered.append(reporter)
 
         return reporter
+
+
+# imitating summary_failures in pytest's terminal.py
+# both hookwrapper and tryfirst to make sure this runs before pytest's
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    # prints stack traces for reruns
+    if terminalreporter.config.option.tbstyle != "no":
+        reports = terminalreporter.getreports("rerun")
+        if reports:
+            terminalreporter.write_sep("=", "RERUNS")
+            if terminalreporter.config.option.tbstyle == "line":
+                for rep in reports:
+                    line = terminalreporter._getcrashline(rep)
+                    terminalreporter.write_line(line)
+            else:
+                for rep in reports:
+                    msg = terminalreporter._getfailureheadline(rep)
+                    terminalreporter.write_sep("_", msg, red=True, bold=True)
+                    terminalreporter._outrep_summary(rep)
+                    terminalreporter._handle_teardown_sections(rep.nodeid)
+    yield

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at { namespace native {
@@ -12,6 +12,7 @@ using rnn_packed_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, co
 
 DECLARE_DISPATCH(lstm_fn, lstm_cudnn_stub);
 DECLARE_DISPATCH(lstm_fn, lstm_miopen_stub);
+DECLARE_DISPATCH(lstm_fn, lstm_mkldnn_stub);
 DECLARE_DISPATCH(rnn_fn, gru_cudnn_stub);
 DECLARE_DISPATCH(rnn_fn, gru_miopen_stub);
 DECLARE_DISPATCH(rnn_fn, rnn_tanh_cudnn_stub);
@@ -45,8 +46,8 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
     }
   };
 
-  for (auto h : hiddens) check_tensors("hidden", h);
-  for (auto p : params) check_tensors("parameter", p);
+  for (const auto& h : hiddens) check_tensors("hidden", h);
+  for (const auto& p : params) check_tensors("parameter", p);
 }
 
 }} // namespace at::native

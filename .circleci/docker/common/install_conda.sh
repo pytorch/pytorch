@@ -42,8 +42,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   pushd /tmp
   wget -q "${BASE_URL}/${CONDA_FILE}"
-  chmod +x "${CONDA_FILE}"
-  as_jenkins ./"${CONDA_FILE}" -b -f -p "/opt/conda"
+  # NB: Manually invoke bash per https://github.com/conda/conda/issues/10431
+  as_jenkins bash "${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
 
   # NB: Don't do this, rely on the rpath to get it right
@@ -61,24 +61,26 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python
     # This should be called as
     #   conda_install pkg1 pkg2 ... [-c channel]
-    as_jenkins conda install -q -y python="$ANACONDA_PYTHON_VERSION" $*
+    as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" $*
   }
 
   pip_install() {
-    as_jenkins pip install --progress-bar off $*
+    as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.13, but
-  # we want to pin to version 3.13.
-  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi future six"
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
+  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools six"
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    # TODO: Stop using `-c malfet`
+    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 -c malfet
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
@@ -92,14 +94,19 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing_extensions
   fi
 
+  # Use conda cmake in some cases. Conda cmake will be newer than our supported
+  # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
+  # following builds that we know should use conda. Specifically, Ubuntu bionic
+  # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
+  if [ -n "${CONDA_CMAKE}" ]; then
+    conda_install cmake
+  fi
+
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   if [ -n "$CUDA_VERSION" ]; then
     conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
-
-  # TODO: This isn't working atm
-  conda_install nnpack -c killeent
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt

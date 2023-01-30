@@ -13,6 +13,8 @@ Functions
 -----------------------
 
 .. autofunction:: airy_ai
+.. autofunction:: bessel_j0
+.. autofunction:: bessel_j1
 .. autofunction:: digamma
 .. autofunction:: entr
 .. autofunction:: erf

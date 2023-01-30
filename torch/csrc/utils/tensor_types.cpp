@@ -43,6 +43,12 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.mps";
     case at::Backend::PrivateUse1:
       return "torch.privateuseone";
+    case at::Backend::Lazy:
+      return "torch.lazy";
+    case at::Backend::XLA:
+      return "torch.xla";
+    case at::Backend::Meta:
+      return "torch.meta";
     default:
       AT_ERROR("Unimplemented backend ", backend);
   }
@@ -132,7 +138,7 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
           (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
         continue;
       }
-      ret.emplace_back(std::make_pair(backend, scalar_type));
+      ret.emplace_back(backend, scalar_type);
     }
   }
 

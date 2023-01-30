@@ -7,7 +7,7 @@ import torch
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import \
-    (run_tests, IS_SANDCASTLE, clone_input_helper, first_sample, skipIfSlowGradcheckEnv)
+    (run_tests, IS_SANDCASTLE, clone_input_helper, first_sample)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -30,7 +30,6 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 #   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
 #   functionality with original test_jit.py method operator tests
-@skipIfSlowGradcheckEnv
 class TestJit(JitCommonTestCase):
     exact_dtype = True
 
@@ -52,6 +51,12 @@ class TestJit(JitCommonTestCase):
             # TODO: inplace tests currently fail, fix and add inplace variant
             'function': func, 'method': method,
         }
+
+        # scripting strips the torch.ops prefix from these operators
+        # incorrectly; don't bother testing this case.  Count this
+        # as "testing"
+        if isinstance(func, torch._ops.OpOverload):
+            self.skipTest("variant consistency doesn't work on torch.ops")
 
         # TODO: find better way to standardize on op registration itself..
         has_fake_function = op.name in ["resize_", 'resize_as_']

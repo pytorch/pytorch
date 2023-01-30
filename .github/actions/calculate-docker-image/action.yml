@@ -24,9 +24,6 @@ inputs:
   force_push:
     description: If set to any value, always run the push
     required: false
-  push-ghcr-image:
-    description: If set to any value, push docker image to the ghcr.io.
-    required: false
 
 outputs:
   docker-image:
@@ -41,18 +38,18 @@ runs:
       id: calculate-tag
       env:
         IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
-        XLA_IMAGE_TAG: v0.4
+        XLA_IMAGE_TAG: v0.9
         DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
       run: |
         if [ -n "${IS_XLA}" ]; then
           echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
-          echo "::set-output name=docker-tag::${DOCKER_TAG}"
-          echo "::set-output name=docker-image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "docker-image=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
         else
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
-          echo "::set-output name=docker-tag::${DOCKER_TAG}"
-          echo "::set-output name=docker-image::${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"
+          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "docker-image=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
         fi
 
     - name: Check if image should be built
@@ -93,10 +90,10 @@ runs:
             # In order to avoid a stampeding herd of jobs trying to push all at once we set it to
             # skip the push. If this is negatively affecting TTS across the board the suggestion
             # should be to run the docker-builds.yml workflow to generate the correct docker builds
-            echo ::set-output name=skip_push::true
+            echo "skip_push=true" >> "${GITHUB_OUTPUT}"
           fi
         fi
-        echo ::set-output name=rebuild::yes
+        echo "rebuild=yes" >> "${GITHUB_OUTPUT}"
 
     - name: Build and push docker image
       if: inputs.always-rebuild || steps.check.outputs.rebuild
@@ -106,8 +103,6 @@ runs:
         # Skip push if we don't need it, or if specified in the inputs
         DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
-        PUSH_GHCR_IMAGE: ${{ inputs.push-ghcr-image }}
-        GHCR_PAT: ${{ env.GHCR_PAT }}
       working-directory: .circleci/docker
       shell: bash
       run: |

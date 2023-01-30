@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
@@ -6,6 +8,16 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/from_blob.h>
+#endif
 
 int register_linear_params();
 
@@ -49,11 +61,18 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
-  TORCH_CHECK(
-      orig_weight.defined(),
-      "Cannot unpack weights. "
-      "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
+    if (orig_weight.defined()){
+        return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
+    }
+    else{
+        TORCH_WARN(
+        "Original weight is freed, we are converting pre-packed weight to original weight.");
+        uint8_t* kernel = w->unpackWeights(w_zero_points.data(), n_elements);
+        at::Tensor original_tensor = at::from_blob(kernel, weight_sizes, c10::kByte).clone().toType(c10::kQInt8);
+        original_tensor.sub_(128);
+        free(kernel);
+        return std::tuple<at::Tensor, c10::optional<at::Tensor>>(original_tensor, bias_);
+    }
 }
 #endif // USE_PYTORCH_QNNPACK
 

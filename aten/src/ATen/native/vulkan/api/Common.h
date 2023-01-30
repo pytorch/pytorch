@@ -2,23 +2,10 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <c10/util/Exception.h>
+#include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
-
-#ifdef USE_VULKAN_SHADERC_RUNTIME
-#include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name)                     \
-  ::at::native::vulkan::api::ShaderSource { \
-#name, name##_glsl,                     \
-  }
-#else
-#include <ATen/native/vulkan/spv.h>
-#define VK_KERNEL(name)                                  \
-  ::at::native::vulkan::api::ShaderSource {              \
-#name, name##_spv, name##_spv_len, name##_spv_layout \
-  }
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 /*
  * Check that the return code of a Vulkan API call is VK_SUCCESS, throwing an

@@ -89,7 +89,11 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
     default:
-      TORCH_CHECK(false, "unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ONNX type ",
+          onnx_type,
+          " is an unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
 }
@@ -135,7 +139,11 @@ namespace {
     case at::kQInt32:
       return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
     default:
-      AT_ERROR("unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ScalarType ",
+          toString(at_type),
+          " is an unexpected tensor scalar type");
   }
 }
 } // namespace
@@ -237,7 +245,7 @@ void ONNXLintGraph(
       GRAPH_DEBUG("Node does not set sourceRange:", *n);
       n_miss_source_range.emplace_back(n->kind());
     }
-    if (n->scopeName() == "") {
+    if (n->scopeName().empty()) {
       GRAPH_DEBUG("Node does not set scope:", *n);
       n_miss_scope.emplace_back(n->kind());
     }

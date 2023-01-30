@@ -88,7 +88,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
     const std::vector<size_t>* indices,
     GraphFormat format) {
-  std::vector<torch::lazy::Node*> root_nodes;
+  std::vector<const torch::lazy::Node*> root_nodes;
   std::vector<torch::lazy::Value> root_values;
   std::vector<torch::lazy::hash_t> root_hashes;
   torch::lazy::Unique<torch::lazy::BackendDevice> unique_device;

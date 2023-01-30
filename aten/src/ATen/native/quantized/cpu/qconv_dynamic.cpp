@@ -1,8 +1,8 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
-#include <cmath>
-#include <vector>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
 #include <ATen/native/quantized/PackedParams.h>
@@ -11,8 +11,14 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <c10/util/irange.h>
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/dequantize.h>                           // for dequantize
+#include <ATen/ops/quantize_per_tensor.h>
+#endif
 
 #ifdef USE_FBGEMM
 
@@ -157,7 +163,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_dynamic(
       input, q_params.scale, q_params.zero_point, c10::kQUInt8);
 
   at::Tensor out =
-      apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
+      apply_impl<false>(q_input, /*accum*/c10::nullopt, q_params.scale, q_params.zero_point);
 
   // TODO: Modify ideep to allow fp32 input & output
   // to avoid explicit `quantize - dequantize`

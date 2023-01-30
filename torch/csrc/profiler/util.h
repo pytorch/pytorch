@@ -10,6 +10,7 @@
 #include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
@@ -181,12 +182,11 @@ class TORCH_API GlobalStateManager {
     return singleton_;
   }
 
-  template <typename... Args>
-  static void init(Args... args) {
+  static void push(std::shared_ptr<T>&& state) {
     if (singleton().state_) {
       LOG(WARNING) << "GlobalStatePtr already exists!";
     } else {
-      singleton().state_ = std::make_shared<T>(std::forward<Args>(args)...);
+      singleton().state_ = std::move(state);
     }
   }
 
@@ -195,9 +195,6 @@ class TORCH_API GlobalStateManager {
   }
 
   static std::shared_ptr<T> pop() {
-    TORCH_INTERNAL_ASSERT(
-        singleton().state_ != nullptr,
-        "Global state ptr cannot be null before resetting");
     auto out = singleton().state_;
     singleton().state_.reset();
     return out;
@@ -207,6 +204,23 @@ class TORCH_API GlobalStateManager {
   GlobalStateManager() = default;
 
   std::shared_ptr<T> state_;
+};
+
+struct HashCombine {
+  template <typename T0, typename T1>
+  size_t operator()(const std::pair<T0, T1>& i) {
+    return c10::get_hash((*this)(i.first), (*this)(i.second));
+  }
+
+  template <typename... Args>
+  size_t operator()(const std::tuple<Args...>& i) {
+    return c10::get_hash(i);
+  }
+
+  template <typename T>
+  size_t operator()(const T& i) {
+    return c10::get_hash(i);
+  }
 };
 
 } // namespace impl

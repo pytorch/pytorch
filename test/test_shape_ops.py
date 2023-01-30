@@ -406,6 +406,34 @@ class TestShapeOps(TestCase):
             out_t = make_from_data([[3, 2, 1], [6, 5, 4]])
             yield in_t, dims, out_t
 
+            # vectorized NCHW cases (images)
+            if device == "cpu" and dtype != torch.bfloat16:
+                for mf in [torch.contiguous_format, torch.channels_last]:
+                    for c in [2, 3, 8, 16]:
+                        in_t = make_from_size((2, c, 32, 32)).contiguous(memory_format=mf)
+                        np_in_t = in_t.numpy()
+
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_t, 3, out_t
+
+                        np_out_t = np_in_t[:, :, ::-1, :].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_t, 2, out_t
+
+                        # non-contig cases
+                        in_tt = in_t[..., ::2, :]
+                        np_in_t = in_tt.numpy()
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_tt, 3, out_t
+
+                        in_tt = in_t[..., ::2]
+                        np_in_t = in_tt.numpy()
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_tt, 3, out_t
+
             # Noops (edge cases)
 
             # Size 0
@@ -677,6 +705,16 @@ class TestShapeOps(TestCase):
         x = torch.randn(10, requires_grad=True)
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
+
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_sparse_dense_dim(self, device, dtype):
+        for shape in [(), (2, ), (2, 3)]:
+            if dtype.is_complex or dtype.is_floating_point:
+                x = torch.rand(shape, device=device, dtype=dtype)
+            else:
+                x = torch.randint(-9, 9, shape, device=device, dtype=dtype)
+            self.assertEqual(x.sparse_dim(), 0)
+            self.assertEqual(x.dense_dim(), len(shape))
 
 instantiate_device_type_tests(TestShapeOps, globals())
 

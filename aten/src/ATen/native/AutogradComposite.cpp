@@ -1,5 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <c10/util/SmallBuffer.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_has_same_storage_numel_native.h>
+#include <ATen/ops/_make_dual_native.h>
+#include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
+#include <ATen/ops/_unpack_dual_native.h>
+#include <ATen/ops/alias.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {

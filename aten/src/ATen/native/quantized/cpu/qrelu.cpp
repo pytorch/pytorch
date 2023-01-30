@@ -1,6 +1,8 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -9,6 +11,19 @@
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/hardtanh_native.h>
+#include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/prelu.h>
+#include <ATen/ops/prelu_native.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/relu_native.h>
+#endif
 
 #include <algorithm>
 
@@ -135,7 +150,7 @@ Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   return self;
 }
 
-Tensor prelu_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
+Tensor _prelu_kernel_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
                                 double output_scale, int64_t output_zero_point) {
   auto ndim = self.dim();
   // for ndim < 1 or > 5, go to reference path
@@ -157,8 +172,8 @@ Tensor prelu_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
   return qy;
 }
 
-Tensor prelu_quantized_cpu(const Tensor& self, const Tensor& weight) {
-  return prelu_quantized_cpu_impl(self, weight, self.q_scale(), self.q_zero_point());
+Tensor _prelu_kernel_quantized_cpu(const Tensor& self, const Tensor& weight) {
+  return _prelu_kernel_quantized_cpu_impl(self, weight, self.q_scale(), self.q_zero_point());
 }
 
 namespace {
@@ -205,7 +220,7 @@ class QLeakyRelu final {
 class QPRelu final {
  public:
   static Tensor run(Tensor self, const Tensor& weight, double output_scale, int64_t output_zero_point) {
-  return prelu_quantized_cpu_impl(self, weight, output_scale, output_zero_point);
+  return _prelu_kernel_quantized_cpu_impl(self, weight, output_scale, output_zero_point);
   }
 };
 

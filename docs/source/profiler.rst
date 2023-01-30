@@ -26,3 +26,14 @@ API Reference
 .. autofunction:: torch.profiler.schedule
 
 .. autofunction:: torch.profiler.tensorboard_trace_handler
+
+Intel Instrumentation and Tracing Technology APIs
+-------------------------------------------------
+
+.. autofunction:: torch.profiler.itt.is_available
+
+.. autofunction:: torch.profiler.itt.mark
+
+.. autofunction:: torch.profiler.itt.range_push
+
+.. autofunction:: torch.profiler.itt.range_pop

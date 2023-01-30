@@ -10,6 +10,8 @@ on:
       - landchecks/*
   workflow_dispatch:
 
+# The names of steps that actually test the code should be suffixed with `(nonretryable)`.
+# When any other step fails, it's job will be retried once by retryBot.
 jobs:
   lintrunner:
     runs-on: linux.20_04.16x
@@ -21,16 +23,18 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
-      - name: Install lintrunner
-        run: pip install lintrunner==0.9.2
+      - name: Install requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -44,7 +48,7 @@ jobs:
             --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
-      - name: Run lintrunner on all files
+      - name: Run lintrunner on all files (nonretryable)
         run: |
           set +e
           if ! lintrunner --force-color --all-files --tee-json=lint.json; then
@@ -79,10 +83,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.x
+          python-version: '3.x'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -95,20 +100,20 @@ jobs:
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
-      - name: Ensure cross-OS compatible file names
+      - name: Ensure cross-OS compatible file names (nonretryable)
         if: always()
         run: |
           (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
-      - name: Ensure no versionless Python shebangs
+      - name: Ensure no versionless Python shebangs (nonretryable)
         if: always()
         run: |
           (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
-      - name: C++ docs check
+      - name: C++ docs check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
-      - name: CUDA kernel launch check
+      - name: CUDA kernel launch check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
@@ -125,38 +130,12 @@ jobs:
         with:
           submodules: false
           fetch-depth: -1
-      - name: PR size check
+      - name: PR size check (nonretryable)
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -x
-
-          ancestor=$(git merge-base "${BASE}" "${HEAD}")
-          details=$(git diff --shortstat "$ancestor" "${HEAD}")
-          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
-          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
-
-          pr_size=0
-          if [ "$add" ]; then
-              pr_size=$(("$pr_size" + "$add"))
-          fi
-          if [ "$remove" ]; then
-              pr_size=$(("$pr_size" + "$remove"))
-          fi
-
-          if ((pr_size > 2000)); then
-            echo
-            echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
-            echo 'allowed within PyTorch infra. PLease make sure to split up'
-            echo 'your PR into smaller pieces that can be reviewed.'
-            echo 'If you think that this rule should not apply to your PR,'
-            echo 'please contact @albanD or @seemethere.'
-            echo
-            false
-          fi
-
-
+          bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
     name: workflow-checks
@@ -169,10 +148,11 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.x
+          python-version: '3.x'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -184,10 +164,10 @@ jobs:
       - name: Install Jinja2
         run: |
           pip install Jinja2==3.0.1 --user
-      - name: Regenerate workflows
+      - name: Regenerate workflows (nonretryable)
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
-      - name: Assert that regenerating the workflows didn't change them
+      - name: Assert that regenerating the workflows didn't change them (nonretryable)
         run: |
           if ! .github/scripts/report_git_status.sh .github/workflows; then
             echo
@@ -201,7 +181,7 @@ jobs:
             echo 'onto a more recent commit from the PyTorch master branch.'
             false
           fi
-      - name: Check that jobs will be cancelled
+      - name: Check that jobs will be cancelled (nonretryable)
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
@@ -221,10 +201,10 @@ jobs:
           fetch-depth: 1
       # This is not a node project so there is no package-lock.json to cache
       - name: Setup Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
       - name: Install markdown-toc
         run: npm install -g markdown-toc
-      - name: Regenerate ToCs and check that they didn't change
+      - name: Regenerate ToCs and check that they didn't change (nonretryable)
         run: |
           set -eu
           export PATH=~/.npm-global/bin:"$PATH"
@@ -260,10 +240,11 @@ jobs:
         with:
           submodules: false
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -283,7 +264,7 @@ jobs:
           pip install -r requirements.txt --user
           pip install mypy==0.960 --user
           make setup_lint
-      - name: Test tools
+      - name: Test tools (nonretryable)
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
@@ -305,28 +286,31 @@ jobs:
           fetch-depth: 1
       - name: Setup Python 3.5
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.5
+          python-version: '3.5'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
+            **/requirements.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
+            **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
+          pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
-      - name: Run collect_env.py
+      - name: Run collect_env.py (nonretryable)
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py

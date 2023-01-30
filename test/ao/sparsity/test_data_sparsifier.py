@@ -13,8 +13,8 @@ import itertools
 import math
 import copy
 
-from torch.ao.sparsity._experimental.data_sparsifier import BaseDataSparsifier, DataNormSparsifier
-from torch.ao.sparsity._experimental.data_sparsifier.quantization_utils import post_training_sparse_quantize
+from torch.ao.pruning._experimental.data_sparsifier import BaseDataSparsifier, DataNormSparsifier
+from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import post_training_sparse_quantize
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 

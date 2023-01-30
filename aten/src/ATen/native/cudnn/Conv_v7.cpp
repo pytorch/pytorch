@@ -1,15 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <limits>
 #include <vector>
-#include <sstream>
-#include <functional>
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
@@ -199,10 +205,11 @@ size_t getMaxWorkspaceSize(
 {
   size_t max_ws_size = 0;
   size_t max_block_size = 0;
-  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
   const auto device = c10::cuda::current_device();
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  // For the native allocator, retrieves the size of the largest unused block.
+  // For cudaMallocAsync, see c10/cuda/CUDAMallocAsync.cpp:cacheInfo for details.
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
 
   for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;

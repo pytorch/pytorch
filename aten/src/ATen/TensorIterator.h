@@ -659,9 +659,12 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// in operands_).
   int num_outputs_ = 0;
 
-  /// Whether or not all operands have the same shape.  Having all the same
-  /// shape affects whether or not the iterator is eligible for fast setup.
+  /// Whether or not all operands have the same shape and are 1d+. Having all
+  /// the same shape affects whether or not the iterator is eligible for fast
+  /// setup.
   bool all_ops_same_shape_ = false;
+  /// Whether or not all operands are 0d, this affects type promotion
+  bool all_ops_are_scalars_ = false;
 
   /// The "computation" dtype of TensorIterator, specifying what the dtype
   /// we will do the internal computation in TensorIterator.  Typically,
@@ -735,7 +738,7 @@ class TORCH_API TensorIteratorConfig final {
   friend struct TensorIteratorBase;
   friend struct TensorIterator;
 
-  TensorIteratorConfig() {}
+  TensorIteratorConfig() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
@@ -933,7 +936,7 @@ class TORCH_API TensorIteratorConfig final {
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
   struct TORCH_API iterator {
-    iterator(){};
+    iterator() = default;
     iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;
 

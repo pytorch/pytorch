@@ -25,8 +25,23 @@
 - tag: nondeterministic_seeded
   desc: |
           This tag indicates if an operator is nondeterminstically seeded (ie is random)
-          such that the operator intentially produces different results when run twice on the same inputs.
+          such that the operator intentionally produces different results when run twice on the same inputs.
 - tag: nondeterministic_bitwise
   desc: |
           This tag indicates if an operator doesn't guarentee bitwise equivalence
           across different runs of an operator with identical inputs.
+- tag: core
+  desc: |
+          Core aten ops is a subset of aten ops that remains after aten-to-aten decomposition and
+          functionalization pass. Core aten ops are fully functional and adhere to single static
+          assignment (SSA): this implies there will be no `inplace` or `_out` variants in this opset.
+          This opset is designed to serve as the functional IR to interface with compiler backends.
+          In contrast to primTorch, core aten opset doesn't decompose ops into explicit
+          type promotion and broadcasting ops.
+          Core aten ops is also effectively the opset produced by torchdynamo.export(aten_graph=True),
+          and thus can be used as an opset for export purpose.
+- tag: pointwise
+  desc: |
+          Pointwise operators are operators where each element of the output is computed only by accessing
+          the corresponding element of all the broadcasted inputs. The output shape will be the broadcasted
+          shape of the inputs.

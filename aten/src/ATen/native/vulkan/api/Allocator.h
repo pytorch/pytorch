@@ -22,7 +22,7 @@
 
 #define VMA_STATS_STRING_ENABLED 0
 
-#ifdef DEBUG
+#ifdef VULKAN_DEBUG
 #define VMA_DEBUG_ALIGNMENT 4096
 #define VMA_DEBUG_ALWAYS_DEDICATED_MEMORY 0
 #define VMA_DEBUG_DETECT_CORRUPTION 1
@@ -39,7 +39,7 @@
     printf("\n"); \
 } while(false)
 */
-#endif /* DEBUG */
+#endif /* VULKAN_DEBUG */
 
 #ifdef __clang__
 #pragma clang diagnostic push

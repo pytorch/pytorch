@@ -83,7 +83,7 @@ def _polynomial_value(poly, x, zero_power, transition):
 
       x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
 
-      zero_power (Tensor): the represenation of `x^0`. It is application-specific.
+      zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
       transition (Callable): the function that accepts some intermediate result `int_val`,
                              the `x` and a specific polynomial coefficient
@@ -399,7 +399,7 @@ def lobpcg(
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When not specified, `B` is interpereted as
+                  m)`. When not specified, `B` is interpreted as
                   identity matrix.
 
       X (tensor, optional): the input tensor of size :math:`(*, m, n)`

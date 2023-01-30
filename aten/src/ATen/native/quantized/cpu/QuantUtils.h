@@ -1,9 +1,20 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/quantize_per_tensor_native.h>
+#include <ATen/ops/quantize_per_channel_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace quant_utils {
 namespace {
@@ -177,7 +188,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 constexpr int64_t kConv1dSqueezeDim = 0;
 static C10_UNUSED torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
                                              int64_t base_value) {
-  TORCH_CHECK(arg.size() > 0, "Argument must have elements.");
+  TORCH_CHECK(!arg.empty(), "Argument must have elements.");
   torch::List<int64_t> result({arg.get(0), base_value});
   if (arg.size() == 1) {
     result[1] = arg.get(0);

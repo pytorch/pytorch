@@ -7,10 +7,10 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/schema_info.h>
 
+#include <ATen/Utils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/enum_type.h>
@@ -177,7 +177,7 @@ struct Wrap {
 };
 
 struct Value {
-  TH_DISALLOW_COPY_AND_ASSIGN(Value);
+  AT_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
 
  private:
@@ -239,6 +239,11 @@ struct Value {
   const Node* node() const {
     return node_;
   }
+
+  /**
+   * @warning NEVER pass raw pointer of smart pointer managed Graph to Python.
+   * Check #87343 for details.
+   */
   Graph* owningGraph();
   const Graph* owningGraph() const;
   // TODO: make this more const correct
@@ -310,7 +315,7 @@ struct Value {
 };
 
 struct TORCH_API Node {
-  TH_DISALLOW_COPY_AND_ASSIGN(Node);
+  AT_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend struct Block;
   friend struct Value;
@@ -398,6 +403,10 @@ struct TORCH_API Node {
   }
   SourceRange sourceRange() const;
 
+  /**
+   * @warning NEVER pass raw pointer of smart pointer managed Graph to Python.
+   * Check #87343 for details.
+   */
   Graph* owningGraph() {
     return graph_;
   }
@@ -423,6 +432,7 @@ struct TORCH_API Node {
     return scope_->namesFromRoot();
   }
 
+  // Copies the source range, scope and callstack from another node.
   Node* copyMetadata(Node* from) {
     this->setSourceRange(from->sourceRange());
     this->setScope(from->scope());
@@ -840,7 +850,7 @@ struct TORCH_API Node {
     return removeAttribute(Symbol::attr(name));
   }
   bool hasAttributes() const {
-    return values_.size() > 0;
+    return !values_.empty();
   }
   size_t numAttributes() const {
     return values_.size();
@@ -848,6 +858,7 @@ struct TORCH_API Node {
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
+    names.reserve(values_.size());
     for (const AVPtr& a : values_) {
       names.push_back(a->name);
     }
@@ -855,6 +866,7 @@ struct TORCH_API Node {
   }
   std::vector<const char*> attributeNamesS() const {
     std::vector<const char*> names;
+    names.reserve(values_.size());
     for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
     }
@@ -1014,7 +1026,7 @@ struct Block {
   friend struct Node;
   friend struct Graph;
 
-  TH_DISALLOW_COPY_AND_ASSIGN(Block);
+  AT_DISALLOW_COPY_AND_ASSIGN(Block);
   TORCH_API Block(Graph* graph_, Node* node_);
 
   at::ArrayRef<Value*> inputs() {
@@ -1048,6 +1060,10 @@ struct Block {
   const Node* param_node() const {
     return input_;
   }
+  /**
+   * @warning NEVER pass raw pointer of smart pointer managed Graph to Python.
+   * Check #87343 for details.
+   */
   Graph* owningGraph() {
     return graph_;
   }
@@ -1162,8 +1178,8 @@ struct Block {
   std::shared_ptr<Wrap<Block>> wrap_;
 };
 
-struct Graph {
-  TH_DISALLOW_COPY_AND_ASSIGN(Graph);
+struct Graph : std::enable_shared_from_this<Graph> {
+  AT_DISALLOW_COPY_AND_ASSIGN(Graph);
   friend struct Node;
   friend struct Value;
   friend struct Block;

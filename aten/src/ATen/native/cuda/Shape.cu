@@ -21,8 +21,7 @@
 #include <ATen/ops/narrow.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
@@ -252,7 +251,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 } // namespace
 
 TORCH_IMPL_FUNC(cat_out_cuda)
-(ITensorListRef tensors,
+(const ITensorListRef& tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -321,5 +320,4 @@ TORCH_IMPL_FUNC(cat_out_cuda)
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

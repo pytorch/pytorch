@@ -2,78 +2,54 @@
 
 #ifdef USE_C10D_UCC
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <ucc/api/ucc.h>
-#include <ucp/api/ucp.h>
-
-#define TORCH_UCX_COMM_BITS 15
-#define TORCH_UCX_RANK_BITS 16
-#define TORCH_UCX_TAG_BITS 32
-#define TORCH_UCX_OOB_BITS 1
-
-#define TORCH_UCX_COMM_BITS_OFFSET 0
-#define TORCH_UCX_RANK_BITS_OFFSET TORCH_UCX_COMM_BITS
-#define TORCH_UCX_TAG_BITS_OFFSET (TORCH_UCX_COMM_BITS + TORCH_UCX_RANK_BITS)
-#define TORCH_UCX_OOB_BITS_OFFSET \
-  (TORCH_UCX_COMM_BITS + TORCH_UCX_RANK_BITS + TORCH_UCX_TAG_BITS)
-
-#define TORCH_UCX_MAX_COMM ((((uint64_t)1) << TORCH_UCX_COMM_BITS) - 1)
-#define TORCH_UCX_MAX_RANK ((((uint64_t)1) << TORCH_UCX_RANK_BITS) - 1)
-#define TORCH_UCX_MAX_TAG ((((uint64_t)1) << TORCH_UCX_TAG_BITS) - 1)
-#define TORCH_UCX_MAX_OOB ((((uint64_t)1) << TORCH_UCX_OOB_BITS) - 1)
-
-#define TORCH_UCX_COMM_MASK (TORCH_UCX_MAX_COMM << TORCH_UCX_COMM_BITS_OFFSET)
-#define TORCH_UCX_RANK_MASK (TORCH_UCX_MAX_RANK << TORCH_UCX_RANK_BITS_OFFSET)
-#define TORCH_UCX_TAG_MASK (TORCH_UCX_MAX_TAG << TORCH_UCX_TAG_BITS_OFFSET)
-#define TORCH_UCX_OOB_MASK (TORCH_UCX_MAX_OOB << TORCH_UCX_OOB_BITS_OFFSET)
 
 namespace c10d {
 
-// Macro to throw on a non-successful UCC return value.
-#define TORCH_UCC_CHECK(_cmd, _error_msg) \
-  do {                                    \
-    ucc_status_t result = _cmd;           \
-    if (result != UCC_OK) {               \
-      std::string err = c10::str(         \
-          "[",                            \
-          std::string(__FILE__),          \
-          ":",                            \
-          std::to_string(__LINE__),       \
-          "] ",                           \
-          logger->getLogPrefix(),         \
-          _error_msg,                     \
-          ", error code ",                \
-          result,                         \
-          ": ",                           \
-          ucc_status_string(result),      \
-          ", system error code ",         \
-          errno);                         \
-      TORCH_CHECK(false, err);            \
-    }                                     \
+// Macro to generate the error message on a non-successful UCC return value.
+#define TORCH_UCC_GET_ERROR_MSG(_err, _error_msg, _result) \
+  do {                                                     \
+      _err = c10::str(                                     \
+          "[",                                             \
+          std::string(__FILE__),                           \
+          ":",                                             \
+          std::to_string(__LINE__),                        \
+          "] ",                                            \
+          logger->getLogPrefix(),                          \
+          _error_msg,                                      \
+          ", error code ",                                 \
+          _result,                                         \
+          ": ",                                            \
+          ucc_status_string(_result),                      \
+          ", system error code ",                          \
+          errno);                                          \
   } while (0)
 
-// Macro to throw on a non-successful UCX return value.
-#define TORCH_UCX_CHECK(_cmd, _error_msg) \
-  do {                                    \
-    ucs_status_t result = _cmd;           \
-    if (result != UCS_OK) {               \
-      std::string err = c10::str(         \
-          "[",                            \
-          std::string(__FILE__),          \
-          ":",                            \
-          std::to_string(__LINE__),       \
-          "] ",                           \
-          logger->getLogPrefix(),         \
-          _error_msg,                     \
-          ", error code ",                \
-          result,                         \
-          ": ",                           \
-          ucs_status_string(result),      \
-          ", system error code ",         \
-          errno);                         \
-      TORCH_CHECK(false, err);            \
-    }                                     \
+// Macro to throw on a non-successful UCC return value.
+#define TORCH_UCC_CHECK(_cmd, _error_msg)               \
+  do {                                                  \
+    ucc_status_t result = _cmd;                         \
+    if (result != UCC_OK) {                             \
+      std::string err;                                  \
+      TORCH_UCC_GET_ERROR_MSG(err, _error_msg, result); \
+      TORCH_CHECK(false, err);                          \
+    }                                                   \
+  } while (0)
+
+// Macro and throw on a non-successful UCC return value and free its request.
+#define TORCH_UCC_CHECK_REQUEST(_request, _cmd, _error_msg) \
+  do {                                                      \
+    ucc_status_t result = _cmd;                             \
+    if (result != UCC_OK) {                                 \
+      std::string err;                                      \
+      TORCH_UCC_GET_ERROR_MSG(err, _error_msg, result);     \
+      if (_request != nullptr) {                            \
+        ucc_collective_finalize(_request);                  \
+      }                                                     \
+      TORCH_CHECK(false, err);                              \
+    }                                                       \
   } while (0)
 
 // Macros to print logs with unified format
@@ -148,21 +124,6 @@ class CommBase {
   virtual ~CommBase() {}
   c10::intrusive_ptr<ProcessGroupUCCLogger> logger;
 };
-
-class CommUCX : public CommBase {
- public:
-  ucp_context_h context{nullptr};
-  ucp_worker_h worker{nullptr};
-
- public:
-  void progress() override;
-  void free_request(ucc_coll_req_h request) override;
-  CommUCX(
-      int comm_size,
-      const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger);
-  ~CommUCX();
-};
-
 class CommUCC : public CommBase {
  public:
   ucc_lib_h lib{nullptr};

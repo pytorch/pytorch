@@ -15,7 +15,7 @@ class IOSNightlyJob:
     def get_phase_name(self):
         return "upload" if self.is_upload else "build"
 
-    def get_common_name_pieces(self, with_version_dots):
+    def get_common_name_pieces(self, sep):
 
         extra_name_suffix = [self.get_phase_name()] if self.is_upload else []
 
@@ -24,7 +24,7 @@ class IOSNightlyJob:
         common_name_pieces = [
             "ios",
         ] + extra_name + [
-        ] + ios_definitions.XCODE_VERSION.render_dots_or_parts(with_version_dots) + [
+        ] + ios_definitions.XCODE_VERSION.render_dots_or_parts(sep) + [
             "nightly",
             self.variant,
             "build",
@@ -33,14 +33,14 @@ class IOSNightlyJob:
         return common_name_pieces
 
     def gen_job_name(self):
-        return "_".join(["pytorch"] + self.get_common_name_pieces(False))
+        return "_".join(["pytorch"] + self.get_common_name_pieces(None))
 
     def gen_tree(self):
         build_configs = BUILD_CONFIGS_FULL_JIT if self.is_full_jit else BUILD_CONFIGS
         extra_requires = [x.gen_job_name() for x in build_configs] if self.is_upload else []
 
         props_dict = {
-            "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(True)),
+            "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(".")),
             "requires": extra_requires,
             "context": "org-member",
             "filters": {"branches": {"only": "nightly"}},

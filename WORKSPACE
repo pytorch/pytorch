@@ -85,6 +85,12 @@ new_local_repository(
 )
 
 new_local_repository(
+    name = "cutlass",
+    build_file = "//third_party:cutlass.BUILD",
+    path = "third_party/cutlass",
+)
+
+new_local_repository(
     name = "fbgemm",
     build_file = "//third_party:fbgemm/BUILD.bazel",
     path = "third_party/fbgemm",
@@ -250,6 +256,21 @@ local_repository(
 local_repository(
     name = "unused_fbgemm",
     path = "third_party/fbgemm",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_googletest",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/googletest",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_gflags",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/gflags",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_glog",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/glog",
 )
 
 local_repository(

@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -19,7 +21,7 @@ class TORCH_API CodeGen {
   template <typename... Ts>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(StmtPtr stmt, Ts... ts)
-      : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
+      : stmt_(std::move(stmt)), buffer_args_({BufferArg(ts)...}) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(
@@ -123,10 +125,10 @@ class TORCH_API ExtCallMemoryReuse : public IRMutator {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
+  BufferArg(const Tensor& tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
-  BufferArg(const BufPtr& buf) : buf_(buf) {}
+  BufferArg(BufPtr buf) : buf_(std::move(buf)) {}
 
   VarPtr var() const {
     return isVar_ ? var_ : buf_->base_handle();

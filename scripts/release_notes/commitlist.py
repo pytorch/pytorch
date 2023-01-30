@@ -143,7 +143,7 @@ class CommitList:
         files_changed = features['files_changed']
         for file in files_changed:
             file_lowercase = file.lower()
-            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
+            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.ci', '.azure_pipelines']):
                 category = 'releng'
                 break
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
@@ -299,6 +299,10 @@ def to_markdown(commit_list: CommitList, category):
     for topic in topics:
         lines.append(f'### {topic}\n')
         commits = commit_list.filter(category=category, topic=topic)
+        if '_' in topic:
+            commits.extend(commit_list.filter(category=category, topic=topic.replace('_', ' ')))
+        if ' ' in topic:
+            commits.extend(commit_list.filter(category=category, topic=topic.replace(' ', '_')))
         for commit in commits:
             if commit.merge_into:
                 continue

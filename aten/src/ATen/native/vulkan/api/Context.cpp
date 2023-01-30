@@ -1,6 +1,4 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/vulkan/Context.h>
 
 #include <sstream>
 
@@ -21,11 +19,11 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
       fences_(device_),
 // Diagnostics
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-      querypool_(device_, config_.queryPoolConfig),
+      querypool_(config_.queryPoolConfig, adapter_p_),
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
-      cmd_(VK_NULL_HANDLE),
+      cmd_(VK_NULL_HANDLE, 0u),
       submit_count_{0u},
       // Memory Management
       buffer_clearlist_mutex_{},
@@ -42,7 +40,7 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderSource& shader_descriptor,
+    const ShaderInfo& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
   const VkDescriptorSetLayout shader_layout =
       shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
@@ -145,24 +143,67 @@ Context* context() {
     return nullptr;
   }());
 
-  TORCH_CHECK(
-      context,
-      "Pytorch Vulkan Context: The global context could not be retrieved "
-      "because it failed to initialize.");
+  if (!context) {
+    TORCH_WARN(
+        "Pytorch Vulkan Context: The global context could not be retrieved "
+        "because it failed to initialize.");
+  }
 
   return context.get();
 }
 
-struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
-  bool is_vulkan_available() const override {
-    return available();
+//
+// UniformParamsBuffer
+//
+
+namespace {
+
+void memcpy_to_buffer(const VulkanBuffer& src, VulkanBuffer& dst) {
+  MemoryMap dst_mapping(dst, MemoryAccessType::WRITE);
+
+  MemoryMap src_mapping(src, api::MemoryAccessType::READ);
+  src_mapping.invalidate();
+
+  void* dst_ptr = dst_mapping.template data<void>();
+  void* src_ptr = src_mapping.template data<void>();
+
+  memcpy(dst_ptr, src_ptr, src.mem_size());
+}
+
+} // namespace
+
+UniformParamsBuffer::UniformParamsBuffer(const UniformParamsBuffer& other)
+    : context_p_(other.context_p_), vulkan_buffer_{} {
+  if (other.vulkan_buffer_) {
+    vulkan_buffer_ = context_p_->adapter_ptr()->vma().create_uniform_buffer(
+        other.vulkan_buffer_.mem_size());
+
+    memcpy_to_buffer(other.vulkan_buffer_, vulkan_buffer_);
+  }
+}
+
+UniformParamsBuffer& UniformParamsBuffer::operator=(
+    const UniformParamsBuffer& other) {
+  if (&other != this) {
+    context_p_ = other.context_p_;
+
+    // Move vulkan_buffer_ to another VulkanBuffer for cleanup
+    if (vulkan_buffer_) {
+      VulkanBuffer temp_buffer(std::move(vulkan_buffer_));
+      context_p_->register_buffer_cleanup(temp_buffer);
+    }
+    // vulkan_buffer_ should now be empty
+
+    if (other.vulkan_buffer_) {
+      vulkan_buffer_ = context_p_->adapter_ptr()->vma().create_uniform_buffer(
+          other.vulkan_buffer_.mem_size());
+
+      memcpy_to_buffer(other.vulkan_buffer_, vulkan_buffer_);
+    }
   }
 
-  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
-    return vulkan::ops::copy_(self, src);
-  }
-};
-static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
+  return *this;
+}
 
 } // namespace api
 } // namespace vulkan

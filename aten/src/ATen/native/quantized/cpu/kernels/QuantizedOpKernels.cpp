@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Activation.h>
@@ -14,6 +16,13 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 #include <ATen/native/cpu/utils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#endif
 
 #include <cmath>
 #ifdef USE_FBGEMM
@@ -47,7 +56,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor qcat_nhwc_kernel(
-    const c10::List<Tensor>& qxs,
+    const MaterializedITensorListRef& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point) {
@@ -110,7 +119,7 @@ Tensor qcat_nhwc_kernel(
       c10::nullopt);
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
-  // which causes an internal compiler error if they're not
+  // and clang5 which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
     at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
@@ -671,14 +680,18 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
-  // Weight should be a 1d or scalar tensor
-  // Reshape it to an nd tensor that broadcasts with input
-  // All elements go into the channel dimension
-  DimVector sizes(input_ndim, 1);
-  if (input_ndim > 1) {
-    sizes[1] = qw.numel();
+  // This logic is present in at::prelu and repeated here, as this path can be
+  // hit via quantized::prelu, which is registered under quantized/cpu/qprelu.cpu
+  auto qw_nd = qw;
+  if (input_ndim != qw_nd.dim()) {
+    DimVector dim_w(input_ndim, 1);
+    if (input_ndim > 1) {
+      dim_w[1] = qw.numel();
+    }
+    // This will always be a view in CPU/CUDA, but some backends
+    // like MKLDNN do not support views
+    qw_nd = qw_nd.reshape(dim_w);
   }
-  auto qw_nd = qw.reshape(sizes);
 
   auto iter = TensorIteratorConfig()
     .add_output(out)
@@ -3790,8 +3803,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (const auto b : c10::irange(batches)) {
-      for (const auto e : c10::irange(elements_per_channel)) {
+    for (const auto b C10_UNUSED : c10::irange(batches)) {
+      for (const auto e C10_UNUSED : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int16x8_t vzero_point = vld1q_s16(&zero_points_int16t[c]);
@@ -3821,8 +3834,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (const auto b : c10::irange(batches)) {
-      for (const auto c : c10::irange(channels)) {
+    for (const auto b C10_UNUSED : c10::irange(batches)) {
+      for (const auto c C10_UNUSED : c10::irange(channels)) {
         uint32_t e = 0;
         const int16x8_t vzero_point = vdupq_n_s16(zero_points_int16t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);

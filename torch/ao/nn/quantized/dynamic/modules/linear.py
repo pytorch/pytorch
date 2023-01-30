@@ -1,7 +1,12 @@
 import torch
 import torch.ao.nn.quantized as nnq
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
+
+__all__ = [
+    "Linear",
+]
+
 
 class Linear(nnq.Linear):
     r"""
@@ -21,9 +26,9 @@ class Linear(nnq.Linear):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> m = nn.quantized.dynamic.Linear(20, 30)
         >>> input = torch.randn(128, 20)
-        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])

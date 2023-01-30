@@ -100,6 +100,10 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
       });
 }
 
+bool SchemaInfo::has_argument(c10::string_view name) {
+  return schema_.argumentIndexWithName(name) != c10::nullopt;
+}
+
 bool SchemaInfo::is_mutable(c10::string_view name) {
   c10::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
@@ -337,7 +341,7 @@ void SchemaInfo::initSchemaInfo() {
       c10::optional<c10::AliasTypeSet> contained_types =
           schema_.getAliasTypeSetContainedTypes(
               schema_.mapTypeToAliasTypeSet(argument.type()));
-      if (contained_types && contained_types->size() > 0) {
+      if (contained_types && !contained_types->empty()) {
         container_set_.insert({type, i});
       }
     }

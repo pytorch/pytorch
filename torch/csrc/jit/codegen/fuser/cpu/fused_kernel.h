@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
-#include <torch/csrc/utils/disallow_copy.h>
 
 #include <cstdint>
 #include <memory>

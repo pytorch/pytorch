@@ -52,7 +52,6 @@ except ImportError:
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQStatic  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQDynamic  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerOps  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerONNXExport  # noqa: F401
 # 2. Eager mode quantization aware training
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
@@ -75,6 +74,9 @@ try:
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
     from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+# Quantization for PyTorch 2.0 Export path
+    from quantization.fx.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
+    from quantization.fx.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
@@ -84,6 +86,7 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError:
     pass
@@ -125,6 +128,7 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 # AO Migration tests
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
 from quantization.ao_migration.test_ao_migration import TestAOMigrationNNQuantized  # noqa: F401
+from quantization.ao_migration.test_ao_migration import TestAOMigrationNNIntrinsic  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
 except ImportError:

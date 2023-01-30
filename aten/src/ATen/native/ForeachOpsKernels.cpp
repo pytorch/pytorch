@@ -1,6 +1,59 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Operators.h>
+#else
+#include <ATen/ops/_foreach_abs_native.h>
+#include <ATen/ops/_foreach_acos_native.h>
+#include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_addcdiv_native.h>
+#include <ATen/ops/_foreach_addcmul_native.h>
+#include <ATen/ops/_foreach_asin_native.h>
+#include <ATen/ops/_foreach_atan_native.h>
+#include <ATen/ops/_foreach_ceil_native.h>
+#include <ATen/ops/_foreach_cos_native.h>
+#include <ATen/ops/_foreach_cosh_native.h>
+#include <ATen/ops/_foreach_div_native.h>
+#include <ATen/ops/_foreach_erf_native.h>
+#include <ATen/ops/_foreach_erfc_native.h>
+#include <ATen/ops/_foreach_exp_native.h>
+#include <ATen/ops/_foreach_expm1_native.h>
+#include <ATen/ops/_foreach_floor_native.h>
+#include <ATen/ops/_foreach_frac_native.h>
+#include <ATen/ops/_foreach_lerp_native.h>
+#include <ATen/ops/_foreach_lgamma_native.h>
+#include <ATen/ops/_foreach_log10_native.h>
+#include <ATen/ops/_foreach_log1p_native.h>
+#include <ATen/ops/_foreach_log2_native.h>
+#include <ATen/ops/_foreach_log_native.h>
+#include <ATen/ops/_foreach_maximum_native.h>
+#include <ATen/ops/_foreach_minimum_native.h>
+#include <ATen/ops/_foreach_mul_native.h>
+#include <ATen/ops/_foreach_neg_native.h>
+#include <ATen/ops/_foreach_norm_native.h>
+#include <ATen/ops/_foreach_reciprocal_native.h>
+#include <ATen/ops/_foreach_round_native.h>
+#include <ATen/ops/_foreach_sigmoid_native.h>
+#include <ATen/ops/_foreach_sin_native.h>
+#include <ATen/ops/_foreach_sinh_native.h>
+#include <ATen/ops/_foreach_sqrt_native.h>
+#include <ATen/ops/_foreach_sub_native.h>
+#include <ATen/ops/_foreach_tan_native.h>
+#include <ATen/ops/_foreach_tanh_native.h>
+#include <ATen/ops/_foreach_trunc_native.h>
+#include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_clamp_max_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/maximum.h>
+#include <ATen/ops/minimum.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 namespace at { namespace native {
 
@@ -146,23 +199,53 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
   for(const auto i : c10::irange(input.size())) {                                                                                                       \
     input[i].OP##_(tensors1[i], tensors2[i], scalars[i]);                                                                                               \
   }                                                                                                                                                     \
-}                                                                                                                                                       \
+}
+
+#define FOREACH_POINTWISE_OP_TENSOR(OP)                                    \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_slow(                   \
+      TensorList input,                                                    \
+      TensorList tensors1,                                                 \
+      TensorList tensors2,                                                 \
+      const Tensor& scalars_) {                                            \
+    auto scalars = convert_tensor_to_scalar_list(scalars_, input.size());  \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);    \
+    return foreach_tensor_##OP##_scalarlist_slow(                          \
+        input, tensors1, tensors2, scalars);                               \
+  }                                                                        \
+                                                                           \
+  void foreach_tensor_##OP##_tensor_slow_(                                 \
+      TensorList input,                                                    \
+      TensorList tensors1,                                                 \
+      TensorList tensors2,                                                 \
+      const Tensor& scalars_) {                                            \
+    auto scalars = convert_tensor_to_scalar_list(scalars_, input.size());  \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);    \
+    foreach_tensor_##OP##_scalarlist_slow_(                                \
+        input, tensors1, tensors2, scalars);                               \
+  }
 
 FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
+FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
 FOREACH_BINARY_OP_SCALAR(mul);
 FOREACH_BINARY_OP_SCALAR(div);
+FOREACH_BINARY_OP_SCALAR(clamp_min);
+FOREACH_BINARY_OP_SCALAR(clamp_max);
 
 FOREACH_BINARY_OP_SCALARLIST(add);
 FOREACH_BINARY_OP_SCALARLIST(sub);
 FOREACH_BINARY_OP_SCALARLIST(mul);
 FOREACH_BINARY_OP_SCALARLIST(div);
+FOREACH_BINARY_OP_SCALARLIST(clamp_min);
+FOREACH_BINARY_OP_SCALARLIST(clamp_max);
 
 FOREACH_BINARY_OP_LIST(mul);
 FOREACH_BINARY_OP_LIST(div);
+FOREACH_BINARY_OP_LIST(clamp_min);
+FOREACH_BINARY_OP_LIST(clamp_max);
 
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
@@ -199,31 +282,27 @@ FOREACH_POINTWISE_OP_SCALAR(addcmul);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
-// NOTE(crcrpar): It didn't seem feasible to use `self[i]` as both the first and the last
-// arguments of `maximum_out` and `minimum_out` so I tentatively embarrassingly get and copy
-// the result to `self[i]`.
-#define FOREACH_MAXIMUM_MINIMUM_OP(NAME)                                                     \
-std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList tensors2) { \
-  check_foreach_api_restrictions(tensors1, tensors2);                                        \
-                                                                                             \
-  std::vector<Tensor> result;                                                                \
-  result.reserve(tensors1.size());                                                           \
-  for (const auto i : c10::irange(tensors1.size())) {                                        \
-    result.emplace_back(at::NAME(tensors1[i], tensors2[i]));                                 \
-  }                                                                                          \
-                                                                                             \
-  return result;                                                                             \
-}                                                                                            \
-void foreach_tensor_##NAME##_slow_(TensorList self, TensorList other) {                      \
-  check_foreach_api_restrictions(self, other);                                               \
-  for (const auto i : c10::irange(self.size())) {                                            \
-    const auto tmp = at::NAME(self[i], other[i]);                                            \
-    self[i].copy_(tmp, /* non_blocking */ true);                                             \
-  }                                                                                          \
-}
+FOREACH_POINTWISE_OP_TENSOR(addcdiv);
+FOREACH_POINTWISE_OP_TENSOR(addcmul);
 
-FOREACH_MAXIMUM_MINIMUM_OP(maximum)
-FOREACH_MAXIMUM_MINIMUM_OP(minimum)
+#define FOREACH_TERNARY_OP(OP)                                                                                           \
+std::vector<Tensor> foreach_tensor_ternary_##OP##_slow(TensorList tensors1, TensorList tensors2, TensorList tensors3) {  \
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
+  std::vector<Tensor> result;                                                                                            \
+  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
+    result.emplace_back(tensors1[i].OP(tensors2[i], tensors3[i]));                                                       \
+  }                                                                                                                      \
+  return result;                                                                                                         \
+}                                                                                                                        \
+                                                                                                                         \
+void foreach_tensor_ternary_##OP##_slow_(TensorList tensors1, TensorList tensors2, TensorList tensors3) {                \
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
+  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
+    tensors1[i].OP##_(tensors2[i], tensors3[i]);                                                                         \
+  }                                                                                                                      \
+}                                                                                                                        \
+
+FOREACH_TERNARY_OP(lerp);
 
 void foreach_tensor_zero_slow_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);

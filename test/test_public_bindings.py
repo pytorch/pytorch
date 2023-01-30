@@ -11,6 +11,20 @@ import json
 import os
 import unittest
 
+
+# TODO(jansel): we should remove this workaround once this is fixed:
+# https://github.com/pytorch/pytorch/issues/86619
+NOT_IMPORTED_WHEN_TEST_WRITTEN = {
+    "torch.fx.experimental.normalize",
+    "torch.fx.experimental.proxy_tensor",
+    "torch.fx.experimental.schema_type_annotation",
+    "torch.fx.experimental.symbolic_shapes",
+    "torch.fx.passes.backends.cudagraphs",
+    "torch.fx.passes.infra.partitioner",
+    "torch.fx.passes.utils.fuser_utils",
+}
+
+
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
         """
@@ -36,6 +50,7 @@ class TestPublicBindings(TestCase):
             "AnyType",
             "Argument",
             "ArgumentSpec",
+            "AwaitType",
             "autocast_decrement_nesting",
             "autocast_increment_nesting",
             "AVG",
@@ -55,7 +70,6 @@ class TestPublicBindings(TestCase):
             "ComplexType",
             "ConcreteModuleType",
             "ConcreteModuleTypeBuilder",
-            "CONV_BN_FUSION",
             "cpp",
             "CudaBFloat16TensorBase",
             "CudaBFloat16TensorBase",
@@ -86,6 +100,7 @@ class TestPublicBindings(TestCase):
             "DeviceObjType",
             "DictType",
             "DisableTorchFunction",
+            "DisableTorchFunctionSubclass",
             "DispatchKey",
             "DispatchKeySet",
             "dtype",
@@ -99,7 +114,6 @@ class TestPublicBindings(TestCase):
             "FloatType",
             "fork",
             "FunctionSchema",
-            "FUSE_ADD_RELU",
             "Future",
             "FutureType",
             "Generator",
@@ -118,15 +132,14 @@ class TestPublicBindings(TestCase):
             "has_mps",
             "has_openmp",
             "has_spectral",
-            "HOIST_CONV_PACKED_PARAMS",
             "iinfo",
             "import_ir_module_from_buffer",
             "import_ir_module",
             "InferredType",
             "init_num_threads",
-            "INSERT_FOLD_PREPACK_OPS",
             "InterfaceType",
             "IntType",
+            "SymFloatType",
             "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
@@ -144,7 +157,6 @@ class TestPublicBindings(TestCase):
             "LoggerBase",
             "memory_format",
             "merge_type_from_type_comment",
-            "MobileOptimizerType",
             "ModuleDict",
             "Node",
             "NoneType",
@@ -161,7 +173,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileWriter",
             "qscheme",
             "read_vitals",
-            "REMOVE_DROPOUT",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -192,7 +203,8 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
-            "SymIntNode",
+            "SymFloat",
+            "SymInt",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -245,7 +257,6 @@ class TestPublicBindings(TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
-
             "wait",
             "Tag",
         }
@@ -318,6 +329,8 @@ class TestPublicBindings(TestCase):
                     why_not_looks_public = f"because it starts with `_` (`{elem}`)"
 
                 if is_public != looks_public:
+                    if modname in NOT_IMPORTED_WHEN_TEST_WRITTEN:
+                        return
                     if modname in allow_dict and elem in allow_dict[modname]:
                         return
 

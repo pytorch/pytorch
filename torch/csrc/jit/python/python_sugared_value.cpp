@@ -18,8 +18,7 @@
 
 #include <Python.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -51,7 +50,7 @@ FunctionSchema PythonValue::getSchema(
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
-    if (param_names.size() == 0) {
+    if (param_names.empty()) {
       throw ErrorReport(loc)
           << "Non-static method does not have a self argument";
     }
@@ -64,12 +63,12 @@ FunctionSchema PythonValue::getSchema(
     // No type signature was provided on the callable, so make a default
     // signature where each argument is typed as a Tensor
     for (; names_it != param_names.end(); ++names_it) {
-      args.emplace_back(Argument(
+      args.emplace_back(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
           /*N=*/c10::nullopt,
           /*default_value=*/c10::nullopt,
-          /*kwarg_only=*/false));
+          /*kwarg_only=*/false);
     }
 
     // Use as many outputs as are requested to make the return type
@@ -123,7 +122,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     size_t n_binders) {
   std::vector<NamedValue> argsWithSelf;
   if (moduleSelf_) {
-    argsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
+    argsWithSelf.emplace_back("self", moduleSelf_);
   }
   argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
 
@@ -229,6 +228,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "current_stream",
       "default_stream",
       "current_device",
+      "_exchange_device",
       "set_device",
       "device_index",
       "device_count",
@@ -418,7 +418,7 @@ void recurseThroughNestedModules(
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
     std::string submodule_prefix = prefix;
-    if (prefix != "") {
+    if (!prefix.empty()) {
       submodule_prefix = prefix + ".";
     }
     submodule_prefix += key_string;
@@ -746,9 +746,8 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
-  bool have_pre_hooks =
-      class_type && class_type->getForwardPreHooks().size() != 0;
-  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+  bool have_pre_hooks = class_type && !class_type->getForwardPreHooks().empty();
+  bool have_hooks = class_type && !class_type->getForwardHooks().empty();
 
   std::vector<Value*> arg_values;
   std::vector<NamedValue> pre_hook_result;
@@ -795,9 +794,9 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
             ->insertNode(calling_graph->createTupleUnpack(forward_input))
             ->outputs();
     for (auto& output_node : output_nodes) {
-      pre_hook_result.emplace_back(NamedValue(output_node));
+      pre_hook_result.emplace_back(output_node);
     }
-    if (args.size() != 0) { // only replace input if it existed
+    if (!args.empty()) { // only replace input if it existed
       args = pre_hook_result;
     }
   }
@@ -971,7 +970,7 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   Value* error_message = nullptr;
-  if (args.size() == 0) {
+  if (args.empty()) {
     error_message = insertConstant(*caller.graph(), "", loc);
   } else if (args.size() == 1) {
     error_message = args.at(0).value(*caller.graph());
@@ -1149,7 +1148,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
-    } else if (obj.is(py::none())) {
+    } else if (obj.is_none()) {
       return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
@@ -1199,7 +1198,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
-    if (obj_name.compare("torch.cuda") == 0) {
+    if (obj_name == "torch.cuda") {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
     return std::make_shared<PythonModuleValue>(obj);
@@ -1207,6 +1206,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
       obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {
+    return SpecialFormValue::create(prim::awaitable);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
@@ -1372,5 +1374,4 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

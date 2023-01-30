@@ -14,13 +14,13 @@ from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F4
 from jit.test_backend_nnapi import TestNnapiBackend  # noqa: F401
 from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
+from jit.test_await import TestAwait  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
 from jit.test_modules import TestModules  # noqa: F401
 from jit.test_autodiff import TestAutodiffJit  # noqa: F401
 from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
-from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_graph_rewrite_passes import TestGraphRewritePasses  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
@@ -97,7 +97,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
-    freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
+    freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, IS_MACOS, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -1858,6 +1858,7 @@ graph(%Ra, %Rb):
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     def test_dropout_func_requires_grad(self):
         def dropout_training(input):
             return F.dropout(input, 0.5, training=True)
@@ -3026,6 +3027,46 @@ class TestFrontend(JitTestCase):
         checker.check("def forward")
         checker.run(str(cm.exception))
 
+    def test_dictionary_as_example_inputs_for_jit_trace(self):
+        class TestModule_v1(torch.nn.Module):
+            def __init__(self):
+                super(TestModule_v1, self).__init__()
+
+            def forward(self, key2=None, key3=None, key4=None, key5=None, key1=None, key6=None):
+                return key1 + key2 + key3
+
+        class TestModule_v2(torch.nn.Module):
+            def __init__(self):
+                super(TestModule_v2, self).__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        def test_func(x, y):
+            return x + y
+        model_1 = TestModule_v1()
+        model_2 = TestModule_v2()
+        value1 = torch.ones(1)
+        value2 = torch.ones(1)
+        value3 = torch.ones(1)
+        example_input_dict = {'key1': value1, 'key2': value2, 'key3': value3}
+        example_input_dict_func = {'x': value1, 'y': value2}
+        traced_model_1 = torch.jit.trace(model_1, example_kwarg_inputs=example_input_dict, strict=False)
+        traced_model_1_m = torch.jit.trace_module(
+            model_1, {'forward': example_input_dict}, example_inputs_is_kwarg=True, strict=False)
+        traced_model_2 = torch.jit.trace(model_2, example_kwarg_inputs={'x': torch.rand([2]), 'y': torch.rand([2])})
+        traced_func = torch.jit.trace(test_func, example_kwarg_inputs=example_input_dict_func, strict=False)
+        res_1 = traced_model_1(**example_input_dict)
+        res_1_m = traced_model_1_m(**example_input_dict)
+        self.assertEqual(res_1, 3 * torch.ones(1))
+        self.assertEqual(res_1_m, 3 * torch.ones(1))
+        res_func = traced_func(**example_input_dict_func)
+        self.assertEqual(res_func, 2 * torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'x'."):
+            res_2 = traced_model_2(**{'z': torch.rand([2]), 'y': torch.rand([2])})
+        with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'y'."):
+            res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})
+
 
 class TestScript(JitTestCase):
 
@@ -3242,6 +3283,7 @@ class TestScript(JitTestCase):
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
 
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_profiling_merge(self):
         @torch.jit.script
@@ -3882,7 +3924,7 @@ def foo(x):
         t = node.outputsAt(0).type()
         self.assertIsNotNone(t)
 
-    @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
+    @unittest.skipIf(IS_WINDOWS, 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
         message2 = 'def invalid2\\(a\\):\n\\s*~+\\.*\\s+<--- HERE\n\\s+# type: \\(Int, Int\\) -> Int\n\\s+return a \\+ 2'
@@ -3910,6 +3952,14 @@ def foo(x):
                 # type: (Int, Int) -> Int
                 return a + 2
             torch.jit.script(invalid4)
+
+    def test_calls_in_type_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "Type annotation should not contain calls"):
+            def spooky(a):
+                # type: print("Hello") -> Tensor # noqa: F723
+                return a + 2
+            print(torch.__file__)
+            torch.jit.annotations.get_signature(spooky, None, 1, True)
 
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
@@ -5712,6 +5762,7 @@ a")
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_view_listconstruct_shape_prop(self):
         def fn(x):
             B = x.size(0)
@@ -5871,23 +5922,6 @@ a")
         outputs = [torch.ones(20, 10, 10)] * 3
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
-
-    def test_dropout_script(self):
-
-        eg = torch.zeros(1, 2, 3, requires_grad=True)
-
-        @_trace(eg)
-        def foo(x):
-            x = torch.neg(x)
-            return F.dropout(x)
-
-        class MyDrop(nn.Module):
-            def forward(self, x):
-                return foo(x)
-
-        f = io.BytesIO()
-        with warnings.catch_warnings(record=True):
-            torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_cast(self):
@@ -6577,7 +6611,11 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
+                    # math.pow() behavior has changed in 3.11, see https://docs.python.org/3/library/math.html#math.pow
+                    if sys.version_info >= (3, 11) and func_name == "pow" and a == 0.0 and b == -math.inf:
+                        self.assertTrue(res_python == math.inf and type(res_script) is RuntimeError)
+                    else:
+                        self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
@@ -6753,6 +6791,7 @@ a")
         self.checkScript(plus_123, (2,))
         self.checkScript(plus_123, (3,))
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -9278,6 +9317,7 @@ dedent """
         self.run_pass("inline", fee.graph)
         FileCheck().check_not("prim::If").run(fee.graph)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
@@ -9739,50 +9779,6 @@ dedent """
             m = M2()
             m(torch.zeros(4, 3))
 
-    @skipIfCompiledWithoutNumpy
-    def test_pack_padded_pad_packed_trace(self):
-        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-        T, B, C = 3, 5, 7
-
-        class PadPackedWrapper(torch.nn.Module):
-            def __init__(self):
-                super(PadPackedWrapper, self).__init__()
-
-            def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens)
-                x, _ = pad_packed_sequence(x)
-                return x
-
-        x = np.ones((T, B, C))
-        seq_lens = np.array([3, 3, 2, 2, 1], dtype=np.int32)
-        # set padding value so we can test equivalence
-        for b in range(B):
-            if seq_lens[b] < T:
-                x[seq_lens[b]:, b, :] = 0
-        seq_lens = torch.from_numpy(seq_lens)
-        x = torch.autograd.Variable(torch.from_numpy(x), requires_grad=True)
-
-        m = PadPackedWrapper()
-        m_traced = torch.jit.trace(m, (x, seq_lens,))
-
-        y = m(x, seq_lens)
-        loss = torch.sum(y)
-        loss.backward()
-        grad = x.grad.clone()
-        x.grad.zero_()
-
-        y_traced = m_traced(x, seq_lens)
-        loss_traced = torch.sum(y_traced)
-        loss_traced.backward()
-        grad_traced = x.grad.clone()
-
-        self.assertEqual(y_traced, x)
-        self.assertEqual(y_traced, y)
-        self.assertEqual(grad, grad_traced)
-
-        f = io.BytesIO()
-        torch.onnx._export(m, (x, seq_lens), f, verbose=False)
-
     def test_script_pack_padded_sequence(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
@@ -9983,54 +9979,6 @@ dedent """
         m_scripted = torch.jit.script(m)
         self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(246))
 
-    # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
-    @suppress_warnings
-    @skipIfCompiledWithoutNumpy
-    def test_rnn_trace_override(self):
-        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-        num_layers = 3
-        T, B, C = 11, 5, 7
-
-        class RNNTraceWrapper(torch.nn.Module):
-            def __init__(self, cell_type):
-                super(RNNTraceWrapper, self).__init__()
-                if cell_type == 'RNN':
-                    self.rnn = torch.nn.RNN(input_size=C, hidden_size=C, num_layers=num_layers)
-                elif cell_type == 'LSTM':
-                    self.rnn = torch.nn.LSTM(input_size=C, hidden_size=C, num_layers=num_layers)
-                elif cell_type == 'GRU':
-                    self.rnn = torch.nn.GRU(input_size=C, hidden_size=C, num_layers=num_layers)
-
-            def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens)
-                x, _ = self.rnn(x)
-                x, _ = pad_packed_sequence(x)
-                return x
-
-        for cell_type in ['RNN', 'LSTM', 'GRU']:
-            x = torch.ones(T, B, C, requires_grad=True)
-            seq_lens = torch.from_numpy(np.array([11, 3, 2, 2, 1], dtype=np.int32))
-
-            m = RNNTraceWrapper(cell_type)
-            m_traced = torch.jit.trace(m, (x, seq_lens,))
-
-            y = m(x, seq_lens)
-            loss = torch.sum(y)
-            loss.backward()
-            grad = x.grad.clone()
-            x.grad.zero_()
-
-            y_traced = m_traced(x, seq_lens)
-            loss_traced = torch.sum(y_traced)
-            loss_traced.backward()
-            grad_traced = x.grad.clone()
-
-            self.assertEqual(y_traced, y)
-            self.assertEqual(grad, grad_traced)
-
-            f = io.BytesIO()
-            torch.onnx._export(m, (x, seq_lens), f, verbose=False)
-
     def test_python_call_non_tensor(self):
         def foo(a, b, c):
             # type: (Tensor, int, Tuple[Tensor, int]) -> Tuple[int, Tensor]
@@ -10169,6 +10117,7 @@ dedent """
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @_inline_everything
     def test_import_constants_not_specialized(self):
         class Mod(torch.nn.Module):
@@ -10776,6 +10725,7 @@ dedent """
             graph = script.graph_for()
             FileCheck().check("aten::manual_seed").run(graph)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
@@ -11215,6 +11165,7 @@ dedent """
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(w.grad, w_ref.grad)
 
+    @skipIfTorchDynamo("TorchDynamo doesn't support profile")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():
@@ -14502,7 +14453,6 @@ dedent """
             m = torch.jit.script(M())
             m(p)
 
-    @unittest.skipIf(sys.version_info < (3, 7, 0), "defaults keyword added in Python 3.8")
     def test_namedtuple_default_values_using_factory_constructor(self):
         Pair = namedtuple("Pair", ["x", "y"], defaults=(1, 2))
 

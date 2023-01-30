@@ -11,6 +11,8 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include <torch/csrc/Export.h>
 
+#include <c10/core/SymIntArrayRef.h>
+
 namespace torch { namespace autograd { namespace generated {
 
 using at::Scalar;
@@ -45,13 +47,13 @@ struct TypeAndSize {
   TypeAndSize() : options(at::TensorOptions()) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
-    : sizes(t.sizes().vec())
+    : sym_sizes(t.sym_sizes().vec())
     , options(t.options()) {}
 
-  Tensor zeros() { return at::zeros(sizes, options); }
+  Tensor zeros() { return at::zeros_symint(sym_sizes, options); }
 
 private:
-  std::vector<int64_t> sizes;
+  std::vector<c10::SymInt> sym_sizes;
   at::TensorOptions options;
 };
 

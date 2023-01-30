@@ -1,12 +1,16 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.intrinsic import LinearReLU
+from torch.ao.nn.intrinsic import LinearReLU
 from torch.nn.utils.parametrize import (
     is_parametrized,
     type_before_parametrizations,
     transfer_parametrizations_and_params,
 )
+
+__all__ = [
+    "Linear"
+]
 
 class Linear(nn.Linear):
     r"""

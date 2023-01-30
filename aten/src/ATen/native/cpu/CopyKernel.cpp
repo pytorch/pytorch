@@ -8,8 +8,7 @@
 #include <ATen/TensorIteratorInternal.h>
 #include <ATen/Parallel.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 inline namespace CPU_CAPABILITY {
 void neg_kernel(TensorIteratorBase &iter);
 void conj_kernel(TensorIteratorBase &iter);
@@ -49,8 +48,7 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
       std::copy_n(base, 2, data.data());
       const int64_t *outer_strides = &strides[2];
 
-      for (const auto it : c10::irange(size1)) {
-        (void)it;
+      for (const auto it C10_UNUSED : c10::irange(size1)) {
         Vecd dst_s;
         if (strides_in[0] == 0) {
           dst_s = Vecd(dest_t(*((scalar_t*)data[1])));
@@ -119,8 +117,7 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
       std::copy_n(base, 2, data.data());
       const int64_t *outer_strides = &strides[2];
 
-      for (const auto it : c10::irange(size1)) {
-        (void)it;
+      for (const auto it C10_UNUSED : c10::irange(size1)) {
         Vecd dst_s;
         if (strides_in[0] == 0) {
           dst_s = Vecd(dest_t(*((scalar_t*)data[1])));
@@ -273,5 +270,4 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

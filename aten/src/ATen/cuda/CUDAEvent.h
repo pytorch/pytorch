@@ -28,8 +28,8 @@ namespace at { namespace cuda {
 struct TORCH_CUDA_CPP_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
-  CUDAEvent() {}
-  CUDAEvent(unsigned int flags) : flags_{flags} {}
+  CUDAEvent() noexcept = default;
+  CUDAEvent(unsigned int flags) noexcept : flags_{flags} {}
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
@@ -48,7 +48,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
         CUDAGuard guard(device_index_);
         const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
         if (C10_UNLIKELY(interp)) {
-          interp->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(event_));
+          (*interp)->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(event_));
         }
         cudaEventDestroy(event_);
       }
@@ -58,9 +58,11 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   CUDAEvent(const CUDAEvent&) = delete;
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
-  CUDAEvent(CUDAEvent&& other) { moveHelper(std::move(other)); }
-  CUDAEvent& operator=(CUDAEvent&& other) {
-    moveHelper(std::move(other));
+  CUDAEvent(CUDAEvent&& other) noexcept { moveHelper(std::move(other)); }
+  CUDAEvent& operator=(CUDAEvent&& other) noexcept {
+    if (this != &other) {
+      moveHelper(std::move(other));
+    }
     return *this;
   }
 
@@ -120,7 +122,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
-      interp->trace_gpu_event_record(
+      (*interp)->trace_gpu_event_record(
           reinterpret_cast<uintptr_t>(event_),
           reinterpret_cast<uintptr_t>(stream.stream())
       );
@@ -136,7 +138,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
-        interp->trace_gpu_event_wait(
+        (*interp)->trace_gpu_event_wait(
             reinterpret_cast<uintptr_t>(event_),
             reinterpret_cast<uintptr_t>(stream.stream())
         );
@@ -157,6 +159,10 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   // Note: cudaEventSynchronize can be safely called from any device
   void synchronize() const {
     if (is_created_) {
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+          (*interp)->trace_gpu_event_synchronization(reinterpret_cast<uintptr_t>(event_));
+      }
       AT_CUDA_CHECK(cudaEventSynchronize(event_));
     }
   }
@@ -185,7 +191,7 @@ private:
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
-      interp->trace_gpu_event_creation(reinterpret_cast<uintptr_t>(event_));
+      (*interp)->trace_gpu_event_creation(reinterpret_cast<uintptr_t>(event_));
     }
     is_created_ = true;
   }

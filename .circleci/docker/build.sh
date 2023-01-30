@@ -33,7 +33,7 @@ function extract_all_from_image_name() {
     if [ "x${name}" = xpy ]; then
       vername=ANACONDA_PYTHON_VERSION
     fi
-    # skip non-conforming fields such as "pytorch", "linux" or "xenial" without version string
+    # skip non-conforming fields such as "pytorch", "linux" or "bionic" without version string
     if [ -n "${name}" ]; then
       extract_version_from_image_name "${name}" "${vername}"
     fi
@@ -46,11 +46,7 @@ if [[ "$image" == *xla* ]]; then
   exit 0
 fi
 
-if [[ "$image" == *-xenial* ]]; then
-  UBUNTU_VERSION=16.04
-elif [[ "$image" == *-artful* ]]; then
-  UBUNTU_VERSION=17.10
-elif [[ "$image" == *-bionic* ]]; then
+if [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
@@ -79,67 +75,16 @@ elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
-if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
-  CMAKE_VERSION=3.13.5
-fi
+# CMake 3.18 is needed to support CUDA17 language variant
+CMAKE_VERSION=3.18.5
 
-TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 _UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
-_UCC_COMMIT=12944da33f911daf505d9bbc51411233d0ed85e1
+_UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-xenial-py3.8)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
-  pytorch-linux-xenial-py3.7-gcc7.2)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
-  pytorch-linux-xenial-py3.7-gcc7)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
-    CUDNN_VERSION=8
-    TENSORRT_VERSION=8.0.1.6
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
-    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
-    CUDNN_VERSION=8
-    TENSORRT_VERSION=8.0.1.6
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
@@ -151,6 +96,7 @@ case "$image" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
     ;;
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
@@ -163,45 +109,40 @@ case "$image" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
     ;;
-  pytorch-linux-xenial-py3-clang5-asan)
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=5.0
+  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.8.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ;;
-  pytorch-linux-xenial-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ;;
-  pytorch-linux-xenial-py3-clang7-onnx)
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
+    CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    CONDA_CMAKE=yes
     ;;
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
+  pytorch-linux-focal-py3-clang7-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=5.0
+    CLANG_VERSION=7
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
@@ -209,21 +150,25 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-xenial-py3.7-clang7)
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-bionic-py3.7-clang9)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-bionic-py3.8-clang9)
+    ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-bionic-py3.11-clang9)
+    ANACONDA_PYTHON_VERSION=3.11
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
+    CONDA_CMAKE=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
@@ -231,49 +176,36 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    CONDA_CMAKE=yes
     ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-focal-rocm5.1-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-focal-rocm-n-1-py3)
+    ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.1.1
+    ROCM_VERSION=5.3
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-rocm5.2-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-focal-rocm-n-py3)
+    ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.2
+    ROCM_VERSION=5.4.2
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-py3.7-gcc7)
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.16.9  # Required for precompiled header support
+  pytorch-linux-focal-py3.8-gcc7)
+    ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
     KATEX=yes
+    CONDA_CMAKE=yes
     ;;
   pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -287,6 +219,15 @@ case "$image" in
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.7
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.8
     CUDNN_VERSION=8
     CLANG_VERSION=12
     PROTOBUF=yes
@@ -308,6 +249,10 @@ case "$image" in
     fi
     if [[ "$image" == *rocm* ]]; then
       extract_version_from_image_name rocm ROCM_VERSION
+      NINJA_VERSION=1.9.0
+    fi
+    if [[ "$image" == *centos7* ]]; then
+      NINJA_VERSION=1.10.2
     fi
     if [[ "$image" == *gcc* ]]; then
       extract_version_from_image_name gcc GCC_VERSION
@@ -327,12 +272,6 @@ case "$image" in
   ;;
 esac
 
-# Set Jenkins UID and GID if running Jenkins
-if [ -n "${JENKINS:-}" ]; then
-  JENKINS_UID=$(id -u jenkins)
-  JENKINS_GID=$(id -g jenkins)
-fi
-
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 #when using cudnn version 8 install it separately from cuda
@@ -349,17 +288,12 @@ fi
 docker build \
        --no-cache \
        --progress=plain \
-       --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "THRIFT=${THRIFT:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
-       --build-arg "EC2=${EC2:-}" \
-       --build-arg "JENKINS=${JENKINS:-}" \
-       --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
-       --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
@@ -379,10 +313,11 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
+       --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

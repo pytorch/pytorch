@@ -73,11 +73,7 @@ Static runtime's memory planner does two things:
 1) Coalesces internal allocations for tensor storage
 2) Does static analysis to figure out how to efficiently re-use memory.
 
-For (2), there are two algorithms used. Specify which algorithm with
-the `memory_planner_algorithm` field in `StaticModuleOptions`. The
-algorithms are briefly described below:
-
-### Standard Resizing (default)
+### Standard Resizing
 Static runtime will record the space required for each intermediate managed tensor it sees
 on the first inference iteration. An intermediate tensor is *managed* if two conditions
 are satisfied:
@@ -103,16 +99,6 @@ will occur. This is why dynamic shapes will degrade performance. With the standa
 strategy, static runtime will record the new largest tensor size in each storage group at the
 end of the iteration and allocate a buffer that is possibly bigger on the next iteration.
 
-### Precomputed Offsets Memory Planner (experimental)
-This algorithm is based on [arXiv:2001.03288](https://arxiv.org/pdf/2001.03288.pdf), section 5.2 "Greedy by Size for Offset Calculation".
-
-The paper describes the algorithm in detail, but the key considerations are:
-
-1) This algorithm will tend to be more efficient with respect to maximum memory usage
-2) This algorithm will *not* resize the tensor buffer since recomputing offsets is a quadratic operation. Therefore,
-to avoid performance degradation, the model should be warmed up with the largest possible inputs.
-
-
 ### Managed Output Tensors
 
 `StaticRuntime` can optionally manage output tensors via the `manage_output_tensors` option in `StaticModuleOptions`.
@@ -121,17 +107,7 @@ output tensors is separated from the one containing intermediate tensors. The fo
 of the inference run, but the latter needs deallocated at the end of the run.
 
 Under the hood, we store a refcounted pointer to the output arena in each returned `Tensor`. The arena is destroyed
-only when all output tensors are destroyed.
-
-```
-auto output = runtime(args);
-auto& elems = output.toTupleRef().elements();
-auto tensor_1 = elems[0].toTensor();
-auto tensor_2 = elems[1].toTensor();
-
-tensor_1 = at::empty({0}); // Output buffer not deallocated yet!
-tensor_2 = at::empty({0}); // This call deallocates the output buffer.
-```
+explicitly.
 
 ## Registering Ops
 Static runtime has three op execution modes:
@@ -165,10 +141,10 @@ is selected instead.
 
 When loading a model, ops are selected for each `torch::jit::Node` in the graph as follows:
 
-1) If an out variant is registered, pass the node to the function that prodcues the `SROperator`. If
-the result is not `nulltpr`, use that op.
-2) If a native function is registered, pass the node to the function that prodcues the `SROperator`. If
-the result is not `nulltpr`, use that op.
+1) If an out variant is registered, pass the node to the function that produces the `SROperator`. If
+the result is not `nullptr`, use that op.
+2) If a native function is registered, pass the node to the function that produces the `SROperator`. If
+the result is not `nullptr`, use that op.
 3) Use the JIT implementation. Static runtime will throw an exception if it does not exist.
 
 ## Implementation Details
@@ -255,68 +231,8 @@ upon `StaticModule` construction according to the out variant/native/JIT fallbac
 * `prim::Loop` operations have a `BlockRunner` for the execution of the looping sub-block.
 * `prim::fork` operations have `torch::jit::TaskLauncher` (`std::function<void(std::function<void()>)>`) responsible for forked graph execution.
 
-### `Asynchronous Execution`
+### Asynchronous Execution
 
-`StaticRuntime::runAsync()` API allows execution of asynchronous operations on `TaskLauncher` passed as arguments.
-`StaticRuntime::runAsync()` performs inline execution of parent graph on caller thread and asynchronous operations like `prim::fork` are executed
-on the launcher passed in. In the case that no launcher is provided, the execution happens on `at::launch` inter-op thread pool.
-
-### `prim::fork and aten::wait`
-
-`prim::fork` takes the callable function/method/Module (say `fn`) and arguments to that callable `args` and `kwargs`. Since the execution of forked function `fn` happens asynchronously and fork returns immediately after creating the async task, the `fn` may not have been executed by the time the line of code after the `fork` call is reached. Thus, `aten::wait` is used to wait for the async `fn` task to be completed. `prim::fork` nodes contain the sub-graph for the forked parts of the network. Each parent graph creates a separate instance of `StaticModule` for the
-forked sub-graph and `StaticRuntime` instances are created on the fly during runtime as the fork nodes are executed. The forked subgraph execution
-happens asynchronously on the launcher provided during `StaticRuntime::runAsync()` or by `at::launch` executor by default. `aten::wait` operator
-waits on the future returned by the corresponding `prim::fork` operation
-
-#### Inter-op parallelism via fork/wait ops
-
-Sample Model with independent operations can be parallelized by inserting fork/wait nodes in the graph.
-
-```python
-def CNNBlock(x):
-    out_1 = conv1(x)
-    out_1 = conv2(out_1)
-    out_1 = max_pool1(out_1)
-
-    out_2 = conv3(x)
-    out_2 = max_pool2(out_2)
-
-    out_merged = conv4(out_1 + out_2)
-    return out_merged
-```
-The two branches of (conv,conv,pool) operations can be parallelized by inserting fork nodes such that the execution of both the branches can
-happen in parallel:
-
-```python
-def branch1(x):
-    out = conv1(x)
-    out = conv2(x)
-    return max_pool1(out)
-
-def branch2(x):
-    out = conv3(x)
-    return max_pool2(out)
-
-def CNNBlock(x):
-    fut_1 = torch.jit.fork(branch1, x)
-    fut_2 = torch.jit.fork(branch2, x)
-
-    out_merged = conv4(torch.jit.wait(fut_1) + torch.jit.wait(fut_2))
-    return out_merged
- ```
-**Execution without fork/wait operations:**
-```
-<CALLER THREAD>: conv1 ─> conv2 ─> max_pool1 ─> conv3 ─> max_pool2 ─> conv4
-```
-
-**Execution with fork/wait operations:**
-```
-<CALLER THREAD>  :             fork1 ──> fork2 ──────────> wait(fut_1) ─> wait(fut_2) ─> conv4
-                                  |        |
-                                  |        |
-<INTER-OP THREAD>:                |       conv3 ──────────────────> max_pool2 -> fut_2
-                                  |
-<INTER-OP THREAD>:             conv1 ─> conv2 ─> max_pool1 ──>fut_1
-```
-More examples for fork/wait operations and inter-op parallelism in PyTorch can be found at
-[Dynamic Parallelism in TorchScript](https://pytorch.org/tutorials/advanced/torch-script-parallelism.html)
+The `StaticRuntime::runAsync()` API allows the execution of asynchronous operations on the `TaskLauncher` passed as arguments.
+`StaticRuntime::runAsync()` performs inline execution of the parent graph on the caller thread. Asynchronous operations like `prim::fork` are executed
+on the launcher passed in. In the case that no launcher is provided, the execution happens via `at::launch`, i.e. on the inter-op thread pool.

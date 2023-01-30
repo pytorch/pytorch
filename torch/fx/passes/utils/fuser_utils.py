@@ -181,12 +181,12 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
 
     if len(orig_outputs) == 1:
         # main_remapping[comp.orig_outputs[0]] = module_node
-        orig_outputs[0].replace_all_uses_with(module_node)
+        orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
     else:
         for i, orig_output in enumerate(orig_outputs):
             # Use Proxy to record getitem access.
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
-            orig_output.replace_all_uses_with(proxy_out)
+            orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
     return gm
 
 def erase_nodes(gm: GraphModule, nodes: NodeList):

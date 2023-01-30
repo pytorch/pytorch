@@ -77,13 +77,6 @@ const auto sigmoid_inplace_script = R"JIT(
       return (a)
 )JIT";
 
-const auto sigmoid_out_script = R"JIT(
-  def forward(self, inp: Tensor):
-      a = inp + inp
-      b = torch.sigmoid(inp, out=a).clone()
-      return (b)
-)JIT";
-
 } // namespace
 
 // Test that StaticModule::value_group groups values of the graph into
@@ -352,6 +345,18 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
   EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
   EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
   EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
+}
+
+TEST(StaticRuntime, CanEnableStaticRuntimeSubBlocks) {
+  const auto src = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, cond: bool):
+        if cond:
+            # aten::__is__ on tensors is blocked
+            return a is b
+        return False
+  )JIT";
+
+  EXPECT_FALSE(testCanEnableStaticRuntime(src));
 }
 
 TEST(StaticRuntime, NestedOutput) {

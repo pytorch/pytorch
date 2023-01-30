@@ -9,17 +9,26 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C._autograd import (
+from torch._C._profiler import (
     _add_execution_graph_observer,
-    _remove_execution_graph_observer,
-    _enable_execution_graph_observer,
     _disable_execution_graph_observer,
+    _enable_execution_graph_observer,
+    _ExperimentalConfig,
+    _remove_execution_graph_observer,
 )
-from torch._C._profiler import _ExperimentalConfig
-from torch.autograd import ProfilerActivity, kineto_available
+from torch.autograd import kineto_available, ProfilerActivity
+from torch.profiler import _memory_profiler
 
-__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
-           'ExecutionGraphObserver']
+
+__all__ = [
+    "supported_activities",
+    "ProfilerAction",
+    "schedule",
+    "tensorboard_trace_handler",
+    "profile",
+    "ExecutionGraphObserver",
+]
+PROFILER_STEP_NAME = "ProfilerStep"
 
 def supported_activities():
     """
@@ -109,6 +118,17 @@ class _KinetoProfile(object):
         assert self.profiler is not None
         self.profiler._start_trace()
 
+        if self.profile_memory:
+            self.add_metadata_json("profile_memory", "1")
+        if self.with_stack:
+            self.add_metadata_json("with_stack", "1")
+        if self.record_shapes:
+            self.add_metadata_json("record_shapes", "1")
+        if self.with_modules:
+            self.add_metadata_json("with_modules", "1")
+        if self.with_flops:
+            self.add_metadata_json("with_flops", "1")
+
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
@@ -197,6 +217,15 @@ class _KinetoProfile(object):
             "world_size": dist.get_world_size()
         }
 
+    def _memory_profile(self) -> _memory_profiler.MemoryProfile:
+        required = ("record_shapes", "profile_memory", "with_stack")
+        missing = [f"{i}=True" for i in required if not getattr(self, i)]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required for memory profiling.")
+
+        assert self.profiler is not None and self.profiler.kineto_results is not None
+        return _memory_profiler.MemoryProfile(self.profiler.kineto_results)
+
 
 class ProfilerAction(Enum):
     """
@@ -263,8 +292,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         if not os.path.isdir(dir_name):
             try:
                 os.makedirs(dir_name, exist_ok=True)
-            except Exception:
-                raise RuntimeError("Can't create directory: " + dir_name)
+            except Exception as e:
+                raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
@@ -467,6 +496,9 @@ class profile(_KinetoProfile):
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
             (ProfilerAction.RECORD_AND_SAVE, None): [self.stop_trace, self._trace_ready]
         }
+        # Start tracking increments to profiler step, this will be used
+        # by Kineto
+        prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
         self.start()
@@ -474,6 +506,7 @@ class profile(_KinetoProfile):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+        prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):
         self._transit_action(ProfilerAction.NONE, self.current_action)
@@ -498,8 +531,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
+        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
-        prof.kineto_step()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
             self.step_rec_fn.__enter__()

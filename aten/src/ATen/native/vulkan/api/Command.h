@@ -18,8 +18,7 @@ class CommandBuffer final {
  public:
   explicit CommandBuffer(
       const VkCommandBuffer,
-      const VkCommandBufferUsageFlags =
-          VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+      const VkCommandBufferUsageFlags);
 
   CommandBuffer(const CommandBuffer&) = delete;
   CommandBuffer& operator=(const CommandBuffer&) = delete;
@@ -69,6 +68,15 @@ class CommandBuffer final {
   Bound bound_;
 
  public:
+  inline bool is_reusable() {
+    return !(flags_ & VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+  }
+
+  inline void invalidate() {
+    handle_ = VK_NULL_HANDLE;
+    bound_.reset();
+  }
+
   void begin();
   void end();
 
@@ -80,6 +88,13 @@ class CommandBuffer final {
 
   void insert_barrier(const PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
+
+  void copy_buffer_to_buffer(
+      const api::VulkanBuffer&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
 
   void copy_texture_to_texture(
       const api::VulkanImage&,
@@ -143,7 +158,7 @@ class CommandPool final {
   size_t in_use_;
 
  public:
-  CommandBuffer get_new_cmd();
+  CommandBuffer get_new_cmd(bool reusable = false);
 
   void flush();
 

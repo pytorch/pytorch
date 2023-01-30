@@ -32,6 +32,13 @@ enum pytorch_qnnp_status {
   pytorch_qnnp_status_out_of_memory = 5,
 };
 
+enum pytorch_qnnp_sparse_matrix_indices_dtype {
+  pytorch_qnnp_sparse_matrix_indices_dtype_invalid = 0,
+  pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t = 8,
+  pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t = 16,
+  pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t = 32,
+};
+
 enum pytorch_qnnp_status pytorch_qnnp_initialize(void);
 
 enum pytorch_qnnp_status pytorch_qnnp_deinitialize(void);
@@ -168,11 +175,12 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     size_t output_channels,
     uint8_t input_zero_point,
     const uint8_t* kernel_zero_points,
-    const uint32_t* kernel_col_indices,
-    const uint32_t* kernel_row_values,
+    const void* kernel_col_indices,
+    const void* kernel_row_values,
     const uint8_t* kernel_values,
     const uint32_t kernel_row_block_size,
     const uint32_t kernel_col_block_size,
+    enum pytorch_qnnp_sparse_matrix_indices_dtype kernel_indices_dtype,
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max,

@@ -1,7 +1,6 @@
 import functools
 import torch
 import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 
 class DefaultState(object):
@@ -22,9 +21,11 @@ class DefaultState(object):
 
     def __init__(
         self,
-        process_group
+        process_group: dist.ProcessGroup
     ):
-        self.process_group = process_group if process_group is not None else distributed_c10d._get_default_group()
+        if process_group is None:
+            raise ValueError(f"Expected to pass in an explicit ProcessGroup to {self}.")
+        self.process_group = process_group
         self.world_size = dist.get_world_size(process_group)
         # Setting two factors `self.gradient_predivide_factor`
         # and `self.gradient_postdivide_factor` to avoid underflow and overflow
@@ -107,7 +108,7 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
     # Average grad by pre-division factor.
     if state.gradient_predivide_factor > 1:
         grad.div_(state.gradient_predivide_factor)
-    dist._reduce_scatter_base(
+    dist.reduce_scatter_tensor(
         output, grad, group=state.process_group
     )
     # Average grad's shard by post-division factor.
@@ -115,9 +116,11 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
         output.div_(state.gradient_postdivide_factor)
 
 def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor):
-    grad.data = grad.data.to(prec)
+    if grad.dtype != prec:
+        grad.data = grad.data.to(prec)
     if output is not None:
-        output.data = output.data.to(prec)
+        if output.dtype != prec:
+            output.data = output.data.to(prec)
         reduce_scatter_hook(state, grad, output)
         _decompress(state, output)
     else:

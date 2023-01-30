@@ -37,7 +37,7 @@ const std::set<libkineto::ActivityType> cudaTypes = {
 #endif // USE_KINETO
 
 static_assert(
-    std::is_pod<DeviceAndResource>::value,
+    c10::is_pod_v<DeviceAndResource>,
     "Kineto specific details should be in `kineto_ids`.");
 
 const DeviceAndResource kineto_ids() {
@@ -116,7 +116,7 @@ TraceWrapper::operator bool() const {
 
 ActivityTraceWrapper::ActivityTraceWrapper(
     std::unique_ptr<interface_trace_t>&& trace)
-    : trace_(std::move(trace)), saved_{false} {}
+    : trace_(std::move(trace)) {}
 
 ActivityTraceWrapper::operator bool() const {
 #ifdef USE_KINETO
@@ -151,7 +151,7 @@ class ExperimentalConfigWrapper {
     // Kineto supports reading performance events per kernel/iteration
     // using CUPTI Range based profiler API. In this mode however we
     // do not trace CPU or GPU events.
-    bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
+    bool cupti_range_profiler = !config_.profiler_metrics.empty();
     if (cupti_range_profiler &&
         activities.count(torch::autograd::profiler::ActivityType::CPU)) {
       LOG(WARNING)
@@ -221,7 +221,7 @@ void prepareTrace(
   ExperimentalConfigWrapper configWrap(config);
 
   // Experimental Configuration options are present
-  if (config.hasOptions() && configWrap.assertValid(activities)) {
+  if (config && configWrap.assertValid(activities)) {
     configWrap.prepareTraceWithExperimentalOptions();
     return;
   }

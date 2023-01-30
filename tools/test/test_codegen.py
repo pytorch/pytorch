@@ -9,10 +9,14 @@ import torchgen.model
 import yaml
 
 from tools.autograd import gen_autograd_functions, load_derivatives
+from torchgen import dest
+from torchgen.api.types import CppSignatureGroup, DispatcherSignature
+from torchgen.context import native_function_manager
 from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
+    static_dispatch,
 )
 from torchgen.model import (
     BackendIndex,
@@ -214,6 +218,14 @@ class TestGenSchemaRegistration(unittest.TestCase):
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set(),
         )
+        (
+            self.fragment_custom_native_function,
+            _,
+        ) = torchgen.model.NativeFunction.from_yaml(
+            {"func": "quantized_decomposed::func() -> bool"},
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
 
     def test_default_namespace_schema_registration_code_valid(self) -> None:
         native_functions = [DEFAULT_NATIVE_FUNCTION]
@@ -232,6 +244,23 @@ class TestGenSchemaRegistration(unittest.TestCase):
             registrations,
             """
 TORCH_LIBRARY(custom, m) {
+  m.def("func() -> bool", {});
+
+};""",
+        )
+
+    def test_fragment_custom_namespace_schema_registration_code_valid(self) -> None:
+        """Sometimes we want to extend an existing namespace, for example quantized
+        namespace, which is already defined in native/quantized/library.cpp
+        """
+        _, registrations = get_native_function_schema_registrations(
+            native_functions=[self.fragment_custom_native_function],
+            schema_selector=self.selector,
+        )
+        self.assertEqual(
+            registrations,
+            """
+TORCH_LIBRARY_FRAGMENT(quantized_decomposed, m) {
   m.def("func() -> bool", {});
 
 };""",
@@ -328,6 +357,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                     self.op_2_native_function,
                 ],
                 backend_indices=self.backend_indices,
+                native_function_decl_gen=dest.compute_native_function_declaration,
             )
 
     def test_native_function_declaration_1_op_1_ns_valid(self) -> None:
@@ -337,6 +367,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 self.op_1_native_function,
             ],
             backend_indices=self.backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
         )
         target = """
 namespace at {
@@ -406,6 +437,65 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
             op_name
         ]
         self.assertEqual(backend_metadata.kernel, "op_2_out")
+
+
+# Test for static_dispatch
+class TestStaticDispatchGeneratrion(unittest.TestCase):
+    def setUp(self) -> None:
+        self.backend_indices: Dict[
+            DispatchKey, Dict[OperatorName, BackendMetadata]
+        ] = defaultdict(dict)
+        yaml_entry = """
+- func: op.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: op
+        """
+        es = yaml.load(yaml_entry, Loader=LineLoader)
+        self.one_return_func, m = NativeFunction.from_yaml(
+            es[0], loc=Location(__file__, 1), valid_tags=set()
+        )
+
+        BackendIndex.grow_index(self.backend_indices, m)
+        dispatch_key = DispatchKey.CompositeExplicitAutograd
+        self.assertTrue(dispatch_key in self.backend_indices)
+        self.indices = [
+            BackendIndex(
+                dispatch_key=dispatch_key,
+                use_out_as_primary=True,
+                external=False,
+                device_guard=False,
+                index=self.backend_indices[dispatch_key],
+            )
+        ]
+
+    def test_op_with_1_backend_generates_static_dispatch(self) -> None:
+        disp_sig = DispatcherSignature.from_schema(self.one_return_func.func)
+        with native_function_manager(self.one_return_func):
+            out = static_dispatch(
+                sig=disp_sig,
+                f=self.one_return_func,
+                backend_indices=self.indices,
+            )
+        self.assertEqual(
+            out, "return at::compositeexplicitautograd::op_out(out, self);"
+        )
+
+    def test_op_with_cpp_sig_generates_static_dispatch(self) -> None:
+        sig_group = CppSignatureGroup.from_native_function(
+            self.one_return_func,
+            method=False,
+            fallback_binding=self.one_return_func.manual_cpp_binding,
+        )
+        # cpp signature puts out at the front
+        with native_function_manager(self.one_return_func):
+            out = static_dispatch(
+                sig=sig_group.signature,
+                f=self.one_return_func,
+                backend_indices=self.indices,
+            )
+        self.assertEqual(
+            out, "return at::compositeexplicitautograd::op_out(out, self);"
+        )
 
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()

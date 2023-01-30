@@ -28,6 +28,7 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
+__all__ = ["RemoteModule"]
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -60,12 +61,17 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_buffers",
     "_non_persistent_buffers_set",
     "_backward_hooks",
+    "_backward_pre_hooks",
     "_is_full_backward_hook",
     "_forward_hooks",
+    "_forward_hooks_with_kwargs",
     "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
     "_load_state_dict_post_hooks",
+    "_state_dict_pre_hooks",
     "_modules",
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
@@ -131,7 +137,7 @@ class _RemoteModule(nn.Module):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
         It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`__,
         without incurring any overheads of copying the actual module,
@@ -355,14 +361,30 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
-        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_pre_hook(  # type: ignore[return]
+        self,
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
+        prepend: bool = False,
+        with_kwargs: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_hook(  # type: ignore[return]
+        self,
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
+        prepend: bool = False,
+        with_kwargs: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
     def state_dict(self, *args, **kwargs):
@@ -381,7 +403,10 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -389,7 +414,10 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
@@ -419,7 +447,7 @@ class _RemoteModule(nn.Module):
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
     def share_memory(self: T) -> T:  # type: ignore[return]
@@ -582,7 +610,7 @@ class RemoteModule(_RemoteModule):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
 
         It generates two methods ``forward_async`` and ``forward`` based on the
