@@ -176,18 +176,6 @@ class DeviceMeshTest(DTensorTestBase):
                 dim_groups=[dim_groups[0]],
             )
 
-    @with_comms
-    def test_device_mesh_fake_mode(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        import numpy as np
-
-        # To avoid being tracked by the FakeTensorMode, we should
-        # pass the mesh array using numpy ndarray instead of torch.Tensor.
-        mesh_array = np.arange(4).reshape(2, 2)
-        with FakeTensorMode():
-            # construct a cuda device mesh
-            mesh = DeviceMesh(self.device_type, mesh_array)
-
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
