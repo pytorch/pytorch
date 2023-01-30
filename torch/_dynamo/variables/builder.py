@@ -428,8 +428,8 @@ class VariableBuilder:
                 getattr(torch.ops.aten, value.__name__), torch._ops.OpOverloadPacket
             )
         ):
-            # point torch.Tensor.fn to torch.ops.aten.fn
             return TorchVariable(
+                # point torch.Tensor.{fn} to torch.ops.aten.{fn}
                 getattr(torch.ops.aten, value.__name__),
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
