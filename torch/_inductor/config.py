@@ -136,7 +136,7 @@ class cpp:
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = True
+    cudagraphs = False
 
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
