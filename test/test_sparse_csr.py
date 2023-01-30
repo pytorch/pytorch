@@ -1468,7 +1468,6 @@ class TestSparseCSR(TestCase):
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @unittest.skipIf(not has_triton(), "Triton is not available")
-    @unittest.skipIf(torch.version.cuda == '11.6', "Triton segfaults with CUDA 11.6")
     @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16)
