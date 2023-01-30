@@ -1,4 +1,3 @@
-import operator
 from typing import Dict, List, Optional
 
 import torch
@@ -109,6 +108,7 @@ class BaseListVariable(VariableTracker):
         assert not (
             left.is_python_constant() and right.is_python_constant()
         ), "Illegal generic list compare on constant lists"
+
         # Most list-like variables implement comparison ops the same way,
         # so they can re-use this helper.
         # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
@@ -126,6 +126,7 @@ class BaseListVariable(VariableTracker):
             l.compare(tx, op, r, **options)
 
         return left
+
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
