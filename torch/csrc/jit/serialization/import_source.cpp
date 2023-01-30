@@ -9,8 +9,7 @@
 
 #include <regex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -155,7 +154,7 @@ Function* SourceImporterImpl::findFunction(const QualifiedName& name) {
 
 void SourceImporterImpl::parseSourceIfNeeded(const std::string& qualifier) {
   // qualifier may be blank, for instance checking if __torch__ is a class.
-  if (qualifier == "" || loaded_sources_.count(qualifier)) {
+  if (qualifier.empty() || loaded_sources_.count(qualifier)) {
     return;
   }
   loaded_sources_.insert(qualifier);
@@ -660,7 +659,7 @@ void SourceImporterImpl::importEnum(
             << ". Only Integers, Floats and Strings are supported.";
     }
 
-    names_values.emplace_back(std::make_pair(name, ivalue));
+    names_values.emplace_back(name, ivalue);
   }
 
   if (!value_type) {
@@ -794,5 +793,4 @@ void SourceImporter::LEGACY_import_methods(
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

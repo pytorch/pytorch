@@ -5,6 +5,7 @@ import cProfile
 import dataclasses
 import datetime
 import dis
+import enum
 import functools
 import gc
 import inspect
@@ -22,30 +23,33 @@ import types
 import typing
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache
-from typing import Any, Dict
+from functools import lru_cache, wraps
+from typing import Any, Dict, List
 
-import numpy as np
-import sympy
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
-
 
 timer_counter = itertools.count()
 
@@ -62,6 +66,7 @@ def tabulate(rows, headers):
 
 
 def dynamo_profiled(func):
+    @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         datafn = (
@@ -81,19 +86,97 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-def dynamo_timed(func):
-    def time_wrapper(*args, **kwargs):
-        key = func.__qualname__
-        if key not in compilation_metrics:
-            compilation_metrics[key] = []
-        t0 = time.time()
-        r = func(*args, **kwargs)
-        latency = time.time() - t0
-        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-        compilation_metrics[key].append(latency)
-        return r
+frame_phase_timing = collections.OrderedDict()
 
-    return time_wrapper
+curr_frame = 0
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def increment_frame():
+    global curr_frame
+    curr_frame = curr_frame + 1
+
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def reset_frame_count():
+    global curr_frame
+    frame_phase_timing.clear()
+    curr_frame = 0
+
+
+op_count = 0
+
+
+def increment_op_count(cnt):
+    global op_count
+    op_count += cnt
+
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+# entire_frame_compile:8.574629999999999
+# backend_compile:5.26806
+def print_time_report():
+    total = 0
+    total_by_key = {}
+    for frame, timings in frame_phase_timing.items():
+        for key, timing in timings.items():
+            total += timing
+            if key not in total_by_key:
+                total_by_key[key] = timing
+            else:
+                total_by_key[key] += timing
+
+    out = "TIMING:"
+    for key, value in total_by_key.items():
+        out = f"{out} {key}:{round(value, 5)}"
+
+    print(out)
+
+
+# dynamo_timed API works as a function decorator
+# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# where the key is the functions name.
+# For example:
+#
+#  @dynamo_timed
+#  def _foo(...):
+#
+# Would show up as an entry in our timing dict:
+# OrderedDict([('bar.<locals>._foo', [0.083690, 0.23949, 3.1425e-05])])
+# This is extremely useful for granular debugging.
+#
+# For a higher-level mode, pass a phase_name into dynamo_timed
+# phase_names record an extra record into a separate compilation timing structure,
+# one keyed on frame+name rather than function.
+# The frame is incremented outside of this function, in def increment_frame() above.
+def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed_inner(func):
+        @wraps(func)
+        def time_wrapper(*args, **kwargs):
+            key = func.__qualname__
+            if key not in compilation_metrics:
+                compilation_metrics[key] = []
+            t0 = time.time()
+            r = func(*args, **kwargs)
+            time_spent = time.time() - t0
+            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+            compilation_metrics[key].append(time_spent)
+            if phase_name:
+                frame_key = str(curr_frame)
+                if frame_key not in frame_phase_timing:
+                    frame_phase_timing[frame_key] = {}
+                assert (
+                    phase_name not in frame_phase_timing[frame_key]
+                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
+                frame_phase_timing[frame_key][phase_name] = time_spent
+            return r
+
+        return time_wrapper
+
+    if original_function:
+        return dynamo_timed_inner(original_function)
+    return dynamo_timed_inner
 
 
 def compile_times(repr="str", aggregate=False):
@@ -175,22 +258,6 @@ def init_logging():
         config.log_level, log_file_name=config.log_file_name
     )
     graph_break_dup_warning_checker.reset()
-
-
-# filter out all frames after entering dynamo
-def filter_stack(stack):
-    user_stack = []
-    for frame in stack:
-        if "convert_frame" in frame.filename:
-            break
-        if (
-            "eval_frame" in frame.filename
-            or f"{config.dynamo_import}.optimize(" in frame.line
-        ):
-            continue
-        user_stack.append(frame)
-
-    return user_stack
 
 
 def format_graph_tabular(graph):
@@ -286,30 +353,43 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    return istype(
-        value,
-        (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        )
+    else:
+        return False
 
 
 def is_numpy_float_type(value):
-    return istype(
-        value,
-        (
-            np.float16,
-            np.float32,
-            np.float64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.float16,
+                np.float32,
+                np.float64,
+            ),
+        )
+    else:
+        return False
+
+
+def is_numpy_ndarray(value):
+    if HAS_NUMPY:
+        return istype(value, np.ndarray)
+    else:
+        return False
 
 
 def istensor(obj):
@@ -348,13 +428,13 @@ def proxy_args_kwargs(args, kwargs):
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
-    except NotImplementedError:
+    except NotImplementedError as e:
         from .exc import unimplemented
         from .variables.base import typestr
 
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        )
+        ) from e
 
 
 @dataclasses.dataclass
@@ -398,6 +478,10 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    # TODO: this is questionable
+    if isinstance(x, torch._subclasses.FakeTensor):
+        # this func fails on fake tensors in __torch_dispatch__
+        return x
 
     def torch_clone(x):
         y = torch.clone(x)
@@ -615,7 +699,7 @@ def is_safe_constant(v):
             type(type),
             torch.device,
         ),
-    )
+    ) or isinstance(v, enum.Enum)
 
 
 def check_constant_args(args, kwargs):
@@ -664,12 +748,33 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def enum_repr(value):
+    # Workaround repr(Enum) returning invalid global reference before python 3.11
+    # https://peps.python.org/pep-0663/
+    if sys.version_info < (3, 11):
+        return str(value)
+    else:
+        return repr(value)
+
+
 def dict_param_key_ids(value):
     return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
 
 
 def dict_const_keys(value):
     return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+
+
+def dict_const_keys_repr(const_keys):
+    if any(isinstance(k, enum.Enum) for k in const_keys):
+        # To workaround repr(Enum) returning invalid global reference before python 3.11
+        # by calling enum_repr and removing quotes to render enum in guard code.
+        const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
+            "'", ""
+        )
+    else:
+        const_keys_str = f"{const_keys!r}"
+    return const_keys_str
 
 
 def global_key_name(key):
@@ -695,42 +800,6 @@ from torch._subclasses import (  # noqa: F401
 )
 
 
-def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
-    fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
-    if tx is not None:
-        from torch._dynamo.guards import TensorReference
-
-        def _record(tensor_ref):
-            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
-
-        def _extract(symbol):
-            if isinstance(symbol, int):
-                return None
-            sym_expr = symbol.get_pyobj().expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                return None
-            return sym_expr
-
-        def _record_ref(e, index, symbol, kind):
-            sym_expr = _extract(symbol)
-            if sym_expr:
-                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                _record(tensor_ref)
-
-        for index, symbol in enumerate(fake_tensor.size()):
-            _record_ref(e, index, symbol, "size")
-
-        for index, symbol in enumerate(fake_tensor.stride()):
-            _record_ref(e, index, symbol, "stride")
-
-        offset = fake_tensor.storage_offset()
-        _record_ref(e, None, offset, "storage_offset")
-
-    return fake_tensor
-
-
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -739,31 +808,7 @@ def wrap_fake_exception(fn):
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
-        raise unimplemented(msg)
-
-
-def wrap_to_fake_tensor(e, fake_mode):
-    if type(e) in (torch.Tensor, torch.nn.Parameter):
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(
-                e, fake_mode, static_shapes=config.dynamic_shapes is False
-            )
-        )
-    else:
-        return e
-
-
-def wrap_to_fake_tensor_and_record(e, tx):
-    if type(e) in (torch.Tensor, torch.nn.Parameter):
-        static_shapes = config.dynamic_shapes is False
-        if type(e) is torch.nn.Parameter:
-            # Always static for params
-            static_shapes = True
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
-        )
-    else:
-        return e
+        raise unimplemented(msg) from e
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -786,6 +831,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    relax_numpy_equality=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -793,7 +839,16 @@ def same(
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         return len(ref) == len(res) and all(
-            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            same(
+                ai,
+                bi,
+                fp64_refi,
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+                relax_numpy_equality,
+            )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif isinstance(ref, dict):
@@ -811,12 +866,16 @@ def same(
                     tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
+                    relax_numpy_equality=relax_numpy_equality,
                 )
             ):
                 log.error(f"Accuracy failed for key name {k}")
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
+        assert not isinstance(ref, torch._subclasses.FakeTensor)
+        assert not isinstance(res, torch._subclasses.FakeTensor)
+
         if ref.is_sparse:
             assert res.is_sparse
             ref = ref.to_dense()
@@ -828,13 +887,16 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
-                return torch.allclose(
+                r = torch.allclose(
                     ref.to(dtype=torch.uint8),
                     res.to(dtype=torch.uint8),
                     atol=tol,
                     rtol=tol,
                     equal_nan=equal_nan,
                 )
+                if not r:
+                    log.error("Accuracy failed: uint8 tensor did not match")
+                return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -842,10 +904,10 @@ def same(
                 # early exit that handles zero/nan better
                 # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
                 return True
-            res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
-            if res < 0.99:
-                log.warning(f"Similarity score={res.cpu().detach().item()}")
-            return res >= 0.99
+            score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
+            if score < 0.99:
+                log.warning(f"Similarity score={score.cpu().detach().item()}")
+            return score >= 0.99
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
@@ -860,15 +922,18 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
-                if fp64_ref.numel() < 1000 or (
-                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                if (
+                    fp64_ref.numel() < 1000
+                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                    or tol >= 2 * 1e-2
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-4)
+                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
@@ -876,13 +941,27 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
+            log.error(f"Accuracy failed: allclose not within tol={tol}")
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
-        return ref == res
+        r = ref == res
+        if not r:
+            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+        return r
     elif isinstance(ref, float):
-        return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        if not r:
+            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+        return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        return (type(ref) is type(res)) and (ref == res)
+        if relax_numpy_equality:
+            ref = ref.item()
+        r = (type(ref) is type(res)) and (ref == res)
+        if not r:
+            log.error("Accuracy failed (numpy): {ref} != {res}")
+        return r
+    elif is_numpy_ndarray(ref):
+        return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -906,6 +985,7 @@ def same(
                 tol=tol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                relax_numpy_equality=relax_numpy_equality,
             )
             for key in ref.__dict__.keys()
         )
@@ -1033,7 +1113,11 @@ def get_fake_value(node, tx):
     from .exc import TorchRuntimeError, unimplemented, Unsupported
 
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def fake_wrapper(e):
+        if isinstance(e, torch.Tensor):
+            assert isinstance(e, FakeTensor)
+        return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
@@ -1105,6 +1189,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
@@ -1147,11 +1234,45 @@ def get_real_value(node, output_graph):
 
 
 def assert_no_fake_params_or_buffers(gm):
+    from torch._subclasses.fake_tensor import FakeTensorConfig
+
+    def stack_or_hint(t):
+        if FakeTensorConfig.debug:
+            import traceback
+
+            return f"FAKE TENSOR CREATION TRACEBACK: \n {traceback.format_list(t._debug_trace)}"
+        else:
+            return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
     for name, buffer in gm.named_buffers():
         assert not isinstance(
             buffer, torch._subclasses.FakeTensor
-        ), f"Unexpected fake buffer {name}"
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
         assert not isinstance(
             param, torch._subclasses.FakeTensor
-        ), f"Unexpected fake param {name}"
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
+
+
+def fake_mode_from_tensors(inputs: List[Any]):
+    """
+    Takes a list of anything, unflattened is fine, returns a fake_mode
+    if any are fake. All fake modes on all fake tensors must be identical.
+    Returns None if no fake_mode is fine
+    """
+    flat_inputs, _ = tree_flatten(inputs)
+    fake_mode = None
+    for flat_input in flat_inputs:
+        if isinstance(flat_input, torch._subclasses.FakeTensor):
+            if fake_mode is None:
+                fake_mode = flat_input.fake_mode
+            else:
+                assert fake_mode is flat_input.fake_mode
+    return fake_mode
+
+
+def fqn(obj: Any):
+    """
+    Returns the fully qualified name of the object.
+    """
+    return f"{obj.__module__}.{obj.__qualname__}"

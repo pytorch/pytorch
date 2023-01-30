@@ -1,11 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-import torch
-import torch.utils._pytree as pytree
 from typing import List
+
+import torch.utils._pytree as pytree
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.ops.utils import register_impl, unwrap_single_placement
 from torch.distributed._tensor.utils import unwrap_local_tensor
-from torch.distributed._tensor.ops.utils import unwrap_single_placement, register_impl
 
 """
 The ops below were quickly hacked and needed to be polished down the road.
@@ -13,18 +13,6 @@ Although they come with unit tests already, the logic is directly borrowed
 from ShardedTensor. We need to also make it work for all placement types
 of DTensor and all corner cases for sharded distributed tensor.
 """
-
-
-@register_impl("aten.cat.default")
-def dist_cat(tensor_list: List[DTensor], dim: int = 0) -> DTensor:
-    local_inputs = pytree.tree_map(unwrap_local_tensor, tensor_list)
-    local_tensor = torch.ops.aten.concat(local_inputs, dim=dim)
-    return DTensor.from_local(
-        local_tensor,
-        tensor_list[0].device_mesh,
-        tensor_list[0].placements,
-        run_check=False,
-    )
 
 
 @register_impl("aten.split.Tensor")

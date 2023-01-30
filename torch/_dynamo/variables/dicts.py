@@ -20,11 +20,16 @@ class ConstDictVariable(VariableTracker):
         super(ConstDictVariable, self).__init__(
             recursively_contains=recursively_contains, **kwargs
         )
+
+        self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
 
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
+
+    def as_python_constant(self):
+        return {k: v.as_python_constant() for k, v in self.items.items()}
 
     def python_type(self):
         return self.user_cls
@@ -259,7 +264,8 @@ class DefaultDictVariable(ConstDictVariable):
                     new_rec_contains = self.recursively_contains.union(
                         default_var.recursively_contains
                     )
-                    new_rec_contains.add(default_var.mutable_local)
+                    if default_var.mutable_local is not None:
+                        new_rec_contains.add(default_var.mutable_local)
                     tx.replace_all(
                         self, self.modifed(new_val, new_rec_contains, **options)
                     )

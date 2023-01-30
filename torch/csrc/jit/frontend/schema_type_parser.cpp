@@ -40,8 +40,7 @@ using c10::TupleType;
 using c10::UnionType;
 using c10::VarType;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -82,7 +81,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (text.size() > 0 && islower(text[0])) {
+    if (!text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
@@ -462,5 +461,4 @@ void SchemaTypeParser::parseList(
     L.expect(end);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

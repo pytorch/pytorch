@@ -14,7 +14,7 @@
 #include <cstring>
 #include <type_traits>
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 /**  NOTE [ Grid Sample CPU Kernels ]
  *
@@ -511,8 +511,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto sw = n * e;
     auto se = n * w;
 
-    auto i_x_w = convert_to_int_of_same_size(x_w);
-    auto i_y_n = convert_to_int_of_same_size(y_n);
+    auto i_x_w = convert_to_int_of_same_size<scalar_t>(x_w);
+    auto i_y_n = convert_to_int_of_same_size<scalar_t>(y_n);
     auto i_x_e = i_x_w + iVec(1);
     auto i_y_s = i_y_n + iVec(1);
 
@@ -1319,4 +1319,4 @@ REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl);
 REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl);
 
 
-}}  // namespace at::native
+}  // namespace at::native

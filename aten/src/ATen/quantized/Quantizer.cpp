@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <typeinfo>
+#include <utility>
 
 namespace at {
 
@@ -96,7 +97,7 @@ int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::S
       element_per_byte = 1;
   }
   // zero dim tensor
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return c10::multiply_integers(sizes) * dtype_itemsize;
   }
   // Consider most inner dim as cols
@@ -377,7 +378,7 @@ Tensor from_blob_quantized_per_tensor_affine(
       data,
       sizes,
       strides,
-      deleter,
+      std::move(deleter),
       scale,
       zeroPoint,
       options);

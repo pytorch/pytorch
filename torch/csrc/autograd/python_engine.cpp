@@ -1,7 +1,7 @@
 #include <torch/csrc/autograd/python_engine.h>
 
-#include <ATen/BatchedTensorImpl.h>
-#include <ATen/VmapMode.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
+#include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -22,6 +22,7 @@
 
 #include <memory> // for unique_ptr
 #include <unordered_set>
+#include <utility>
 
 using namespace torch::autograd;
 
@@ -108,7 +109,7 @@ void PythonEngine::thread_on_exception(
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(graph_task, fn, e);
+  Engine::thread_on_exception(std::move(graph_task), fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -148,7 +149,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     InputBuffer&& input_buffer) {
   try {
     return Engine::execute_with_graph_task(
-        graph_task, graph_root, std::move(input_buffer));
+        graph_task, std::move(graph_root), std::move(input_buffer));
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {

@@ -2044,6 +2044,130 @@ def conv_forwards(input: List[int],
   return newSizes
 
 )=====")
++ std::string(R"=====(def movedim(self: List[int],
+    source: List[int],
+    destination: List[int]) -> List[int]:
+  self_dim = torch.len(self)
+  if torch.le(self_dim, 1):
+    _0 = self
+  else:
+    normalized_src = annotate(List[int], [])
+    normalized_dst = annotate(List[int], [])
+    for i in range(torch.len(source)):
+      _1 = source[i]
+      if torch.le(self_dim, 0):
+        dim_post_expr = 1
+      else:
+        dim_post_expr = self_dim
+      min = torch.neg(dim_post_expr)
+      max = torch.sub(dim_post_expr, 1)
+      if torch.lt(_1, min):
+        _2 = True
+      else:
+        _2 = torch.gt(_1, max)
+      if torch.__not__(_2):
+        pass
+      else:
+        ops.prim.RaiseException("AssertionError: ")
+      if torch.lt(_1, 0):
+        dim = torch.add(_1, dim_post_expr)
+      else:
+        dim = _1
+      _3 = torch.append(normalized_src, dim)
+      _4 = destination[i]
+      if torch.le(self_dim, 0):
+        dim_post_expr0 = 1
+      else:
+        dim_post_expr0 = self_dim
+      min0 = torch.neg(dim_post_expr0)
+      max0 = torch.sub(dim_post_expr0, 1)
+      if torch.lt(_4, min0):
+        _5 = True
+      else:
+        _5 = torch.gt(_4, max0)
+      if torch.__not__(_5):
+        pass
+      else:
+        ops.prim.RaiseException("AssertionError: ")
+      if torch.lt(_4, 0):
+        dim0 = torch.add(_4, dim_post_expr0)
+      else:
+        dim0 = _4
+      _6 = torch.append(normalized_dst, dim0)
+    order = annotate(List[int], [])
+    for i0 in range(self_dim):
+      _7 = torch.append(order, -1)
+    src_dims = annotate(List[int], [])
+    for i1 in range(self_dim):
+      _8 = torch.append(src_dims, i1)
+    dst_dims = annotate(List[int], [])
+    for i2 in range(self_dim):
+      _9 = torch.append(dst_dims, i2)
+    for i3 in range(torch.len(source)):
+      _10 = normalized_src[i3]
+      _11 = torch._set_item(order, normalized_dst[i3], _10)
+      _12 = torch._set_item(src_dims, normalized_src[i3], -1)
+      _13 = torch._set_item(dst_dims, normalized_dst[i3], -1)
+    source_dims = annotate(List[int], [])
+    destination_dims = annotate(List[int], [])
+    for _14 in range(torch.len(src_dims)):
+      ele = src_dims[_14]
+      if torch.ne(ele, -1):
+        _15 = torch.append(source_dims, ele)
+      else:
+        pass
+    for _16 in range(torch.len(dst_dims)):
+      ele0 = dst_dims[_16]
+      if torch.ne(ele0, -1):
+        _17 = torch.append(destination_dims, ele0)
+      else:
+        pass
+    rest_dim = torch.sub(self_dim, torch.len(source))
+    for i4 in range(rest_dim):
+      _18 = source_dims[i4]
+      _19 = torch._set_item(order, destination_dims[i4], _18)
+    _20 = torch.eq(torch.len(self), torch.len(order))
+    if _20:
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    ndim = torch.len(order)
+    seen_dims = annotate(List[int], [])
+    newSizes = annotate(List[int], [])
+    for i5 in range(ndim):
+      _21 = order[i5]
+      if torch.le(ndim, 0):
+        dim_post_expr1 = 1
+      else:
+        dim_post_expr1 = ndim
+      min1 = torch.neg(dim_post_expr1)
+      max1 = torch.sub(dim_post_expr1, 1)
+      if torch.lt(_21, min1):
+        _22 = True
+      else:
+        _22 = torch.gt(_21, max1)
+      if torch.__not__(_22):
+        pass
+      else:
+        ops.prim.RaiseException("AssertionError: ")
+      if torch.lt(_21, 0):
+        dim1 = torch.add(_21, dim_post_expr1)
+      else:
+        dim1 = _21
+      _23 = torch.append(seen_dims, dim1)
+      _24 = torch.append(newSizes, self[dim1])
+    for _25 in range(torch.__range_length(1, ndim, 1)):
+      i6 = torch.__derive_index(_25, 1, 1)
+      for j in range(i6):
+        _26 = torch.ne(seen_dims[i6], seen_dims[j])
+        if _26:
+          pass
+        else:
+          ops.prim.RaiseException("AssertionError: ")
+    _0 = newSizes
+  return _0
+
+)=====")
 + std::string(R"=====(def view(self: List[int],
     sizes: List[int]) -> List[int]:
   _0 = "AssertionError: only one dimension can be inferred"
@@ -2832,6 +2956,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
+    {"aten::movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)", "movedim"},
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
     {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},

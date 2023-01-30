@@ -11,6 +11,8 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
+#include <utility>
+
 using namespace at;
 using namespace torch::autograd::generated;
 using torch::autograd::as_view;
@@ -226,7 +228,7 @@ Tensor& copy_(
 const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
-    IntArrayRef size,
+    SymIntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
@@ -234,7 +236,7 @@ const Tensor& resize_(
   }
   {
     at::AutoDispatchBelowAutograd mode;
-    at::redispatch::resize_(
+    at::redispatch::resize__symint(
         ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
@@ -397,7 +399,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
       /* output */ out,
       /* is_bw_differentiable */ false,
       /* is_fw_differentiable */ false,
-      /* view_func */ func,
+      /* view_func */ std::move(func),
       /* creation_meta */ CreationMeta::DEFAULT,
       /*allow_tensor_metadata_change=*/false);
 
@@ -421,7 +423,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
       /* output */ tmp,
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
-      /* view_func */ func,
+      /* view_func */ std::move(func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;
@@ -449,7 +451,7 @@ Tensor _make_dual(
       /* output */ tmp,
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
-      /* view_func */ func,
+      /* view_func */ std::move(func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;
