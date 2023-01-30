@@ -7,6 +7,7 @@ __all__ = [
     "Linear",
 ]
 
+
 class Linear(nnq.Linear):
     r"""
     A dynamic quantized linear module with floating point tensor as inputs and outputs.
@@ -25,9 +26,9 @@ class Linear(nnq.Linear):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> m = nn.quantized.dynamic.Linear(20, 30)
         >>> input = torch.randn(128, 20)
-        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])

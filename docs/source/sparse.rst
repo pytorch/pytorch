@@ -321,6 +321,15 @@ invariants:
    Dense dimensions always follow sparse dimensions, that is, mixing
    of dense and sparse dimensions is not supported.
 
+.. note::
+
+   To be sure that a constructed sparse tensor has consistent indices,
+   values, and size, the invariant checks can be enabled per tensor
+   creation via ``check_invariants=True`` keyword argument, or
+   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance. By default, the sparse tensor invariants
+   checks are disabled.
+
 .. _sparse-uncoalesced-coo-docs:
 
 Uncoalesced sparse COO tensors
@@ -530,6 +539,13 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_(CSR,_CRS_o
      where ``plain_dim_size`` is the number of plain dimensions
      (orthogonal to compressed dimensions, e.g. columns or rows).
 
+   To be sure that a constructed sparse tensor has consistent indices,
+   values, and size, the invariant checks can be enabled per tensor
+   creation via ``check_invariants=True`` keyword argument, or
+   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance. By default, the sparse tensor invariants
+   checks are disabled.
+
 .. note::
 
    The generalization of sparse compressed layouts to N-dimensional
@@ -646,9 +662,9 @@ argument is optional and will be deduced from the ``crow_indices`` and
     >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.float64)
     >>> csr
     tensor(crow_indices=tensor([0, 2, 4]),
-          col_indices=tensor([0, 1, 0, 1]),
-          values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
-          dtype=torch.float64)
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64)
     >>> csr.to_dense()
     tensor([[1., 2.],
             [3., 4.]], dtype=torch.float64)
@@ -1159,6 +1175,14 @@ The following :mod:`torch` functions support sparse tensors:
 :func:`~torch.vstack`
 :func:`~torch.zeros`
 :func:`~torch.zeros_like`
+
+To manage checking sparse tensor invariants, see:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.check_sparse_tensor_invariants
 
 Unary functions
 ---------------

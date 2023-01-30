@@ -35,11 +35,6 @@ call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-:: Install ninja and other deps
-if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
-
 :: Override VS env here
 pushd .
 if "%VC_VERSION%" == "" (
@@ -85,10 +80,8 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 set DISTUTILS_USE_SDK=1
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
-:: Target only our CI GPU machine's CUDA arch to speed up the build, we can overwrite with env var
-:: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
-:: jenkins has M40, which is 5.2
-if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
+:: The latest Windows CUDA test is running on AWS G5 runner with A10G GPU
+if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=8.6
 
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
@@ -140,7 +133,7 @@ python setup.py bdist_wheel
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 sccache --show-stats
-python -c "import os, glob; os.system('python -mpip install ' + glob.glob('dist/*.whl')[0] + '[opt-einsum]')"
+python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
