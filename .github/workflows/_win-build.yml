@@ -122,7 +122,7 @@ jobs:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
-          .jenkins/pytorch/win-build.sh
+          .ci/pytorch/win-build.sh
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3

@@ -151,7 +151,7 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
-          .jenkins/pytorch/win-test.sh
+          .ci/pytorch/win-test.sh
 
       - name: Print remaining test logs
         shell: bash

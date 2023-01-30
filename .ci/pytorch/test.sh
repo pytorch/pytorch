@@ -816,7 +816,7 @@ test_vec256() {
 }
 
 test_docs_test() {
-  .jenkins/pytorch/docs-test.sh
+  .ci/pytorch/docs-test.sh
 }
 
 test_executorch() {

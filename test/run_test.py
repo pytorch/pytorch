@@ -52,7 +52,7 @@ except ImportError:
 
 # Note [ROCm parallel CI testing]
 # https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
-# In .jenkins/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
+# In .ci/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
 # This results in multiple test files sharing the same GPU.
 # This should be a supported use case for ROCm, but it exposed issues in the kernel driver resulting in hangs.
 # See https://github.com/pytorch/pytorch/issues/90940.
