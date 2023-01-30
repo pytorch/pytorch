@@ -522,6 +522,18 @@ class ListIteratorVariable(VariableTracker):
         self.items = items
         self.index = index
 
+    def next_variables(self):
+        assert self.mutable_local
+        if self.index >= len(self.items):
+            raise StopIteration()
+        return self.items[self.index].add_options(self), ListIteratorVariable(
+            self.items,
+            self.index + 1,
+            mutable_local=MutableLocal(),
+            recursively_contains=self.recursively_contains,
+            **VariableTracker.propagate([self]),
+        )
+
     def as_python_constant(self):
         if self.index > 0:
             raise NotImplementedError()
