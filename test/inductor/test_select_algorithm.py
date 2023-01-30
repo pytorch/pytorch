@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import functools
-import logging
 from unittest.mock import patch
 
 import torch
@@ -21,11 +20,8 @@ def patches(fn):
         return generate()
 
     for patcher in [
-        patch.object(dynamo_config, "log_level", logging.INFO),
-        patch.object(dynamo_config, "verbose", True),
-        patch.object(inductor_config, "debug", True),
-        patch.object(inductor_config, "max_autotune", True),
-        patch.object(inductor_config, "epilogue_fusion", True),
+        dynamo_config.patch(verbose=True),
+        inductor_config.patch(debug=True, max_autotune=True, epilogue_fusion=True),
         patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
     ]:
