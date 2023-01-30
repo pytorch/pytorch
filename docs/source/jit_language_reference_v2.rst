@@ -1847,11 +1847,11 @@ only usable within TorchScript:
 - ``torch.jit.fork()``
     - Creates an asynchronous task executing func and a reference to the value of the result of this execution. Fork will return immediately.
     - Synonymous to ``torch.jit._fork()``, which is only kept for backward compatibility reasons.
-    - More deatils about its usage and examples can be found in :meth:`~torch.jit.fork`.
+    - More details about its usage and examples can be found in :meth:`~torch.jit.fork`.
 - ``torch.jit.wait()``
     - Forces completion of a ``torch.jit.Future[T]`` asynchronous task, returning the result of the task.
     - Synonymous to ``torch.jit._wait()``, which is only kept for backward compatibility reasons.
-    - More deatils about its usage and examples can be found in :meth:`~torch.jit.wait`.
+    - More details about its usage and examples can be found in :meth:`~torch.jit.wait`.
 
 
 .. _torch_apis_in_torchscript_annotation:

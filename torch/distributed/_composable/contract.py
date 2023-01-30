@@ -1,5 +1,6 @@
 import uuid
 from collections import OrderedDict
+from functools import wraps
 from typing import Callable, Dict, List, Optional, Type
 
 import torch.nn as nn
@@ -65,7 +66,10 @@ def contract(state_cls: Type[_State] = _State):
         >>> model(torch.randn(2, 10)).sum().backward()
     """
 
+    # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
+    @wraps(state_cls)
     def inner(func):
+        @wraps(func)
         def wrapper(module: nn.Module, *args, **kwargs) -> Optional[nn.Module]:
             # get existing global states
             default_all_state: Dict[Callable, _State] = OrderedDict()

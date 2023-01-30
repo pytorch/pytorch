@@ -18,8 +18,7 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at {
-    namespace native {
+namespace at::native {
         namespace {
             const char spherical_bessel_j0_name[] = "spherical_bessel_j0_forward";
 
@@ -39,5 +38,4 @@ namespace at {
         }
 
         REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace at::native

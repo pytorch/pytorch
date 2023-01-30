@@ -191,6 +191,13 @@ This context manager has no effect if a factory function is passed an explicit,
 non-None device argument.  To globally change the default device, see also
 :func:`torch.set_default_device`.
 
+.. warning::
+
+    This function imposes a slight performance cost on every Python
+    call to the torch API (not just factory functions).  If this
+    is causing problems for you, please comment on
+    https://github.com/pytorch/pytorch/issues/92701
+
 .. note::
    The :class:`torch.device` argument in functions can generally be substituted with a string.
    This allows for fast prototyping of code.

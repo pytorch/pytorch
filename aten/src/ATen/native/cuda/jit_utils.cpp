@@ -38,7 +38,7 @@
 #endif
 
 
-namespace at { namespace cuda { namespace jit {
+namespace at::cuda::jit {
 
 // hiprtc already includes some traits, so this removes duplicate definitions of
 // integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
@@ -921,7 +921,7 @@ void codegenOutputQuery(
 
 // TODO: another copy paste from jit, refactor so it's usable from both
 // TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
-void __inline__ initializeCudaContext() {
+void initializeCudaContext() {
   // lazily construct context if non-existing yet;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
@@ -1656,5 +1656,4 @@ void launch_jitted_pwise_function(
     nullptr));
 }
 
-
-}}} // at::cuda::jit
+} // at::cuda::jit
