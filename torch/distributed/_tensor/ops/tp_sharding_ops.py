@@ -15,7 +15,6 @@ of DTensor and all corner cases for sharded distributed tensor.
 """
 
 
-@register_impl("aten.split.Tensor")
 # pyre-fixme[2]: Parameter must be annotated.
 def dist_split(self: DTensor, split_size_or_sections, dim=0) -> List[DTensor]:
     local_mat = pytree.tree_map(unwrap_local_tensor, self)

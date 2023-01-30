@@ -600,3 +600,75 @@ def _update_schema_suggestion_for_cat(
         )
     ]
     return output_sharding
+
+@register_prop_rule("aten.split.Tensor")
+def split_rule(op_schema: OpSchema) -> OutputSharding:
+    """
+    The OutputSpecType of tensor split should be Sequence[DTensorSpec]
+    """
+    print(op_schema)
+    output_spec_list: List[DTensorSpec] = []
+    input_spec = cast(DTensorSpec, op_schema.args_schema[0])
+    ndim = input_spec.ndim
+    split_size_or_sections = op_schema.args_schema[1]
+    dim = 0
+    if len(op_schema.args_schema) > 2:
+        dim = cast(int, op_schema.args_schema[2])
+    dim = normalize_dim(dim, ndim)
+
+    # TODO: just like slice op, split replicates before splitting
+    # on a sharded dimension
+    # TODO: shall we consider partial???
+    # TODO: consider splitting an empty tensor
+    need_reshard = False
+    if is_tensor_dim_sharded(input_spec, dim=dim):
+        need_reshard = True
+        input_spec = DTensorSpec(
+            mesh=input_spec.mesh,
+            placements=unshard_tensor_dim(input_spec.placements, dim=dim),
+            shape=input_spec.shape,
+            ndim=input_spec.ndim,
+        )
+
+    if need_reshard:
+        return OutputSharding(
+            None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(input_spec,) + op_schema.args_schema[1:],
+                    kwargs_schema={},
+                ),
+            ]
+        )
+
+    def size_split(N, i):
+        # Last chunk will be smaller if the tensor size N
+        # along the given dimension dim is not divisible by i.
+        assert i > 0
+        return [i] * (N // i) + ([N % i] if N % i != 0 else [])
+
+    output_size_list = (
+        size_split(input_spec.shape[dim], split_size_or_sections)
+        if isinstance(split_size_or_sections, int)
+        else split_size_or_sections
+    )
+    output_shape_list = [
+        torch.Size(
+            tuple(input_spec.shape[:dim])
+            + (size,)
+            + tuple(input_spec.shape[dim + 1 :])
+        )
+        for size in output_size_list
+    ]
+    output_spec_list = [
+        DTensorSpec(
+            mesh=input_spec.mesh,
+            placements=input_spec.placements,
+            shape=shape,
+            ndim=input_spec.ndim,
+        ) 
+        for shape in output_shape_list
+    ]
+    print(output_spec_list)
+    return OutputSharding(output_spec_list)

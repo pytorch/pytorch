@@ -453,7 +453,7 @@ dtensor_fails = {
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),
-    xfail("split"),
+    #xfail("split"),
     xfail("split", "list_args"),
     xfail("split_with_sizes"),
     xfail("squeeze", "multiple"),
@@ -553,6 +553,7 @@ skip_bw = [
     "torch.eq",
     "torch.isfinite",
     "torch.isnan",
+    #"torch.functional.split",
 ]
 
 
