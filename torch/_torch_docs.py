@@ -106,6 +106,9 @@ factory_common_args = merge_dicts(
         the pinned memory. Works only for CPU tensors. Default: ``False``.
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
+    check_invariants (bool, optional): If sparse tensor invariants are checked.
+        Default: as returned by :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled`,
+        initially False.
 """
     ),
     {
@@ -1227,7 +1230,7 @@ Converts :attr:`obj` to a tensor.
 :attr:`obj` can be one of:
 
 1. a tensor
-2. a NumPy array
+2. a NumPy array or a NumPy scalar
 3. a DLPack capsule
 4. an object that implements Python's buffer protocol
 5. a scalar
@@ -1242,14 +1245,18 @@ requested then it will not share its memory with :attr:`obj`. If :attr:`requires
 is ``True`` then the returned tensor will require a gradient, and if :attr:`obj` is
 also a tensor with an autograd history then the returned tensor will have the same history.
 
-When :attr:`obj` is not a tensor, NumPy Array, or DLPack capsule but implements Python's
+When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
 buffer protocol then the buffer is interpreted as an array of bytes grouped according to
 the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
 passed then the default floating point datatype is used, instead.) The returned tensor
 will have the specified datatype (or default floating point datatype if none is specified)
 and, by default, be on the CPU device and share memory with the buffer.
 
-When :attr:`obj` is none of the above but a scalar or sequence of scalars then the
+When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
+the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
+be the PyTorch datatype corresponding to the NumPy's scalar's datatype.
+
+When :attr:`obj` is none of the above but a scalar, or a sequence of scalars then the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
 CPU device, and not share its memory.
 
@@ -1317,6 +1324,10 @@ Example::
     >>> t2 = torch.asarray(array, dtype=torch.float32)
     >>> array.__array_interface__['data'][0] == t1.data_ptr()
     False
+
+    >>> scalar = numpy.float64(0.5)
+    >>> torch.asarray(scalar)
+    tensor(0.5000, dtype=torch.float64)
 """,
 )
 
@@ -10161,7 +10172,7 @@ Example::
 add_docstr(
     torch.sparse_compressed_tensor,
     r"""sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None, """
-    r"""*, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+    r"""*, dtype=None, layout=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in Compressed Sparse format - CSR,
 CSC, BSR, or BSC - <sparse-compressed-docs>` with specified values at
@@ -10213,6 +10224,7 @@ Keyword args:
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
+    {check_invariants}
 
 Example::
     >>> compressed_indices = [0, 2, 4]
@@ -10232,8 +10244,8 @@ Example::
 
 add_docstr(
     torch.sparse_csr_tensor,
-    r"""
-sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+    r"""sparse_csr_tensor(crow_indices, col_indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
@@ -10273,6 +10285,7 @@ Keyword args:
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
+    {check_invariants}
 
 Example::
     >>> crow_indices = [0, 2, 4]
@@ -10292,8 +10305,8 @@ Example::
 
 add_docstr(
     torch.sparse_csc_tensor,
-    r"""
-sparse_csc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+    r"""sparse_csc_tensor(ccol_indices, row_indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
 <sparse-csc-docs>` with specified values at the given
@@ -10335,6 +10348,7 @@ Keyword args:
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
+    {check_invariants}
 
 Example::
     >>> ccol_indices = [0, 2, 4]
@@ -10354,8 +10368,8 @@ Example::
 
 add_docstr(
     torch.sparse_bsr_tensor,
-    r"""
-sparse_bsr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+    r"""sparse_bsr_tensor(crow_indices, col_indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
 <sparse-bsr-docs>` with specified 2-dimensional blocks at the given
@@ -10399,6 +10413,7 @@ Keyword args:
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
+    {check_invariants}
 
 Example::
     >>> crow_indices = [0, 1, 2]
@@ -10421,8 +10436,8 @@ Example::
 
 add_docstr(
     torch.sparse_bsc_tensor,
-    r"""
-sparse_bsc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+    r"""sparse_bsc_tensor(ccol_indices, row_indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
 Column)) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
@@ -10465,6 +10480,7 @@ Keyword args:
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
+    {check_invariants}
 
 Example::
     >>> ccol_indices = [0, 1, 2]
@@ -10488,7 +10504,7 @@ Example::
 add_docstr(
     torch.sparse_coo_tensor,
     r"""
-sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
@@ -10520,7 +10536,7 @@ Keyword args:
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
-
+    {check_invariants}
 
 Example::
 
@@ -10632,14 +10648,14 @@ add_docstr(
     r"""
 squeeze(input, dim=None) -> Tensor
 
-Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
+Returns a tensor with all specified dimensions of :attr:`input` of size `1` removed.
 
 For example, if `input` is of shape:
-:math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` tensor
+:math:`(A \times 1 \times B \times C \times 1 \times D)` then the `input.squeeze()`
 will be of shape: :math:`(A \times B \times C \times D)`.
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
-dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
+dimension(s). If `input` is of shape: :math:`(A \times 1 \times B)`,
 ``squeeze(input, 0)`` leaves the tensor unchanged, but ``squeeze(input, 1)``
 will squeeze the tensor to the shape :math:`(A \times B)`.
 
@@ -10648,12 +10664,15 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 
 .. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
           will also remove the batch dimension, which can lead to unexpected
-          errors.
+          errors. Consider specifying only the dims you wish to be squeezed.
 
 Args:
     {input}
-    dim (int, optional): if given, the input will be squeezed only in
-           this dimension
+    dim (int or tuple of ints, optional): if given, the input will be squeezed
+           only in the specified dimensions.
+
+        .. versionchanged:: 2.0
+           :attr:`dim` now accepts tuples of dimensions.
 
 Example::
 
@@ -10669,6 +10688,8 @@ Example::
     >>> y = torch.squeeze(x, 1)
     >>> y.size()
     torch.Size([2, 2, 1, 2])
+    >>> y = torch.squeeze(x, (1, 2, 3))
+    torch.Size([2, 2, 2])
 """.format(
         **common_args
     ),
@@ -10701,11 +10722,12 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      Defaults to `Bessel's correction`_, ``correction=1``.
-    .. versionchanged:: 1.14
-        Previously this argument was called ``unbiased`` and was a boolean with
-        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
+        Defaults to `Bessel's correction`_, ``correction=1``.
 
+        .. versionchanged:: 2.0
+            Previously this argument was called ``unbiased`` and was a boolean
+            with ``True`` corresponding to ``correction=1`` and ``False`` being
+            ``correction=0``.
     {keepdim}
     {out}
 
@@ -10757,10 +10779,12 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      Defaults to `Bessel's correction`_, ``correction=1``.
-    .. versionchanged:: 1.14
-        Previously this argument was called ``unbiased`` and was a boolean with
-        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
+        Defaults to `Bessel's correction`_, ``correction=1``.
+
+        .. versionchanged:: 2.0
+            Previously this argument was called ``unbiased`` and was a boolean
+            with ``True`` corresponding to ``correction=1`` and ``False`` being
+            ``correction=0``.
     {keepdim}
     {out}
 
@@ -12175,10 +12199,12 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      Defaults to `Bessel's correction`_, ``correction=1``.
-    .. versionchanged:: 1.14
-        Previously this argument was called ``unbiased`` and was a boolean with
-        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
+        Defaults to `Bessel's correction`_, ``correction=1``.
+
+        .. versionchanged:: 2.0
+            Previously this argument was called ``unbiased`` and was a boolean
+            with ``True`` corresponding to ``correction=1`` and ``False`` being
+            ``correction=0``.
     {keepdim}
     {out}
 
@@ -12229,10 +12255,12 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      Defaults to `Bessel's correction`_, ``correction=1``.
-    .. versionchanged:: 1.14
-        Previously this argument was called ``unbiased`` and was a boolean with
-        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
+        Defaults to `Bessel's correction`_, ``correction=1``.
+
+        .. versionchanged:: 2.0
+            Previously this argument was called ``unbiased`` and was a boolean
+            with ``True`` corresponding to ``correction=1`` and ``False`` being
+            ``correction=0``.
     {keepdim}
     {out}
 
@@ -12490,34 +12518,34 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y, *, out=None) -> Tensor
+where(condition, input, other, *, out=None) -> Tensor
 
-Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
+Return a tensor of elements selected from either :attr:`input` or :attr:`other`, depending on :attr:`condition`.
 
 The operation is defined as:
 
 .. math::
     \text{out}_i = \begin{cases}
-        \text{x}_i & \text{if } \text{condition}_i \\
-        \text{y}_i & \text{otherwise} \\
+        \text{input}_i & \text{if } \text{condition}_i \\
+        \text{other}_i & \text{otherwise} \\
     \end{cases}
 """
     + r"""
 .. note::
-    The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
+    The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
-    condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor or Scalar): value (if :attr:`x` is a scalar) or values selected at indices
+    condition (BoolTensor): When True (nonzero), yield input, otherwise yield other
+    input (Tensor or Scalar): value (if :attr:`input` is a scalar) or values selected at indices
                           where :attr:`condition` is ``True``
-    y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
+    other (Tensor or Scalar): value (if :attr:`other` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
 
 Keyword args:
     {out}
 
 Returns:
-    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
+    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
 
 Example::
 
@@ -12527,6 +12555,10 @@ Example::
     tensor([[-0.4620,  0.3139],
             [ 0.3898, -0.7197],
             [ 0.0478, -0.1657]])
+    >>> torch.where(x > 0, 1.0, 0.0)
+    tensor([[0., 1.],
+            [1., 0.],
+            [1., 0.]])
     >>> torch.where(x > 0, x, y)
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
@@ -13983,3 +14015,59 @@ Performs the same operation as :func:`torch.alias`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )
+
+for unary_base_func_name in (
+    "exp",
+    "sqrt",
+    "abs",
+    "acos",
+    "asin",
+    "atan",
+    "ceil",
+    "cos",
+    "cosh",
+    "erf",
+    "erfc",
+    "expm1",
+    "floor",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "neg",
+    "tan",
+    "tanh",
+    "sin",
+    "sinh",
+    "round",
+    "lgamma",
+    "frac",
+    "reciprocal",
+    "sigmoid",
+    "trunc",
+    "zero",
+):
+    unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
+    if hasattr(torch, unary_foreach_func_name):
+        add_docstr(
+            getattr(torch, unary_foreach_func_name),
+            r"""
+{}(self: List[Tensor]) -> List[Tensor]
+
+Apply :func:`torch.{}` to each Tensor of the input list.
+            """.format(
+                unary_foreach_func_name, unary_base_func_name
+            ),
+        )
+    unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
+    if hasattr(torch, unary_inplace_foreach_func_name):
+        add_docstr(
+            getattr(torch, unary_inplace_foreach_func_name),
+            r"""
+{}(self: List[Tensor]) -> None
+
+Apply :func:`torch.{}` to each Tensor of the input list.
+        """.format(
+                unary_inplace_foreach_func_name, unary_base_func_name
+            ),
+        )

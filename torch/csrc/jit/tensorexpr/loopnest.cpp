@@ -31,9 +31,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
@@ -658,8 +656,8 @@ class FunctionInliner : public IRMutator {
   FunctionInliner(StorePtr producer, std::unordered_set<BufPtr> outputs)
       : buf_(producer->buf()),
         producer_(producer),
-        outputs_(std::move(outputs)) {
-    success_ = true;
+        outputs_(std::move(outputs)),
+        success_(true) {
     for (const auto& i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
@@ -1356,7 +1354,7 @@ bool LoopNest::optimizeConditionals() {
       continue;
     }
     TORCH_INTERNAL_ASSERT(
-        comp_values.size() >= 1,
+        !comp_values.empty(),
         buildErrorMessage(
             "Expected at least one expression in optimizeConditional in the fuser."));
     comp_values.insert(comp_values.begin(), immLike(comp_values[0], 0));
@@ -1436,7 +1434,7 @@ void LoopNest::vectorizeInnerLoops() {
     worklist.push_back(rootF);
   } else if (BlockPtr body = to<Block>(root_stmt_)) {
     std::vector<BlockPtr> blocks = {body};
-    while (blocks.size()) {
+    while (!blocks.empty()) {
       BlockPtr b = blocks.back();
       blocks.pop_back();
 
@@ -1452,7 +1450,7 @@ void LoopNest::vectorizeInnerLoops() {
 
   // Traverse the For loop nest find inner-most loops, which are
   // vectorization candidates.
-  while (worklist.size()) {
+  while (!worklist.empty()) {
     ForPtr f = worklist.back();
     worklist.pop_back();
 
@@ -3428,6 +3426,4 @@ bool LoopNest::rfactor(
   return true;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

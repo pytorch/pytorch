@@ -292,12 +292,12 @@ auto handle_torch_function_no_python_arg_parser(
 
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  auto get_stack_len = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
-                             : c10::impl::TorchDispatchModeTLS::stack_len();
+  const auto is_mode_active = [&]() {
+    return is_torch_function ? at::impl::torch_function_mode_enabled()
+                             : c10::impl::dispatch_mode_enabled();
   };
 
-  if (get_stack_len() > 0) {
+  if (is_mode_active()) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
@@ -702,7 +702,7 @@ static bool is_int_list(
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
         (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+         THPVariable_Unpack(item.ptr()).sizes().empty());
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -738,7 +738,7 @@ static bool is_int_or_symint_list(
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
         (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+         THPVariable_Unpack(item.ptr()).sizes().empty());
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -1126,12 +1126,11 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
 
   auto last_offset = open_paren + 1;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto next_offset = last_offset;
   bool keyword_only = false;
   bool done = false;
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
+    auto next_offset = offset + 2;
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
       done = true;
@@ -1141,8 +1140,6 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
         last_offset = next_offset;
         break;
       }
-    } else {
-      next_offset = offset + 2;
     }
     if (offset == std::string::npos) {
       throw std::runtime_error("missing closing parenthesis: " + fmt);
@@ -1457,7 +1454,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
       max_args = signature.max_args;
     }
   }
-  if (signatures_.size() > 0) {
+  if (!signatures_.empty()) {
     function_name = signatures_[0].name;
   }
 

@@ -8,8 +8,6 @@ import tempfile
 
 from typing import Dict
 
-import numpy as np
-
 import torch
 from ..output_graph import CompilerFn
 
@@ -18,17 +16,6 @@ from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
 BACKENDS: Dict[str, CompilerFn] = dict()
-_NP_DTYPE = {
-    torch.float16: np.float16,
-    torch.float32: np.float32,
-    torch.float64: np.float64,
-    torch.uint8: np.uint8,
-    torch.int8: np.int8,
-    torch.int16: np.int16,
-    torch.int32: np.int32,
-    torch.int64: np.longlong,
-    torch.bool: np.bool_,
-}
 
 
 def register_backend(fn):
@@ -41,6 +28,11 @@ def register_backend(fn):
 
 
 def create_backend(fn):
+    """
+    WARNING: We do not recommend using this for new backends.  This is
+    primarily used to support legacy TorchScript-based backends.
+    """
+
     @functools.wraps(fn)
     def inner(model, example_inputs=None, **kwargs):
         if model is None:
@@ -59,6 +51,14 @@ def create_backend(fn):
 
     BACKENDS[fn.__name__] = inner
     return inner
+
+
+@register_backend
+def inductor(*args, **kwargs):
+    # do import here to avoid loading inductor into memory when it is not used
+    from torch._inductor.compile_fx import compile_fx
+
+    return compile_fx(*args, **kwargs)
 
 
 @create_backend
@@ -133,7 +133,20 @@ def static_runtime(subgraph):
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
+    import numpy as np  # type: ignore[import]
     import onnxruntime  # type: ignore[import]
+
+    _np_dtype = {
+        torch.float16: np.float16,
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.uint8: np.uint8,
+        torch.int8: np.int8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.longlong,
+        torch.bool: np.bool_,
+    }
 
     assert provider in onnxruntime.get_available_providers()
     session = onnxruntime.InferenceSession(
@@ -153,7 +166,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
                 name,
                 dev.type,
                 dev.index or 0,
-                _NP_DTYPE[value.dtype],
+                _np_dtype[value.dtype],
                 value.size(),
                 value.data_ptr(),
             )
@@ -164,7 +177,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
                 name,
                 dev.type,
                 dev.index or 0,
-                _NP_DTYPE[value.dtype],
+                _np_dtype[value.dtype],
                 value.size(),
                 value.data_ptr(),
             )
@@ -759,7 +772,7 @@ def torchxla_trivial(subgraph):
 
 @create_backend
 def torchxla_trace_once(subgraph):
-    import torch._dynamo.optimizations.torchxla_integration as integration
+    import torch_xla.core.dynamo_bridge as bridge  # type: ignore[import]
 
     compiled_graph = None
     model = subgraph.model
@@ -768,7 +781,7 @@ def torchxla_trace_once(subgraph):
         nonlocal subgraph
         nonlocal compiled_graph
         if compiled_graph is None:
-            compiled_graph = integration.extract_compiled_graph(model, args)
+            compiled_graph = bridge.extract_compiled_graph(model, args)
             del subgraph
         return compiled_graph(*args)
 

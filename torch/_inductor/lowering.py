@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
@@ -10,22 +11,25 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch import _prims_common
 from torch._prims_common import (
+    canonicalize_dims,
+    dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
+    is_float_dtype,
     is_integer_dtype,
     Number,
 )
+from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    FloorDiv,
     IndexingConstant,
-    IndexingDiv,
     PermuteView,
     Pointwise,
     Reduction,
@@ -287,7 +291,7 @@ def promote_constants(inputs, override_return_dtype=None):
             *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
         return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
-    ex = next(x for x in inputs if isinstance(x, TensorBox))
+    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
@@ -487,16 +491,17 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
-    offset = len(x.get_size()) == 0
-    dim = _validate_dim(x, dim, offset)
-    new_shape = list(x.get_size())
-    if len(new_shape) > 0:
-        removed = new_shape.pop(dim)
-        if V.graph.sizevars.maybe_guard_equals(removed, 1):
-            return view(x, new_shape)
 
+    dim = canonicalize_dims(len(x.get_size()), dim)
+    dims = set((dim,) if not isinstance(dim, tuple) else dim)
+
+    new_shape = [
+        s
+        for d, s in enumerate(x.get_size())
+        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
+    ]
     # squeeze does nothing if the size isn't 1
-    return x
+    return view(x, new_shape) if new_shape != x.get_size() else x
 
 
 @register_lowering([aten.squeeze_])
@@ -558,6 +563,7 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
+    (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
     assert isinstance(x, TensorBox)
@@ -733,9 +739,9 @@ def as_strided(x, size, stride, storage_offset=None):
         # as_strided ignores views
         x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_contiguous_storage_and_layout(x):
+    if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
-    storage, old_layout = ir.as_contiguous_storage_and_layout(x)
+    storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
         old_layout.device,
         old_layout.dtype,
@@ -835,21 +841,6 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
-
-
-@register_lowering(aten.mm)
-def mm(a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiply.create(a, b))
-
-
-@register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
-
-
-@register_lowering(aten.bmm)
-def bmm(a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
 def register_onednn_fusion_ops():
@@ -1109,17 +1100,19 @@ fast_randn = make_rand("randn")
 
 @register_lowering([aten.rand, torch.rand])
 def rand(*args, **kwargs):
-    if config.fallback_random:
+    if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_rand(*args, **kwargs)
     else:
+        kwargs.pop("generator", None)
         return fast_rand(*args, **kwargs)
 
 
 @register_lowering([aten.randn, torch.randn])
 def randn(*args, **kwargs):
-    if config.fallback_random:
+    if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_randn(*args, **kwargs)
     else:
+        kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
 
 
@@ -1338,27 +1331,6 @@ def arange(
     )
 
 
-@register_lowering([torch.linspace, aten.linspace])
-def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
-    assert not pin_memory
-    dtype = dtype or torch.get_default_dtype()
-
-    step_size = (end - start) / (steps - 1)
-
-    def inner_fn(index):
-        return ops.add(
-            ops.mul(ops.constant(step_size, dtype), ops.index_expr(index[0], dtype)),
-            ops.constant(start, dtype),
-        )
-
-    return Pointwise.create(
-        device=decode_device(device),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=[sympy.Integer(steps)],
-    )
-
-
 @register_lowering(aten.triu)
 def triu(x, diagonal=0):
     x_loader = x.make_loader()
@@ -1429,7 +1401,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = ir.IndexingDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = ir.FloorDiv(sympy.expand(end - start), sympy.expand(step))
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -1440,7 +1412,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
 
         idx_dim = ops.index_expr(idx[dim], torch.int32)
         src_idx = list(idx)
-        src_idx[dim] = ir.IndexingDiv(idx[dim] - start, step)
+        src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
 
         mask = []
         if start != 0:
@@ -1569,7 +1541,8 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
-    if isinstance(value, (int, float)):
+
+    if isinstance(value, (int, float, sympy.Expr)):
 
         def inner_fn(index):
             return ops.constant(value, dtype)
@@ -1619,9 +1592,24 @@ def tensor_constructor(fill_value):
     return inner
 
 
-empty = register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
-zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
-ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
+@register_lowering([torch.empty, aten.empty])
+def empty(
+    *size,
+    names=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    assert names is None
+    assert memory_format in (None, torch.contiguous_format)
+    device = decode_device(device)
+    if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+        size = list(size[0])
+    return empty_strided(
+        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 def create_tensor_like(creation_fn):
@@ -1652,12 +1640,10 @@ def constant_like(fill_value):
 
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
-zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
-ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
+ones_like = create_tensor_like(tensor_constructor(1))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-
-register_lowering(aten.zero)(zeros_like)
+    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):
@@ -1675,9 +1661,15 @@ def new_constant(fill_value):
     return _new_constant
 
 
-register_lowering(aten.new_empty)(new_constant(0))
-register_lowering(aten.new_zeros)(new_constant(0))
-register_lowering(aten.new_ones)(new_constant(1))
+@register_lowering(aten.new_empty)
+def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    if dtype is None:
+        dtype = x.get_dtype()
+    if device is None:
+        device = x.get_device()
+    return empty_strided(
+        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_lowering(aten.empty_strided)
@@ -1685,23 +1677,28 @@ def empty_strided(
     size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
 ):
     assert isinstance(size, (list, type))
-    assert isinstance(stride, (list, type))
+    assert isinstance(stride, (list, type, type(None)))
     assert not pin_memory
     assert not layout or layout == torch.strided
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
-    if tuple(ir.FlexibleLayout.contiguous_strides(size)) == tuple(stride):
-        # fast path, no need to realize it
-        return pointwise
     pointwise.realize()
     buffer = pointwise.data.data
+    # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
+    buffer.data.ranges = [0] * len(size)
     assert isinstance(buffer, ir.ComputedBuffer)
+    size = [sympy.expand(s) for s in size]
+    stride = (
+        [sympy.expand(s) for s in stride]
+        if stride
+        else ir.FlexibleLayout.contiguous_strides(size)
+    )
     buffer.layout = ir.FixedLayout(
         device=device,
         dtype=dtype,
-        size=[sympy.expand(s) for s in size],
-        stride=[sympy.expand(s) for s in stride],
+        size=size,
+        stride=stride,
     )
     return pointwise
 
@@ -1853,41 +1850,17 @@ def index(x, indices):
     )
 
 
-# Note [Decompositions as Inductor Lowerings]
-# This is moved from decomposition to lowering because this decomp introduced
+# All the indexing decompositions are written in terms of index, index_put, and index_put_
+# We cannot have this lowering as a decomposition as it introduces
 # mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
 # code elimination and common subexpression elimination optimizations, which
 # assume graphs to be side-effect free. More details at
-# https://github.com/pytorch/torchdynamo/issues/1235.
-# Moving such reinplacing type of decomps to lowering ensures that AotAutograd
-# gets good graphs.
-# A better long term solution would be to functionalize all decompositions.
-# That would let us use these decompositions "normally",
-# instead of forcing them to be lowerings.
+# https://github.com/pytorch/torchdynamo/issues/1235
+# and
+# https://github.com/pytorch/torchdynamo/issues/1863
 @register_lowering([aten.index_put])
 def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
-
-
-# See Note [Decompositions as Inductor Lowerings]
-# We don't want the decomp to do type promotion implicitly;
-# It will try to convert index (int64) to a float-like type.
-@register_lowering([aten.index_add], type_promotion_kind=None)
-def index_add(x, dim, index, tensor, *, alpha=1):
-    return index_add_(clone(x), dim, index, tensor, alpha=alpha)
-
-
-# See Note [Decompositions as Inductor Lowerings]
-# We don't want the decomp to do type promotion implicitly;
-# It will try to convert index (int64) to a float-like type.
-@register_lowering([aten.index_add_], type_promotion_kind=None)
-def index_add_(x, dim, index, tensor, *, alpha=1):
-    dim = _prims_common.canonicalize_dims(len(x.get_size()), dim)
-    if alpha != 1:
-        tensor = mul(tensor, alpha)
-    idx = (None,) * dim + (index,)
-    index_put_(x, idx, tensor, accumulate=True)
-    return x
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -2468,6 +2441,7 @@ def constant_pad_nd(x, padding, fill_value=0):
         mask_sizes.append(size)
         output_size.append(sympy.expand(size + low + high))
     assert len(output_size) == len(sizes)
+    fill_value = dtype_to_type(x.get_dtype())(fill_value)
 
     def mask(index):
         mask = []
@@ -2534,12 +2508,12 @@ def constant_boundary_condition_2d(x, fill_value, padding):
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
-    x_out = ir.IndexingDiv(
+    x_out = ir.FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
 
     if ceil_mode:
-        x_alt = ir.IndexingDiv(
+        x_alt = ir.FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
 
@@ -2723,13 +2697,13 @@ def max_pool2d_with_indices_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -2870,10 +2844,10 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     def start_index(index, out_dim, inp_dim):
-        return ir.IndexingDiv((index * inp_dim), out_dim)
+        return ir.FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
-        return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+        return ir.FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -3151,13 +3125,13 @@ def avg_pool2d_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -3403,8 +3377,14 @@ def pow(a, b):
             inner_fn=fn,
             ranges=a.get_size(),
         )
-    else:
-        return pow_native(a, b)
+
+    if isinstance(a, Number):
+        if a == 1:
+            return full_like(b, 1)
+        if a == 2 and is_float_dtype(b.get_dtype()):
+            return exp2(b)
+
+    return pow_native(a, b)
 
 
 def mutate_to(changed, val):
@@ -3425,7 +3405,9 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
+    if isinstance(changed_data, ir.StorageBox) and not (
+        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+    ):
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data
@@ -3438,11 +3420,6 @@ def mutate_to(changed, val):
 @register_lowering(aten.fill_)
 def fill_(x, fill_value):
     return mutate_to(x, full_like(x, fill_value))
-
-
-@register_lowering(aten.zero_)
-def zero_(x):
-    return mutate_to(x, full_like(x, 0))
 
 
 @register_lowering(aten.copy_, type_promotion_kind=None)
@@ -3571,6 +3548,14 @@ exp = register_pointwise(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
 )
+exp2 = register_pointwise(
+    aten.exp2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+expm1 = register_pointwise(
+    aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
     aten.sigmoid,
@@ -3616,7 +3601,7 @@ register_pointwise(
 )
 
 register_pointwise(
-    aten.expm1,
+    aten.tan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
@@ -3689,6 +3674,11 @@ def sym_size(a, dim):
     return a.get_size()[dim]
 
 
+@register_lowering(aten.sym_stride)
+def sym_stride(a, dim):
+    return a.get_stride()[dim]
+
+
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
     return a.get_numel()
@@ -3704,9 +3694,39 @@ def op_add(a, b):
     return a + b
 
 
+@register_lowering(operator.sub)
+def op_sub(a, b):
+    return a - b
+
+
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
-    return IndexingDiv(a, b)
+    return FloorDiv(a, b)
+
+
+@register_lowering(operator.truediv)
+def op_truediv(a, b):
+    return a / b
+
+
+@register_lowering(math.ceil)
+def op_ceil(a):
+    return sympy.ceiling(a)
+
+
+@register_lowering(math.floor)
+def op_floor(a):
+    return sympy.floor(a)
+
+
+@register_lowering(sym_sqrt)
+def op_sqrt(a):
+    return sympy.sqrt(a)
+
+
+@register_lowering(torch.sym_float)
+def op_sym_float(a):
+    return a
 
 
 @register_lowering(aten._foobar)
@@ -3718,3 +3738,20 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+def _import_kernels():
+    """
+    Need to make sure all these get registered in the lowers dict
+    """
+    import importlib
+    import os
+
+    from . import kernel
+
+    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
+
+
+_import_kernels()
