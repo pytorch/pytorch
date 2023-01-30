@@ -11,6 +11,7 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -1546,17 +1547,25 @@ def _all_gather_optim_state(
     all_tensor_states = sorted(
         list(set([n for state in object_list for n in state.tensors.keys()]))
     )
+    empty_ranks: Set[int] = set()
     for name in all_tensor_states:
         numels = []
         dtype = torch.float
         max_numel = 0
-        for object_state in object_list:
+        _empty_ranks: Set[int] = set()
+        for rank, object_state in enumerate(object_list):
             numels.append(0)
             info = object_state.tensors.get(name, None)
             if info is not None:
                 numels[-1] = info.shape.numel()
                 dtype = info.dtype
                 max_numel = max(max_numel, numels[-1])
+            if numels[-1] == 0:
+                _empty_ranks.add(rank)
+
+        if empty_ranks:
+            assert empty_ranks == _empty_ranks
+        empty_ranks = _empty_ranks
         local_state = (
             optim_state[name]
             if name in optim_state
@@ -1575,7 +1584,9 @@ def _all_gather_optim_state(
         )
         gathered_state[name] = AllGatherInfo(tensors, numels, work)
 
-    for object_state in object_list:
+    for rank, object_state in enumerate(object_list):
+        if rank in empty_ranks:
+            continue
         for name, non_tensor_value in object_state.non_tensors.items():
             curr_non_tensor_value = gathered_state.get(name, None)
             assert (
