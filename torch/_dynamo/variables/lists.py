@@ -100,9 +100,6 @@ class BaseListVariable(VariableTracker):
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
 
-    def next_variables(self):
-        return unimplemented(f"{type(self)}.next_variables()")
-
     @staticmethod
     def generic_list_compare(left, tx, op, right, **options):
         assert not (
@@ -265,13 +262,6 @@ class ListVariable(BaseListVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def next_variables(self):
-        return self.items[0].add_options(self), ListVariable(
-            self.items[1:],
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
-
     def compare(self, tx, op, right, **options):
         if not isinstance(right, ListVariable):
             return ConstantVariable(False, **options)
@@ -312,12 +302,6 @@ class TupleVariable(BaseListVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def next_variables(self):
-        return self.items[0].add_options(self), ListVariable(
-            self.items[1:],
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
 
     def compare(self, tx, op, right, **options):
         # All tuple-like python constructs can be validly compared (e.g. torch.Size vs tuple)
@@ -537,18 +521,6 @@ class ListIteratorVariable(VariableTracker):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
-
-    def next_variables(self):
-        assert self.mutable_local
-        if self.index >= len(self.items):
-            raise StopIteration()
-        return self.items[self.index].add_options(self), ListIteratorVariable(
-            self.items,
-            self.index + 1,
-            mutable_local=MutableLocal(),
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
 
     def as_python_constant(self):
         if self.index > 0:
