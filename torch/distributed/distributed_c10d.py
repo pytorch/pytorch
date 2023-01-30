@@ -30,8 +30,7 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
-    Work,
-    _lookup_process_group
+    Work
 )
 from torch._six import string_classes
 from torch.autograd.profiler import record_function
@@ -1606,7 +1605,6 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     else:
         work.wait()
 
-
 @exception_handler
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -1657,8 +1655,6 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     """
     _check_single_tensor(tensor, "tensor")
-    if isinstance(group, int):
-        group = _lookup_process_group(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
         return
@@ -3759,7 +3755,7 @@ def new_subgroups_by_enumeration(
     return cur_subgroup, subgroups
 
 
-def _find_pg_by_ranks_and_tag(tag:str, ranks: List[int]) -> ProcessGroup:
+def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
     for group, group_ranks in _world.pg_group_ranks.items():
         good = all(r in group_ranks for r in ranks)
         if good:

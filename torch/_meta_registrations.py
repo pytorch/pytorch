@@ -2650,7 +2650,7 @@ def activate_meta():
 
 
 @register_meta(aten.all_reduce)
-def all_reduce_meta(self, reduceOp, tag, ranks):
+def all_reduce_meta(self, reduceOp, tag, rankset, stride):
     return self
 
 
