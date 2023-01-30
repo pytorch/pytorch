@@ -41,6 +41,11 @@ void clearCublasWorkspaces() {
 
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
+  /* :4096:2:16:8 default, 32MiB for Hopper */
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
+  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+
   if (val) {
     size_t total_size = 0;
     const std::string config(val);
@@ -48,24 +53,25 @@ size_t parseChosenWorkspaceSize() {
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;
     if (next == end) {
-      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size of 4096.");
-      return 4096 * 1024;
+      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size of ", default_size, " bytes.");
+      return default_size;
     }
     while (next != end) {
       std::smatch match = *next;
       TORCH_CHECK(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
       size_t curr_size = (size_t) std::stoi(match.str(1));
-      total_size += curr_size * 1024;
+      size_t count = (size_t) std::stoi(match.str(2));
+      total_size += curr_size * 1024 * count;
       next++;
     }
     return total_size;
-  } else /* :4096:8 */ {
-    return 4096 * 1024;
+  } else {
+    return default_size;
   }
 }
 
 size_t getChosenWorkspaceSize() {
-  static size_t pool_size = parseChosenWorkspaceSize();
+  size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
@@ -95,7 +101,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   // cublasSetWorkspace not available on CUDA 10.2
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
@@ -105,7 +111,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   }
   TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
 #endif
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.

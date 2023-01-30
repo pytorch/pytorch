@@ -19,17 +19,14 @@ namespace autograd {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 Scatter::Scatter(
     std::vector<at::Device> devices,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const c10::optional<std::vector<int64_t>>& chunk_sizes,
+    c10::optional<std::vector<int64_t>> chunk_sizes,
     int64_t dim,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
-        streams,
+    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
-      chunk_sizes_(chunk_sizes),
+      chunk_sizes_(std::move(chunk_sizes)),
       dim_(dim),
-      streams_(streams),
+      streams_(std::move(streams)),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
 Scatter::~Scatter() = default;
@@ -49,12 +46,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
     return device.index();
   });
   auto tensors = torch::cuda::scatter(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(input),
-      device_indices,
-      chunk_sizes_,
-      dim_,
-      streams_);
+      std::move(input), device_indices, chunk_sizes_, dim_, streams_);
 
   std::vector<Variable> variables;
   variables.reserve(tensors.size());
@@ -105,8 +97,10 @@ variable_list Gather::apply(variable_list&& inputs) {
   if (compute_requires_grad(inputs)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::Device> source_devices;
+    source_devices.reserve(inputs.size());
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<int64_t> input_sizes;
+    input_sizes.reserve(inputs.size());
     for (auto& input : inputs) {
       source_devices.push_back(input.device());
       input_sizes.push_back(input.size(dim_));
