@@ -1364,7 +1364,6 @@ class ShapeEnv:
                     source_creation.append(
                         f"auto {tensor_property_info.name} = {variable_name}->cdata->{tensor_property_str}();"
                     )
-                    )
 
             source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
 
