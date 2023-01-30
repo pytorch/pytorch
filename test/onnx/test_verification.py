@@ -154,7 +154,7 @@ class TestVerificationOnWrongExport(pytorch_test_common.ExportTestCase):
                 decorators=[
                     unittest.skipIf(
                         version.Version(onnx.__version__) < version.Version("1.13"),
-                        reason="Reference Python runtime was  introduced in 'onnx' 1.13.",
+                        reason="Reference Python runtime was introduced in 'onnx' 1.13.",
                     )
                 ],
             ),
