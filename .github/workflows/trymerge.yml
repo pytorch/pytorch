@@ -40,6 +40,7 @@ jobs:
           LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
           REBASE: ${{ github.event.client_payload.rebase }}
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           set -ex
           if [ -n "${REBASE}" ]; then
