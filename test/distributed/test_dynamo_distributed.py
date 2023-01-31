@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 import torch._dynamo
-from torch._dynamo.optimizations.distributed import DDPOptimizer
+from torch._dynamo.backends.distributed import DDPOptimizer
 import torch._dynamo.test_case
 import torch.distributed as dist
 from contextlib import contextmanager

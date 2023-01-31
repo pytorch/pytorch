@@ -314,7 +314,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
-                    from .optimizations.distributed import DDPOptimizer
+                    from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
