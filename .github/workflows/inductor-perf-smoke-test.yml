@@ -5,8 +5,6 @@ on:
     branches:
       - master
       - main
-    tags:
-      - ciflow/inductor-perf-test-nightly/*
   pull_request:
     paths:
       - .github/workflows/inductor-perf-smoke-test.yml
