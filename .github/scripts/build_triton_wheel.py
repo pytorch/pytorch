@@ -7,8 +7,9 @@ import sys
 import shutil
 SCRIPT_DIR = Path(__file__).parent
 
-def read_triton_pin() -> str:
-    with open(SCRIPT_DIR.parent / "ci_commit_pins" / "triton.txt") as f:
+def read_triton_pin(is_rocm: bool = False) -> str:
+    filename = "triton-rocm.txt" if is_rocm else "triton.txt"
+    with open(SCRIPT_DIR.parent / "ci_commit_pins" / filename) as f:
         return f.read().strip()
 
 
@@ -30,11 +31,14 @@ def patch_setup_py(path: Path, *, version: str = "2.0.0", name: str = "triton") 
         f.write(orig)
 
 
-def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optional[str] = None) -> Path:
+def build_triton(commit_hash: str, build_conda: bool = False, is_rocm: bool = False, py_version : Optional[str] = None) -> Path:
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
-        check_call(["git", "clone", "https://github.com/openai/triton"], cwd=tmpdir)
+        if is_rocm:
+            check_call(["git", "clone", "https://github.com/ROCmSoftwarePlatform/triton", "-b", "triton-mlir-pyt20"], cwd=tmpdir)
+        else:
+            check_call(["git", "clone", "https://github.com/openai/triton"], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
@@ -54,7 +58,8 @@ def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optio
             shutil.copy(conda_path, Path.cwd())
             return Path.cwd() / conda_path.name
 
-        patch_setup_py(triton_pythondir / "setup.py", name="pytorch-triton", version=f"2.0.0+{commit_hash[:10]}")
+        name = "pytorch-triton-rocm" if is_rocm else "pytorch-triton"
+        patch_setup_py(triton_pythondir / "setup.py", name=name, version=f"2.0.0+{commit_hash[:10]}")
         check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
@@ -64,11 +69,12 @@ def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optio
 def main() -> None:
     from argparse import ArgumentParser
     parser = ArgumentParser("Build Triton binaries")
+    parser.add_argument("--rocm", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--py-version", type=str)
     args = parser.parse_args()
-    pin = read_triton_pin()
-    build_triton(pin, build_conda=args.build_conda, py_version=args.py_version)
+    pin = read_triton_pin(is_rocm=args.rocm)
+    build_triton(pin, build_conda=args.build_conda, is_rocm=args.rocm, py_version=args.py_version)
 
 
 if __name__ == "__main__":
