@@ -664,13 +664,20 @@ def handle_subgraph(
             custom_prepare_kwargs)
 
 def create_add_loggers_graph(
-    model: torch.nn.Module,
+    model: GraphModule,
     subgraphs_dedup: Dict[str, List[Node]],
     qconfig_mapping: QConfigMapping,
     node_name_to_qconfig: Dict[str, QConfigAny],
 ) -> None:
     """
-    Given layer op0 and op1, there are four cases when handling op1:
+    Given a model, a model graph partition (currently a set of matched
+    subgraphs) and instructions how to transform each subgraph
+    (currently quantizing it according to qconfig_mapping), modifies
+    the model graph to create an alternate path through the original graph,
+    with each of the subgraphs quantized.  This is useful to compare
+    propagation error of a transformation such as quantization.
+
+    For example, given layer op0 and op1, there are four cases when handling op1:
     1. op0 and op1 quantized
     2. op0 and op1 unquantized
     3. op0 quantized, op1 unquantized
@@ -702,7 +709,6 @@ def create_add_loggers_graph(
                 return subgraph
         return None
 
-    # print('original graph', model.graph)
     # First, we need to create shadow branches, going from
     #
     #   x0 -> op0 -> x1 -> ...
@@ -723,12 +729,11 @@ def create_add_loggers_graph(
 
     nodes_to_skip = set()
     # need to record original list because we will mutate the graph as we go
-    orig_nodes = list(model.graph.nodes)
+    orig_nodes = list(model.graph.nodes)  # type: ignore[union-attr, arg-type]
     cur_subgraph_idx = 0
     orig_first_node_to_shadow_in_node = {}
     orig_first_node_to_shadow_out_node = {}
     for n in orig_nodes:
-        # print('processing n', n.format_node())
         if n.op in ('placeholder', 'get_attr', 'output') or n in nodes_to_skip:
             continue
 
@@ -743,8 +748,6 @@ def create_add_loggers_graph(
                 insert_submodule_copy = True
         else:
             first_node, last_node = n, n
-
-        # print('first', first_node, 'last', last_node, 'insert_copy', insert_submodule_copy)
 
         if insert_submodule_copy:
             match_name = first_node.name
@@ -811,8 +814,7 @@ def create_add_loggers_graph(
                     if first_node_copy is None:
                         first_node_copy = cur_node_copy
                 cur_node_orig = list(cur_node_orig.users.keys())[0]
-                # TODO(before land): make this safer
-                assert not cur_node_orig.name.startswith('shadow')
+                assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
                 insertion_point = cur_node_copy
 
             # add a comparison logger after last_node copy
@@ -834,35 +836,23 @@ def create_add_loggers_graph(
         cur_subgraph_idx += 1
 
     model.recompile()
-    # print('\nafter step 1', model.graph)
-    # print(orig_first_node_to_shadow_in_node)
-    # print(orig_first_node_to_shadow_out_node)
 
-    # There are two mutations we have to do, in order:
-    # 1. For each op, duplicate it if it's not already been duplicated.
-    #    An op can not be duplicated at this point either if the op
-    #    is not supported by quantization, or if the qconfig for this
-    #    op is set to None. Note: there are no copies of modules or
-    #    parameters here, the only thing that is copied is FX nodes.
-    #    This is more memory efficient from creating submodules, and we
-    #    don't care about submodules here because we don't need to transform
-    #    the subgraph copy.
-    # 2. After (1) is done, reroute the graph from shadow style
-    #    (fp32 is always baseline) to propagation error style
-
+    # Now, we go from
     #
-    # 1. Duplicate ops which have not already been duplicated
+    #   x0 -> op0_0 -> x1_0 -> log -> x1 -> op1_0 -> ...
+    #    \                     \       \
+    #      -> op0_1 -> x1_1 -> clog      -> op1_1 -> ...
+    #
+    # to
+    #
+    #   x0 -> op0_0 -> x1_0 -> log --> x1_0 -> op1_0 -> ...
+    #    \                     \
+    #      -> op0_1 -> x1_1 -> clog -> x1_1 -> op1_1 -> ...
     #
 
-    model.recompile()
-
-    #
-    # 2. Reroute the graph from shadow style to propagation error style
-    #
     nodes_to_skip = set()
     cur_subgraph_idx = 0
     for n in orig_nodes:
-        # print('processing n', n.format_node())
         if n.op in ('placeholder', 'get_attr', 'output') or n in nodes_to_skip:
             continue
 

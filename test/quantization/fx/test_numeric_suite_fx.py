@@ -2588,7 +2588,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         results = extract_results_n_shadows_model(msq)
         # print(results)
-        print_comparisons_n_shadows_model(results)
+        # print_comparisons_n_shadows_model(results)
 
         # get the last quantized output from results
         inner_results = results['model']['node_output']
