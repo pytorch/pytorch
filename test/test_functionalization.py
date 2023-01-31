@@ -178,7 +178,7 @@ class TestFunctionalization(TestCase):
             from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
             import torch.fx.traceback as fx_traceback
             setup_stacktrace_preservation_hooks([loss.grad_fn])
-            with fx_traceback.override_stack_trace():
+            with fx_traceback.preserve_node_meta():
                 loss.backward()
             return x.grad
 

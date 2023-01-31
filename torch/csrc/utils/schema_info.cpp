@@ -341,7 +341,7 @@ void SchemaInfo::initSchemaInfo() {
       c10::optional<c10::AliasTypeSet> contained_types =
           schema_.getAliasTypeSetContainedTypes(
               schema_.mapTypeToAliasTypeSet(argument.type()));
-      if (contained_types && contained_types->size() > 0) {
+      if (contained_types && !contained_types->empty()) {
         container_set_.insert({type, i});
       }
     }
