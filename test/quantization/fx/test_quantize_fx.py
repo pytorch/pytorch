@@ -451,22 +451,22 @@ class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_add_relu_onednn(self):
         # conv - bn - add - relu is fused for onednn backend only
         from torch.ao.quantization.backend_config import get_onednn_backend_config
-        expected_nodes = [
-            ns.call_module(nni.ConvAdd2d),
-        ]
-        expected_occurrence = {
-            ns.call_module(nni.ConvAdd2d): 1,
-            ns.call_module(nn.BatchNorm2d): 0,
-        }
-
         options = itertools.product(
             [True, False],  # with_bn
-            [False],  # with_relu
+            [True, False],  # with_relu
             [True, False],  # conv in the left
             [True, False],  # with_two_conv
             [True, False],  # use_torch_add
         )
         for with_bn, with_relu, left_conv, two_conv, use_torch_add in options:
+            expected_nodes = [
+                ns.call_module(nni.ConvAddReLU2d if with_relu else nni.ConvAdd2d),
+            ]
+            expected_occurrence = {
+                ns.call_module(nni.ConvAddReLU2d if with_relu else nni.ConvAdd2d): 1,
+                ns.call_module(nn.BatchNorm2d): 0,
+            }
+
             # test eval mode
             m = ConvBnAddReluModel(
                 with_bn=with_bn,
@@ -485,7 +485,7 @@ class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_add_relu_by_default(self):
         options = itertools.product(
             [True, False],  # with_bn
-            [False],  # with_relu
+            [True, False],  # with_relu
             [True, False],  # conv in the left
             [True, False],  # with_two_conv
             [True, False],  # use_torch_add
@@ -520,7 +520,7 @@ class TestFuseFx(QuantizationTestCase):
         with override_quantized_engine('onednn'):
             options = itertools.product(
                 [True, False],  # with_bn
-                [False],  # with_relu
+                [True, False],  # with_relu
                 [True, False],  # conv in the left
                 [True, False],  # two_conv
                 [True, False],  # use_torch_add
@@ -529,7 +529,7 @@ class TestFuseFx(QuantizationTestCase):
                 node_occurrence = {
                     ns.call_function(torch.quantize_per_tensor): 1 if two_conv else 2,
                     ns.call_method("dequantize"): 1,
-                    ns.call_module(nniq.ConvAdd2d): 1,
+                    ns.call_module(nniq.ConvAddReLU2d if with_relu else nniq.ConvAdd2d): 1,
                     ns.call_module(nn.Conv2d): 0,
                     ns.call_module(nn.ReLU): 0,
                 }
