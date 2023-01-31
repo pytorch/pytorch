@@ -7356,7 +7356,7 @@ TEST_F(NVFuserTest, FusionExprSortMatmulLikeSchedule_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  constexpr int M1 = 5, M2 = 5, N1 = 6, N2 = 6, K1 = 7, K2 = 7;
+  constexpr int M1 = 5, M2 = 5, N1 = 6, N2 = 6, K1 = 2, K2 = 2;
 
   auto tv0 = makeContigConcreteTensor({M1, M2, K1, K2});
   auto tv1 = makeContigConcreteTensor({N1, N2, K1, K2});
