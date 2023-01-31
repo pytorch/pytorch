@@ -193,7 +193,7 @@ void _sparse_binary_op_intersection_kernel_impl(
         // with the fields taken from y. Ensures no side effects for y.
         auto rhs_copy = at::empty({0}, rhs.options());
         auto* rhs_copy_sparse_impl = get_sparse_impl(rhs_copy);
-        rhs_copy_sparse_impl->raw_resize_(rhs.sparse_dim(), rhs._values().dim() - 1, rhs.sizes());
+        rhs_copy_sparse_impl->raw_resize_(rhs.sparse_dim(), rhs.dense_dim(), rhs.sizes());
         rhs_copy_sparse_impl->set_indices_and_values_unsafe(rhs._indices(), rhs._values());
         rhs_copy_sparse_impl->set_nnz_and_narrow(rhs._nnz());
         rhs_copy._coalesced_(false);
@@ -434,7 +434,7 @@ void _sparse_binary_op_intersection_kernel_impl(
         nnz_arange.narrow(-1, 0, source._nnz()),
         intersection_count.ge(1));
     const auto res_sparse_dim = source.sparse_dim();
-    const auto res_dense_dim = res_values.dim() - 1;
+    const auto res_dense_dim = source.dense_dim();
     const auto& res_shape = broadcasted_shape;
     const auto res_nnz = source._nnz();
 
