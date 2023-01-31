@@ -135,7 +135,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   if (arguments[dim_arg_pos].isIntList()) {
     reduction_case = ReductionCase::DimArray;
     dims = arguments[dim_arg_pos].toIntList().vec();
-    if (dims.size() == 0) {
+    if (dims.empty()) {
       auto all_dims = range(0, std::max((int64_t)1, logical_dim));
       dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
     }
