@@ -31,6 +31,16 @@
     {% include "searchbox.html" %}
 {% endblock %}
 
+{%- block content %}
+{{ super() }}
+<script>
+if((window.location.href.indexOf("/_([0-9]+)$/")!= -1))
+  {
+    var div = '<div class="admonition note"><p class="admonition-title">Note</p><p><i class="fa fa-flask" aria-hidden="true">&nbsp</i> This page describes a private API. No support is provided for private APIs.</p></div>'
+    document.getElementById("pytorch-article").insertAdjacentHTML('afterBegin', div)
+  }
+</script>
+{%- endblock %}
 
 {% block footer %}
 {{ super() }}
