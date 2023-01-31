@@ -1927,8 +1927,6 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
-        # Only dump error on CI
-        args.quiet = True
         args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
