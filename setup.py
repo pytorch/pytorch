@@ -751,6 +751,9 @@ class clean(setuptools.Command):
                         break
                     # Ignore lines which begin with '#'.
                 else:
+                    # Don't remove absolute paths from the system
+                    wildcard = wildcard.lstrip('./')
+
                     for filename in glob.glob(wildcard):
                         try:
                             os.remove(filename)
@@ -981,7 +984,6 @@ def main():
         'typing_extensions',
         'sympy',
         'networkx',
-        'packaging'
     ]
 
     extras_require = {
@@ -1154,7 +1156,6 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
-        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

@@ -279,6 +279,7 @@ class TimmRunnner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
                 continue
@@ -313,7 +314,8 @@ class TimmRunnner(BenchmarkRunner):
         return self.loss(pred, self.target) / 10.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(*inputs)
+        with self.autocast():
+            return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
