@@ -21,6 +21,9 @@ SymTypes = (SymInt, SymFloat, SymBool)
 
 log = logging.getLogger(__name__)
 
+class GuardOnDataDependentSymNode(RuntimeError):
+    pass
+
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
@@ -217,28 +220,42 @@ class SymNode:
     def int_(self):
         if len(self.expr.free_symbols) == 0:
             return int(self.expr)
-        raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
+        raise RuntimeError(f"Trying to extract a concrete int out of a symbolic int {self.expr}")
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return int(self.shape_env.evaluate_expr(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return int(r)
+        except Exception:
+            log.warn(f"Failed to convert to int: {r}")
+            raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return float(self.shape_env.evaluate_expr(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return float(r)
+        except Exception:
+            log.warn(f"Failed to convert to float: {r}")
+            raise
 
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         # TODO: why is the replace needed here?
-        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+        r = self.shape_env.evaluate_expr(self.shape_env.replace(self.expr))
+        try:
+            return bool(r)
+        except Exception:
+            log.warn(f"Failed to convert to bool: {r}")
+            raise
 
     def bool_(self):
-        # TODO: why is the replace needed here?
-        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+        return self.guard_bool("", 0)
 
 
 if HAS_SYMPY:
@@ -269,6 +286,12 @@ if HAS_SYMPY:
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
+            if isinstance(base, sympy.Add):
+                for a in base.args:
+                    gcd = sympy.gcd(a, divisor)
+                    if gcd == divisor:
+                        return FloorDiv(base - a, divisor) + a / gcd
+
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(
@@ -291,6 +314,7 @@ if HAS_SYMPY:
                 ))
             return None
 
+@lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         return sympy.expand(r)
@@ -1057,9 +1081,10 @@ class ShapeEnv(object):
             f"Data dependent variable '{s}' allocated at:\n{s.stack}"
             for s in expr.free_symbols
         )
-        return RuntimeError(
+        return GuardOnDataDependentSymNode(
             f"\n\n{accesses}\n"
-            "RuntimeError: It appears that you're trying to get a value out of symbolic int/float "
+            "GuardOnDataDependentSymNode: It appears that you're trying to get "
+            "a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr}.  "
             "Scroll up to see where each of these data-dependent accesses originally occurred."

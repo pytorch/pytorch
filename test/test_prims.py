@@ -145,7 +145,7 @@ class TestPrims(TestCase):
         # This test is to ensure that when the nvfuser implementation exists it is used
         # Assuming one-to-one mapping between prims and nvfuser implementations
         # This test is not intended to test the correctness of the nvfuser implementation
-        from torch._C._nvfuser import FusionDefinition as fd
+        from nvfuser._C import FusionDefinition as fd
 
         prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.ops))
         ops_without_nvfuser_impl = {

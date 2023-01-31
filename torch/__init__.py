@@ -98,18 +98,10 @@ if sys.platform == 'win32':
 
     kernel32.LoadLibraryW.restype = ctypes.c_void_p
     if with_load_library_flags:
-        kernel32.AddDllDirectory.restype = ctypes.c_void_p
         kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
     for dll_path in dll_paths:
-        if sys.version_info >= (3, 8):
-            os.add_dll_directory(dll_path)
-        elif with_load_library_flags:
-            res = kernel32.AddDllDirectory(dll_path)
-            if res is None:
-                err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
-                raise err
+        os.add_dll_directory(dll_path)
 
     try:
         ctypes.CDLL('vcruntime140.dll')
@@ -146,18 +138,25 @@ if sys.platform == 'win32':
 
 
 def _preload_cuda_deps():
-    """ Preloads cudnn/cublas deps if they could not be found otherwise """
+    """Preloads cudnn/cublas deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
+    cublas_path = None
+    cudnn_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
-            continue
-        break
+        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
+        if os.path.exists(candidate_cublas_path) and not cublas_path:
+            cublas_path = candidate_cublas_path
+        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
+        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
+            cudnn_path = candidate_cudnn_path
+        if cublas_path and cudnn_path:
+            break
+    if not cublas_path or not cudnn_path:
+        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
 
     ctypes.CDLL(cublas_path)
     ctypes.CDLL(cudnn_path)
@@ -434,7 +433,7 @@ except ImportError:
     import torch._C as _C_for_compiled_check
 
     # The __file__ check only works for Python 3.7 and above.
-    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+    if _C_for_compiled_check.__file__ is None:
         raise ImportError(textwrap.dedent('''
             Failed to load PyTorch C extensions:
                 It appears that PyTorch has loaded the `torch/_C` folder
@@ -1213,6 +1212,7 @@ from torch.autograd import (
 )
 from torch import fft as fft
 from torch import futures as futures
+from torch import _awaits as _awaits
 from torch import nested as nested
 from torch import nn as nn
 from torch.signal import windows as windows
@@ -1307,6 +1307,7 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
