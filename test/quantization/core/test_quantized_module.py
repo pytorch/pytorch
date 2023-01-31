@@ -395,12 +395,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             qconv_module, [example_input_q],
             check_save_load=True)
 
-        if post_op in ["add_relu"]:
-            # **TODO Leslie** Remove this part when enabling the lowering in next PR.
-            # workaround in this PR to return from here, since the below lowering part enabled in next PR
-            # We will enable below check in next PR
-            return
-
         class _FusedModule_two_input_args(torch.nn.intrinsic._FusedModule):
             # Help Module for ConvAdd2d since torch.nn.intrinsic._FusedModule only support one input arg
             def forward(self, x1, x2):
@@ -409,7 +403,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Test from_float
         fused_conv_module = _FusedModule_two_input_args(conv_module) \
-            if post_op == "add" else torch.nn.intrinsic._FusedModule(conv_module)
+            if post_op in ["add", "add_relu"] else torch.nn.intrinsic._FusedModule(conv_module)
 
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
@@ -422,7 +416,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         if use_bias:
-            self.assertEqual(conv_module[0].bias if (post_op in ["relu", "add"]) else conv_module.bias,
+            self.assertEqual(conv_module[0].bias if (post_op in ["relu", "add", "add_relu"]) else conv_module.bias,
                              converted_qconv_module[0].bias())
         # Smoke test extra_repr
         self.assertTrue(module_name == converted_qconv_module[0]._get_name())
