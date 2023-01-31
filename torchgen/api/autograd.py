@@ -323,6 +323,19 @@ def match_differentiability_info(
         if schema.kind() != SchemaKind.functional
     }
 
+    def is_foreach_func(f: NativeFunction) -> bool:
+        base_op_name = f.func.name.name
+        return base_op_name.base.startswith("_foreach_") and not base_op_name.inplace
+
+    def is_reference_for_foreach(
+        f: NativeFunction,
+        function_schema: FunctionSchema,
+    ) -> bool:
+        return (
+            f.func.name.name.base.split("_foreach_")[-1] == function_schema.name.name.base
+            and not function_schema.name.name.inplace
+        )
+
     def find_info(
         f: NativeFunction,
     ) -> Tuple[Optional[Dict[str, DifferentiabilityInfo]], bool]:
@@ -360,24 +373,18 @@ Attempted to convert a derivative formula for a mutable operator
 
         # (4) Generate derivative information of unary foreach functions if none is defined in `derivatives.yaml`
         base_op_name = f.func.name.name
-        if (
-            base_op_name.base.startswith("_foreach")
-            and not base_op_name.inplace
-            and len(f.func.arguments.post_self_positional) == 0
-        ):
-            ref_native_op_name = base_op_name.base.split("_foreach_")[-1]
+        if is_foreach_func(f):
+            # TODO(crcrpar): Support non-unary foreach functions
+            if len(f.func.arguments.post_self_positional) > 0:
+                return None, False
             for function_schema in functional_info_by_signature:
-                if not (
-                    function_schema.name.name.base == ref_native_op_name
-                    and not function_schema.name.name.inplace
-                ):
+                if not is_reference_for_foreach(f, function_schema):
                     continue
                 all_saved_inputs = []
                 all_saved_outputs = []
-                diff_info_dict = copy.deepcopy(differentiability_infos[function_schema])
-                diff_info = diff_info_dict["Default"]
+                ref_diff_info = differentiability_infos[function_schema]["Default"]
                 modified_derivative_formulas = []
-                for derivative in diff_info.derivatives:
+                for derivative in ref_diff_info.derivatives:
                     saved_inputs = []
                     saved_outputs = []
                     modified_formula = (
@@ -418,7 +425,7 @@ Attempted to convert a derivative formula for a mutable operator
                 diff_info = DifferentiabilityInfo(
                     name=base_op_name.base,
                     func=f,
-                    op=f"Foreach{diff_info.op}",
+                    op=f"Foreach{ref_diff_info.op}",
                     derivatives=modified_derivative_formulas,
                     forward_derivatives=[],
                     all_saved_inputs=tuple(set(all_saved_inputs)),
@@ -437,7 +444,7 @@ Attempted to convert a derivative formula for a mutable operator
                     output_differentiability=None,
                     output_differentiability_conditions=None,
                 )
-                diff_info_dict["Default"] = diff_info
+                diff_info_dict = {"Default": diff_info}
                 if f.func not in differentiability_infos:
                     differentiability_infos[f.func] = diff_info_dict
                     functional_info_by_signature[f.func] = diff_info_dict
