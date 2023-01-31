@@ -4,7 +4,6 @@ import re
 import textwrap
 import unittest
 
-import torch
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 
@@ -13,7 +12,7 @@ requires_cuda = functools.partial(
 )
 
 RELU_COMPILE_ERROR_BACKEND = """\
-from torch._dynamo.optimizations.backends import register_backend
+from torch._dynamo import register_backend
 
 class DynamoCompileError(Exception):
     pass
@@ -27,7 +26,7 @@ def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_RUNTIME_ERROR_BACKEND = """\
-from torch._dynamo.optimizations.backends import register_backend
+from torch._dynamo import register_backend
 
 @register_backend
 def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
@@ -40,7 +39,7 @@ def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_ACCURACY_ERROR_BACKEND = """\
-from torch._dynamo.optimizations.backends import register_backend
+from torch._dynamo import register_backend
 
 @register_backend
 def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs):

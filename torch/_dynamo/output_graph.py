@@ -7,20 +7,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Tuple,
-    Union,
-)
-
-from typing_extensions import Protocol
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch.nn
 from torch import fx
@@ -34,6 +21,7 @@ from torch._guards import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
+from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
@@ -68,15 +56,6 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
-
-
-# TODO: I think this accepts int arguments too
-class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        ...
-
-
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 
 class OutputGraphState(NamedTuple):

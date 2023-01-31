@@ -6,7 +6,7 @@ import functorch
 
 import torch._dynamo
 import torch._inductor.config as config
-from torch._dynamo.optimizations.backends import register_backend
+from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import (

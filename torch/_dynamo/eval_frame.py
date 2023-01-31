@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -39,7 +40,6 @@ else:
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .output_graph import CompilerFn
 from .types import DynamoCallback
 from .utils import compile_times
 
@@ -355,15 +355,6 @@ def get_compiler_fn(compiler_fn):
         compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
-
-
-def lookup_backend(compiler_fn):
-    """Expand backend strings to functions"""
-    if isinstance(compiler_fn, str):
-        from .optimizations import BACKENDS
-
-        compiler_fn = BACKENDS[compiler_fn]
-    return compiler_fn
 
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
