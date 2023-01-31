@@ -101,7 +101,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-python ${SCRIPT_HELPERS_DIR}"/build_pytorch.py"
+python3 ${SCRIPT_HELPERS_DIR}"/build_pytorch.py"
 
 env
 
