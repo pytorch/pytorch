@@ -12,6 +12,7 @@ try:
     import onnxscript
     from onnxscript import evaluator, opset18
     from onnxscript.function_libs.torch_aten import graph_building, ops
+
     # TODO: Handle imports
 except ImportError:
     onnx = ModuleType("onnx")
@@ -163,6 +164,8 @@ _ATENLIB_FUNCTIONS = {
     "aten::native_layer_norm": ops.core.aten_native_layer_norm,
     "aten::transpose": ops.core.aten_transpose,
     "aten::sum": ops.core.aten_sum_dim_IntList,
+    "aten::argmin": ops.core.aten_argmin,
+    "aten::argmax": ops.core.aten_argmax,
 }
 
 
