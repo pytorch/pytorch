@@ -14,7 +14,7 @@ import torch._prims as prims
 
 # Will only create the nvfuser module if CUDA is available
 try:
-    from nvfuser import FusionCache, FusionDefinition, DataType
+    from nvfuser import FusionCache, FusionDefinition, DataType, version
 except ImportError:
     pass
 
@@ -647,6 +647,9 @@ class TestNvFuserFrontend(TestCase):
 
         eager_out = torch.index_select(inputs[0] + inputs[1], 0, inputs[2])
         self.assertEqual(eager_out, nvf_out[0])
+
+    def test_python_version_API(self):
+        self.assertTrue(version() > '0.0.0')
 
 if __name__ == '__main__':
     run_tests()

@@ -234,10 +234,28 @@ if(BUILD_PYTHON)
   endif()
   install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${TORCH_ROOT}/nvfuser/)
 
+  # setup python API version
+  add_custom_command(
+    OUTPUT ${NVFUSER_ROOT}/python/version.py
+    COMMAND
+      "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${NVFUSER_ROOT}/tools/gen_nvfuser_version.py').touch()\"
+    COMMAND
+      "${PYTHON_EXECUTABLE}" ${NVFUSER_ROOT}/tools/gen_nvfuser_version.py
+    DEPENDS ${NVFUSER_ROOT}/tools/gen_nvfuser_version.py
+    WORKING_DIRECTORY ${NVFUSER_ROOT}/tools/
+  )
+  add_custom_target(
+    gen_nvfuser_version ALL
+    DEPENDS ${NVFUSER_ROOT}/python/version.py
+  )
+  add_dependencies(torch_python gen_nvfuser_version)
+
   # install nvfuser python files
   install(DIRECTORY "${NVFUSER_ROOT}/python/"
           DESTINATION "${TORCH_ROOT}/nvfuser"
           FILES_MATCHING PATTERN "*.py" )
+
+  file(WRITE "${TORCH_ROOT}/nvfuser/.gitignore" "*")
 endif()
 
 # --- generate runtime files
