@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
@@ -26,7 +27,7 @@ import unittest
 
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
-        cls, "DynamicShapes", "_dynamic_shapes", ("dynamic_shapes", True)
+        cls, "DynamicShapes", "_dynamic_shapes", (config, "dynamic_shapes", True)
     )
 
 
@@ -51,6 +52,11 @@ unittest.expectedFailure(
 
 unittest.expectedFailure(
     DynamicShapesReproTests.test_hf_t5_forward_dynamic_shapes
+    # Cannot call sizes() on tensor with symbolic sizes/strides
+)
+
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_sort_out2_dynamic_shapes
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 

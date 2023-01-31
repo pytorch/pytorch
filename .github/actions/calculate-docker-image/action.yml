@@ -24,9 +24,6 @@ inputs:
   force_push:
     description: If set to any value, always run the push
     required: false
-  push-ghcr-image:
-    description: If set to any value, push docker image to the ghcr.io.
-    required: false
 
 outputs:
   docker-image:
@@ -41,7 +38,7 @@ runs:
       id: calculate-tag
       env:
         IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
-        XLA_IMAGE_TAG: v0.6
+        XLA_IMAGE_TAG: v0.9
         DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
       run: |
         if [ -n "${IS_XLA}" ]; then
@@ -106,8 +103,6 @@ runs:
         # Skip push if we don't need it, or if specified in the inputs
         DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
-        PUSH_GHCR_IMAGE: ${{ inputs.push-ghcr-image }}
-        GHCR_PAT: ${{ env.GHCR_PAT }}
       working-directory: .circleci/docker
       shell: bash
       run: |

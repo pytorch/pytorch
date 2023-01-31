@@ -96,6 +96,13 @@ class DDPOptimizer:
        and therefore aren't allreduced by DDP.  (They are broadcast during forward, but this is not covered by
        DDPOptimizer)
 
+    Debugging
+     - Generally, it is easiest to debug DDPOptimizer in a single process program, using pdb.
+     - In many cases, the log messages are helpful (they show bucket size assignments)-
+       just configure torch._dynamo.config.log_level to info or debug.
+     - See `benchmarks/dynamo/distributed.py` for a simple harness that will run a toy model or a torchbench model
+       in a single process (or with torchrun, in multiple processes)
+
     Args:
         bucket_bytes_cap (int): Controls the size of buckets, in bytes, used to determine graphbreaks.  Should be
             set to match the equivalent parameter on the original DDP module.
@@ -175,6 +182,12 @@ class DDPOptimizer:
             # All nodes have to be mapped to a bucket, even if they don't have their own params
             # Ignored params still end up in buckets, we just don't count them towards the capacity
             buckets[0].nodes.append(node)
+
+        if len(buckets) > 1 and buckets[0].size == 0:
+            # we collected a small preamble graph with ops that don't include parameters, fuse it back
+            buckets[1].nodes.extend(buckets[0].nodes)
+            assert len(buckets[0].params) == 0, "Params should be empty if size is 0"
+            del buckets[0]
 
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
@@ -289,8 +302,6 @@ class DDPOptimizer:
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
 
-                    # modify the currently running FX graph
-                    # maybe this isn't sound in general, but only changing the target of a node might be ok?
                     if n.op == "call_module":
                         real_mod = self.fetch_attr(n.target)
                         if fake_mode:
@@ -301,15 +312,28 @@ class DDPOptimizer:
                         log.debug(
                             f"\n---{n.target} graph---\n" + str(curr_submod.graph)
                         )
+
+                        # When calling the compiler on the submod, inputs (new_args) are expected to
+                        # be FakeTensors already since Dynamo would have made them FakeTensors in the
+                        # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
+                        # since this wrapping happens during compilation
                         compiled_submod_real = self.compile_submod(
                             real_mod, new_args, kwargs
                         )
+
+                        # We update the original (outer) graph with a call into the compiled module
+                        # instead of the uncompiled one.
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod_real)
-                        return curr_submod(*new_args, **kwargs)
-                    # then we execute the modified node using the usual logic
-                    return getattr(self, n.op)(n.target, new_args, kwargs)
+
+                        # Finally, we have to produce inputs for use compiling the next submodule,
+                        # and these need to be FakeTensors, so we execute the module under fake_mode
+                        with fake_mode:
+                            return curr_submod(*new_args, **kwargs)
+                    else:
+                        # placeholder or output nodes don't need to get compiled, just executed
+                        return getattr(self, n.op)(n.target, new_args, kwargs)
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
         submod_compiler.run(*example_inputs)
