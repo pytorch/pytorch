@@ -785,9 +785,9 @@ def prepare_n_shadows_model(
     a single pass through the model.
 
     High level TODOs for future PRs:
-    *. figure out a better way to name the output structure
-    *. return a results data structure instead of printing it out
-    *. add examples to docblocks
+    * figure out a better way to name the output structure
+    * return a results data structure instead of printing it out
+    * add examples to docblocks
     """
 
     if custom_tracer is None:
