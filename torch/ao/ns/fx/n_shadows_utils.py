@@ -26,7 +26,6 @@ import collections
 import copy
 from typing import List, Dict, Set, Tuple, Callable, Any, Optional
 import operator
-import re
 
 SHADOW_NODE_NAME_PREFIX = 'shadow'
 SHADOW_WRAPPER_NODE_NAME_PREFIX = 'shadow_wrapper'

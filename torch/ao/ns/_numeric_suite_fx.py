@@ -795,9 +795,9 @@ def prepare_n_shadows_model(
     a single pass through the model.
 
     High level TODOs for future PRs:
-    *. figure out a better way to name the output structure
-    *. return a results data structure instead of printing it out
-    *. add examples to docblocks
+    * figure out a better way to name the output structure
+    * return a results data structure instead of printing it out
+    * add examples to docblocks
     """
 
     if custom_tracer is None:
@@ -983,15 +983,6 @@ def extract_results_n_shadows_model(model: torch.nn.Module) -> NSResultsType:
     """
     results: NSResultsType = {}
     _extract_logger_info_one_model(model, results, OutputLogger)
-
-    # With add_loggers, not all logger modules are added to the model
-    # sequentially. Fix the order so the result structure is ordered
-    # sequentially.
-    if False:
-        results_inner = results['model']['node_output']
-        results_inner = dict(sorted(results_inner.items()))
-        results['model']['node_output'] = results_inner
-
     return results
 
 def print_comparisons_n_shadows_model(results: NSResultsType) -> None:
