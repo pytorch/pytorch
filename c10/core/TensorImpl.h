@@ -6,12 +6,12 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
-#include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
@@ -22,13 +22,13 @@
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
-#include <c10/util/strong_type.h>
 
 #include <algorithm>
 #include <atomic>
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -193,26 +193,6 @@ struct C10_API AutogradMetaFactoryRegisterer {
   }
 };
 
-// PyInterpreterStatus describes what the state of its interpreter tag
-// is, relative to the thread currently holding the GIL.
-enum class PyInterpreterStatus {
-  // We just allocated the Tensor, it hasn't escaped to other threads,
-  // we know that it definitely hasn't been tagged to be associated
-  // with an interpreter.
-  DEFINITELY_UNINITIALIZED,
-  // We queried the interpreter field and it looked uninitialized.  But
-  // another thread may have raced with us to tag it with some other
-  // interpreter id.  So we will have to do a CEX to make sure we can
-  // actually nab it.
-  MAYBE_UNINITIALIZED,
-  // We queried the interpreter field and it was tagged to belong to us.
-  // This means we have sole write access (as we hold the GIL for this
-  // interpreter)
-  TAGGED_BY_US,
-  // Someone else tagged this.  We can't use this TensorImpl from Python.
-  TAGGED_BY_OTHER,
-};
-
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
@@ -227,10 +207,6 @@ struct C10_API NamedTensorMetaInterface {
   };
 };
 
-template <typename T>
-using strong_bool = strong::
-    type<bool, T, strong::regular, strong::iostreamable, strong::boolean>;
-
 // For ease of copy pasting
 #if 0
 is_contiguous
@@ -241,28 +217,17 @@ is_channels_last_3d
 is_non_overlapping_and_dense
 #endif
 
-using bool_is_contiguous = strong_bool<struct bool_is_contiguous_>;
-using bool_is_channels_last_contiguous =
-    strong_bool<struct bool_is_channels_last_contiguous_>;
-using bool_is_channels_last_3d_contiguous =
-    strong_bool<struct bool_is_channels_last_3d_contiguous_>;
-using bool_is_channels_last = strong_bool<struct bool_is_channels_last_>;
-using bool_is_channels_last_3d = strong_bool<struct bool_is_channels_last_3d_>;
-using bool_is_non_overlapping_and_dense =
-    strong_bool<struct bool_is_non_overlapping_and_dense_>;
-
 struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
   SymInt storage_offset_ = 0;
-  // TODO: make these all SymBool
-  bool_is_contiguous is_contiguous_{true};
-  bool_is_channels_last_contiguous is_channels_last_contiguous_{false};
-  bool_is_channels_last_3d_contiguous is_channels_last_3d_contiguous_{false};
-  bool_is_channels_last is_channels_last_{false};
-  bool_is_channels_last_3d is_channels_last_3d_{false};
-  bool_is_non_overlapping_and_dense is_non_overlapping_and_dense_{true};
+  SymBool is_contiguous_{true};
+  SymBool is_channels_last_contiguous_{false};
+  SymBool is_channels_last_3d_contiguous_{false};
+  SymBool is_channels_last_{false};
+  SymBool is_channels_last_3d_{false};
+  SymBool is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
   ExtraMeta() = default;
@@ -272,23 +237,24 @@ struct C10_API ExtraMeta {
       SymDimVector strides,
       SymInt numel,
       SymInt storage_offset,
-      bool_is_contiguous is_contiguous,
-      bool_is_channels_last_contiguous is_channels_last_contiguous,
-      bool_is_channels_last_3d_contiguous is_channels_last_3d_contiguous,
-      bool_is_channels_last is_channels_last,
-      bool_is_channels_last_3d is_channels_last_3d,
-      bool_is_non_overlapping_and_dense is_non_overlapping_and_dense,
+      SymBool is_contiguous,
+      SymBool is_channels_last_contiguous,
+      SymBool is_channels_last_3d_contiguous,
+      SymBool is_channels_last,
+      SymBool is_channels_last_3d,
+      SymBool is_non_overlapping_and_dense,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
         storage_offset_(std::move(storage_offset)),
-        is_contiguous_(is_contiguous),
-        is_channels_last_contiguous_(is_channels_last_contiguous),
-        is_channels_last_3d_contiguous_(is_channels_last_3d_contiguous),
-        is_channels_last_(is_channels_last),
-        is_channels_last_3d_(is_channels_last_3d),
-        is_non_overlapping_and_dense_(is_non_overlapping_and_dense),
+        is_contiguous_(std::move(is_contiguous)),
+        is_channels_last_contiguous_(std::move(is_channels_last_contiguous)),
+        is_channels_last_3d_contiguous_(
+            std::move(is_channels_last_3d_contiguous)),
+        is_channels_last_(std::move(is_channels_last)),
+        is_channels_last_3d_(std::move(is_channels_last_3d)),
+        is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
         named_tensor_meta_(std::move(named_tensor_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
@@ -537,7 +503,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  */
 struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
-  virtual ~TensorImpl() override;
+  ~TensorImpl() override;
   // Note [Enum ImplType]
   // This enum is temporary. In the followup refactor we should
   // think about how to specialize TensorImpl creation for view
@@ -608,9 +574,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * tensors.
    */
   void release_resources() override;
-
- private:
-  void destroy_pyobj_if_needed();
 
  public:
   /**
@@ -862,11 +825,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return bool(extra_meta_->is_channels_last_contiguous_);
+        return extra_meta_->is_channels_last_contiguous_.guard_bool(
+            __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return bool(extra_meta_->is_channels_last_3d_contiguous_);
+        return extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
+            __FILE__, __LINE__);
       }
-      return bool(extra_meta_->is_contiguous_);
+      return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -880,9 +845,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return bool(extra_meta_->is_channels_last_);
+        return extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return bool(extra_meta_->is_channels_last_3d_);
+        return extra_meta_->is_channels_last_3d_.guard_bool(__FILE__, __LINE__);
       } else {
         return false;
       }
@@ -899,7 +864,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return bool(extra_meta_->is_non_overlapping_and_dense_);
+      return extra_meta_->is_non_overlapping_and_dense_.guard_bool(
+          __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
     }
@@ -2005,113 +1971,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     version_counter_.bump();
   }
 
-  // Associate the TensorImpl with the specified PyObject, and, if necessary,
-  // also tag the interpreter.
-  //
-  // NB: This lives in a header so that we can inline away the switch on status
-  //
-  // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
-  // PyObject if necessary!
-  void init_pyobj(
-      impl::PyInterpreter* self_interpreter,
-      PyObject* pyobj,
-      c10::impl::PyInterpreterStatus status) {
-    impl::PyInterpreter* expected = nullptr;
-    switch (status) {
-      case impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED:
-        // caller guarantees there is no multithreaded access; if there is
-        // no data race OK to do a relaxed store
-        pyobj_interpreter_.store(self_interpreter, std::memory_order_relaxed);
-        break;
-      case impl::PyInterpreterStatus::TAGGED_BY_US:
-        // no tagging is necessary, the tag is already correct
-        break;
-      case impl::PyInterpreterStatus::MAYBE_UNINITIALIZED:
-        // attempt to claim this TensorImpl with the specified interpreter
-        // tag
-        if (pyobj_interpreter_.compare_exchange_strong(
-                expected, self_interpreter, std::memory_order_acq_rel)) {
-          break;
-        }
-        // test if, actually, it was already tagged by us!  this situation can't
-        // be caused by a race, but it could be caused by a situation
-        // where someone conservatively tagged the tensor as MAYBE_UNINITIALIZED
-        // (because they didn't pre-check the tag) when actually it was
-        // owned by the interpreter
-        if (expected == self_interpreter) {
-          break;
-        }
-        // fallthrough, we lost the race.  We are guaranteed not to lose the
-        // race with ourself, as calls to init_pyobj with the same interpreter
-        // ID must be sequentialized by the GIL
-        C10_FALLTHROUGH;
-      case impl::PyInterpreterStatus::TAGGED_BY_OTHER:
-        TORCH_CHECK(
-            false,
-            "cannot allocate PyObject for Tensor on interpreter ",
-            self_interpreter,
-            " that has already been used by another torch deploy interpreter ",
-            pyobj_interpreter_.load());
-    }
-
-    // we are the ONLY thread that can have gotten to this point.  It is not
-    // possible to conflict with another zero interpreter as access is protected
-    // by GIL
-    // NB: owns_pyobj tag is initially false
-    pyobj_ = pyobj;
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
   }
 
-  // Query the PyObject interpreter.  This may return null if there is no
-  // interpreter.  This is racy!
-  impl::PyInterpreter* pyobj_interpreter() {
-    return pyobj_interpreter_.load(std::memory_order_acquire);
-  }
-
-  PyObject* _unchecked_untagged_pyobj() const {
-    return reinterpret_cast<PyObject*>(
-        reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
-  }
-
-  // Test the interpreter tag.  If tagged for the current interpreter, return
-  // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
-  // returns a nullopt.  If it is definitely invalid, raises an error.
-  //
-  // NB: this lives in header so that we can avoid actually creating the
-  // c10::optional
-  c10::optional<PyObject*> check_pyobj(
-      impl::PyInterpreter* self_interpreter) const {
-    // Note [Memory ordering on Python interpreter tag]
-    impl::PyInterpreter* interpreter =
-        pyobj_interpreter_.load(std::memory_order_acquire);
-    if (interpreter == nullptr) {
-      // NB: This never returns DEFINITELY_UNINITIALIZED because there is
-      // always the possibility that another thread races to initialize
-      // after we query here.  The only time when we can conclude a tensor
-      // is definitely uninitialized is when we have just allocated it and
-      // it cannot have escaped to other threads yet
-      return c10::nullopt;
-    } else if (interpreter == self_interpreter) {
-      // NB: pyobj_ could still be null!
-      if (c10::impl::HermeticPyObjectTLS::get_state()) {
-        return c10::nullopt;
-      } else {
-        return c10::make_optional(_unchecked_untagged_pyobj());
-      }
-    } else {
-      TORCH_CHECK(
-          false,
-          "cannot access PyObject for Tensor on interpreter ",
-          (*self_interpreter)->name(),
-          " that has already been used by another torch deploy interpreter ",
-          (*pyobj_interpreter_.load())->name());
-    }
-  }
-
-  // Clear the PyObject field for an interpreter, in situations where we
-  // statically know the tensor is tagged with our interpreter.
-  void unchecked_clear_pyobj(impl::PyInterpreter* interpreter) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
-    pyobj_ = nullptr;
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
   }
 
  private:
@@ -2121,8 +1986,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   c10::optional<c10::Device> device_opt() const {
     return device_opt_;
   }
-
-  impl::PyInterpreter& load_pyobj_interpreter() const;
 
  public:
   /**
@@ -2336,7 +2199,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_storage_and_dtype(
       at::Storage storage,
       const caffe2::TypeMeta data_type) {
-    set_storage_keep_dtype(storage);
+    set_storage_keep_dtype(std::move(storage));
     data_type_ = data_type;
   }
 
@@ -2544,18 +2407,29 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute whether or not a tensor is contiguous based on the sizes and
    * strides of a tensor.
    */
-  bool_is_contiguous compute_contiguous() const;
+  bool compute_contiguous(identity<bool>) const;
 
-  bool_is_channels_last_contiguous compute_channels_last_contiguous_2d() const;
+  bool compute_channels_last_contiguous_2d(identity<bool>) const;
 
-  bool_is_channels_last_3d_contiguous compute_channels_last_contiguous_3d()
-      const;
+  bool compute_channels_last_contiguous_3d(identity<bool>) const;
 
-  bool_is_channels_last compute_strides_like_channels_last_2d() const;
+  bool compute_strides_like_channels_last_2d(identity<bool>) const;
 
-  bool_is_channels_last_3d compute_strides_like_channels_last_3d() const;
+  bool compute_strides_like_channels_last_3d(identity<bool>) const;
 
-  bool_is_non_overlapping_and_dense compute_non_overlapping_and_dense() const;
+  bool compute_non_overlapping_and_dense(identity<bool>) const;
+
+  SymBool compute_contiguous(identity<SymBool>) const;
+
+  SymBool compute_channels_last_contiguous_2d(identity<SymBool>) const;
+
+  SymBool compute_channels_last_contiguous_3d(identity<SymBool>) const;
+
+  SymBool compute_strides_like_channels_last_2d(identity<SymBool>) const;
+
+  SymBool compute_strides_like_channels_last_3d(identity<SymBool>) const;
+
+  SymBool compute_non_overlapping_and_dense(identity<SymBool>) const;
 
  protected:
   /**
@@ -2597,40 +2471,111 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  /**
-   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
-   * or strides.
-   */
-  void refresh_contiguous() {
-    auto set_fields =
-        [&](bool_is_contiguous is_contiguous,
-            bool_is_channels_last_contiguous is_channels_last_contiguous,
-            bool_is_channels_last_3d_contiguous is_channels_last_3d_contiguous,
-            bool_is_channels_last is_channels_last,
-            bool_is_channels_last_3d is_channels_last_3d,
-            bool_is_non_overlapping_and_dense is_non_overlapping_and_dense) {
-          if (has_symbolic_sizes_strides_) {
-            extra_meta_->is_contiguous_ = is_contiguous;
-            extra_meta_->is_channels_last_contiguous_ =
-                is_channels_last_contiguous;
-            extra_meta_->is_channels_last_3d_contiguous_ =
-                is_channels_last_3d_contiguous;
-            extra_meta_->is_channels_last_ = is_channels_last;
-            extra_meta_->is_channels_last_3d_ = is_channels_last_3d;
-            extra_meta_->is_non_overlapping_and_dense_ =
-                is_non_overlapping_and_dense;
-          } else {
-            is_contiguous_ = bool(is_contiguous);
-            is_channels_last_contiguous_ = bool(is_channels_last_contiguous);
-            is_channels_last_3d_contiguous_ =
-                bool(is_channels_last_3d_contiguous);
-            is_channels_last_ = bool(is_channels_last);
-            is_channels_last_3d_ = bool(is_channels_last_3d);
-            is_non_overlapping_and_dense_ = bool(is_non_overlapping_and_dense);
-          }
-        };
+ private:
+  // NB: the TypeId argument prevents confusion where you pass a true/false
+  // literal and pick the wrong overload
 
-    auto is_contiguous = compute_contiguous();
+  void _set_is_contiguous(identity<bool>, bool b) {
+    is_contiguous_ = b;
+  }
+
+  void _set_is_contiguous(identity<SymBool>, SymBool b) {
+    extra_meta_->is_contiguous_ = std::move(b);
+  }
+
+  void _set_is_channels_last_contiguous(identity<bool>, bool b) {
+    is_channels_last_contiguous_ = b;
+  }
+
+  void _set_is_channels_last_contiguous(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_contiguous_ = std::move(b);
+  }
+
+  void _set_is_channels_last_3d_contiguous(identity<bool>, bool b) {
+    is_channels_last_3d_contiguous_ = b;
+  }
+
+  void _set_is_channels_last_3d_contiguous(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_3d_contiguous_ = std::move(b);
+  }
+
+  void _set_is_channels_last(identity<bool>, bool b) {
+    is_channels_last_ = b;
+  }
+
+  void _set_is_channels_last(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_ = std::move(b);
+  }
+
+  void _set_is_channels_last_3d(identity<bool>, bool b) {
+    is_channels_last_3d_ = b;
+  }
+
+  void _set_is_channels_last_3d(identity<SymBool>, SymBool b) {
+    extra_meta_->is_channels_last_3d_ = std::move(b);
+  }
+
+  void _set_is_non_overlapping_and_dense(identity<bool>, bool b) {
+    is_non_overlapping_and_dense_ = b;
+  }
+
+  void _set_is_non_overlapping_and_dense(identity<SymBool>, SymBool b) {
+    extra_meta_->is_non_overlapping_and_dense_ = std::move(b);
+  }
+
+  // These are little wrappers over the real compute_ functions that
+  // can make use of other contiguity fields to short circuit.
+  // They need to be implemented separately for SymBool, as SymBool does
+  // not short circuit.
+  // TODO: should the SymBool cases avoid the short circuit?  Need to reason
+  // if its correct, and reason if the simpler expressions are better for
+  // analysis (maybe not!)
+
+  bool compute_is_non_overlapping_and_dense_dim4(identity<bool> type_id) {
+    return is_contiguous_ || is_channels_last_contiguous_ ||
+        compute_non_overlapping_and_dense(type_id);
+  }
+
+  SymBool compute_is_non_overlapping_and_dense_dim4(identity<SymBool> type_id);
+
+  bool compute_channels_last_contiguous_3d_dim5(identity<bool> type_id) {
+    return !is_channels_last_contiguous_ &&
+        compute_channels_last_contiguous_3d(type_id);
+  }
+
+  SymBool compute_channels_last_contiguous_3d_dim5(identity<SymBool> type_id);
+
+  bool compute_channels_last_2d_dim5(identity<bool> type_id) {
+    return !is_channels_last_3d_contiguous_ &&
+        compute_strides_like_channels_last_2d(type_id);
+  }
+
+  SymBool compute_channels_last_2d_dim5(identity<SymBool> type_id);
+
+  bool compute_channels_last_3d_dim5(identity<bool> type_id) {
+    return !is_channels_last_ && compute_strides_like_channels_last_3d(type_id);
+  }
+
+  SymBool compute_channels_last_3d_dim5(identity<SymBool> type_id);
+
+  bool compute_is_non_overlapping_and_dense_dim5(identity<bool> type_id) {
+    return is_contiguous_ || is_channels_last_contiguous_ ||
+        is_channels_last_3d_contiguous_ ||
+        compute_non_overlapping_and_dense(type_id);
+  }
+
+  SymBool compute_is_non_overlapping_and_dense_dim5(identity<SymBool> type_id);
+
+  bool compute_is_non_overlapping_and_dense_anydim(identity<bool> type_id) {
+    return is_contiguous_ || compute_non_overlapping_and_dense(type_id);
+  }
+
+  SymBool compute_is_non_overlapping_and_dense_anydim(
+      identity<SymBool> type_id);
+
+  template <typename T>
+  void _refresh_contiguous() {
+    auto type_id = identity<T>();
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
     // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
@@ -2638,42 +2583,28 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // this point)
     switch (dim()) {
       case 4: {
-        auto is_channels_last_contiguous =
-            compute_channels_last_contiguous_2d();
-        set_fields(
-            is_contiguous,
-            is_channels_last_contiguous,
-            bool_is_channels_last_3d_contiguous(false),
-            compute_strides_like_channels_last_2d(),
-            bool_is_channels_last_3d(false),
-            bool_is_non_overlapping_and_dense(
-                is_contiguous || is_channels_last_contiguous ||
-                compute_non_overlapping_and_dense()));
+        _set_is_contiguous(type_id, compute_contiguous(type_id));
+        _set_is_channels_last_contiguous(
+            type_id, compute_channels_last_contiguous_2d(type_id));
+        _set_is_channels_last_3d_contiguous(type_id, false);
+        _set_is_channels_last(
+            type_id, compute_strides_like_channels_last_2d(type_id));
+        _set_is_channels_last_3d(type_id, false);
+        _set_is_non_overlapping_and_dense(
+            type_id, compute_is_non_overlapping_and_dense_dim4(type_id));
         break;
       }
       case 5: {
-        auto is_channels_last_contiguous =
-            compute_channels_last_contiguous_2d();
-        auto is_channels_last_3d_contiguous =
-            bool_is_channels_last_3d_contiguous(
-                !is_channels_last_contiguous &&
-                compute_channels_last_contiguous_3d());
-        auto is_channels_last = bool_is_channels_last(
-            !is_channels_last_3d_contiguous &&
-            compute_strides_like_channels_last_2d());
-        auto is_channels_last_3d = bool_is_channels_last_3d(
-            !is_channels_last && compute_strides_like_channels_last_3d());
-        auto is_non_overlapping_and_dense = bool_is_non_overlapping_and_dense(
-            is_contiguous || is_channels_last_contiguous ||
-            is_channels_last_3d_contiguous ||
-            compute_non_overlapping_and_dense());
-        set_fields(
-            is_contiguous,
-            is_channels_last_contiguous,
-            is_channels_last_3d_contiguous,
-            is_channels_last,
-            is_channels_last_3d,
-            is_non_overlapping_and_dense);
+        _set_is_contiguous(type_id, compute_contiguous(type_id));
+        _set_is_channels_last_contiguous(
+            type_id, compute_channels_last_contiguous_2d(type_id));
+        _set_is_channels_last_3d_contiguous(
+            type_id, compute_channels_last_contiguous_3d_dim5(type_id));
+        _set_is_channels_last(type_id, compute_channels_last_2d_dim5(type_id));
+        _set_is_channels_last_3d(
+            type_id, compute_channels_last_3d_dim5(type_id));
+        _set_is_non_overlapping_and_dense(
+            type_id, compute_is_non_overlapping_and_dense_dim5(type_id));
         break;
       }
       default:
@@ -2682,14 +2613,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // mean the tensor is strided like channels_last: for strides on channel
         // dimension could suggest desired memory_layout, but it doesn't affect
         // memory storage
-        set_fields(
-            is_contiguous,
-            bool_is_channels_last_contiguous(false),
-            bool_is_channels_last_3d_contiguous(false),
-            bool_is_channels_last(false),
-            bool_is_channels_last_3d(false),
-            bool_is_non_overlapping_and_dense(
-                is_contiguous || compute_non_overlapping_and_dense()));
+        _set_is_contiguous(type_id, compute_contiguous(type_id));
+        _set_is_channels_last_contiguous(type_id, false);
+        _set_is_channels_last_3d_contiguous(type_id, false);
+        _set_is_channels_last(type_id, false);
+        _set_is_channels_last_3d(type_id, false);
+        _set_is_non_overlapping_and_dense(
+            type_id, compute_is_non_overlapping_and_dense_anydim(type_id));
+        break;
+    }
+  }
+
+ protected:
+  /**
+   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
+   * or strides.
+   */
+  void refresh_contiguous() {
+    if (has_symbolic_sizes_strides_) {
+      _refresh_contiguous<SymBool>();
+    } else {
+      _refresh_contiguous<bool>();
     }
   }
 
@@ -2739,15 +2683,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
  public:
   void set_storage_access_should_throw() {
     storage_access_should_throw_ = true;
-  }
-
-  bool owns_pyobj() {
-    return reinterpret_cast<uintptr_t>(pyobj_) & 1;
-  }
-
-  void set_owns_pyobj(bool b) {
-    pyobj_ = reinterpret_cast<PyObject*>(
-        reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
  public:
@@ -2834,49 +2769,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::VariableVersion version_counter_;
 
-  // This field contains the interpreter tag for this object.  See
-  // Note [Python interpreter tag] for general context
-  //
-  // Note [Memory ordering on Python interpreter tag]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // What memory_order do we need when accessing this atomic?  We don't
-  // need a single total modification order (as provided by
-  // memory_order_seq_cst) as pyobj_interpreter_ is monotonic: it can only
-  // transition from -1 to some positive integer and never changes afterwards.
-  // Because there is only one modification, it trivially already has a total
-  // modification order (e.g., we don't need fences or locked instructions on
-  // x86)
-  //
-  // In fact, one could make a reasonable argument that relaxed reads are OK,
-  // due to the presence of external locking (GIL) to ensure that interactions
-  // with other data structures are still correctly synchronized, so that
-  // we fall in the "Single-Location Data Structures" case as described in
-  // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2055r0.pdf
-  // However, on x86, it doesn't matter if I use acquire or relaxed on the load
-  // as I get the same assembly in both cases.  So I just use the more
-  // conservative acquire (which will impede compiler optimizations but I don't
-  // care)
-  std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
-
-  // This field contains a reference to a PyObject representing this Tensor.
-  // If pyobj is nullptr, when we transfer Tensor to Python, we allocate a new
-  // PyObject for it and set this field.  This field does not have to be
-  // protected by an atomic as it is only allowed to be accessed when you hold
-  // the GIL, or during destruction of the tensor.
-  //
-  // When a PyObject dies, you are obligated to clear this field
-  // (otherwise, you will try to use-after-free the pyobj); this currently
-  // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
-  //
-  // NB: Ordinarily, this should not be a strong reference, as if the
-  // PyObject owns the Tensor, this would create a reference cycle.
-  // However, sometimes this ownership flips.  To track who owns
-  // who, this has a single pointer tag indicating whether or not the
-  // C++ object owns the PyObject (the common case, zero, means PyObject
-  // owns the C++ object); see _unchecked_untagged_pyobj for raw access
-  // or check_pyobj for checked access.  See references to PyObject
-  // resurrection in torch/csrc/autograd/python_variable.cpp
-  PyObject* pyobj_;
+  impl::PyObjectSlot pyobj_slot_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
 
@@ -3075,8 +2968,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    autograd metadata pointer
 //    named tensor metadata pointer
 //    version counter pointer
-//    Python interpreter pointer
-//    PyObject pointer
+//    PyObjectSlot
 //    SizesAndStrides size/pointer
 //    SizesAndStrides sizes (pre-allocated 0)
 //    SizesAndStrides sizes (pre-allocated 1)
@@ -3155,8 +3047,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     autograd_meta_,
     extra_meta_,
     version_counter_,
-    pyobj_interpreter_,
-    pyobj_,
+    pyobj_slot_,
     sizes_and_strides_,
     storage_offset_,
     numel_,
@@ -3212,8 +3103,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
     are_equal<sizeof(extra_meta_),         4,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_interpreter_),  4,  FieldNameEnum::pyobj_interpreter_>();
-    are_equal<sizeof(pyobj_),              4,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
     is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
@@ -3238,8 +3128,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
     is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>();
-    are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();

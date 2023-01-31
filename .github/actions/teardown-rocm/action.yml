@@ -12,6 +12,8 @@ runs:
         # ignore expansion of "docker ps -q" since it could be empty
         # shellcheck disable=SC2046
         docker stop $(docker ps -q) || true
+        # Prune all stopped containers.
+        docker container prune -f
         # Prune everything docker if there are more than 10 images (~200GB).
         # This is easier than using a time filter, e.g., "until=24h".
         # Might fail if a prune is already in progress by another runner.

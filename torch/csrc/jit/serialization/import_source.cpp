@@ -9,8 +9,7 @@
 
 #include <regex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -122,6 +121,7 @@ SourceImporterImpl::SourceImporterImpl(
       // actual value
       {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
       {"fork", SpecialFormValue::create(prim::fork)},
+      {"awaitable", SpecialFormValue::create(prim::awaitable)},
       {"annotate", SpecialFormValue::create(prim::annotate)},
       {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
       {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},
@@ -155,7 +155,7 @@ Function* SourceImporterImpl::findFunction(const QualifiedName& name) {
 
 void SourceImporterImpl::parseSourceIfNeeded(const std::string& qualifier) {
   // qualifier may be blank, for instance checking if __torch__ is a class.
-  if (qualifier == "" || loaded_sources_.count(qualifier)) {
+  if (qualifier.empty() || loaded_sources_.count(qualifier)) {
     return;
   }
   loaded_sources_.insert(qualifier);
@@ -794,5 +794,4 @@ void SourceImporter::LEGACY_import_methods(
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

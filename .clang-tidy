@@ -26,6 +26,8 @@ cppcoreguidelines-*,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
+misc-unused-alias-decls,
+misc-unused-using-decls,
 modernize-*,
 -modernize-concat-nested-namespaces,
 -modernize-return-braced-init-list,
@@ -37,6 +39,7 @@ modernize-*,
 performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
+readability-container-size-empty,
 '
 HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
 AnalyzeTemporaryDtors: false

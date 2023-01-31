@@ -10,7 +10,6 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from importlib import import_module
 from typing import Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
@@ -124,7 +123,7 @@ def enable_dynamic(enable: bool = True):
         return
     with patch("torch._dynamo.config.dynamic_shapes", True), patch(
         "torch._functorch.config.use_dynamic_shapes", True
-    ):
+    ), patch("torch._dynamo.config.specialize_int_float", False):
         yield
 
 
@@ -350,8 +349,8 @@ def _optimize_catch_errors(
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
-    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
-        compiler_str = "inductor"
+    if hasattr(compiler_fn, "compiler_name"):
+        compiler_str = compiler_fn.compiler_name
     elif isinstance(compiler_fn, str):
         compiler_str = compiler_fn
     else:
@@ -360,22 +359,9 @@ def get_compiler_fn(compiler_fn):
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
-@functools.lru_cache(1)
 def lookup_backend(compiler_fn):
     """Expand backend strings to functions"""
-    if compiler_fn == "inductor":
-        if torch.cuda.is_available():
-            if (
-                torch.backends.cuda.matmul.allow_tf32 is False
-                and torch.cuda.get_device_capability() >= (8, 0)
-            ):
-                warnings.warn(
-                    "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
-                    "Consider setting `torch.set_float32_matmul_precision('high')`"
-                )
-
-        compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
-    elif isinstance(compiler_fn, str):
+    if isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
         compiler_fn = BACKENDS[compiler_fn]
@@ -432,15 +418,11 @@ def optimize(
         return _NullDecorator()
     if sys.platform == "win32":
         warnings.warn(
-            "Windows is not currently supported, "
-            + f"{config.dynamo_import}.optimize() will do nothing"
+            "Windows is not currently supported, torch.compile() will do nothing"
         )
         return _NullDecorator()
     if sys.version_info >= (3, 11):
-        warnings.warn(
-            "Python 3.11+ not yet supported, "
-            f"{config.dynamo_import}.optimize() will do nothing"
-        )
+        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
@@ -608,8 +590,7 @@ def export(
 
         return result_capturing_wrapper
 
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
@@ -617,6 +598,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -667,13 +649,14 @@ def export(
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.override_stack_trace():
+            with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
         graph = make_fx(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
@@ -681,9 +664,10 @@ def export(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
+    input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            [f"orig_arg_{i}" for i in range(len(args))],
+            input_strs,
             in_spec,
             out_spec_traced,
         )

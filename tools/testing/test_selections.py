@@ -9,7 +9,8 @@ IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
 
-# Special logic for ROCm GHA runners.
+# See Note [ROCm parallel CI testing]
+# Special logic for ROCm GHA runners to query number of GPUs available.
 # torch.version.hip was not available to check if this was a ROCm self-hosted runner.
 # Must check for ROCm runner in another way. We look for /opt/rocm directory.
 if os.path.exists("/opt/rocm") and not IS_MEM_LEAK_CHECK:

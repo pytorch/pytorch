@@ -26,14 +26,18 @@ namespace python {
 namespace detail {
 inline Device py_object_to_device(py::object object) {
   PyObject* obj = object.ptr();
-  TORCH_CHECK_TYPE(THPDevice_Check(obj), "Expected device");
-  return reinterpret_cast<THPDevice*>(obj)->device;
+  if (THPDevice_Check(obj)) {
+    return reinterpret_cast<THPDevice*>(obj)->device;
+  }
+  throw TypeError("Expected device");
 }
 
 inline Dtype py_object_to_dtype(py::object object) {
   PyObject* obj = object.ptr();
-  TORCH_CHECK_TYPE(THPDtype_Check(obj), "Expected dtype");
-  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+  if (THPDtype_Check(obj)) {
+    return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+  }
+  throw TypeError("Expected dtype");
 }
 
 template <typename ModuleType>

@@ -23,7 +23,7 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
-      cmd_(VK_NULL_HANDLE),
+      cmd_(VK_NULL_HANDLE, 0u),
       submit_count_{0u},
       // Memory Management
       buffer_clearlist_mutex_{},
@@ -40,7 +40,7 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderSource& shader_descriptor,
+    const ShaderInfo& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
   const VkDescriptorSetLayout shader_layout =
       shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
