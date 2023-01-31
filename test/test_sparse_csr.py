@@ -2174,7 +2174,17 @@ class TestSparseCSR(TestCase):
     def test_sparse_triangular_solve(self, device, dtype):
 
         def run_test(n, k, upper, unitriangular, transpose, zero):
-            triangle_function = torch.triu if upper else torch.tril
+            if not unitriangular:
+                triangle_function = torch.triu if upper else torch.tril
+            else:
+                # Make sure diagonal elements are not materialized.
+                # This is to exercise `unitriangular=True` not relying on
+                # explicit presence of these indices.
+                if upper:
+                    triangle_function = lambda t: t.triu(-1)
+                else:
+                    triangle_function = lambda t: t.tril(-1)
+
             make_A = torch.zeros if zero else make_tensor
             A = make_A((n, n), dtype=dtype, device=device)
             A = triangle_function(A)
