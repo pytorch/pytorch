@@ -418,7 +418,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
 
 # TODO mlazos: add support for same args, or record them
 def replay(filename):
-    from .optimizations.backends import eager
+    from .backends.debugging import eager
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False

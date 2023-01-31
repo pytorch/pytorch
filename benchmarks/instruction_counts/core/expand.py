@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 import uuid
 
 import torch
+import torch._dynamo.backends.debugging
 
 if TYPE_CHECKING:
     # See the note in api.py for why this is necessary.
@@ -209,7 +210,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
             assert isinstance(args, GroupedBenchmark)
 
             model_path: Optional[str] = None
-            if args.py_model_setup and args.torchscript:
+            if args.py_model_setup and torch._dynamo.backends.debugging.torchscript:
                 model_setup = f"{args.py_model_setup}\njit_model = torch.jit.script(model)"
 
                 # This is just for debugging. We just need a unique name for the
@@ -223,7 +224,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
                 if runtime == RuntimeMode.EXPLICIT or autograd == AutogradMode.EXPLICIT:
                     continue
 
-                if runtime == RuntimeMode.JIT and not args.torchscript:
+                if runtime == RuntimeMode.JIT and not torch._dynamo.backends.debugging.torchscript:
                     continue
 
                 if autograd == AutogradMode.FORWARD_BACKWARD and not args.autograd:

@@ -154,6 +154,27 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_torchscript(self):
         self._check_backend_works("ts")
 
+    def test_aot_eager(self):
+        self._check_backend_works("aot_eager")
+
+    def test_aot_eager_decomp_partition(self):
+        self._check_backend_works("aot_eager_decomp_partition")
+
+    def test_aot_cudagraphs(self):
+        self._check_backend_works("aot_cudagraphs")
+
+    def test_aot_ts(self):
+        self._check_backend_works("aot_ts")
+
+    def test_aot_ts_nvfuser(self):
+        self._check_backend_works("aot_ts_nvfuser")
+
+    def test_nvprims_nvfuser(self):
+        self._check_backend_works("nvprims_nvfuser")
+
+    def test_nvprims_aten(self):
+        self._check_backend_works("nvprims_aten")
+
 
 class NormalizeIRTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_functorch(), "requires functorch")
