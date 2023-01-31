@@ -5,10 +5,11 @@ import io
 import unittest
 from typing import Any, Sequence, Tuple, Union
 
-import torch
-import onnx_test_common
 # import onnxruntime  # type: ignore[import]
 import onnx.reference
+import onnx_test_common
+
+import torch
 import transformers  # type: ignore[import]
 from torch import nn
 from torch.nn import functional as F

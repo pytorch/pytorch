@@ -1,4 +1,6 @@
 # Owner(s): ["module: onnx"]
+import unittest
+
 import onnx
 import pytorch_test_common
 import torch
@@ -49,9 +51,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         onnx.checker.check_model(onnx_model, full_check=True)
 
     def test_trace_only_op_with_evaluator(self):
-
-        # TODO(titaiwang): Do we need this in exporter?
-
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
 
         class ArgminArgmaxModel(torch.nn.Module):
@@ -70,12 +69,19 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
         onnx.checker.check_model(onnx_model, full_check=True)
 
+    @unittest.skip(
+        "Error: Field 'shape' of 'type' is required but missing. https://github.com/microsoft/onnx-script/issues/371"
+    )
     def test_multiple_outputs_op_with_evaluator(self):
-        # TODO(titaiwang): Do we need this in exporter?
-        # TODO(titaiwang) what op has multiple outputs
-        # 1. torch.nn.Module with multiple outpus ops
-        # 2. use fx.export
-        pass
+        model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
+
+        class TopKModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.topk(x, 3)
+
+        x = torch.arange(1.0, 6.0, requires_grad=True)
+        onnx_model = fx_onnx.export(TopKModel(), self.opset_version, x)
+        onnx.checker.check_model(onnx_model, full_check=True)
 
 
 if __name__ == "__main__":
