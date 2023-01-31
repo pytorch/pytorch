@@ -413,7 +413,8 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        name_prefix = "_" if self.name == "segment_reduce" else ""
+        return f'def {name_prefix}{self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> Optional[str]:
         # only pyi uses vararg signatures
@@ -445,7 +446,8 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        name_prefix = "_" if self.name == "segment_reduce" else ""
+        return f'def {name_prefix}{self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
 
 
 # The deprecated python signature involves some special logic, so create a
