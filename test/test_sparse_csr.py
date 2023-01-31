@@ -2181,9 +2181,14 @@ class TestSparseCSR(TestCase):
                 # This is to exercise `unitriangular=True` not relying on
                 # explicit presence of these indices.
                 if upper:
-                    triangle_function = lambda t: t.triu(-1)
+                    def remove_diagonal(t):
+                        return t.triu(-1)
+
                 else:
-                    triangle_function = lambda t: t.tril(-1)
+                    def remove_diagonal(t):
+                        return t.tril(-1)
+
+                triangle_function = remove_diagonal
 
             make_A = torch.zeros if zero else make_tensor
             A = make_A((n, n), dtype=dtype, device=device)

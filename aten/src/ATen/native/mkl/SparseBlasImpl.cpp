@@ -617,7 +617,7 @@ void triangular_solve_out_sparse_csr(
 
   const auto materialize_diagonal_indices = [](const Tensor& t) -> Tensor {
     const auto n = t.size(-1);
-    const auto [compressed_indices, _] = at::sparse_csr::getCompressedPlainIndices(t);
+    const auto compressed_indices = std::get<0>(at::sparse_csr::getCompressedPlainIndices(t));
     const auto diag_indices = at::arange(n, compressed_indices.options()).unsqueeze(0).expand({2, n});
     const auto diag_values = at::zeros({1}, t.values().options()).expand({n});
 
