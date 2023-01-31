@@ -14,7 +14,7 @@ from .fused import BNReLU3d
 from .fused import LinearBn1d
 from .fused import LinearLeakyReLU
 from .fused import LinearTanh
-
+from .fused import ConvAdd2d
 
 __all__ = [
     'ConvBn1d',
@@ -32,4 +32,5 @@ __all__ = [
     'LinearBn1d',
     'LinearLeakyReLU',
     'LinearTanh',
+    'ConvAdd2d',
 ]

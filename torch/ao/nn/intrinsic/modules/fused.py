@@ -4,7 +4,8 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = ['ConvReLU1d', 'ConvReLU2d', 'ConvReLU3d', 'LinearReLU', 'ConvBn1d', 'ConvBn2d',
            'ConvBnReLU1d', 'ConvBnReLU2d', 'ConvBn3d', 'ConvBnReLU3d', 'BNReLU2d', 'BNReLU3d',
-           'LinearBn1d', 'LinearLeakyReLU', 'LinearTanh']
+           'LinearBn1d', 'LinearLeakyReLU', 'LinearTanh', 'ConvAdd2d']
+
 # Used for identifying intrinsic modules used in quantization
 class _FusedModule(torch.nn.Sequential):
     pass
@@ -144,3 +145,13 @@ class LinearTanh(_FusedModule):
             'Incorrect types for input modules{}{}'.format(
                 type(linear), type(tanh))
         super().__init__(linear, tanh)
+
+class ConvAdd2d(_FusedModule):
+    r"""This is a sequential container which calls the Conv2d modules with extra Add.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, conv, add):
+        super().__init__(conv)
+        self.add = add
+
+    def forward(self, x1, x2):
+        return self.add(self[0](x1), x2)
