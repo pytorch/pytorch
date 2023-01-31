@@ -64,7 +64,6 @@ namespace nn {
 /// iteration over submodules, positional access, adding new modules from a
 /// vector of key-module pairs or an `OrderedDict` or another `ModuleDict` after
 /// construction via `update`.
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
  public:
   using Iterator =
@@ -179,7 +178,14 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     static_assert(
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::at with an nn::Module type");
-    return *modules_[key]->as<T>();
+    auto module = modules_[key]->as<T>();
+    TORCH_CHECK(
+        module,
+        "Unable to cast module[",
+        key,
+        "] to ",
+        c10::demangle(typeid(T).name()));
+    return *module;
   }
 
   /// Attempts to return the module at the given key as the requested type.
@@ -190,7 +196,14 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     static_assert(
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::at with an nn::Module type");
-    return *modules_[key]->as<T>();
+    const auto module = modules_[key]->as<T>();
+    TORCH_CHECK(
+        module,
+        "Unable to cast module[",
+        key,
+        "] to ",
+        c10::demangle(typeid(T).name()));
+    return *module;
   }
 
   /// Removes and returns the `Module` associated with the given `key`.
