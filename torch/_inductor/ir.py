@@ -1888,7 +1888,8 @@ class Buffer(IRNode):
     name: str
     layout: Layout
 
-    _reuses_buffer: Optional[Buffer] = None
+    def __post_init__(self):
+        self._reuses_buffer: Optional[Buffer] = None
 
     def make_indexer(self):
         return self.layout.make_indexer()
