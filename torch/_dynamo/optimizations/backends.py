@@ -520,7 +520,11 @@ def tvm_compile_inner(
 
 @create_backend
 def ipex(subgraph):
-    import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
+    try:
+        import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
+    except ImportError:
+        log.exception("ipex backend fails. Cannot import intel_extension_for_pytorch")
+        raise
 
     from torch.utils._mode_utils import no_dispatch
 
