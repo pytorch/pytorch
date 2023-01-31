@@ -700,7 +700,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         # We also disable other proxy tracers except the current one. This means that a trace from the resultant
         # function will not be contaminated by nested proxy traces.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing_except_current():  # type: ignore[attr-defined]
+             sym_mode, proxy_mode, disable_autocast_cache(), enable_current_proxy_mode_exclusive():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
@@ -736,19 +736,27 @@ def disable_proxy_modes_tracing():
         for proxy_mode, old in zip(proxy_tensor_modes, olds):
             proxy_mode.enable_tracing = old
 
+# Disables all proxy modes except the current, most recently instantiated one. This makes `make_fx`
+# opaque to all higher invocations of `make_fx`
 @contextlib.contextmanager
-def disable_proxy_modes_tracing_except_current():
+def enable_current_proxy_mode_exclusive():
     # TODO: This probably doesn't correctly also disable ProxySymDispatchMode
     modes = get_torch_dispatch_modes()
     proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
-    olds = [m.enable_tracing for m in proxy_tensor_modes[:-1]]
+    olds = [(m.enable_tracing, m.sym_mode.enable_tracing) for m in proxy_tensor_modes]
     for proxy_mode in proxy_tensor_modes[:-1]:
         proxy_mode.enable_tracing = False
+        proxy_mode.sym_mode.enable_tracing = False
+    if len(proxy_tensor_modes) > 0:
+        proxy_mode = proxy_tensor_modes[-1]
+        proxy_mode.enable_tracing = True
+        proxy_mode.sym_mode.enable_tracing = True
     try:
         yield
     finally:
-        for proxy_mode, old in zip(proxy_tensor_modes[:-1], olds):
+        for proxy_mode, (old, old_sym) in zip(proxy_tensor_modes, olds):
             proxy_mode.enable_tracing = old
+            proxy_mode.sym_mode.enable_tracing = old_sym
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):
     """A helper function used to get the GraphModule for the given func.
