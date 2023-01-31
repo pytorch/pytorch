@@ -8,6 +8,7 @@ import warnings
 import re
 import tempfile
 import subprocess
+import stat
 import glob
 
 import torch.testing._internal.common_utils as common
@@ -29,13 +30,16 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
 IS_WINDOWS = sys.platform == "win32"
 
 
+def remove_readonly(func, path, excinfo):
+    # PermissionError: [WinError 5] Access is denied, temp dir in Windows is
+    # read-only
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
 def remove_build_path():
-    if sys.platform == "win32":
-        print("Not wiping extensions build folder because Windows")
-        return
     default_build_root = torch.utils.cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root)
+        shutil.rmtree(default_build_root, onerror=remove_readonly)
 
 # There's only one test that runs gracheck, run slow mode manually
 class TestCppExtensionJIT(common.TestCase):
@@ -165,7 +169,7 @@ class TestCppExtensionJIT(common.TestCase):
                 #   PTX file    1: cudaext_archflags.1.sm_61.ptx
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
-            shutil.rmtree(temp_dir)
+            shutil.rmtree(temp_dir, onerror=remove_readonly)
 
             if old_envvar is None:
                 os.environ.pop('TORCH_CUDA_ARCH_LIST')
