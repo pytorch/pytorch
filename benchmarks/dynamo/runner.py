@@ -1296,13 +1296,17 @@ class DashboardUpdater:
             f.write(comment)
             filename = f.name
 
+        issue_number = "681"
+        if self.args.dtypes[0] == "float32":
+            issue_number = "2049"
+
         subprocess.check_call(
             [
                 self.args.dashboard_gh_cli_path,
                 "issue",
                 "comment",
                 "--repo=https://github.com/pytorch/torchdynamo.git",
-                "681",
+                issue_number,
                 "-F",
                 filename,
             ]

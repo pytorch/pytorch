@@ -2874,7 +2874,7 @@ struct WrappedOperator : public py::base<WrappedOperator> {
         name = orig.attr("__name__");
         doc = orig.attr("__doc__");
         dim_name = std::move(dim_name_);
-        if (!py::is_none(doc) && dim_name.size() > 0) {
+        if (!py::is_none(doc) && !dim_name.empty()) {
             doc = py::unicode_from_format("%S\nArgument '%s' can be either an integer or a torchdim.Dim object.\n", doc.ptr(), dim_name.c_str());
         }
         method_def.ml_name = py::is_none(name) ? "" : PyUnicode_AsUTF8(name.ptr());
