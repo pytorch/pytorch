@@ -33,6 +33,7 @@ CHANNEL=${CHANNEL:-pytorch-nightly}
 PKG=${PKG:-pytorch}
 PLATFORMS=${PLATFORMS:-noarch osx-64 osx-arm64 linux-64 win-64}
 
+#anaconda remove --force "pytorch-nightly/pytorch/}/${platform}/${PKG}-${version}-${spec}.tar.bz2"
 for platform in ${PLATFORMS}; do
     latest_version="$(grab_latest_version || true)"
     specs_in_latest_version="$(grab_specs_for_version "${latest_version}" || true)"
@@ -44,7 +45,8 @@ for platform in ${PLATFORMS}; do
         if [[ "${specs_in_latest_version}" =~ ${spec} ]];then
             (
                 set -x
-                anaconda remove --force "${CHANNEL}/${PKG}/${version}/${platform}/${PKG}-${version}-${spec}.tar.bz2"
+                echo "Removing ${CHANNEL}/${PKG}/${version}/${platform}/${PKG}-${version}-${spec}.tar.bz2"
+                #anaconda remove --force "${CHANNEL}/${PKG}/${version}/${platform}/${PKG}-${version}-${spec}.tar.bz2"
             )
         fi
         done
