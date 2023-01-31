@@ -236,7 +236,7 @@ HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
 def proxy_call(proxy_mode, func, args, kwargs):
     # `__torch_dispatch__` is only called on aten ops, which must have `overloadpacket` attr
-    # hence, the lack of such an attribute indicates an `external_call`, perhaps a function 
+    # hence, the lack of such an attribute indicates an `external_call`, perhaps a function
     # decorated with `@torch.tx.wrap`
     external_call = not hasattr(func, "overloadpacket")
 
@@ -332,7 +332,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
         proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs, name=func.__name__)
     else:
         proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
-                                               name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
+                                                   name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
         # This makes DCE marginally less likely to DCE inplace operations.
         # It is not strictly necessary
