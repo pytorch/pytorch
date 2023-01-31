@@ -8,7 +8,7 @@ import warnings
 from pkg_resources import packaging
 
 MIN_CUDA_VERSION = packaging.version.parse("11.6")
-MIN_PYTHON_VERSION = (3, 7)
+MIN_PYTHON_VERSION = (3, 8)
 
 
 class VerifyDynamoError(BaseException):
