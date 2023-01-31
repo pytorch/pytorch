@@ -20,7 +20,7 @@ import random
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, OpDTypes
+    OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3260,16 +3260,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
         with self.assertRaisesRegex(RuntimeError, r"Attempted to vmap over aten::where"):
             vmap(f)(x)
-
-    @skipCUDAIfNoMagma
-    @allowVmapFallbackUsage
-    def test_symeig(self, device):
-        def op(x):
-            return torch.symeig(x, eigenvectors=True)[0]
-
-        x = torch.randn(3, 3, device=device, requires_grad=True)
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
 
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
