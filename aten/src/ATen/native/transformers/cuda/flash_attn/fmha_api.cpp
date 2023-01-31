@@ -26,6 +26,7 @@
  *
  ******************************************************************************/
 
+#include <cstdint>
 #include <tuple>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
@@ -194,7 +195,7 @@ void run_fmha_fwd(Launch_params<FMHA_fprop_params> &launch_params) {
 // The tensor `out` will get populated the output attention
 // First return value is softmax_logsumexp
 // Second return value is the random generator state
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
+std::tuple<at::Tensor, uint64_t, uint64_t, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -208,8 +209,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const bool zero_tensors,
         const bool is_causal,
         const bool return_softmax,
-        const int num_splits,
-        c10::optional<at::Generator> gen_) {
+        const int num_splits) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
@@ -289,9 +289,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         if (return_softmax) {flash_softmax.zero_();}
     }
 
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
-
     set_params_fprop(launch_params.params,
                      batch_size,
                      max_seqlen_q,
@@ -315,18 +312,23 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     int64_t counter_offset = launch_params.params.b * launch_params.params.h * 32;
 
     // We want to checkpoint and save the RNG state for backward if dropout
-    c10::TensorOptions mask_options{at::ScalarType::Byte};
-    at::Tensor generator_state = at::detail::empty_cpu({0}, mask_options);
+    // We get the default generator and return the seed and offset which will
+    // be used in the backward function
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+    uint64_t seed{0}, offset{0};
     if( is_dropout ) {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-        generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
-        launch_params.params.philox_args = gen->philox_cuda_state(counter_offset);
+        // generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
+        at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+        std::tie(seed, offset) = at::cuda::philox::unpack(philox_state);
+        launch_params.params.philox_seed = seed;
+        launch_params.params.philox_offset = offset;
     }
 
     run_fmha_fwd(launch_params);
 
-    return {softmax_lse, generator_state, flash_softmax};
+    return {softmax_lse, seed, offset, flash_softmax};
 }
 
 void run_fmha_bwd(FMHA_dgrad_params &params, cudaStream_t stream, const bool configure) {
@@ -358,7 +360,8 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const bool zero_tensors,
         const bool is_causal,
         const int num_splits,
-        c10::optional<at::Generator> gen_
+        const uint64_t philox_seed,
+        const uint64_t philox_offset
 ) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
@@ -367,7 +370,6 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(is_sm8x || is_sm75);
     auto launch = &run_fmha_bwd;
 
-    bool is_dropout = p_dropout > 0.0;
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
@@ -488,17 +490,9 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         }
     }
 
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
-
-    // We use a custom RNG that increases the offset by batch_size * nheads * 32.
-    int64_t counter_offset = params.b * params.h * 32;
-
-    if( is_dropout ) {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        params.philox_args = gen->philox_cuda_state(counter_offset);
-    }
+    // Set the philox seed and offset which will be used if dropout is set
+    params.philox_seed = philox_seed;
+    params.philox_offset = philox_offset;
 
     launch(params, stream, /*configure=*/false);
 

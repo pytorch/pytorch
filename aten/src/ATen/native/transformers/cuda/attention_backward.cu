@@ -84,7 +84,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const Tensor& rng_state) {
+    const int64_t philox_seed,
+    const int64_t philox_offset) {
 #if defined(USE_FLASH_ATTENTION)
   /*
   num_splits determines how much to parallelize over the seqlen_q dimension
@@ -102,16 +103,6 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   Tensor dv = at::empty_like(value);
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
-
-  c10::intrusive_ptr<c10::TensorImpl> current_rng_state;
-  if (dropout_p > 0.0){
-        // See Note [Acquire lock when using random generators]
-        auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        current_rng_state = gen->get_state();
-        c10::TensorImpl* rng_state_value_impl = rng_state.unsafeGetTensorImpl();
-        gen -> set_state(*rng_state_value_impl);
-  }
 
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
           contiguous_grad_out,
@@ -132,14 +123,9 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           false, /*zero_tensors = false for all calls here*/
           is_causal,
           num_splits,
-          c10::nullopt /*gen_*/
+          (uint64_t)philox_seed, /*TODO: are these casts safe?*/
+          (uint64_t)philox_offset
   );
-  if (dropout_p > 0.0){
-        // See Note [Acquire lock when using random generators]
-        auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        gen -> set_state(*current_rng_state);
-  }
   return std::make_tuple(dq, dk, dv);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
@@ -351,7 +337,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const Tensor& rng_state){
+    const int64_t philox_seed,
+    const int64_t philox_offset){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -390,7 +377,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     max_seqlen_batch_k,
     dropout_p,
     is_causal,
-    rng_state);
+    philox_seed,
+    philox_offset);
 
   grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
   grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);

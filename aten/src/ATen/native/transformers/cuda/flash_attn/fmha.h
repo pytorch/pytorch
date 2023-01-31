@@ -124,7 +124,8 @@ struct FMHA_fprop_params : public Qkv_params {
     uint32_t scale_dropout;
 
     // Random state.
-    at::PhiloxCudaState philox_args;
+    uint64_t philox_seed;
+    uint64_t philox_offset;
 
     bool is_bf16;
     bool is_causal;

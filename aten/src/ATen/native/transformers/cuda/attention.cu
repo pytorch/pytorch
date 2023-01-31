@@ -679,7 +679,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -729,8 +729,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor> _sc
   Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  Tensor attention, log_sumexp, rng_state, debug_attn_mask;
-  std::tie(attention, log_sumexp, rng_state, debug_attn_mask) =
+  Tensor attention, log_sumexp, debug_attn_mask;
+  int64_t philox_seed{0}, philox_offset{0};
+  std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_reshaped,
           key_reshaped,
@@ -746,7 +747,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor> _sc
   attention =
       attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
 
-  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, rng_state, debug_attn_mask);
+  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -808,7 +809,7 @@ bool _chunk_grad_outputs_efficient_attention(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
+std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -830,8 +831,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   auto softmax_scale = std::pow(query.size(-1), -0.5);
   at::Tensor output = at::empty_like(query);
 
-  Tensor logsumexp, rng_state, debug_attn_mask;
-  std::tie(logsumexp, rng_state, debug_attn_mask) = fmha::mha_fwd(
+  Tensor logsumexp, debug_attn_mask;
+  uint64_t philox_seed{0}, philox_offset{0};
+  std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
       query,
       key,
       value,
@@ -845,14 +847,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
       false, /*zero_tensors = false for all calls here*/
       is_causal,
       return_debug_mask, /*return_softmax (this is used for testing)*/
-      num_splits,
-      c10::nullopt);
+      num_splits);
 
   debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
-  return std::make_tuple(output, logsumexp, rng_state, debug_attn_mask);
+  // TODO: Need to check if this cast is okay
+  return std::make_tuple(output, logsumexp, (int64_t)philox_seed, (int64_t)philox_offset, debug_attn_mask);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
+  return std::make_tuple(Tensor(), Tensor(), 0, 0, Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(

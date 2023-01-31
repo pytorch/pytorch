@@ -2084,18 +2084,6 @@ def meta__scaled_dot_product_flash(
         batch_size + 1, dtype=torch.int32, device="meta"
     )
 
-    if dropout_p > 0.0:
-        DEFAULT_RNG_STATE_SIZE = 816
-        # [Note] This number feels magical but it is derived from the calculation:
-        # pytorch/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp:154
-        # where sizeof(4120) will equal 4 bytes for all systems that are
-        # expected to run this meta function :hope:
-        rng_state_tensor = torch.empty(
-            DEFAULT_RNG_STATE_SIZE, dtype=torch.uint8, device="meta"
-        )
-    else:
-        rng_state_tensor = torch.empty(0, dtype=torch.uint8, device="meta")
-
     if return_debug_mask:
         blocksize_c = 128 if head_dim > 64 else 256
         max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
@@ -2118,7 +2106,8 @@ def meta__scaled_dot_product_flash(
         cumulative_sequence_length_k,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        rng_state_tensor,
+        1,  # what do I put here
+        1,  # what do I put here
         debug_mask,
     )
 
@@ -2141,7 +2130,8 @@ def meta__scaled_dot_product_flash_backward(
     max_k: int,
     dropout_p: float,
     is_causal: bool,
-    rng_state: Tensor,
+    philox_seed: int,
+    philox_offset: int,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
