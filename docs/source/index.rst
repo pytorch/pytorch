@@ -81,6 +81,7 @@ Features described in this documentation are classified by release status:
    torch.autograd <autograd>
    torch.library <library>
    cuda
+   torch._awaits <_awaits>
    torch.backends <backends>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
