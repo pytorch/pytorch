@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib
 import urllib.parse
 
@@ -50,6 +51,7 @@ def fetch_url(url: str, *,
             )
             if i == retries:
                 raise RuntimeError(exception_message) from err
+        time.sleep(0.5)
 
 def parse_args() -> Any:
     parser = argparse.ArgumentParser()
