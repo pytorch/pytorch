@@ -736,8 +736,8 @@ def disable_proxy_modes_tracing():
         for proxy_mode, old in zip(proxy_tensor_modes, olds):
             proxy_mode.enable_tracing = old
 
-# Disables all proxy modes except the current, most recently instantiated one. This makes `make_fx`
-# opaque to all higher invocations of `make_fx`
+# Disables all proxy modes except the current, most recently instantiated one. This makes the containing
+# code opaque to all higher invocations of `make_fx`
 @contextlib.contextmanager
 def enable_current_proxy_mode_exclusive():
     # TODO: This probably doesn't correctly also disable ProxySymDispatchMode
