@@ -38,7 +38,7 @@ if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
     rm "$CI_SCRIPTS_DIR"/*
 fi
 
-export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}"/win-test-helpers"
+export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}"\win-test-helpers"
 
 # These variables are set for the python build
 if [ $DEBUG == "1" ]
@@ -101,7 +101,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-python "$SCRIPT_HELPERS_DIR"/build_pytorch.py
+python ${SCRIPT_HELPERS_DIR}"/build_pytorch.py"
 
 env
 
