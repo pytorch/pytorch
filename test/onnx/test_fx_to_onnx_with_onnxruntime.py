@@ -101,6 +101,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
 
+    @unittest.skip("Requires patching GPT2 code to avoid if-else code blocks")
     def test_large_scale_exporter_with_gpt2_tiny(self):
         # This test contains 3 major steps.
         #  1. Export ONNX model without initializers.
