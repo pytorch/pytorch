@@ -9635,6 +9635,85 @@ TEST_F(NVFuserTest, FusionPersistentBufferProjection_CUDA) {
   testValidate(&fusion, cg_outputs, {aten_t0}, {aten_t7}, __LINE__, __FILE__);
 }
 
+// Repro of issue #2381
+TEST_F(NVFuserTest, FusionPersistentBufferProjection2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2, DataType::Half);
+  fusion.addInput(tv1);
+
+  auto tv2 = castOp(DataType::Float, tv0);
+  auto tv3 = castOp(DataType::Float, tv1);
+  auto tv4 = add(tv2, tv3);
+  auto tv5 = sum(tv4, {1});
+  auto tv6 = broadcast(tv5, {false, true});
+  // Cast tv1 again
+  auto tv7 = castOp(DataType::Float, tv1);
+  // No error if this is done with tv3 rather than tv7
+  auto tv8 = sub(tv6, tv7);
+  auto tv9 = sub(tv8, tv4);
+  auto tv10 = castOp(DataType::Half, tv9);
+  fusion.addOutput(tv10);
+
+  std::vector<int64_t> shape({10, 11});
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn(shape, options);
+  at::Tensor t1 = at::randn(shape, options);
+
+  // Persistent buffers: tv1, tv4
+  // Projectable buffer: tv4
+  // Projectable buffer inputs: tv0, tv1
+
+  // tv1 is both a persistent buffer and an input to the projected
+  // buffer of tv4. It is NOT considered as projectable.
+
+  auto persistent_info = scheduler_utils::persistentBuffers(&fusion);
+
+  TORCH_CHECK(persistent_info.persistent_buffers.size() == 2);
+  for (auto tv : persistent_info.persistent_buffers) {
+    TORCH_CHECK(
+        tv == tv4 || tv == tv1,
+        "Unexpected persistent buffer: ",
+        tv->toString());
+  }
+
+  TORCH_CHECK(persistent_info.projectable_persistent_buffers.size() == 1);
+  for (auto tv : persistent_info.projectable_persistent_buffers) {
+    TORCH_CHECK(
+        tv == tv4,
+        "Unexpected projectable persistent buffer: ",
+        tv->toString());
+  }
+
+  for (auto tv : persistent_info.projectable_buffer_inputs) {
+    TORCH_CHECK(
+        tv == tv0 || tv == tv1,
+        "Unexpected projectable buffer input: ",
+        tv->toString());
+  }
+
+  SchedulerRuntimeInfo runtime_info(&fusion, {t0, t1}, true);
+  auto persistent_buffer_size =
+      persistentBufferSize(&fusion, runtime_info, persistent_info);
+
+  // Since tv1 is not projectable, it is included in the active mask
+  // of projected buffers, even though it is also included in the
+  // projectable buffer inputs. Thus, the buffer size would be
+  // calculated as the sum of tv1, tv0 and tv1.
+  auto projected_size = persistent_buffer_size.projected_persistent_buffer_size;
+  auto expected_size = shape[1] * 2 * dataTypeSize(DataType::Half);
+  TORCH_CHECK(
+      projected_size == expected_size,
+      "Buffer projection failure. Expected size: ",
+      expected_size,
+      ". Actual: ",
+      projected_size);
+}
+
 TEST_F(NVFuserTest, FusionIssue1223_CUDA) {
   if (!deviceMajorMinorCheck(7)) {
     GTEST_SKIP() << "skipping tests on pre-Volta GPUs";

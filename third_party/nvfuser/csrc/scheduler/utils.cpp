@@ -832,13 +832,21 @@ PersistentBufferSizeReturn persistentBufferSize(
   // input buffers), and sizes, and returns total persistent buffer size.
   auto masked_dot_product = [](const std::vector<bool>& mask0,
                                const std::vector<bool>& mask1,
-                               const std::vector<int64_t>& sizes) {
+                               const std::vector<int64_t>& sizes,
+                               const std::vector<TensorView*>& all_buffers) {
     int64_t buffer_size = 0;
     TORCH_INTERNAL_ASSERT(
-        mask0.size() == mask1.size() && mask0.size() == sizes.size());
+        mask0.size() == mask1.size() && mask0.size() == sizes.size() &&
+        mask0.size() == all_buffers.size());
+    // Keep track of which buffer is counted as there can be tensors
+    // that are both a persistent buffer and an input to a projectable
+    // buffer
+    std::unordered_set<TensorView*> active_buffers;
     for (auto buffer_i : c10::irange(sizes.size())) {
-      if (mask0[buffer_i] && mask1[buffer_i]) {
+      if (mask0[buffer_i] && mask1[buffer_i] &&
+          active_buffers.count(all_buffers[buffer_i]) == 0) {
         buffer_size += sizes[buffer_i];
+        active_buffers.insert(all_buffers[buffer_i]);
       }
     }
     return buffer_size;
@@ -859,12 +867,12 @@ PersistentBufferSizeReturn persistentBufferSize(
   for (const auto& entry : scoped_persistence_factor) {
     auto active_buffers = entry.second;
     auto persistent_buffer_size = masked_dot_product(
-        persistent_mask, active_buffers, persistent_buffer_sizes);
+        persistent_mask, active_buffers, persistent_buffer_sizes, all_buffers);
     max_persistence_size =
         std::max(max_persistence_size, persistent_buffer_size);
 
     auto projected_buffer_size = masked_dot_product(
-        projected_mask, active_buffers, persistent_buffer_sizes);
+        projected_mask, active_buffers, persistent_buffer_sizes, all_buffers);
     max_proj_persistence_size =
         std::max(max_proj_persistence_size, projected_buffer_size);
   }
