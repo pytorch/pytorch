@@ -1279,7 +1279,18 @@ def meta_embedding_bag(
         else:
             offset2bag = offsets.new_empty(0)
         bag_size = offsets.new_empty(num_bags)
-        max_indices = offsets.new_empty(bag_size.size())
+        # This part of the logic comes from make_max_indices_out in EmbeddingBag.cpp
+        numBags = offsets.shape[0]
+        if mode == MODE_MAX:
+            if include_last_offset:
+                check(
+                    numBags >= 1,
+                    lambda: "include_last_offset: numBags should be at least 1",
+                )
+                numBags -= 1
+            max_indices = offsets.new_empty(numBags, weight.shape[1])
+        else:
+            max_indices = offsets.new_empty(bag_size.size())
     return output, offset2bag, bag_size, max_indices
 
 
@@ -2038,7 +2049,6 @@ def meta__scaled_dot_product_flash(
     key: Tensor,
     value: Tensor,
     dropout_p: float = 0.0,
-    return_softmax: bool = False,
     is_causal: bool = False,
 ):
     batch_size = query.size(0)
@@ -2081,17 +2091,7 @@ def meta__scaled_dot_product_flash(
     elif max_seqlen_k <= 256:
         max_seqlen_k = 256
 
-    softmax = torch.empty(
-        (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    softmax = torch.empty(
-        0,
-        dtype=query.dtype,
-        device=query.device,
-    )
-    return ouput, logsumexp, softmax
+    return ouput, logsumexp
 
 
 @register_meta(

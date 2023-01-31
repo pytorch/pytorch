@@ -369,8 +369,13 @@ def _elementwise_meta(
     number = None
     for arg in args_:
         if isinstance(arg, TensorLike):
-            device = arg.device
-            break
+            if utils.is_cpu_scalar_tensor(arg):
+                if device is None:
+                    device = arg.device
+                # keep going, in case there is a cuda tensor later
+            else:
+                device = arg.device
+                break
 
         elif isinstance(arg, Number):
             if number is None:
@@ -1859,8 +1864,8 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
             elif length != common_length:
                 raise RuntimeError(
                     f"Sizes of tensors must match except in dimension {dim}. "
-                    "Expected {common_length} but got {length} for tensor number "
-                    "{tensor_idx} in the list"
+                    f"Expected {common_length} but got {length} for tensor number "
+                    f"{tensor_idx} in the list"
                 )
 
     new_shape = list(tensors[0].shape).copy()
@@ -2131,28 +2136,6 @@ minimum_value = _make_prim(
     impl_aten=_minimum_value_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_minimum_value_doc,
-)
-
-# TODO: FIXME: strides are incorrect
-def _to_dtype_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
-    strides = utils.make_contiguous_strides_for(a.shape)
-    return TensorMeta(a, strides=strides, dtype=dtype)
-
-
-def _to_dtype_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-    return a.to(dtype)
-
-
-_to_dtype_doc = """
-    Creates a contiguous copy of a tensor with the given dtype.
-"""
-
-to_dtype = _make_prim(
-    schema=("to_dtype(Tensor a, ScalarType dtype) -> Tensor"),
-    meta=_to_dtype_meta,
-    impl_aten=_to_dtype_aten,
-    return_type=RETURN_TYPE.NEW,
-    doc=_to_dtype_doc,
 )
 
 #

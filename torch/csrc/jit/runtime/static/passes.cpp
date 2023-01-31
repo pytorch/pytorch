@@ -505,7 +505,7 @@ std::vector<TupleUnpackBlock> CollectVariadicTupleUnpackFusionCandidates(
 }
 
 void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
-  TORCH_CHECK(nodes.size() > 0);
+  TORCH_CHECK(!nodes.empty());
   auto graph = nodes[0]->owningGraph();
   auto var_unpack = graph->create(
       fromQualString("static_runtime::VarTupleUnpack"),
@@ -987,7 +987,7 @@ void RemoveImmutableInputDictLookups(
     }
     iter->second.push_back(getitem_node);
   }
-  if (keys.size() == 0) {
+  if (keys.empty()) {
     return;
   }
   // Move all keys to the beginning of the graph and insert new dict_unpack
@@ -996,7 +996,7 @@ void RemoveImmutableInputDictLookups(
   graph->prependNode(marker);
   graph->setInsertPoint(marker);
   for (Node* key : keys) {
-    DCHECK(key->inputs().size() == 0);
+    DCHECK(key->inputs().empty());
     key->moveBefore(marker);
   }
   const c10::Symbol static_runtime_dict_unpack_symbol =
@@ -1004,7 +1004,7 @@ void RemoveImmutableInputDictLookups(
   for (auto& it : dict_to_getitems) {
     Value* dict = it.first;
     std::vector<Node*>& getitems = it.second;
-    DCHECK(getitems.size() > 0);
+    DCHECK(!getitems.empty());
     auto* dict_unpack =
         graph->create(static_runtime_dict_unpack_symbol, getitems.size());
     graph->insertNode(dict_unpack);
