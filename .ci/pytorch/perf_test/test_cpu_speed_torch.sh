@@ -19,7 +19,7 @@ test_cpu_speed_torch () {
   fi
 
   if ! python perf-tests/modules/test_cpu_torch.py "${ARGS[@]}"; then
-    echo "To reproduce this regression, run \`cd .jenkins/pytorch/perf_test/ && bash ${FUNCNAME[0]}.sh\` on your local machine and compare the runtime before/after your code change."
+    echo "To reproduce this regression, run \`cd .ci/pytorch/perf_test/ && bash ${FUNCNAME[0]}.sh\` on your local machine and compare the runtime before/after your code change."
     exit 1
   fi
 }

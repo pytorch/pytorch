@@ -91,13 +91,8 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
-        fake_mode=None,
     ):
         super().__init__(gm)
-        if fake_mode is None:
-            self.fake_mode = torch._subclasses.FakeTensorMode()
-        else:
-            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -131,7 +126,11 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.warning(f"Using FallbackKernel: {name}")
+            log.info(f"Using FallbackKernel: {name}")
+
+    @property
+    def fake_mode(self):
+        return V.fake_mode
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -290,6 +289,10 @@ class GraphLowering(torch.fx.Interpreter):
             if target is operator.getitem and isinstance(args[0], (list, tuple)):
                 return super().call_function(target, args, kwargs)
 
+            if hasattr(target, "_inductor_lowering_function"):
+                # passthrough lowerings from .pattern_matcher
+                return target(*args, **kwargs)
+
             if target not in lowerings:
                 if config.implicit_fallbacks:
                     error = (
@@ -297,7 +300,7 @@ class GraphLowering(torch.fx.Interpreter):
                         if get_decompositions([target])
                         else MissingOperatorWithoutDecomp
                     )
-                    log.warning(
+                    log.info(
                         "Creating implicit fallback for:\n%s",
                         error.operator_str(target, args, kwargs),
                     )
