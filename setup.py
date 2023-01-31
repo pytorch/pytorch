@@ -1022,7 +1022,8 @@ def main():
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        if cmake_cache_vars['USE_ROCM']:
+        if os.path.exists('/opt/rocm'):
+            # assume rocm build
             triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton-rocm.txt")
             if os.path.exists(triton_pin_file):
                 with open(triton_pin_file) as f:
