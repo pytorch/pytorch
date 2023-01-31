@@ -116,20 +116,24 @@ class TestFSDPStateDict(FSDPTest):
         # TODO (rohan-varma): remove model
         return _broadcast_state_dict(self.rank, state_dict)
 
-    def _state_compare(self, model, model_new, assert_fn, state_generator='parameters'):
+    def _state_compare(self, model, model_new, assert_fn, state_generator="parameters"):
         state_base = list(getattr(model, state_generator)())
         state_new = list(getattr(model_new, state_generator)())
         # Regardless of `assert_fn`, the number of parameters should be the same
         self.assertEqual(len(state_base), len(state_new))
         assert_fn(state_base, state_new)
-        
-    def _compare_models(self, model, model_new, assert_fn, check_fp16=False, check_buffers=False):
+
+    def _compare_models(
+        self, model, model_new, assert_fn, check_fp16=False, check_buffers=False
+    ):
         assert assert_fn in (self.assertEqual, self.assertNotEqual)
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_new):
                 self._state_compare(model, model_new, assert_fn)
                 if check_buffers:
-                    self._state_compare(model, model_new, assert_fn, state_generator='buffers')
+                    self._state_compare(
+                        model, model_new, assert_fn, state_generator="buffers"
+                    )
                 if check_fp16:
                     for tensor in model_new.parameters():
                         self.assertEqual(tensor.dtype, torch.float16)
@@ -160,11 +164,17 @@ class TestFSDPStateDict(FSDPTest):
             lin = checkpoint_wrapper(lin)
         model = FSDP(lin, *fsdp_args, **fsdp_kwargs)
         return model
-    
-    def _get_multibuffer_nested_model(self, *fsdp_args, wrap=True, checkpoint_wrap=False, **fsdp_kwargs):
+
+    def _get_multibuffer_nested_model(
+        self, *fsdp_args, wrap=True, checkpoint_wrap=False, **fsdp_kwargs
+    ):
         full_p = torch.float32
-        lin_mp = fsdp_kwargs.pop('mixed_precision', None)
-        bn_mp = MixedPrecision(param_dtype=full_p, reduce_dtype=full_p, buffer_dtype=full_p) if lin_mp else None
+        lin_mp = fsdp_kwargs.pop("mixed_precision", None)
+        bn_mp = (
+            MixedPrecision(param_dtype=full_p, reduce_dtype=full_p, buffer_dtype=full_p)
+            if lin_mp
+            else None
+        )
         if wrap:
             lin1 = nn.Linear(10, 10, bias=False).cuda()
             bn1 = nn.BatchNorm1d(10).cuda()
@@ -173,9 +183,11 @@ class TestFSDPStateDict(FSDPTest):
                 lin1 = checkpoint_wrapper(lin1)
                 bn1 = checkpoint_wrapper(bn1)
                 lin2 = checkpoint_wrapper(lin2)
-            seq = nn.Sequential(FSDP(lin1, mixed_precision=lin_mp, *fsdp_args, **fsdp_kwargs), 
-                                FSDP(bn1, mixed_precision=bn_mp, *fsdp_args, **fsdp_kwargs), 
-                                lin2)
+            seq = nn.Sequential(
+                FSDP(lin1, mixed_precision=lin_mp, *fsdp_args, **fsdp_kwargs),
+                FSDP(bn1, mixed_precision=bn_mp, *fsdp_args, **fsdp_kwargs),
+                lin2,
+            )
             if checkpoint_wrap:
                 seq = checkpoint_wrapper(seq)
             model = FSDP(seq, *fsdp_args, **fsdp_kwargs)
@@ -562,7 +574,7 @@ class TestFSDPStateDict(FSDPTest):
         Tests that we can save a state_dict and load it for modules with persistent buffers, including
         in the context of non-default mixed precision, different ``state_dict_type`` s and CPU offloading.
         """
-        if (state_dict_rank0_and_offload and state_dict_type != "state_dict"):
+        if state_dict_rank0_and_offload and state_dict_type != "state_dict":
             return  # not supported
         mixed_precision = (
             MixedPrecision(
@@ -573,16 +585,22 @@ class TestFSDPStateDict(FSDPTest):
             if mixed_precision
             else None
         )
-        model_call = partial(self._get_multibuffer_nested_model,
-                             cpu_offload=cpu_offload,
-                             use_orig_params=False,
-                             mixed_precision=mixed_precision)
+        model_call = partial(
+            self._get_multibuffer_nested_model,
+            cpu_offload=cpu_offload,
+            use_orig_params=False,
+            mixed_precision=mixed_precision,
+        )
         model = model_call()
-        ctx = self._get_state_dict_mgr(model, state_dict_type, state_dict_rank0_and_offload)
+        ctx = self._get_state_dict_mgr(
+            model, state_dict_type, state_dict_rank0_and_offload
+        )
         with ctx:
             fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, False)
 
-        self._validate_state_dict_contents(model, fsdp_state_dict, state_dict_rank0_and_offload)
+        self._validate_state_dict_contents(
+            model, fsdp_state_dict, state_dict_rank0_and_offload
+        )
 
         model_new = model_call()
         if not cpu_offload.offload_params:
