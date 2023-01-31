@@ -33,6 +33,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -317,13 +318,14 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
     uint64_t seed{0}, offset{0};
     if( is_dropout ) {
+        TORCH_CHECK(at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
+        "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
         // generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         std::tie(seed, offset) = at::cuda::philox::unpack(philox_state);
-        launch_params.params.philox_seed = seed;
-        launch_params.params.philox_offset = offset;
+        launch_params.params.philox_args = philox_state;
     }
 
     run_fmha_fwd(launch_params);
@@ -490,9 +492,11 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         }
     }
 
-    // Set the philox seed and offset which will be used if dropout is set
-    params.philox_seed = philox_seed;
-    params.philox_offset = philox_offset;
+    TORCH_CHECK(
+        at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
+        "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
+    at::PhiloxCudaState philox_args{philox_seed, philox_offset};
+    params.philox_args = philox_args;
 
     launch(params, stream, /*configure=*/false);
 

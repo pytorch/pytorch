@@ -37,7 +37,7 @@
 #endif
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/detail/UnpackRaw.cuh>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha_utils.h>
 
@@ -124,8 +124,7 @@ struct FMHA_fprop_params : public Qkv_params {
     uint32_t scale_dropout;
 
     // Random state.
-    uint64_t philox_seed;
-    uint64_t philox_offset;
+    at::PhiloxCudaState philox_args;
 
     bool is_bf16;
     bool is_causal;

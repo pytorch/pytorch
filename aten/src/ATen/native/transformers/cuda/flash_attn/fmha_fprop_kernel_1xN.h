@@ -679,7 +679,8 @@ inline __device__ void device_1xN_loop(const Params &params) {
     // (within a warp). We use the subsequence to store the location of the 16 x 16 blocks within
     // the attention matrix. This way, as long as we have the batch, head, and the location of
     // the 16 x 16 block within the attention matrix, we can generate the exact same dropout pattern.
-    Philox ph(params.philox_seed, 0, params.philox_offset + (bidb * params.h + bidh) * 32 + tidx % 32);
+    auto seeds = at::cuda::philox::unpack(params.philox_args);
+    Philox ph(std::get<0>(seeds), 0, std::get<1>(seeds) + (bidb * params.h + bidh) * 32 + tidx % 32);
     constexpr int M = Kernel_traits::Cta_tile_p::M;
     const int STEPS = (params.seqlen_q + M - 1) / M;
 

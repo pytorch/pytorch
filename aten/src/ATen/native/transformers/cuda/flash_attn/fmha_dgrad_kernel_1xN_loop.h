@@ -795,8 +795,8 @@ inline __device__ void compute_dq_dk_dv_1xN(const Params &params) {
     const int bidh = blockIdx.y;
     // The thread index.
     const int tidx = threadIdx.x;
-
-    Philox ph(params.philox_seed, 0,  params.philox_offset + (bidb * params.h + bidh) * 32 + tidx % 32);
+    auto seeds = at::cuda::philox::unpack(params.philox_args);
+    Philox ph(std::get<0>(seeds), 0,  std::get<1>(seeds) + (bidb * params.h + bidh) * 32 + tidx % 32);
 
     if (loop_steps == 1) {
         compute_dq_dk_dv_1xN_one_iter<Kernel_traits, Is_dropout, Is_causal, true, true>(params, ph, 0);
@@ -827,8 +827,8 @@ inline __device__ void compute_dq_dk_dv_seqparallel(const Params &params) {
     const int bidh = blockIdx.y;
     // The thread index.
     const int tidx = threadIdx.x;
-
-    Philox ph(params.philox_seed, 0, params.philox_offset + (bidb * params.h + bidh) * 32 + tidx % 32);
+    auto seeds = at::cuda::philox::unpack(params.philox_args);
+    Philox ph(std::get<0>(seeds), 0, std::get<1>(seeds) + (bidb * params.h + bidh) * 32 + tidx % 32);
 
     int loop_step_idx = blockIdx.z;
     compute_dq_dk_dv_1xN_one_iter<Kernel_traits, Is_dropout, Is_causal, false, false, /*Seq_parallel=*/true>(params, ph, loop_step_idx);
