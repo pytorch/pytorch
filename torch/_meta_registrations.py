@@ -2651,7 +2651,7 @@ def activate_meta():
 
 @register_meta(aten.all_reduce)
 def all_reduce_meta(self, reduceOp, tag, rankset, stride):
-    return self
+    return torch.empty_like(self)
 
 
 activate_meta()

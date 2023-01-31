@@ -432,7 +432,7 @@ class DeviceMesh(object):
             tensor: torch.Tensor,
             op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
             mesh_dim: int = 0,
-        ) -> Optional[torch.Tensor]:
+    ) -> Optional[torch.Tensor]:
             """
             all_reduce the tensor on each rank on a device mesh dimension, and
             return an output tensor on each rank after all_reduce.
@@ -447,9 +447,7 @@ class DeviceMesh(object):
             Returns:
                 A :class:`Work` object
             """
-            dim_group = self._dim_groups[mesh_dim]
-            #TODO pass self once tr_c support DM natively
-            return tr_c.all_reduce(self=tensor, reduceOp="sum", group=dim_group)
+            return tr_c.all_reduce(self=tensor, reduceOp="sum", group=(self, mesh_dim))
 
     def reduce_scatter(
         self,

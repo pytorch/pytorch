@@ -378,7 +378,7 @@ class _World:
     def tags_to_pg(self) -> Dict[str, List[ProcessGroup]]:
         global _tags_to_pg
         return _tags_to_pg
- 
+
     @property
     def pg_to_tag(self) -> Dict[ProcessGroup, str]:
         global _pg_to_tag
@@ -1083,9 +1083,9 @@ def _new_process_group_helper(
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    #FIXME this should be moved to _World
+    # FIXME this should be moved to _World
     _pg_backend_map[pg] = str(backend_config)
-    #"" is the default tag for user PGs
+    # "" is the default tag for user PGs
     pg_tag = pg_tag or ""
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
@@ -3797,7 +3797,7 @@ def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGr
     pg = _try_find_pg_by_ranks_and_tag(tag, ranks)
     if pg is not None:
         return pg
-    #TODO copy settings and timeout from default PG
+    # TODO copy settings and timeout from default PG
     return new_group(ranks, pg_tag=tag)
 
 def _get_group_tag(pg: ProcessGroup) -> str:

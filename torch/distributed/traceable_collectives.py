@@ -7,7 +7,7 @@ from torch._C import DispatchKey
 
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
-from typing import Any, Union
+from typing import Any, Tuple, Union
 
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
@@ -105,11 +105,6 @@ class AsyncCollectiveTensor(torch.Tensor):
                 return wait_tensor(e._tensor)
             return e
 
-        # TODO what happens when func is an inplace? (add_) -
-        # currently, seems like the mutation works on the underlying tensor,
-        # but it remains an AsyncCollectiveTensor so subsequent ops still 'unwrap' again.
-        # would be nice to fix this.
-
         unwrapped_args = tree_map(unwrap, args)
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
@@ -152,20 +147,7 @@ c10_lib.impl("all_reduce", _all_reduce_cpu)
 
 RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh]
 
-def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
-    """
-    Reduces the tensor data across all machines in such a way that all get
-    the final result.
-
-    The input tensor is left unmodified.
-
-    rank can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: if you don't like all the new cool stuff or has some legacy weigthing on your shoulder.
-        DeviceMesh: Do a SPMD collective over all ranks of a collective
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-    """
+def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
     if isinstance(group, list):
         if isinstance(group[0], list):
             rankset = []
@@ -180,9 +162,37 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
         stride = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, dt.DeviceMesh):
-        raise ValueError("TODO DeviceMesh")
+        rankset = group.mesh.flatten().tolist()
+        stride = len(rankset)
+        tag = tag or c10d._get_group_tag(group.get_dim_groups()[0]) 
+    elif isinstance(group, Tuple) and len(group) == 2:
+        dmesh = group[0]
+        dim = group[1]
+        if isinstance(dmesh, dt.DeviceMesh) and isinstance(dim, int):
+            stride = dmesh.mesh.size(dim)
+            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, stride).flatten()
+            tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
+        else:
+            raise ValueError("Invalid type for group")
     else:
         raise ValueError("Invalid type for group")
 
+    return (tag, rankset, stride)
+
+def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+    """
+    Reduces the tensor data across all machines in such a way that all get
+    the final result.
+
+    The input tensor is left unmodified.
+
+    rank can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: if you don't like all the new cool stuff or has some legacy weigthing on your shoulder.
+        DeviceMesh: Do a SPMD collective over all ranks of a collective
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+    """
+    tag, rankset, stride = _expand_group(group, tag)
     tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, rankset, stride)
     return AsyncCollectiveTensor(tensor)
