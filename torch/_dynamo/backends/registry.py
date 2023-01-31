@@ -1,5 +1,5 @@
 import functools
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from typing_extensions import Protocol
 
@@ -17,9 +17,13 @@ CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 _BACKENDS: Dict[str, CompilerFn] = dict()
 
 
-def register_backend(compiler_fn: CompilerFn = None, name: Optional[str] = None):
+def register_backend(
+    compiler_fn: Optional[CompilerFn] = None,
+    name: Optional[str] = None,
+    tags: Sequence[str] = (),
+):
     """
-    Decorator to add a given compiler to the BACKENDS registry to allow
+    Decorator to add a given compiler to the registry to allow
     calling `torch.compile` with string shorthand:
 
         @register_backend
@@ -36,12 +40,16 @@ def register_backend(compiler_fn: CompilerFn = None, name: Optional[str] = None)
     Args:
         compiler_fn: callable taking a FX graph and fake tensor inputs
         name: Optional name, defaults to `compiler_fn.__name__`
+        tags: Optional set of string tags to categorize backend with
     """
     if compiler_fn is None:
         # @register_backend(name="") syntax
-        return functools.partial(register_backend, name=name)
+        return functools.partial(register_backend, name=name, tags=tags)
     assert callable(compiler_fn)
-    _BACKENDS[name or compiler_fn.__name__] = compiler_fn
+    name = name or compiler_fn.__name__
+    assert name not in _BACKENDS, f"duplicate name: {name}"
+    _BACKENDS[name] = compiler_fn
+    compiler_fn._tags = tuple(tags)
     return compiler_fn
 
 
