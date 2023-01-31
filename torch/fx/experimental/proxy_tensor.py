@@ -696,9 +696,11 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             func = f
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
-        # check a cache, which introduces untracked tensors into the graph
-        # We also disable other proxy tracers except the current one. This means that a trace from the resultant
-        # function will not be contaminated by nested proxy traces.
+        # check a cache, which introduces untracked tensors into the graph   
+        #      
+        # We also disable tracing by any other tensor proxy-based tracers. The purpose of `make_fx` 
+        # is to produce graphmodules as a side effect; its internal execution is thus irrelevant to
+        # any external functional trace.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
              sym_mode, proxy_mode, disable_autocast_cache(), enable_current_proxy_mode_exclusive():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
@@ -742,15 +744,11 @@ def disable_proxy_modes_tracing():
 def enable_current_proxy_mode_exclusive():
     # TODO: This probably doesn't correctly also disable ProxySymDispatchMode
     modes = get_torch_dispatch_modes()
-    proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
+    proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)][:-1]
     olds = [(m.enable_tracing, m.sym_mode.enable_tracing) for m in proxy_tensor_modes]
-    for proxy_mode in proxy_tensor_modes[:-1]:
+    for proxy_mode in proxy_tensor_modes:
         proxy_mode.enable_tracing = False
         proxy_mode.sym_mode.enable_tracing = False
-    if len(proxy_tensor_modes) > 0:
-        proxy_mode = proxy_tensor_modes[-1]
-        proxy_mode.enable_tracing = True
-        proxy_mode.sym_mode.enable_tracing = True
     try:
         yield
     finally:

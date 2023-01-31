@@ -229,14 +229,27 @@ class TestGenericProxyTensor(TestCase):
         self.assertTrue(is_any_digamma(traced))
 
         # Verify nested make_fx calls don't make factory functions to be leaked
-        # into the outer graph
+        # into the outer graph. Verify that `make_fx`` itself does not leak its execution.
         def f2(x):
             gm = make_fx(f1)(x)
             self.assertFalse(is_any_sum(gm))
             self.assertTrue(is_any_sigmoid(gm))
-            return torch.digamma(f1(x))
+            return torch.digamma(x)
 
         traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify that the forward function of a graph module produced as a 
+        # side effect of an inner `make_fx` is still traced
+        def f3(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(gm(x))
+
+        traced = make_fx(f3)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
         self.assertTrue(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
