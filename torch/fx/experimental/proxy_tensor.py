@@ -235,7 +235,7 @@ def fetch_tensor_proxy(tracer):
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
 def proxy_call(proxy_mode, func, args, kwargs):
-    # `__torch_dispatch__` is only called on aten ops, which must have `overloadpacket` attr
+    # `__torch_dispatch__` is only called on torch ops, which must have `overloadpacket` attr
     # hence, the lack of such an attribute indicates an `external_call`, perhaps a function
     # decorated with `@torch.tx.wrap`
     external_call = not hasattr(func, "overloadpacket")
