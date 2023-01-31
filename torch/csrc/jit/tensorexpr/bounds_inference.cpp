@@ -10,9 +10,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using namespace analysis;
 
@@ -369,6 +367,4 @@ bool isOverlapping(
   return hasConflictingOverlap(sBounds, lBounds, kStore, kLoad);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

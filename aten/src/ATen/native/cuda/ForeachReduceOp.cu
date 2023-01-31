@@ -19,8 +19,7 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename T, int NormType, int depth=1, int r_args_depth=1, int res_arg_index=0>
 struct LpNormFunctor {
@@ -128,7 +127,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   int max_chunks_per_tensor = -1;
 
   for (int t = 0; t < ntensors; t++) {
-    int max_chunks_this_tensor = (tensors[0][t].numel() + kChunkSize - 1) / kChunkSize;
+    int max_chunks_this_tensor = (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
     if(max_chunks_this_tensor > max_chunks_per_tensor) {
       max_chunks_per_tensor = max_chunks_this_tensor;
     }
@@ -186,5 +185,4 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -261,7 +261,7 @@ using namespace c10::hip;
 // to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -384,7 +384,7 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw() __attribute__((__noreturn__));
+        const char* function) noexcept __attribute__((__noreturn__));
 
 #if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
     !defined(TORCH_DISABLE_GPU_ASSERTS)

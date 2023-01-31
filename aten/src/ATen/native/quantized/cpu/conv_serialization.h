@@ -90,7 +90,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   int version = -1;
   if (v.isTuple()) {
     const auto& elements = v.toTupleRef().elements();
-    if (elements.size() > 0) {
+    if (!elements.empty()) {
       auto firstElement = elements[0];
       if (firstElement.isTensor()) {
         version = 1;
@@ -123,7 +123,6 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
     at::Tensor groups = elements[5].toTensor();
 
-    std::vector<at::Tensor> non_optional;
     std::vector<c10::optional<at::Tensor>> optional;
 
     std::vector<int64_t> config_vals;
