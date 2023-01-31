@@ -160,6 +160,9 @@ class EnumVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
-    
+
     def const_getattr(self, tx, name):
-        return getattr(self.value, name)
+        member = getattr(self.value, name)
+        if callable(member):
+            raise NotImplementedError()
+        return member

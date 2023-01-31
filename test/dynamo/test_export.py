@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
-from enum import Enum
 import operator
+from enum import Enum
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -101,7 +101,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
 
         self.assertTrue(hit)
-    
+
     def test_export_control_flow_with_getattr(self):
         class Animal(Enum):
             COW = "moo"
