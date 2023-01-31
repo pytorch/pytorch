@@ -57,7 +57,7 @@ void inlineCalls(Block* block) {
           if (fallback && graphFunction->get_executor().isOptimized()) {
             auto exec_plans =
                 graphFunction->get_executor().getDebugState().execution_plans;
-            if (exec_plans.size() != 0) {
+            if (!exec_plans.empty()) {
               g = exec_plans.begin()->second.graph;
               // optimized_graph() calls Inline, so we only need to explicitly
               // invoke inlining on the jit optimized graph with recursive
