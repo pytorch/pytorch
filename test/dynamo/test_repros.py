@@ -20,6 +20,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
+from torch._dynamo.testing import skip_if_pytest
 
 try:
     from test_minifier import requires_cuda
@@ -2160,6 +2161,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
+    @skip_if_pytest
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2206,6 +2208,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
+    @skip_if_pytest
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
