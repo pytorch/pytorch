@@ -22,12 +22,16 @@ def register_backend(compiler_fn: CompilerFn = None, name: Optional[str] = None)
     Decorator to add a given compiler to the BACKENDS registry to allow
     calling `torch.compile` with string shorthand:
 
-        torch.compile(..., backend="name")
+        @register_backend
+        def my_backend(gm, inputs):
+            ...
+
+        torch.compile(..., backend="my_backend")
 
     Note: for projects not imported by default, it might be easier to
     pass a function directly as a backend and not use this:
 
-        torch.compile(..., backend=compiler_fn)
+        torch.compile(..., backend=my_backend)
 
     Args:
         compiler_fn: callable taking a FX graph and fake tensor inputs
@@ -62,6 +66,12 @@ def list_backends():
 
 @functools.lru_cache(None)
 def _lazy_import():
+    from .. import backends
+    from ..utils import import_submodule
+
+    import_submodule(backends)
+
+    # TODO(jansel): refactor backends defined in other places
     from .. import debug_utils
     from ..optimizations import backends, distributed, training
 

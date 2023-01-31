@@ -10,7 +10,6 @@ import functools
 import gc
 import inspect
 import itertools
-import logging
 import logging.config
 import math
 import operator
@@ -33,6 +32,8 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
+
+import importlib
 
 import torch
 from torch import fx
@@ -1276,3 +1277,12 @@ def fqn(obj: Any):
     Returns the fully qualified name of the object.
     """
     return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def import_submodule(mod: types.ModuleType):
+    """
+    Ensure all the files in a given submodule are imported
+    """
+    for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
