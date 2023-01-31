@@ -1,3 +1,4 @@
+import copy
 from typing import List
 
 import torch
@@ -68,6 +69,19 @@ class FxToOnnxContext:
         torch.load = self.torch_load_wrapper
         torch._utils._rebuild_tensor = self.torch__util_rebuild_tensor_wrapper
 
+        self.torch_fx__symbolic_trace__wrapped_methods_to_patch = (
+            torch.fx._symbolic_trace._wrapped_methods_to_patch
+        )
+        desired_wrapped_methods = copy.deepcopy(
+            torch.fx._symbolic_trace._wrapped_methods_to_patch
+        )
+        if (torch.Tensor, "__getitem__") not in desired_wrapped_methods:
+            desired_wrapped_methods.append((torch.Tensor, "__getitem__"))
+        torch.fx._symbolic_trace._wrapped_methods_to_patch = desired_wrapped_methods
+
     def __exit__(self, exc_type, exc_value, traceback):
         torch.load = self.torch_load
         torch._utils._rebuild_tensor = self.torch__util_rebuild_tensor
+        torch.fx._symbolic_trace._wrapped_methods_to_patch = (
+            self.torch_fx__symbolic_trace__wrapped_methods_to_patch
+        )
