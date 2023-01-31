@@ -300,14 +300,14 @@ class _NamedOptimizer(optim.Optimizer):
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            return FSDP._load_optim_state_dict_pre_hook(
+            return FSDP.load_optim_state_dict_pre_hook(
                 self.module, self._optimizer, state_dict
             )
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+            FSDP.optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
         return state_dict
 
 
