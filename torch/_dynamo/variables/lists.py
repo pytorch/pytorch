@@ -123,7 +123,6 @@ class BaseListVariable(VariableTracker):
         # If we hit here, their lengths are the same and they cannot be expressed as python constants.
         # So, we iterate over the zipped list items.
         equal = True
-        list_type = None
         comps = []
         for l_r in zip(left.items, right.items):
             l = l_r[0]
@@ -132,12 +131,9 @@ class BaseListVariable(VariableTracker):
             # .compare must return a DynamicShapeVariable, a TensorVariable,  or raise unimplemented
             # If unimplemented is raised, we rely on checkpointing state to roll us back and not write these operations to the graph
             comp = l.compare(tx, op, r, **options)
-            if list_type is None:
-                list_type = type(comp)
-            else:
-                assert (
-                    type(comp) == list_type
-                ), "Only single-type list comparison is supported atm"
+            list_type = type(comp)
+            if isinstance(comp, TorchVariable):
+                unimplemented("List Comparison for Tensors is not yet supported")
             comps.append(comp)
 
         if len(comps) == 1:
