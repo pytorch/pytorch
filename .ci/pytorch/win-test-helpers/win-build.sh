@@ -4,12 +4,10 @@
 # If you want to build with CUDA, run this with USE_CUDA=1
 # If you want to build without CUDA, run this with USE_CUDA=0
 
-<<com
 if [ ! -f setup.py ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
   exit 1
 fi
-com
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -41,6 +39,52 @@ if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
 fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
+
+# These variables are set for the python build
+if [ $DEBUG == "1" ]
+then
+  export BUILD_TYPE="debug"
+else
+  export BUILD_TYPE="release"
+fi
+
+if [ $BUILD_ENVIRONMENT == "1" ]
+then
+  export CONDA_PARENT_DIR=$CD
+else
+  export CONDA_PARENT_DIR="C:\Jenkins"
+fi
+
+export PATH="C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;"$PATH
+
+export INSTALLER_DIR=${SCRIPT_HELPERS_DIR}"\installation-helpers"
+
+export CMAKE_INCLUDE_PATH=${TMP_DIR_WIN}"\mkl\include"
+
+export LIB=${TMP_DIR_WIN}"\mkl\lib;"$LIB
+
+export INSTALL_FRESH_CONDA="1"
+
+export PATH=${CONDA_PARENT_DIR}"\Miniconda3\Library\bin;"${CONDA_PARENT_DIR}"\Miniconda3;"${CONDA_PARENT_DIR}"\Miniconda3\Scripts;"$PATH
+
+export DISTUTILS_USE_SDK="1"
+
+export PATH=${TMP_DIR_WIN}"\bin;"$PATH
+
+if [ $TORCH_CUDA_ARCH_LIST == "" ]
+then
+  export TORCH_CUDA_ARCH_LIST="5.2"
+fi
+
+export SCCACHE_IDLE_TIMEOUT="0"
+
+export SCCACHE_IGNORE_SERVER_IO_ERROR="1"
+
+export CC="sccache-cl"
+
+export CXX="sccache-cl"
+
+export CMAKE_GENERATOR="Ninja"
 
 set +ex
 grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/
