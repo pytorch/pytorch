@@ -319,22 +319,16 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
-        elif name == "item":
-            if config.capture_scalar_outputs:
-                example_value = get_fake_value(self.proxy.node, tx)
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_method",
-                        "item",
-                        (self.as_proxy(),),
-                        {},
-                    ),
-                    example_value=example_value,
-                    **options,
-                )
-            else:
-                unimplemented(f"Tensor.{name}")
+        elif name == "item" and not config.capture_scalar_outputs:
+            unimplemented(f"Tensor.{name}")
+        elif (
+            name == "item"
+            and config.capture_scalar_outputs
+            and not config.dynamic_shapes
+        ):
+            raise AssertionError(
+                "To capture_scalar_outputs, you must also set dynamic_shapes = True"
+            )
         elif name == "__len__":
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":

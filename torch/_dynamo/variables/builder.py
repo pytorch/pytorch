@@ -3,8 +3,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import math
-import numbers
 import operator
 import re
 import types
@@ -90,7 +88,6 @@ from .misc import (
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
     DynamicShapeVariable,
-    FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -930,19 +927,6 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif (
-        isinstance(example_value, numbers.Number)
-        and (proxy.node.target == "item" or proxy.node.target in {math.sqrt, math.pow})
-        and config.capture_scalar_outputs
-    ):
-        # item raw value should not be accessed
-        return wrap_fx_proxy_cls(
-            FakeItemVariable,
-            tx=tx,
-            proxy=proxy,
-            example_value=torch.tensor(example_value),
-            **options,
-        )
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)

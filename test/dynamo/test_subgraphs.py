@@ -439,6 +439,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
         def fn(a, b):
@@ -450,6 +451,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 1, 6)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
         def fn(a, b):
