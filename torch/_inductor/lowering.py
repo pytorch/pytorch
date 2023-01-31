@@ -17,7 +17,6 @@ from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     get_computation_dtype,
-    IntLike,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -1299,15 +1298,14 @@ def arange(
         start = 0
 
     args = (start, end, step)
-    integer_args = all(isinstance(arg, IntLike) for arg in args)
+    integer_args = all(isinstance(arg, (int, sympy.Expr)) for arg in args)
 
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
-    if integer_args:
-        length = sympy.ceiling(sympy.Rational((end - start), step))
-    else:
-        length = sympy.ceiling((end - start) / step)
+    length = sympy.ceiling(
+        sympy.Rational(end - start, step) if integer_args else (end - start) / step
+    )
 
     if integer_args:
 
