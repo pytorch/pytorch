@@ -445,6 +445,10 @@ class WrapperCodeGen(CodeGen):
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
+        # Hack to explicitly track when a buffer is reusing another allocation.
+        # What is the best way to do this - as a new structure in WrapperCodegen,
+        # or as an api on Buffer objects?
+        output_buffer._reuses_buffer = input_buffer
         self.write_reuse_line(input_buffer, output_buffer)
 
     def codegen_cuda_device_guard_enter(self, device_idx):
