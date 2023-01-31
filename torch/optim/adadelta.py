@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_foreach,
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
@@ -193,7 +193,8 @@ def adadelta(
 
     # We still respect when the user inputs False for foreach.
     if foreach is None:
-        foreach = _default_to_foreach([params, grads, square_avgs, acc_deltas], differentiable=differentiable)
+        _, foreach = _default_to_fused_or_foreach([params, grads, square_avgs, acc_deltas],
+                                                  differentiable, has_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
