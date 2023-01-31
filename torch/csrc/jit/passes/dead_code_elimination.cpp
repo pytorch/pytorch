@@ -286,8 +286,8 @@ class DeadCodeEliminator {
             "Node ",
             it->kind().toQualString(),
             " which outputs ",
-            (node->outputs().size() > 0 ? node->outputs().at(0)->debugName()
-                                        : "n/a"),
+            (!node->outputs().empty() ? node->outputs().at(0)->debugName()
+                                      : "n/a"),
             " will be removed");
         it.destroyCurrent();
       }

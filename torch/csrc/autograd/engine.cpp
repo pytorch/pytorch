@@ -676,7 +676,7 @@ void GraphTask::exec_post_processing() {
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
   // any grad on its device's current stream.
-  if (leaf_streams.size() > 0) {
+  if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_streams() stashed streams for all device IDs that already
       // had a CUDA context before the GraphTask executed. For inactive devices,
