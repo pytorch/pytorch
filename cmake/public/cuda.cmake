@@ -214,6 +214,18 @@ endif()
 
 # nvToolsExt
 add_library(torch::nvtoolsext INTERFACE IMPORTED)
+find_path(
+  nvtx3_dir
+  NAMES nvtx3
+  PATHS ${CUDA_INCLUDE_DIRS}
+  NO_DEFAULT_PATH)
+find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
+if(NOT nvtx3_FOUND)
+  set(nvtx3_dir "${CMAKE_CURRENT_LIST_DIR}/../../third_party/NVTX/c/include")
+  message(WARNING "use NVTX library in ${nvtx3_dir}")
+  target_include_directories(torch::nvtoolsext INTERFACE "${nvtx3_dir}")
+endif()
+
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
