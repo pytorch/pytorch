@@ -123,10 +123,10 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList te
     return FUNCTION<OP, DISABLE_OPMATH_TYPE>(tensors, scalars);                                                          \
 }
 
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false, false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false, false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*div_op*/ true, false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true, true);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*div_op*/ true, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true, /*disable_opmath_type*/ true);
 
 // This does not use FOREACH_BINARY_OP_SCALARLIST because
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
@@ -160,7 +160,7 @@ std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors
     });
 }
 
-FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_max, minimum, false, false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_min, maximum, false, false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_max, minimum, false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_min, maximum, false, /*disable_opmath_type*/ false);
 
 } // namespace at::native

@@ -145,10 +145,10 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
 
 FOREACH_BINARY_OP_LIST_ALPHA(all_types_complex_bool_half_bfloat16, add, std::plus);
 FOREACH_BINARY_OP_LIST_ALPHA(all_types_complex_bool_half_bfloat16, sub, std::minus);
-FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*division_op*/ false, false);
-FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*division_op*/ true, false);
-FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_max, minimum, /*division_op*/ false, false);
-FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_min, maximum, /*division_op*/ false, false);
-FOREACH_BINARY_OP_LIST(all_types_complex_half_bfloat16, pow, power_functor, /*division_op*/ true, true);
+FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*division_op*/ false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*division_op*/ true, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_max, minimum, /*division_op*/ false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_min, maximum, /*division_op*/ false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_LIST(all_types_complex_half_bfloat16, pow, power_functor, /*division_op*/ true, /*disable_opmath_type*/ true);
 
 } // namespace at::native
