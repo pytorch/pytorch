@@ -484,15 +484,15 @@ void Node::lint() const {
   // Node subclass invariants
   switch (kind()) {
     case prim::Constant:
-      AT_ASSERT(inputs_.size() == 0);
+      AT_ASSERT(inputs_.empty());
       break;
     case prim::Return:
       // Return uses is zero
-      AT_ASSERT(outputs().size() == 0);
+      AT_ASSERT(outputs().empty());
       break;
     case prim::Param:
       // Param inputs is zero
-      AT_ASSERT(inputs_.size() == 0);
+      AT_ASSERT(inputs_.empty());
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
@@ -835,7 +835,7 @@ std::string Value::debugNameBase() const {
 
 bool Value::isValidName(const std::string& name) {
   // Empty strings are legal
-  if (!name.size()) {
+  if (name.empty()) {
     return true;
   }
 
@@ -861,7 +861,7 @@ Value* Value::setDebugName(const std::string& name) {
   }
 
   // allow "" to clear the uniquename
-  if (name == "") {
+  if (name.empty()) {
     return this;
   }
 
@@ -1124,7 +1124,7 @@ const Operator& Node::getOperator() const {
     er << *inputs()[i]->type();
   }
   const auto& candidates = getAllOperatorsFor(kind());
-  if (candidates.size() > 0) {
+  if (!candidates.empty()) {
     er << "\ncandidates were:\n";
     for (auto& candidate : candidates) {
       er << "  " << candidate->schema() << "\n";
@@ -2109,7 +2109,7 @@ std::vector<Value*> inlineCallTo(
       module_instance_info = c10::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
     } else if (
-        to_replace->owningGraph()->inputs().size() > 0 &&
+        !to_replace->owningGraph()->inputs().empty() &&
         to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
