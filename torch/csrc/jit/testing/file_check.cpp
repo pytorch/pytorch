@@ -43,9 +43,7 @@ struct Check {
       CheckType type,
       std::string str,
       c10::optional<size_t> count = c10::nullopt)
-      : type_(type), search_str_(std::move(str)) {
-    count_ = count;
-  };
+      : type_(type), count_(count), search_str_(std::move(str)) {}
 
   Check(
       CheckType type,

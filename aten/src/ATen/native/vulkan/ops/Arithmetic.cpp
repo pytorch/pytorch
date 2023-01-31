@@ -95,7 +95,7 @@ Tensor arithmetic_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -104,7 +104,7 @@ Tensor arithmetic_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
@@ -147,7 +147,7 @@ Tensor& arithmetic_scalar_(
     Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -195,7 +195,7 @@ Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
 
@@ -208,7 +208,7 @@ Tensor arithmetic_tensor(
   vTensor v_output{
       context,
       broadcast_size(self_arg, other_arg),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
@@ -262,7 +262,7 @@ Tensor quantized_arithmetic_tensor(
     const Tensor& other_arg,
     const double scale,
     const int64_t zero_point,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
 
@@ -277,9 +277,10 @@ Tensor quantized_arithmetic_tensor(
   vTensor v_output{
       context,
       broadcast_size(self_arg, other_arg),
-      self.options().dtype(c10::kQUInt8),
       scale,
-      zero_point};
+      zero_point,
+      c10::kQUInt8,
+  };
 
   const double scale1 = v_self.get_scale();
   const double scale2 = v_other.get_scale();
@@ -348,7 +349,7 @@ Tensor& arithmetic_tensor_(
     Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       get_dim<Dim4D::Batch>(self_arg) >= get_dim<Dim4D::Batch>(other_arg) &&
           get_dim<Dim4D::Channel>(self_arg) >=
