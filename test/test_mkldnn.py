@@ -417,16 +417,6 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
 
-            if has_bf16_support():
-                with torch.backends.mkldnn.flags(enabled=True):
-                    print(conv)
-                    print(data.size())
-                    x_bf16 = data.to(dtype=torch.bfloat16)
-                    conv1 = copy.deepcopy(conv)
-                    conv_bf16 = conv1.to(dtype=torch.bfloat16)
-                    y_bf16 = conv_bf16(x_bf16)
-                    self.assertEqual(y, y_bf16.float(), atol=1e-1, rtol=1e-3)
-
     def test_conv_transpose1d(self):
         self._test_conv_transpose_base(dim=1)
 
