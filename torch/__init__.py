@@ -1324,7 +1324,7 @@ class _TorchCompileInductorWrapper:
             # cudagraphs conflicts with dynamic shapes
             self.config["triton.cudagraphs"] = False
 
-    def apply_mode(self, mode):
+    def apply_mode(self, mode: Optional[str]):
         if mode is None:
             return
         elif mode == "default":
@@ -1339,7 +1339,7 @@ class _TorchCompileInductorWrapper:
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
             )
 
-    def apply_passes(self, passes):
+    def apply_passes(self, passes: Optional[Dict[str, Any]]):
         if not passes:
             return
 
@@ -1380,7 +1380,7 @@ def compile(model: Optional[Callable] = None, *,
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       passes (dict): A dictionary of passes/options to pass to the backend.
+       passes (dict): A dictionary of options to pass to the backend.
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
