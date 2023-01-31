@@ -116,13 +116,6 @@ def augment_exc_message(exc, msg="\n"):
             "this script to find the smallest traced graph which reproduces this error.\n"
         )
 
-    if not config.suppress_errors:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
-
     old_msg = "" if len(exc.args) == 0 else exc.args[0]
 
     if isinstance(exc, KeyError):
