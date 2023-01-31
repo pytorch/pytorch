@@ -126,7 +126,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.warning(f"Using FallbackKernel: {name}")
+            log.info(f"Using FallbackKernel: {name}")
 
     @property
     def fake_mode(self):
@@ -300,7 +300,7 @@ class GraphLowering(torch.fx.Interpreter):
                         if get_decompositions([target])
                         else MissingOperatorWithoutDecomp
                     )
-                    log.warning(
+                    log.info(
                         "Creating implicit fallback for:\n%s",
                         error.operator_str(target, args, kwargs),
                     )
