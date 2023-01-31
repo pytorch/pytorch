@@ -134,7 +134,7 @@ struct ArgumentSpec {
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (tensor_args.size() == 0)
+    if (tensor_args.empty())
       return true;
     return std::memcmp(
                tensor_args.data(),

@@ -123,7 +123,7 @@ C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
  * exponentialy distributed with `lambda` parameter of the distribution.
  */
 template <typename T>
-C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val, T lambda) {
+C10_HOST_DEVICE inline T exponential(T val, T lambda) {
   // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
   // Different implementations for CUDA and CPU to preserve original logic
   // TODO: must be investigated and unified!!!
@@ -138,7 +138,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
       : at::log(val);
   return static_cast<T>(-1.0) / lambda * log;
 #else
-  return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
+  return static_cast<T>(-1.0) / lambda * at::log1p(-val);
 #endif
 }
 
@@ -149,7 +149,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
 template <typename T>
 C10_HOST_DEVICE inline T geometric(T val, T p) {
   // https://en.wikipedia.org/wiki/Geometric_distribution#Related_distributions
-  return static_cast<T>(::ceil(at::log(val) / at::log(static_cast<T>(1.0) - p)));
+  return static_cast<T>(::ceil(at::log(val) / at::log1p(-p)));
 }
 
 /**
