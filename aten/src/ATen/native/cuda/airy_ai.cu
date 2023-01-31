@@ -20,7 +20,7 @@
 
 namespace at::native {
 namespace {
-constexpr char airy_ai_name[] = "airy_ai_forward";
+const char airy_ai_name[] = "airy_ai_forward";
 
 void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

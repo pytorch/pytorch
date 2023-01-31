@@ -10,7 +10,6 @@ from torch.utils import set_module
 from torch._jit_internal import (
     Final,
     Future,
-    _Await,
     _IgnoreContextManager,
     _overload,
     _overload_method,
@@ -49,7 +48,6 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
-from torch.jit._await import _awaitable, _awaitable_wait, _awaitable_nowait
 from torch.jit._decomposition_utils import _register_decomposition
 from torch.jit._serialization import (
     save,
