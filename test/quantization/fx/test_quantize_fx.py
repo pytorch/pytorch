@@ -642,9 +642,12 @@ class TestFuseFx(QuantizationTestCase):
                 .set_backend_pattern_config(conv_bn_res_relu_config2)
             m = fuse_fx(m, backend_config=backend_config)
             self.assertEqual(type(m.conv), torch.nn.Conv2d)
-            # check bn and relu are gone since we replaced the whole pattern to conv
-            self.assertFalse(hasattr(m, "bn"))
-            self.assertFalse(hasattr(m, "relu"))
+            # check bn and relu nodes are gone since we replaced the whole pattern to conv
+            node_occurrence = {
+                ns.call_module(torch.nn.BatchNorm2d): 0,
+                ns.call_module(torch.nn.ReLU): 0,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     def test_fusion_pattern_with_multiple_inputs(self):
         """ This test tests two keys in backend_config: root_node_getter and
@@ -702,8 +705,11 @@ class TestFuseFx(QuantizationTestCase):
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv), torch.nn.Conv2d)
         # check bn and relu are gone since we replaced the whole pattern to conv
-        self.assertFalse(hasattr(m, "bn"))
-        self.assertFalse(hasattr(m, "relu"))
+        node_occurrence = {
+            ns.call_module(torch.nn.BatchNorm2d): 0,
+            ns.call_module(torch.nn.ReLU): 0,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
@@ -770,9 +776,11 @@ class TestFuseFx(QuantizationTestCase):
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv1), torch.nn.Conv2d)
         self.assertEqual(type(m.conv2), torch.nn.Conv2d)
-        # check relu are gone since we replaced the both patterns to conv
-        self.assertFalse(hasattr(m, "relu1"))
-        self.assertFalse(hasattr(m, "relu2"))
+        # check relu nodes are gone since we replaced the both patterns to conv
+        node_occurrence = {
+            ns.call_module(torch.nn.ReLU): 0,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 
 @skipIfNoFBGEMM
