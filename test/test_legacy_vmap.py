@@ -1871,6 +1871,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         # Single vmap, various in_dims / out_dims
         test(lambda x: x.sum(()), [torch.randn([B0])])
+        test(lambda x: x.sum(()), [torch.randn([B0, 2])])
         test(lambda x: x.sum(0), [torch.randn([B0])])
         test(lambda x: x.sum(-1), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0, 3])])
