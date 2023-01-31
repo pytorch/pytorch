@@ -314,6 +314,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, TensorVariable) and value.dtype == torch.bool:
+            if truth_fn(value.get_real_value()):
+                push and self.push(value)
+                self.jump(inst)
         else:
             unimplemented(f"generic_jump {typestr(value)}")
 

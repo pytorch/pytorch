@@ -101,6 +101,36 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(hit)
 
+    def test_export_control_flow_with_torch_all(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                if torch.all(x):
+                    return x * x
+                else: 
+                    raise ValueError("bad")
+
+        module = MyModule()
+        input = (torch.ones(4, 3),)
+        resA = module(*input)
+        graph, _ = torch._dynamo.export(module, *input)
+        resB = graph(*input)
+        self.assertTrue(torch._dynamo.utils.same(resA, resB))
+    
+    def test_export_control_flow_with_torch_any(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                if torch.any(x):
+                    return x * x 
+                else:
+                    return x - x
+
+        module = MyModule()
+        input = (torch.ones(4, 3),)
+        resA = module(*input)
+        graph, _ = torch._dynamo.export(module, *input)
+        resB = graph(*input)
+        self.assertTrue(torch._dynamo.utils.same(resA, resB))
+
     def test_export_graph_bypass(self):
         inp = [
             torch.tensor([0.1, 0.1]),
