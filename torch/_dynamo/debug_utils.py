@@ -265,7 +265,11 @@ from torch.fx.experimental.proxy_tensor import make_fx
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += "mod = make_fx(Repro())(*args)\n"
+    # TODO: fake may be better for performance here
+    tracing_mode = "real"
+    if config.dynamic_shapes:
+        tracing_mode = "symbolic"
+    model_str += f"mod = make_fx(Repro(), tracing_mode={repr(tracing_mode)})(*args)\n"
     return model_str
 
 
