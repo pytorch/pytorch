@@ -52,7 +52,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, IS_JETSON
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -763,6 +763,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared") 
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
@@ -2357,31 +2358,31 @@ class TestExperimentalUtils(TestCase):
             with open(json_file_path, "w") as f:
                 json.dump([kineto_events, profiler_events], f)
 
-        assert (os.path.exists(json_file_path))
-        with open(json_file_path, "r") as f:
-            kineto_events, profiler_events = json.load(f)
+            assert (os.path.exists(json_file_path))
+            with open(json_file_path, "r") as f:
+                kineto_events, profiler_events = json.load(f)
 
-        cuda_events = [
-            MockKinetoEvent(*event.values()) for event in kineto_events
-        ]
-        cpu_events = []
-        id_map = {}
-        for e in profiler_events:
-            event = MockProfilerEvent(**e)
-            id_map[event.id] = event
-            cpu_events.append(event)
-        for event in cpu_events:
-            parent = None if event.parent is None else id_map[event.parent]
-            children = [id_map[child] for child in event.children]
-            event.__post__init__(parent, children)
-        cpu_events = [event for event in cpu_events if event.parent is None]
-        profiler = unittest.mock.Mock()
-        profiler.kineto_results = unittest.mock.Mock()
-        profiler.kineto_results.events = unittest.mock.Mock(
-            return_value=cuda_events)
-        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-            return_value=cpu_events)
-        return profiler
+            cuda_events = [
+                MockKinetoEvent(*event.values()) for event in kineto_events
+            ]
+            cpu_events = []
+            id_map = {}
+            for e in profiler_events:
+                event = MockProfilerEvent(**e)
+                id_map[event.id] = event
+                cpu_events.append(event)
+            for event in cpu_events:
+                parent = None if event.parent is None else id_map[event.parent]
+                children = [id_map[child] for child in event.children]
+                event.__post__init__(parent, children)
+            cpu_events = [event for event in cpu_events if event.parent is None]
+            profiler = unittest.mock.Mock()
+            profiler.kineto_results = unittest.mock.Mock()
+            profiler.kineto_results.events = unittest.mock.Mock(
+                return_value=cuda_events)
+            profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
+                return_value=cpu_events)
+            return profiler
 
     def test_utils_compute_self_time(self):
         with profile() as prof:
@@ -2493,7 +2494,11 @@ class TestExperimentalUtils(TestCase):
 100000 [CPU (After GPU)]""")
 
     def test_utils_get_optimizable_events(self):
-        basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
+        # prof is None if !(accept and torch.cuda.is_available())
+        prof = self.load_mock_profile()
+        if prof is None:
+            return
+        basic_evaluation = _utils.BasicEvaluation(prof)
         optimizable_events = basic_evaluation.get_optimizable_events(
             2, print_enable=False)
         expected_output = "\n".join(

@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import (
 
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
-from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
+from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, IS_JETSON
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer

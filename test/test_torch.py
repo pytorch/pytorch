@@ -52,7 +52,7 @@ from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
-    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
+    IS_JETSON, tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN, skipDtypeForJetsonCPU)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types,
@@ -1972,6 +1972,7 @@ else:
 
     @onlyNativeDeviceTypes
     @dtypes(torch.int, torch.float, torch.cfloat)
+    @skipDtypeForJetsonCPU(torch.cfloat)
     def test_corrcoef(self, device, dtype):
         for x in self._generate_correlation_tensors(device, dtype):
             res = torch.corrcoef(x)
@@ -1979,6 +1980,7 @@ else:
             self.assertEqual(res, ref, exact_dtype=False)
 
     @dtypes(torch.int, torch.float, torch.cfloat)
+    @skipDtypeForJetsonCPU(torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
             res = torch.cov(t, correction=correction, fweights=fweights, aweights=aweights)
@@ -2760,6 +2762,7 @@ else:
         torch.testing.assert_close(expected, actual)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
     @largeTensorTest('25GB', device='cpu')
@@ -2776,6 +2779,7 @@ else:
     @dtypes(torch.half)  # only small dtype not to get oom
     @largeTensorTest('25GB', device='cpu')
     @largeTensorTest('4GB', device='cuda')
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)

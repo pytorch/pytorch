@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, IS_WINDOWS
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, gcIfJetson
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -56,7 +56,6 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -9544,10 +9543,10 @@ class TestNNDeviceType(NNTestCase):
                     )
 
     @onlyCUDA
+    @gcIfJetson
     def test_masked_softmax_devices_parity(self):
         # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
         # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
-
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
             # mask_type == 0 => attention mask of shape LxL
@@ -10139,6 +10138,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @gcIfJetson
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
         inp = torch.rand(2**25, 1, 1, 1, 1, device=device)
