@@ -727,6 +727,46 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             taskLauncher_(std::move(continuation));
           }
             INST_NEXT;
+          case INST(AWAITABLE): {
+            INST_GUARD;
+            auto fn_ptr = frame.function->function_table_[inst.X];
+            auto& fn = toGraphFunction(*fn_ptr);
+            auto num_outputs = fn.graph()->outputs().size();
+            TypePtr out_type;
+            if (num_outputs == 1) {
+              out_type = fn.graph()->outputs()[0]->type();
+            } else {
+              std::vector<TypePtr> out_types;
+              for (const auto& o : fn.graph()->outputs()) {
+                out_types.push_back(o->type());
+              }
+              out_type = TupleType::create(out_types);
+            }
+            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
+            aw->setArgs(std::move(args));
+            aw->setFn(
+                [&args = aw->args(),
+                 fn_ptr,
+                 taskLauncher = taskLauncher_]() -> IValue {
+                  auto& fn = toGraphFunction(*fn_ptr);
+                  auto n_out = fn.graph()->outputs().size();
+                  torch::jit::Stack s;
+                  for (const auto& arg : args) {
+                    s.push_back(arg);
+                  }
+                  InterpreterState await_interpreter(
+                      fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  await_interpreter.run(s);
+                  if (n_out == 1) {
+                    return s.back();
+                  }
+                  return c10::ivalue::Tuple::create(jit::last(s, n_out));
+                });
+            drop(stack, inst.N);
+            push(stack, std::move(aw));
+          }
+            INST_NEXT;
           case INST(WARN): {
             INST_GUARD;
             // Keeps track of which WARN instruction has been executed before,
