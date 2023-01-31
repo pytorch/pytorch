@@ -317,7 +317,7 @@ struct SymbolicShapeOpAnalyzer {
 
   // We handle non-constant values in the shape propagation step
   void substituteConstantInputs() {
-    if (shape_compute_graph_->inputs().size() == 0) {
+    if (shape_compute_graph_->inputs().empty()) {
       return;
     }
 

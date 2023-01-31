@@ -351,7 +351,7 @@ void add_hook(
     const at::TensorBase& self,
     std::unique_ptr<FunctionPreHook> hook) {
   AutogradMeta* meta = materialize_autograd_meta(self);
-  TORCH_INTERNAL_ASSERT(meta->hooks_.size() == 0);
+  TORCH_INTERNAL_ASSERT(meta->hooks_.empty());
   meta->hooks_.push_back(std::move(hook));
 }
 

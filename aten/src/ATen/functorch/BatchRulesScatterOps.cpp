@@ -43,7 +43,7 @@ static int64_t get_max_index_logical_dim(
     ArrayRef<optional<int64_t>> indices_bdims) {
   int64_t max_logical_dim = -1;
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
-  TORCH_INTERNAL_ASSERT(indices.size() > 0);
+  TORCH_INTERNAL_ASSERT(!indices.empty());
   for (const auto i : c10::irange(0, indices.size())) {
     const auto& maybe_tensor = indices[i];
     if (!maybe_tensor.has_value() || !maybe_tensor->defined()) {

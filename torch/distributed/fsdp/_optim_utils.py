@@ -20,7 +20,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -1529,7 +1528,8 @@ def _all_gather_optim_state(
     for state_name, value in sorted_items(optim_state):
         if torch.is_tensor(value):
             if value.dim() == 0:
-                processed_state.scalar_tensors[state_name] = value
+                # Ensure that `step` is on CPU.
+                processed_state.scalar_tensors[state_name] = value.cpu()
             else:
                 processed_state.tensors[state_name] = _PosDimTensorInfo(
                     value.shape, value.dtype
@@ -1551,7 +1551,6 @@ def _all_gather_optim_state(
     for name in all_tensor_states:
         numels = []
         dtype = torch.float
-        max_numel = 0
         _empty_ranks: Set[int] = set()
         for rank, object_state in enumerate(object_list):
             numels.append(0)
@@ -1559,10 +1558,12 @@ def _all_gather_optim_state(
             if info is not None:
                 numels[-1] = info.shape.numel()
                 dtype = info.dtype
-                max_numel = max(max_numel, numels[-1])
             if numels[-1] == 0:
                 _empty_ranks.add(rank)
 
+        empty_func = functools.partial(
+            torch.empty, dtype=dtype, device=fsdp_state.compute_device
+        )
         if empty_ranks:
             assert empty_ranks == _empty_ranks
         empty_ranks = _empty_ranks
@@ -1571,13 +1572,11 @@ def _all_gather_optim_state(
             if name in optim_state
             else torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
         )
-        if max_numel > local_state.numel():
-            local_state = F.pad(local_state, [0, max_numel - local_state.numel()])
+        local_state = optim_state.get(name, empty_func(0))
+        local_state = local_state.to(fsdp_state.compute_device)
         tensors = [
-            torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
-            if rank != fsdp_state.rank
-            else local_state
-            for rank in range(len(object_list))
+            empty_func(numel) if rank != fsdp_state.rank else local_state
+            for rank, numel in enumerate(numels)
         ]
         work = dist.all_gather(
             tensors, local_state, group=fsdp_state.process_group, async_op=True
