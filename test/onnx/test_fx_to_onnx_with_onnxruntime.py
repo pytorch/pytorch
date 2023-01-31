@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from typing import Any, Sequence, Tuple, Union
+from typing import Any, Callable, Sequence, Tuple, Union
 
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
@@ -101,15 +101,104 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
 
-    def test_large_scale_exporter_with_toy_mlp(self):
-        # This test contains several steps.
-        #  1. Create a toy model.
-        #  2. Save the toy's state (parameters) to a file.
-        #  3. Load it back and export it to ONNX with large-scale exporter.
-        #  4. The ONNX model generated in step 3 doesn't contain parameters,
-        #     so this step adds them as external data.
-        #  5. Run PyTorch and ONNX models and compare their results.
+    def _test_large_scale_exporter(
+        self,
+        model_name,
+        create_model: Callable,
+        create_args: Callable,
+        create_pytorch_only_kwargs: Callable,
+    ):
+        """Test helper for large-scale exporter.
 
+        Arguments:
+            model_name: Name of the model. It used to name temporary files.
+            create_model: A function that creates a model. It should always create the same model.
+            create_args: A function that creates random input arguments for the model.
+            create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+
+        This test contains several steps.
+         1. Create a toy model.
+         2. Save the toy's state (parameters) to a file. This is for simulating a checkpoint file.
+         3. Load it back and export it to ONNX with large-scale exporter.
+            All operations (including model loading) are done under
+            FakeTensorMode so no real tensor is created and no real
+            computation happens.
+         4. The ONNX model generated in step 3 doesn't contain parameters,
+            and this step adds them as external data and save a new ONNX model.
+         5. Run PyTorch and ONNX models and compare their results.
+        """
+
+        # Create the toy model.
+        model = create_model()
+
+        with tempfile.NamedTemporaryFile(
+            prefix=model_name, suffix=".pt"
+        ) as tmp_file, tempfile.TemporaryDirectory(
+            suffix="large_scale_export"
+        ) as tmp_folder:
+            # Dump state_dict to a file to simulate how HuggingFace model is initialized.
+            # The file will be loaded via .load_state_dict(...)
+            torch.save(model.state_dict(), tmp_file.name)
+
+            ftm = FakeTensorMode(
+                allow_non_fake_inputs=True, allow_fallback_kernels=False
+            )
+            ctx = fx_onnx.FxToOnnxContext()
+
+            # The following coed block does several things.
+            #  1. Create a model whose parameters and buffers are all FakeTensor's.
+            #  2. Convert nn.Module into ONNX model without initializers.
+            #  3. Record the file paths to find real initializers.
+            with ftm, ctx:
+                # Toy model with parameters and buffers as FakeTensor's.
+                fake_model = create_model()
+                fake_model.load_state_dict(torch.load(tmp_file.name))
+                # Toy inputs as FakeTensor's.
+                fake_args = create_args()
+                # Export ONNX model without initializers while ctx.paths records
+                # all files that contains real initializers.
+                (onnx_model, _, _, _) = fx_onnx.export_without_parameters_and_buffers(
+                    fake_model,
+                    *fake_args,
+                    use_binary_format=False,
+                )
+
+            # Tasks done by the following block.
+            #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
+            #  2. If a tensor's name matches a "onnx_model"'s input name, an initializer is created and saved to
+            #     a seperated folder.
+            #  3. A new ONNX model is saved into file with the initializers saved in the previous step.
+            #  4. ORT executes the new ONNX model and compares the results with the original GPT model.
+
+            # Model saved to tmp_folder/onnx_model_location
+            # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
+            onnx_model_location = model_name + "_external_data.onnx"
+            onnx_initializer_location = model_name + "_initializers"
+            fx_onnx.save_model_with_external_data(
+                tmp_folder,
+                onnx_model_location,
+                onnx_initializer_location,
+                tuple(ctx.paths),
+                onnx_model,
+            )
+
+            # Generate random inputs.
+            args = create_args()
+            kwargs = create_pytorch_only_kwargs()
+            # Original outputs.
+            ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
+            # ORT outputs.
+            ort_outputs = self._run_ort(
+                os.path.join(tmp_folder, onnx_model_location),
+                (arg for arg in args if arg is not None),
+            )
+
+            assert len(ref_outputs) == len(ort_outputs)
+
+            for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+                torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
+
+    def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -128,135 +217,39 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 output = self.fc3(tensor_x)
                 return output
 
-        # Create the toy model.
-        model = MLPModel()
+        def create_model():
+            return MLPModel()
 
-        with tempfile.NamedTemporaryFile(
-            prefix="mlp_model_", suffix=".pt"
-        ) as tmp_file, tempfile.TemporaryDirectory(
-            suffix="large_scale_export"
-        ) as tmp_folder:
-            # Dump state_dict to a file to simulate how HuggingFace model is initialized.
-            # The file will be loaded via .load_state_dict(...)
-            torch.save(model.state_dict(), tmp_file.name)
+        def create_args():
+            return (torch.rand((97, 8), dtype=torch.float32),)
 
-            ftm = FakeTensorMode(
-                allow_non_fake_inputs=True, allow_fallback_kernels=False
-            )
-            ctx = fx_onnx.FxToOnnxContext()
-            # The following coed block does several things.
-            #  1. Create a model whose parameters and buffers are all FakeTensor's.
-            #  2. Convert nn.Module into ONNX model without initializers.
-            #  3. Record the file paths to find real initializers.
-            with ftm, ctx:
-                # Toy model with parameters and buffers as FakeTensor's.
-                fake_model = MLPModel()
-                fake_model.load_state_dict(torch.load(tmp_file.name))
-                # Toy inputs as FakeTensor's.
-                fake_inputs = (torch.rand((97, 8), dtype=torch.float32),)
-                # Export ONNX model without initializers while ctx.paths records
-                # all files that contains real initializers.
-                (onnx_model, _, _, _) = fx_onnx.export_without_parameters_and_buffers(
-                    fake_model, *fake_inputs, use_binary_format=False
-                )
+        def create_pytorch_only_extra_kwargs():
+            return {}
 
-            # Tasks done by the following block.
-            #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
-            #  2. If a tensor's name matches a "onnx_model"'s input name, an initializer is created and saved to
-            #     a seperated folder.
-            #  3. A new ONNX model is saved into file with the initializers saved in the previous step.
-            #  4. ORT executes the new ONNX model and compares the results with the original GPT model.
+        self._test_large_scale_exporter(
+            "toy_mlp1", create_model, create_args, create_pytorch_only_extra_kwargs
+        )
 
-            # Model saved to tmp_folder/onnx_model_location
-            # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
-            onnx_model_location = "tiny_mlp_external_data.onnx"
-            onnx_initializer_location = "tiny_mlp_initializers"
-            fx_onnx.save_model_with_external_data(
-                tmp_folder,
-                onnx_model_location,
-                onnx_initializer_location,
-                tuple(ctx.paths),
-                onnx_model,
-            )
-
-            # Generate random inputs.
-            inputs = (torch.rand((97, 8), dtype=torch.float32),)
-            # Original outputs.
-            ref_outputs, _ = pytree.tree_flatten(model(*inputs))
-            # ORT outputs.
-            ort_outputs = self._run_ort(
-                os.path.join(tmp_folder, onnx_model_location),
-                inputs,
-            )
-
-            assert len(ref_outputs) == len(ort_outputs)
-
-            for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-                torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
-
-    @unittest.skip("Requires patching GPT2 code to avoid if-else code blocks")
-    def test_large_scale_exporter_with_gpt2_tiny(self):
-        # This test contains 3 major steps.
-        #  1. Export ONNX model without initializers.
-        #  2. Add initializers to ONNX model as external data.
-        #  3. Run ORT to verify the exported model.
-
+    @unittest.skip("To pass this test, if-else conditions in GPT2 should be removed.")
+    def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
-        # This converts text into GPT inputs.
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
-        ftm = FakeTensorMode(allow_non_fake_inputs=True, allow_fallback_kernels=False)
-        ctx = fx_onnx.FxToOnnxContext()
-        # The following coed block does several things.
-        #  1. Create a model whose parameters and buffers are all FakeTensor's.
-        #  2. Convert nn.Module into ONNX model without initializers.
-        #  3. Record the file paths to find real initializers.
-        with ftm, ctx:
-            # GPT model with parameters and buffers as FakeTensor's.
-            fake_model = transformers.AutoModel.from_pretrained(model_name)
-            # GPT inputs as FakeTensor's.
-            fake_inputs = tokenizer("Hello world!", return_tensors="pt")
-            # Export ONNX model without initializers while ctx.paths records
-            # all files that contains real initializers.
-            (onnx_model, _, _, _,) = fx_onnx.export_without_parameters_and_buffers(
-                fake_model, use_binary_format=False, **fake_inputs
-            )
+        def create_model():
+            return transformers.AutoModel.from_pretrained(model_name)
 
-        # Tasks done by the following block.
-        #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
-        #  2. If a tensor's name matches a "onnx_model"'s input name, an initializer is created and saved to
-        #     a seperated folder.
-        #  3. A new ONNX model is saved into file with the initializers saved in the previous step.
-        #  4. ORT executes the new ONNX model and compares the results with the original GPT model.
-        with tempfile.TemporaryDirectory(suffix="large_scale_export") as tmp_folder:
-            # Model saved to tmp_folder/gpt_external_data.onnx
-            # Initializers are saved to tmp_folder/gpt_initializers/*.onnx
-            onnx_model_location = "tiny_gpt_external_data.onnx"
-            onnx_initializer_location = "tiny_gpt_initializers"
-            fx_onnx.save_model_with_external_data(
-                tmp_folder,
-                onnx_model_location,
-                onnx_initializer_location,
-                tuple(ctx.paths),
-                onnx_model,
-            )
+        def create_args():
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            kwargs = tokenizer("Hello world!", return_tensors="pt")
+            input_ids = kwargs["input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            return input_ids, None, attention_mask
 
-            # Create GPT model again with real tensors and inputs.
-            model = transformers.AutoModel.from_pretrained(model_name)
-            inputs = tokenizer("Hello world!", return_tensors="pt")
+        def create_pytorch_only_extra_kwargs():
+            return {"return_dict": False}
 
-            # Original outputs.
-            ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-            # ORT outputs.
-            ort_outputs = self._run_ort(
-                os.path.join(tmp_folder, onnx_model_location),
-                (inputs["input_ids"], inputs["attention_mask"]),
-            )
-
-            assert len(ref_outputs) == len(ort_outputs)
-
-            for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-                torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
+        self._test_large_scale_exporter(
+            "tiny_gpt2", create_model, create_args, create_pytorch_only_extra_kwargs
+        )
 
 
 if __name__ == "__main__":
