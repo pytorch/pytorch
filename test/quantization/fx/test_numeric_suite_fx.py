@@ -2628,8 +2628,6 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         msp(*example_input)
 
         msq = convert_n_shadows_model(msp)
-        # TODO(before land): can we remove below?
-        # msq = convert_n_shadows_model(msp, custom_convert_fn=convert_to_reference_fx)
         # print('msq', msq)
 
         loggers_set_enabled(msq, True)
@@ -2637,7 +2635,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         results = extract_results_n_shadows_model(msq)
         # print(results)
-        # print_comparisons_n_shadows_model(results)
+        print_comparisons_n_shadows_model(results)
 
         # get the last quantized output from results
         inner_results = results['model']['node_output']
@@ -2658,13 +2656,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         # print('shadow', output_shadow.shape, output_shadow)
         # print('shadow_ref', output_shadow_ref.shape, output_shadow_ref)
 
-        # off-by-one errors are okay in the shadow version, because
-        # the models are not actually equivalent - the PNP model has
-        # a lot of extra q/dq
         self.assertTrue(
             torch.allclose(output_shadow, output_shadow_ref),
-            # TODO(before land): can we remove below?
-            # torch.allclose(output_shadow, output_shadow_ref, rtol=0.1),
             f"shadow comparison: {output_shadow} not close to {output_shadow_ref}")
 
         return msq
