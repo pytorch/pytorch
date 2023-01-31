@@ -762,7 +762,7 @@ def as_strided_(x, size, stride, storage_offset=None):
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
-        return inputs[0]
+        return clone(inputs[0])
 
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
