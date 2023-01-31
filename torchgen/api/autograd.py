@@ -380,15 +380,15 @@ Attempted to convert a derivative formula for a mutable operator
             for function_schema in functional_info_by_signature:
                 if not is_reference_for_foreach(f, function_schema):
                     continue
+                ref_diff_info = differentiability_infos[function_schema]["Default"]
                 all_saved_inputs = []
                 all_saved_outputs = []
-                ref_diff_info = differentiability_infos[function_schema]["Default"]
                 modified_derivative_formulas = []
                 for derivative in ref_diff_info.derivatives:
                     saved_inputs = []
                     saved_outputs = []
                     modified_formula = (
-                        derivative.formula.replace("grad", "grads[i]")
+                        derivative.original_formula.replace("grad", "grads[i]")
                         .replace("self", "self[i]")
                         .replace("result", "result[i]")
                     )
