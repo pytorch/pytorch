@@ -63,14 +63,11 @@ void CommandBuffer::begin() {
 
 void CommandBuffer::end() {
   TORCH_CHECK(
-      state_ == CommandBuffer::State::RECORDING ||
-          state_ == CommandBuffer::State::SUBMITTED,
+      state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called end() on a command buffer whose state "
-      "is not RECORDING or SUBMITTED.");
+      "is not RECORDING.");
 
-  if (state_ == CommandBuffer::State::RECORDING) {
-    VK_CHECK(vkEndCommandBuffer(handle_));
-  }
+  VK_CHECK(vkEndCommandBuffer(handle_));
   state_ = CommandBuffer::State::READY;
 }
 
@@ -349,9 +346,8 @@ VkCommandBuffer CommandBuffer::get_submit_handle() {
 
   const VkCommandBuffer handle = handle_;
 
-  if (!is_reusable()) {
-    invalidate();
-  }
+  handle_ = VK_NULL_HANDLE;
+  bound_.reset();
   state_ = CommandBuffer::State::SUBMITTED;
 
   return handle;
@@ -392,7 +388,7 @@ CommandPool::~CommandPool() {
   vkDestroyCommandPool(device_, pool_, nullptr);
 }
 
-CommandBuffer CommandPool::get_new_cmd(bool reusable) {
+CommandBuffer CommandPool::get_new_cmd() {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // No-ops if there are command buffers available
@@ -400,13 +396,8 @@ CommandBuffer CommandPool::get_new_cmd(bool reusable) {
 
   const VkCommandBuffer handle = buffers_[in_use_];
 
-  VkCommandBufferUsageFlags cmd_flags = 0u;
-  if (!reusable) {
-    cmd_flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  }
-
   in_use_++;
-  return CommandBuffer(handle, cmd_flags);
+  return CommandBuffer(handle);
 }
 
 void CommandPool::flush() {

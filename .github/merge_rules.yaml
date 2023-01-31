@@ -1,7 +1,7 @@
 - name: ONNX exporter
   patterns:
-  - .ci/caffe2/*
-  - .ci/onnx/*
+  - .jenkins/caffe2/*
+  - .jenkins/onnx/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*
@@ -52,7 +52,7 @@
   patterns:
   - .github/**
   - .circleci/**
-  - .ci/**
+  - .jenkins/**
   - scripts/**
   - tools/**
   approved_by:

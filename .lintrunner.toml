@@ -680,7 +680,7 @@ init_command = [
 [[linter]]
 code = 'SHELLCHECK'
 include_patterns = [
-    '.ci/pytorch/**/*.sh'
+    '.jenkins/pytorch/**/*.sh'
 ]
 command = [
     'python3',
