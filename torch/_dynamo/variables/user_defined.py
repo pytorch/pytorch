@@ -1,6 +1,5 @@
 import collections
 import contextlib
-import dataclasses
 import functools
 import importlib
 import inspect
@@ -282,7 +281,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return getattr_fn
 
     def _getattr_static(self, name):
-        if isinstance(self.value, (dataclasses.Field, torch.nn.Module)):
+        if (
+            isinstance(self.value, torch.nn.Module)
+            or "__slots__" in self.value.__class__.__dict__
+        ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
         else:
@@ -302,6 +304,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
+            subobj = None
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
@@ -313,6 +316,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, staticmethod):
+            return variables.UserFunctionVariable(
+                subobj.__get__(self.value), source=source, **options
+            )
+        elif isinstance(subobj, classmethod):
+            return variables.UserMethodVariable(
+                subobj.__func__, self, source=source, **options
+            )
+        elif isinstance(subobj, types.FunctionType):
+            return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -359,11 +372,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ),
         ):
             return UserDefinedObjectVariable(subobj, **options)
-
-        if isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
-        elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, **options)
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)

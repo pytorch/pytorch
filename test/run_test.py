@@ -52,7 +52,7 @@ except ImportError:
 
 # Note [ROCm parallel CI testing]
 # https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
-# In .jenkins/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
+# In .ci/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
 # This results in multiple test files sharing the same GPU.
 # This should be a supported use case for ROCm, but it exposed issues in the kernel driver resulting in hangs.
 # See https://github.com/pytorch/pytorch/issues/90940.
@@ -319,7 +319,6 @@ CI_SERIAL_LIST = [
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
-    'dynamo/test_dynamic_shapes',   # flaky on MacOS when running in parallel https://github.com/pytorch/pytorch/issues/92196
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -895,6 +894,9 @@ CUSTOM_HANDLERS = {
     "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
+    # not a test_ops file, but takes 2 hrs on some architectures and
+    # run_test_ops is good at parallelizing things
+    "test_decomp": run_test_ops,
 }
 
 
