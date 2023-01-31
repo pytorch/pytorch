@@ -1249,14 +1249,8 @@ struct HelperInterpCubic : public HelperInterpBase {
           const auto real_input_index =
               area_pixel_compute_source_index<opmath_t>(
                   scale, i, align_corners, /*cubic=*/true);
-          // when `real_input_index` becomes larger than the range the floating point
-          // type can accurately represent, the type casting to `int64_t` might exceed
-          // `input_size - 1`. So we guard it with `std::min` below.
-          input_index = std::min(static_cast<int64_t>(floorf(real_input_index)), input_size - 1);
-          auto lambda = std::min(
-            std::max(real_input_index - input_index, static_cast<opmath_t>(0)),
-            static_cast<opmath_t>(1)
-          );
+          opmath_t lambda;
+          guard_index_and_lambda(real_input_index, input_size, input_index, lambda);
           get_cubic_upsample_coefficients<opmath_t>(coeffs, lambda);
 
           for (const auto j : c10::irange(interp_size)) {

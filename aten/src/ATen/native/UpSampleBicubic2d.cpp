@@ -130,7 +130,7 @@ static void upsample_bicubic2d_backward_out_frame(
   at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 4, [&](int64_t start, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
       buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       acc_data_ptr = buffer_data.get();
       memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -142,21 +142,14 @@ static void upsample_bicubic2d_backward_out_frame(
         for (const auto output_x : c10::irange(output_width)) {
 
           const opmath_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
-          // when `real_x` becomes larger than the range the floating point
-          // type can accurately represent, the type casting to `int64_t` might exceed
-          // `input_width - 1`. So we guard it with `std::min` below.
-          int64_t input_x = std::min(static_cast<int64_t>(floorf(real_x)), input_width - 1);
-          opmath_t t_x = std::min(
-                std::max(real_x - input_x, static_cast<opmath_t>(0)),
-                static_cast<opmath_t>(1)
-              );
+          int64_t input_x;
+          opmath_t t_x;
+          guard_index_and_lambda(real_x, input_width, input_x, t_x);
 
           const opmath_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
-          int64_t input_y = std::min(static_cast<int64_t>(floorf(real_y)), input_height - 1);
-          opmath_t t_y = std::min(
-                std::max(real_y - input_y, static_cast<opmath_t>(0)),
-                static_cast<opmath_t>(1)
-              );
+          int64_t input_y;
+          opmath_t t_y;
+          guard_index_and_lambda(real_y, input_height, input_y, t_y);
 
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
           opmath_t x_coeffs[4];

@@ -428,6 +428,18 @@ static inline scalar_t cubic_interp1d(
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
 }
 
+// when `real_input_index` becomes larger than the range the floating point
+// type can accurately represent, the type casting to `int64_t` might exceed
+// `input_size`, causing overflow. So we guard it with `std::min` below.
+template<typename scalar_t, typename opmath_t>
+static inline void guard_index_and_lambda(const opmath_t& real_input_index, const int64_t& input_size, int64_t& input_index, scalar_t& lambda) {
+  input_index = std::min(static_cast<int64_t>(floorf(real_input_index)), input_size - 1);
+  lambda = std::min(
+      std::max(real_input_index - input_index, static_cast<opmath_t>(0)),
+      static_cast<opmath_t>(1)
+    );
+}
+
 template<typename scalar_t, typename opmath_t>
 static inline void compute_source_index_and_lambda(
     int64_t& input_index0,
@@ -449,23 +461,20 @@ static inline void compute_source_index_and_lambda(
     const auto real_input_index =
         area_pixel_compute_source_index<opmath_t>(
             ratio, output_index, align_corners, /*cubic=*/false);
-    // when `real_input_index` becomes larger than the range the floating point
-    // type can accurately represent, the type casting to `int64_t` might exceed
-    // `input_size - 1`, causing overflow. So we guard it with `std::min` below.
-    input_index0 = std::min(static_cast<int64_t>(real_input_index), input_size - 1);
+    guard_index_and_lambda(real_input_index, input_size, input_index0, lambda1);
     int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
-    lambda1 = std::min(
-      std::max(real_input_index - input_index0, static_cast<opmath_t>(0)),
-      static_cast<opmath_t>(1)
-    );
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
   }
 }
 
-// For compilation, and it will not be used by data types other than BFloat16.
+// It will not be used by data types other than BFloat16.
 template <typename scalar_in, typename scalar_out>
-void inline apply_grad_input(scalar_out* buffer_ptr, scalar_in* gin, int64_t size) {
+void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
+  TORCH_CHECK((std::is_same<scalar_out, BFloat16>::value),
+              "Upsample backward only support BFloat16 in the lower percision data types on CPU.")
+  TORCH_CHECK((std::is_same<scalar_in, float>::value),
+              "Upsample backward should use float as acc buffer for BFloat16 grad input on CPU.")
   return;
 }
 
