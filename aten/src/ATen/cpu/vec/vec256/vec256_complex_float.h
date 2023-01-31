@@ -170,6 +170,11 @@ public:
     auto t21 = _mm256_add_ps(t2, _mm256_set1_ps(1.0f));
     auto t21_sqrt = _mm256_sqrt_ps(t21);
     auto res = _mm256_mul_ps(t21_sqrt, fabs_max);
+
+    // substitute res == 0 where fabs_max == 0
+    auto zero = _mm256_set1_ps(0.f);
+    auto maskz = _mm256_cmp_ps(zero, fabs_max, _CMP_EQ_OQ);
+    res = _mm256_blendv_ps(res, zero, maskz);
     return res;
   }
   Vectorized<c10::complex<float>> abs() const {

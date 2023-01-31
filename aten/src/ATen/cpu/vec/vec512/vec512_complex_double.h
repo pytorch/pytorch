@@ -187,6 +187,11 @@ public:
     auto t21 = _mm512_add_pd(t2, _mm512_set1_pd(1.0f));
     auto t21_sqrt = _mm512_sqrt_pd(t21);
     auto res = _mm512_mul_pd(t21_sqrt, fabs_max);
+
+    // substitute res == 0 where fabs_max == 0
+    auto zero = _mm512_set1_pd(0.f);
+    auto maskz = _mm512_cmp_pd_mask(zero, fabs_max, _CMP_EQ_OQ);
+    res = blendv(res, zero, maskz);
     return res;
   }
   Vectorized<c10::complex<double>> abs() const {

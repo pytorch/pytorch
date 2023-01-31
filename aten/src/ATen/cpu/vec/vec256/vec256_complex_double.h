@@ -134,6 +134,11 @@ public:
     auto t21 = _mm256_add_pd(t2, _mm256_set1_pd(1.0f));
     auto t21_sqrt = _mm256_sqrt_pd(t21);
     auto res = _mm256_mul_pd(t21_sqrt, fabs_max);
+
+    // substitute res == 0 where fabs_max == 0
+    auto zero = _mm256_set1_pd(0.f);
+    auto maskz = _mm256_cmp_pd(zero, fabs_max, _CMP_EQ_OQ);
+    res = _mm256_blendv_pd(res, zero, maskz);
     return res;
   }
   Vectorized<c10::complex<double>> abs() const {
