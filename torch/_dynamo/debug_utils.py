@@ -676,7 +676,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
+    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
     return passing
 
 

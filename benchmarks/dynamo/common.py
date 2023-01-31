@@ -550,6 +550,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     # Use higher tolerance for XLA since XLA cause numerical unstability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
+    torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)

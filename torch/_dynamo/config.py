@@ -139,6 +139,10 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
+# The tolerance we should use when testing if a compiled graph
+# has diverged so that we should treat it as an accuracy failure
+repro_tolerance = 1e-3
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
