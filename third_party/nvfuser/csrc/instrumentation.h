@@ -2,7 +2,11 @@
 
 #include <utils.h>
 
+#ifndef FBCODE_CAFFE2
 #include <nvtx3/nvToolsExt.h>
+#else
+#include <nvToolsExt.h>
+#endif
 
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>

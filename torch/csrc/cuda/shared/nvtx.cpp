@@ -1,7 +1,11 @@
 #ifdef _WIN32
 #include <wchar.h> // _wgetenv for nvtx
 #endif
+#ifndef FBCODE_CAFFE2
 #include <nvtx3/nvToolsExt.h>
+#else
+#include <nvToolsExt.h>
+#endif
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
