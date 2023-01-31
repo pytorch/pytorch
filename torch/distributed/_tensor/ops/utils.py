@@ -38,7 +38,7 @@ def register_prop_rule(func):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def wrapper(impl):
-        DTensor._op_to_rules[func] = impl
+        DTensor._propagator.register_sharding_prop_rule(func, impl)
         return impl
 
     return wrapper
