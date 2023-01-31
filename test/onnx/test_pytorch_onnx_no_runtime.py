@@ -2,6 +2,8 @@
 
 """Tests for onnx export that don't run the exported model."""
 
+from __future__ import annotations
+
 import contextlib
 import io
 import itertools
@@ -925,6 +927,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         num_layers = 3
         T, B, C = 11, 5, 7
         mask_start_point = 0
+
         class LSTMTraceWrapper(torch.nn.Module):
             def __init__(self):
                 super(LSTMTraceWrapper, self).__init__()
@@ -951,7 +954,14 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         m = LSTMTraceWrapper()
 
         f = io.BytesIO()
-        torch.onnx.export(m, (x, seq_lens), f, verbose=True, input_names=["input", "seq_len"], dynamic_axes={"input":{1:"B"}})
+        torch.onnx.export(
+            m,
+            (x, seq_lens),
+            f,
+            verbose=True,
+            input_names=["input", "seq_len"],
+            dynamic_axes={"input": {1: "B"}},
+        )
         onnx_proto = onnx.load_model_from_string(f.getvalue())
         # the first argument in onnx::Range should be constant node with value 0
         const_node = []
@@ -969,7 +979,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             if n.output[0] == constant_input_name:
                 value = np.frombuffer(n.attribute[0].t.raw_data, dtype=np.int64)
         self.assertEqual(value, 0)
-
 
     def test_trace_fork_wait_inline_onnx(self):
         def fork_body(x):
