@@ -738,11 +738,11 @@ def _short_circuit_binary_broadcasting_op(a, b):
     a_broadcast, b_broadcast = refs._maybe_broadcast(a, b)
 
     if not a_broadcast.dtype == b_broadcast.dtype:
-        # breakpoint()
+        breakpoint()
         return None
     
     if not a_broadcast.device == b_broadcast.device:
-        # breakpoint()
+        breakpoint()
         return None
 
     # Easy case - both match
@@ -751,8 +751,8 @@ def _short_circuit_binary_broadcasting_op(a, b):
     # Complex case, we allow no more than 1 non trivial dim (non-0, non-1)
     # TODO(Support this?) never hit it on bench yet...
     if not safe_both_match:
+        breakpoint()
         return None
-        # breakpoint()
 
     simple_safe_strides = a.stride() == b.stride()
     if not simple_safe_strides:
@@ -760,6 +760,7 @@ def _short_circuit_binary_broadcasting_op(a, b):
         b_strides_non_trivial = len([x for x in b_broadcast.stride() if x not in (0, 1)])
         # If one side of strides is nontrivial in only a single dim, it should be fine. 
         if a_strides_non_trivial > 1 and b_strides_non_trivial > 1:
+            breakpoint()
             return None
     
     return FakeTensor(
@@ -783,6 +784,7 @@ short_circuit_binary_ops = {
     aten.mul.Tensor,
     aten.sub.Tensor,
     aten.div.Tensor,
+    aten.empty_strided.default,
 }
 
 short_circuit_unary_ops = {aten.relu.default, aten.rsqrt.default}
@@ -832,6 +834,12 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # Gross circular reference hack
+        # import torch._prims as prims
+        skipped_prims = {
+            torch._prims.mul
+        }
+
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -945,13 +953,18 @@ class FakeTensorMode(TorchDispatchMode):
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         r = None
-        if func in short_circuit_binary_ops and len(kwargs) == 0:
+        if (func in short_circuit_binary_ops or func in skipped_prims) and len(kwargs) == 0:
             r = _short_circuit_binary_broadcasting_op(*args)
         elif func in short_circuit_unary_ops and len(kwargs) == 0:
             r = _short_circuit_unary_op(*args)
+        else:
+            print("RUNNING ", func)
+            if "prims.mul" in str(func):
+                breakpoint()
+            if len(args) == 2:
+                breakpoint()
         if r is not None:
             return r
-        print("RUNNING ", func)
 
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
