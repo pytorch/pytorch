@@ -391,7 +391,7 @@ struct NormTwoOps {
 template <typename acc_t, typename data_t>
 struct NanSumOps {
   inline C10_DEVICE acc_t reduce(acc_t a, data_t b, int64_t /*idx*/) const {
-    return a + (std::isnan(b) ? acc_t{0.} : acc_t{b});
+    return a + (at::_isnan(b) ? acc_t{0.} : acc_t{b});
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
