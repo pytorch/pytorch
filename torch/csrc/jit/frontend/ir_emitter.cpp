@@ -3347,6 +3347,18 @@ struct to_ir {
         auto kwargs = emitAttributes(apply.attributes());
         return emitForkExpr(apply.range(), forked, args, kwargs);
       }
+      case prim::awaitable: {
+        auto& trees = apply.inputs().tree()->trees();
+        if (trees.size() < 1) {
+          throw ErrorReport(apply)
+              << "Expected at least one argument to awaitable()";
+        }
+        auto awaited = emitSugaredExpr(Expr(trees[0]), 1);
+        TreeList sliced_trees(trees.begin() + 1, trees.end());
+        auto args = getNamedValues(sliced_trees, true);
+        auto kwargs = emitAttributes(apply.attributes());
+        return emitAwaitableExpr(apply.range(), awaited, args, kwargs);
+      }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -4118,6 +4130,44 @@ struct to_ir {
     }
     Value* node_output =
         fork_node->output()->setType(FutureType::create(out_type));
+    return std::make_shared<SimpleValue>(node_output);
+  }
+
+  std::shared_ptr<SugaredValue> emitAwaitableExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue>& awaited,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
+    auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Node* await_node;
+    TypePtr out_type;
+
+    await_node =
+        g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
+            ->setSourceRange(loc);
+
+    {
+      WithInsertPoint insert(await_node);
+      if (ClosureValue* sv = dynamic_cast<ClosureValue*>(awaited.get())) {
+        Value* closure_output = sv->asValue(loc, method);
+        Block* closure_block = closure_output->node()->blocks().at(0);
+        TORCH_INTERNAL_ASSERT(closure_block->outputs().size() == 1);
+        out_type = closure_block->outputs().at(0)->type();
+        await_node->addInput(closure_output);
+      } else {
+        auto emit_closure_body = [&](Block* closure_block) {
+          auto fn_sugared_output = awaited->call(loc, method, args, kwargs, 1);
+          auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+          closure_block->registerOutput(fn_simple_output);
+          out_type = fn_simple_output->type();
+        };
+        auto closure_value = emitClosure(emit_closure_body);
+        await_node->addInput(closure_value->asValue(loc, method));
+      }
+    }
+    Value* node_output =
+        await_node->output()->setType(AwaitType::create(out_type));
     return std::make_shared<SimpleValue>(node_output);
   }
 
