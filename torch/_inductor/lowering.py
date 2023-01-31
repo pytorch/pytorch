@@ -762,7 +762,7 @@ def as_strided_(x, size, stride, storage_offset=None):
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
-        return inputs[0]
+        return clone(inputs[0])
 
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
@@ -953,6 +953,36 @@ def register_onednn_fusion_ops():
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        def convolution_transpose_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionTransposeUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
 
         if torch._C.has_mkl:
 
