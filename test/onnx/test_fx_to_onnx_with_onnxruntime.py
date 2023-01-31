@@ -1,6 +1,9 @@
 # Owner(s): ["module: onnx"]
 import io
+import os
+import tempfile
 import unittest
+
 from typing import Any, Sequence, Tuple, Union
 
 import onnx_test_common
@@ -8,6 +11,7 @@ import onnxruntime  # type: ignore[import]
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
 from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
@@ -96,6 +100,69 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
+
+    def test_large_scale_exporter_with_gpt2_tiny(self):
+        # This test contains 3 major steps.
+        #  1. Export ONNX model without initializers.
+        #  2. Add initializers to ONNX model as external data.
+        #  3. Run ORT to verify the exported model.
+
+        model_name = "sshleifer/tiny-gpt2"
+        # This converts text into GPT inputs.
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+
+        ftm = FakeTensorMode(allow_non_fake_inputs=True, allow_fallback_kernels=False)
+        ctx = fx_onnx.TorchLoadPathCaptureContext()
+        # The following coed block does several things.
+        #  1. Create a model whose parameters and buffers are all FakeTensor's.
+        #  2. Convert nn.Module into ONNX model without initializers.
+        #  3. Record the file paths to find real initializers.
+        with ftm, ctx:
+            # GPT model with parameters and buffers as FakeTensor's.
+            fake_model = transformers.AutoModel.from_pretrained(model_name)
+            # GPT inputs as FakeTensor's.
+            fake_inputs = tokenizer("Hello world!", return_tensors="pt")
+            # Export ONNX model without initializers while ctx.paths records
+            # all files that contains real initializers.
+            (onnx_model, _, _, _,) = fx_onnx.export_without_parameters_and_buffers(
+                fake_model, use_binary_format=False, **fake_inputs
+            )
+
+        # Tasks done by the following block.
+        #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
+        #  2. If a tensor's name matches a "onnx_model"'s input name, an initializer is created and saved to
+        #     a seperated folder.
+        #  3. A new ONNX model is saved into file with the initializers saved in the previous step.
+        #  4. ORT executes the new ONNX model and compares the results with the original GPT model.
+        with tempfile.TemporaryDirectory(suffix="large_scale_export") as tmp_folder:
+            # Model saved to tmp_folder/gpt_external_data.onnx
+            # Initializers are saved to tmp_folder/gpt_initializers/*.onnx
+            onnx_model_location = "tiny_gpt_external_data.onnx"
+            onnx_initializer_location = "tiny_gpt_initializers"
+            fx_onnx.save_model_with_external_data(
+                tmp_folder,
+                onnx_model_location,
+                onnx_initializer_location,
+                tuple(ctx.paths),
+                onnx_model,
+            )
+
+            # Create GPT model again with real tensors and inputs.
+            model = transformers.AutoModel.from_pretrained(model_name)
+            inputs = tokenizer("Hello world!", return_tensors="pt")
+
+            # Original outputs.
+            ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
+            # ORT outputs.
+            ort_outputs = self._run_ort(
+                os.path.join(tmp_folder, onnx_model_location),
+                (inputs["input_ids"], inputs["attention_mask"]),
+            )
+
+            assert len(ref_outputs) == len(ort_outputs)
+
+            for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+                torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
 
 
 if __name__ == "__main__":
