@@ -168,6 +168,105 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
+
+ideep::tensor::desc get_conv_transpose_expected_weights_desc(
+    const ideep::tensor::dims& weights_dims,
+    ideep::tensor::data_type w_dtype,
+    const ideep::tensor::dims& strides,
+    const ideep::tensor::dims& padding_l,
+    const ideep::tensor::dims& padding_r,
+    const ideep::tensor::dims& dilates,
+    int groups,
+    bool channels_last,
+    ideep::algorithm aalgorithm,
+    ideep::data_type x_dtype,
+    const ideep::dims& src_dims) {
+  if (channels_last) {
+    return ideep::convolution_transpose_forward::expected_weights_desc<true>(
+        weights_dims,
+        w_dtype,
+        strides,
+        padding_l,
+        padding_r,
+        dilates,
+        groups,
+        aalgorithm,
+        ideep::prop_kind::forward,
+        src_dims);
+  } else {
+    return ideep::convolution_transpose_forward::expected_weights_desc<false>(
+        weights_dims,
+        w_dtype,
+        strides,
+        padding_l,
+        padding_r,
+        dilates,
+        groups,
+        aalgorithm,
+        ideep::prop_kind::forward,
+        src_dims);
+  }
+}
+
+
+Tensor mkldnn_reorder_conv_transpose2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  ideep::tensor w = itensor_from_tensor(self);
+
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+  }
+
+  auto expected_desc = get_conv_transpose_expected_weights_desc(
+      w.get_dims(),
+      w.get_data_type(),
+      stride.vec(),
+      padding.vec(),
+      padding_r(padding, output_padding),
+      dilation.vec(),
+      groups,
+      is_channels_last,
+      ideep::algorithm::deconvolution_direct,
+      w.get_data_type(),
+      src_dims);
+
+  if (groups > 1) {
+    expected_desc = expected_desc.transpose(1, 2);
+  } else {
+    expected_desc = expected_desc.transpose(0, 1);
+  }
+
+  ideep::tensor result;
+  result.init(expected_desc);
+  w.transpose_(0, 1);
+  result.feed_from(w, /*is_deconv_weights*/true);
+
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
+      TORCH_FN(mkldnn_reorder_conv_transpose2d_weight));
+}
+
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
