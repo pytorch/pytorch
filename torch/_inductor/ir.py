@@ -4036,18 +4036,21 @@ class Wait(ExternKernel):
         return False
 
     def codegen(self, wrapper):
-        (all_reduce,) = [t.codegen_reference() for t in self.inputs]
-        work = f"{all_reduce}_work"  # hacky way to name work objs..
+        (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        work = f"{input_collective}_work"  # hacky way to name work objs..
         wrapper.writeline(f"{work}.wait()")
 
-        # largely symbolic from the runtime perspective, but we must ensure from scheduler
-        # perspective that Wait's buffer is the one being consumed by consumers, to ensure
-        # wait op gets scheduled at all.  And as a side effect, wait's buffer name needs to actually
-        # point to something in the codegen output
+        # wait op still needs to produce a 'buffer' that represents the tensor output.
+        # this is a symbolic gesture, and it gets handled by WrapperCodegen.
+        # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
+        # to a new name (`self.get_name()`) and `del`s the old name.
 
-        # this 'del' is screwing up scheduler 'reuse' of this buf. which i'm not sure should even be allowed
-        # wrapper.writeline(f"{self.get_name()} = {all_reduce}; del {all_reduce}")
-        wrapper.writeline(f"{self.get_name()} = {all_reduce}")
+    def get_alias_names(self):
+        # reporting alias name here didn't impact anything.
+        #
+        # (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        # return [input_collective]
+        return ()
 
 
 class AllReduce(ExternKernel):
@@ -4092,6 +4095,15 @@ class AllReduce(ExternKernel):
             inputs=[all_reduce],
         )
 
+    # would this logic be generally useful in the base class?
+    def reuses_input_buffer(self, input_buffer):
+        # WrapperCodegen currently stamps this attribute on a buffer when it
+        # gets 'reused'.
+        return (
+            hasattr(self, "_reuses_buffer")
+            and self._reuses_buffer.get_name() == input_buffer.get_name()
+        )
+
     def codegen(self, wrapper):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once("from torch._C._distributed_c10d import ReduceOp")
@@ -4106,9 +4118,7 @@ class AllReduce(ExternKernel):
 
         # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
         # to reuse the input buffer.  (This requires no other users of the input buffer.)
-        sched_node = V.graph.scheduler.name_to_node[output_name]
-        input_read = next(iter(sched_node.read_writes.reads))
-        if not sched_node.can_inplace(input_read):
+        if not self.reuses_input_buffer(self.inputs[0]):
             wrapper.writeline(f"{output_name}.copy_({input_name})")
 
         # At this point, output_name points to a buffer that is either
@@ -4117,3 +4127,12 @@ class AllReduce(ExternKernel):
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
         )
+
+    def get_alias_names(self):
+        # 1) Report allreduce aliases its input: seems to prevent allreduce inplace mutation trick,
+        #    forces allreduce to copy its input.
+        # (input_name,) = [t.codegen_reference() for t in self.inputs]
+        # return [input_name]
+
+        # 2) report no aliases: currently this way lets allreduce inplace-mutate
+        return ()
