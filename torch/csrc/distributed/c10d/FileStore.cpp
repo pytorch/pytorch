@@ -278,7 +278,7 @@ off_t refresh(
 FileStore::FileStore(std::string path, int numWorkers)
     : Store(),
       path_(std::move(path)),
-      pos_(0),
+
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
       refCountKey_("refcount/"),

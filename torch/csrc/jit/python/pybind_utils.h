@@ -922,7 +922,7 @@ inline py::object runAndInsertCall(
   }
 
   TORCH_CHECK(
-      stack.size() > 0,
+      !stack.empty(),
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
@@ -963,7 +963,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (!overloaded_args.empty()) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
             /*overloaded_args=*/overloaded_args,
