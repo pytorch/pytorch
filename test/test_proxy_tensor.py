@@ -234,7 +234,7 @@ class TestGenericProxyTensor(TestCase):
             gm = make_fx(f1)(x)
             self.assertFalse(is_any_sum(gm))
             self.assertTrue(is_any_sigmoid(gm))
-            return torch.digamma(x)
+            return torch.digamma(f1(x))
 
         traced = make_fx(f2)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
