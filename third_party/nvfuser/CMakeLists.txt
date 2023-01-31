@@ -17,7 +17,9 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/nvfuser")
 
 set(NVFUSER_ROOT ${PROJECT_SOURCE_DIR})
 set(NVFUSER_SRCS_DIR "${NVFUSER_ROOT}/csrc")
-set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+# TODO: have TORCH_ROOT setup as a variable instead
+# currently we are expecting nvfuser to be added from the pytorch root cmake file.
+set(TORCH_ROOT "${CMAKE_SOURCE_DIR}")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 # --- build nvfuser_codegen library
@@ -172,13 +174,15 @@ install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_IN
 install(DIRECTORY "${NVFUSER_SRCS_DIR}/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/nvfuser"
         FILES_MATCHING PATTERN "*.h" )
-
+# installing nvfuser python tests
+install(DIRECTORY "${NVFUSER_ROOT}/python_tests/"
+	DESTINATION "${TORCH_ROOT}/test/_nvfuser"
+        FILES_MATCHING PATTERN "*.py" )
 
 # --- build nvfuser_python library
 
 if(BUILD_PYTHON)
   set(NVFUSER "${PROJECT_NAME}")
-  #find_package(pybind11 REQUIRED)
 
   set(NVFUSER_PYTHON_SRCS)
   list(APPEND NVFUSER_PYTHON_SRCS
@@ -308,7 +312,6 @@ endforeach()
 target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/include")
 
 # -- build tests
-
 if(BUILD_TEST)
   set(NVFUSER_TESTS "${PROJECT_NAME}_tests")
   set(JIT_TEST_SRCS)
@@ -400,5 +403,6 @@ if(BUILD_NVFUSER_BENCHMARK)
 
 endif()
 
-# -- install nvfuser cmake config files
+# -- install nvfuser cmake config files and symlink to build binaries
 install(EXPORT NvfuserTargets FILE NvfuserConfig.cmake DESTINATION share/cmake/nvfuser)
+file(CREATE_LINK "${CMAKE_BINARY_DIR}/bin" "${NVFUSER_ROOT}/bin" SYMBOLIC)

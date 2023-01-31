@@ -59,6 +59,7 @@ dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
+test/_nvfuser
 third_party/build/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
