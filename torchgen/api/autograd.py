@@ -1,10 +1,11 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Match, Optional, Sequence, Set, Tuple
+from typing import cast, Dict, List, Match, Optional, Sequence, Set, Tuple
+
+from torchgen import local
 
 from torchgen.api import cpp
 from torchgen.api.types import BaseCType, Binding, NamedCType, tensorListT
-from torchgen import local
 from torchgen.model import (
     FunctionSchema,
     ListType,
@@ -333,7 +334,8 @@ def match_differentiability_info(
         function_schema: FunctionSchema,
     ) -> bool:
         return (
-            f.func.name.name.base.split("_foreach_")[-1] == function_schema.name.name.base
+            f.func.name.name.base.split("_foreach_")[-1]
+            == function_schema.name.name.base
             and not function_schema.name.name.inplace
         )
 
@@ -381,32 +383,41 @@ Attempted to convert a derivative formula for a mutable operator
             for function_schema in functional_info_by_signature:
                 if not is_reference_for_foreach(f, function_schema):
                     continue
-                if function_schema in differentiability_infos[function_schema]:
+                if function_schema in differentiability_infos:
                     ref_diff_info = differentiability_infos[function_schema]["Default"]
-                elif function_schema.signature(strip_default=True) in functional_info_by_signature:
+                elif (
+                    function_schema.signature(strip_default=True)
+                    in functional_info_by_signature
+                ):
                     ref_diff_info = functional_info_by_signature[
-                        function_schema.signature(strip_default=True)]["Default"]
+                        function_schema.signature(strip_default=True)
+                    ]["Default"]
                 else:
                     raise RuntimeError(
-                        f"Reference `DifferentiabilityInfo` for {f.func} not found: query: {function_schema}")
+                        f"Reference `DifferentiabilityInfo` for {f.func} not found: query: {function_schema}"
+                    )
 
                 map_refarg2foreacharg = {}
                 map_name2arg = {}
-                for arg, ref_arg in zip(f.func.arguments.flat_non_out, function_schema.arguments.flat_non_out):
+                for arg, ref_arg in zip(
+                    f.func.arguments.flat_non_out,
+                    function_schema.arguments.flat_non_out,
+                ):
                     assert ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
                     map_refarg2foreacharg[ref_arg.name] = arg.name
                     map_name2arg[arg.name] = arg
 
-                all_saved_inputs: Sequence[SavedAttribute] = []
-                all_saved_outputs: Sequence[SavedAttribute] = []
-                modified_derivative_formulas: Sequence[str] = []
+                all_saved_inputs: List[SavedAttribute] = []
+                all_saved_outputs: List[SavedAttribute] = []
+                modified_derivative_formulas: List[Derivative] = []
+                all_var_names: List[str] = []
                 for derivative in ref_diff_info.derivatives:
                     # note(crcrpar): `grads` and `result` are a sequence of Tensors.
-                    modified_formula = (
-                        derivative.original_formula.replace("grad", "grads[i]")
-                        .replace("result", "result[i]")
-                    )
+                    modified_formula = derivative.original_formula.replace(
+                        "grad", "grads[i]"
+                    ).replace("result", "result[i]")
                     assert len(f.func.returns) == len(function_schema.returns)
+                    assert f.func.arguments.self_arg is not None
                     if isinstance(f.func.arguments.self_arg.argument.type, ListType):
                         modified_formula = modified_formula.replace("self", "self[i]")
 
@@ -416,11 +427,17 @@ Attempted to convert a derivative formula for a mutable operator
                         use_ilistref_for_tensor_lists=f.part_of_structured_group,
                     ):
                         for ref_input in derivative.saved_inputs:
-                            mapped_name = map_refarg2foreacharg[ref_input.nctype.name]
+                            mapped_name = map_refarg2foreacharg[
+                                cast(str, ref_input.nctype.name)
+                            ]
                             saved_inputs.append(
                                 SavedAttribute(
-                                    nctype=cpp.argument_type(map_name2arg[mapped_name], binds=mapped_name),
-                                    expr=ref_input.expr.replace(ref_input.nctype.name, mapped_name),
+                                    nctype=cpp.argument_type(
+                                        map_name2arg[mapped_name], binds=mapped_name
+                                    ),
+                                    expr=ref_input.expr.replace(
+                                        cast(str, ref_input.nctype.name), mapped_name
+                                    ),
                                 )
                             )
                         for ref_output in derivative.saved_outputs:
@@ -434,22 +451,37 @@ Attempted to convert a derivative formula for a mutable operator
                                     )
                                 )
                             else:
-                                raise RuntimeError(f"Counterpart of {ref_output} not found")
-                    if "reciprocal" in base_op_name.base:
-                        print(f"Generated...\n\t{saved_inputs = }, {saved_outputs = }")
+                                raise RuntimeError(
+                                    f"Counterpart of {ref_output} not found"
+                                )
+                    var_names = [
+                        map_refarg2foreacharg[var] for var in derivative.var_names
+                    ]
+                    all_var_names.extend(var_names)
+                    all_saved_inputs.extend(saved_inputs)
+                    all_saved_outputs.extend(saved_outputs)
                     modified_derivative = Derivative(
                         formula=modified_formula,
                         original_formula=modified_formula,
-                        var_names=tuple([map_refarg2foreacharg[var] for var in derivative.var_names]),
+                        var_names=tuple(var_names),
                         saved_inputs=tuple(saved_inputs),
                         saved_outputs=tuple(saved_outputs),
                         named_gradients=set(),
                     )
-                    if "reciprocal" in base_op_name.base:
-                        print(modified_formula, derivative)
-                    all_saved_inputs.extend(saved_inputs)
-                    all_saved_outputs.extend(saved_outputs)
                     modified_derivative_formulas.append(modified_derivative)
+                with local.parametrize(
+                    use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+                    use_ilistref_for_tensor_lists=f.part_of_structured_group,
+                ):
+                    args_with_derivatives = [
+                        Binding(
+                            name=var,
+                            nctype=cpp.argument_type(map_name2arg[var], binds=var),
+                            argument=map_name2arg[var],
+                            default=None,
+                        )
+                        for var in all_var_names
+                    ]
                 diff_info = DifferentiabilityInfo(
                     name=base_op_name.base,
                     func=f,
@@ -460,14 +492,7 @@ Attempted to convert a derivative formula for a mutable operator
                     all_saved_outputs=tuple(set(all_saved_outputs)),
                     available_named_gradients=(),
                     used_named_gradients=set(),
-                    args_with_derivatives=[
-                        Binding(
-                            name="self",
-                            nctype=NamedCType(name="self", type=BaseCType(tensorListT)),
-                            argument=f.func.arguments.self_arg.argument,
-                            default=None,
-                        )
-                    ],
+                    args_with_derivatives=args_with_derivatives,
                     non_differentiable_arg_names=[],
                     output_differentiability=None,
                     output_differentiability_conditions=None,
