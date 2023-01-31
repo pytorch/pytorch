@@ -16,6 +16,8 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    get_computation_dtype,
+    IntLike,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -1279,9 +1281,6 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
-fallback_arange = fallback_handler(aten.arange)
-
-
 @register_lowering([torch.arange, aten.arange])
 def arange(
     start,
@@ -1299,35 +1298,38 @@ def arange(
         end = start
         start = 0
 
-    if isinstance(start, float) and int(start) == start:
-        start = int(start)
-    if isinstance(end, float) and int(end) == end:
-        end = int(end)
-    if isinstance(step, float) and int(step) == step:
-        step = int(step)
+    args = (start, end, step)
+    integer_args = all(isinstance(arg, IntLike) for arg in args)
 
-    # Triton kernel doesn't support float arange yet, fallback to aten.arange
-    if not (isinstance(start, int) and isinstance(end, int) and isinstance(step, int)):
-        return fallback_arange(
-            start,
-            end,
-            step,
-            dtype=dtype,
-            device=device,
-            layout=layout,
-            pin_memory=pin_memory,
-        )
+    if dtype is None:
+        dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
-    dtype = dtype or torch.int64
-    length = ceildiv((end - start), step)
-    start = sympy.Integer(start)
-    step = sympy.Integer(step)
+    if integer_args:
+        length = sympy.ceiling(sympy.Rational((end - start), step))
+    else:
+        length = sympy.ceiling((end - start) / step)
+
+    if integer_args:
+
+        def fn(index):
+            return ops.index_expr(step * index[0] + start, dtype)
+
+    else:
+        computation_dtype = get_computation_dtype(dtype)
+
+        def fn(index):
+            ind = ops.index_expr(index[0], computation_dtype)
+            xstep = ops.constant(step, dtype=computation_dtype)
+            xstart = ops.constant(start, dtype=computation_dtype)
+            inc = ops.mul(xstep, ind)
+            val = ops.add(xstart, inc)
+            return ops.to_dtype(val, dtype)
 
     return Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
-        inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
-        ranges=[sympy.Integer(length)],
+        inner_fn=fn,
+        ranges=[length],
     )
 
 

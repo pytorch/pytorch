@@ -1034,6 +1034,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    def test_arange5(self):
+        def fn(device):
+            return torch.arange(512, -512, -1.0, device=device)
+
+        compiled_fn = torch._dynamo.optimize()(fn)
+
+        # NOTE: use assertEqual to check dtypes which self.common doesn't do
+        expect = fn(self.device)
+        actual = compiled_fn(self.device)
+        self.assertEqual(expect, actual)
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
