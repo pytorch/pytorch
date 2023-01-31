@@ -3,7 +3,8 @@ from typing import cast, List, Optional, Dict
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        _dispatch_sqrt, _capturable_doc, _differentiable_doc, _maximize_doc)
+                        _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
@@ -262,8 +263,7 @@ Adam.__doc__ = r"""Implements Adam algorithm.
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {maximize}
         {capturable}
         {differentiable}
@@ -271,15 +271,24 @@ Adam.__doc__ = r"""Implements Adam algorithm.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. Since the fused implementation is usually significantly faster than
             the for-loop implementation, we try to use it whenever possible (all parameters
-            are on CUDA and are of a supported type). Else, we continue with the for-loop
-            implementation. (default: None)
+            are on CUDA and are of a supported type). Else, we attempt to use the foreach
+            implementation and lastly fall back to the for-loop implementation. (default: None)
 
+    .. note:: The foreach and fused implementations are typically faster than the for-loop,
+              single-tensor implementation, so we will try to default to them IF the user has
+              not specified either flag (i.e., when foreach = fused = None). For example, if
+              the user specifies True for foreach but nothing for fused, we will run the foreach
+              implementation. If the user specifies False for fused but nothing for foreach, we will
+              run the for-loop implementation. If the user specifies True for both foreach and
+              fused, we will prioritize fused over foreach. We attempt to use the fastest, so the
+              hierarchy goes fused -> foreach -> for-loop.
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
-    """.format(maximize=_maximize_doc, capturable=_capturable_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, capturable=_capturable_doc,
+               differentiable=_differentiable_doc)
 
 
 def adam(params: List[Tensor],
@@ -308,36 +317,25 @@ def adam(params: List[Tensor],
     See :class:`~torch.optim.Adam` for details.
     """
 
-    # We try to use the fused implementation whenever we can since it is fastest.
-    # It's only available when the tensors are floats on the same CUDA device
-    # and when differentiable=False.
-    # We still respect when the user inputs False for fused.
+    if fused is None and foreach is None:
+        fused, foreach = _default_to_fused_or_foreach(
+            [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
+            differentiable, has_fused=True)
     if fused is None:
-        all_tensors = []
-        all_tensors.extend(params)
-        all_tensors.extend(grads)
-        all_tensors.extend(exp_avgs)
-        all_tensors.extend(exp_avg_sqs)
-        all_tensors.extend(max_exp_avg_sqs)
-        all_tensors.extend(state_steps)
-        fused = not torch.jit.is_scripting() and not differentiable and all(
-            p.is_cuda and torch.is_floating_point(p) for p in all_tensors
-        )
+        fused = False
+    if foreach is None:
+        foreach = False
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
-    if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
-
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
 
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adam
-    elif fused and not torch.jit.is_scripting():
+    if fused and not torch.jit.is_scripting():
         func = _fused_adam
+    elif foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adam
     else:
         func = _single_tensor_adam
 
