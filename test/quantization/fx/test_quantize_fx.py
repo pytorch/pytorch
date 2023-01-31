@@ -1502,7 +1502,6 @@ class TestQuantizeFx(QuantizationTestCase):
             # check converted/quantized model
             m = convert_fx(m)
             self.checkGraphModuleNodes(m, expected_node_occurrence=convert_count_check)
-            print("standalone:", m.standalone)
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_convert_count_check)
             res = m(*example_inputs)
 
@@ -3790,7 +3789,6 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 30),))
         m = convert_fx(m)
         state_dict = m.state_dict()
-        print("state dict:", state_dict)
         self.assertTrue("_packed_weight_0" in state_dict)
 
         # test conv packed weight
@@ -5614,7 +5612,6 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(m, qconfig_mapping, example_inputs)
         m(*example_inputs)
         m_ref = copy.deepcopy(m)
-        print(f"m: {m}, m_ref:{m_ref}")
         m_ref = convert_to_reference_fx(m_ref)
         m = _convert_to_reference_decomposed_fx(m)
         expected_occurrence = {

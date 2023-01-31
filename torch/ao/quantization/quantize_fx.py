@@ -29,7 +29,7 @@ def attach_preserved_attrs_to_model(
     """ Store preserved attributes to the model.meta so that it can be preserved during deepcopy
     """
     for attr_name, attr in preserved_attrs.items():
-        model.meta[attr_name] = attr
+        model.meta[attr_name] = attr  # type: ignore[operator, index]
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):

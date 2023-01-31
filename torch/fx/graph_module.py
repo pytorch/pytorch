@@ -709,6 +709,18 @@ class {module_name}(torch.nn.Module):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
         GraphModule.__init__(res, fake_mod, fake_mod.__dict__['_graph'])
+        # hooks are lost during `GraphModule.__init__`, so we need to copy over
+        # them explicitly, note right now we are only copying state_dict related
+        # hooks, to reduce bc-related issues, we can copy forward/backward related
+        # hooks in the future as well if needed
+        extra_preserved_attrs = [
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks"
+        ]
+        for attr in extra_preserved_attrs:
+            if attr in self.__dict__:
+                setattr(res, attr, copy.deepcopy(self.__dict__[attr], memo))
         res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
         return res
 
