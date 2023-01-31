@@ -901,6 +901,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
+    def test_user_defined_class_python_type(self):
+        class MyClass1:
+            pass
+
+        class ExampleMeta(type):
+            pass
+
+        class MyClass2(metaclass=ExampleMeta):
+            pass
+
+        def fn(x, c):
+            if isinstance(c, MyClass1):
+                return x + 1
+            elif isinstance(c, MyClass2):
+                return x + 2
+            else:
+                return x + 3
+
+        x = torch.rand(3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for c in [MyClass1, MyClass2]:
+            ref = fn(x, c)
+            res = opt_fn(x, c)
+            self.assertTrue(same(ref, res))
+
     def test_manual_seed(self):
         def fn(a, b):
             x = a + b

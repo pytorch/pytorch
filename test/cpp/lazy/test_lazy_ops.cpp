@@ -1028,39 +1028,6 @@ TEST_F(LazyOpsTest, TestQR) {
   }
 }
 
-TEST_F(LazyOpsTest, TestSymEig) {
-  static const int dims[] = {4, 7};
-  for (auto m : dims) {
-    for (bool eigenvectors : {true, false}) {
-      for (bool upper : {true, false}) {
-        torch::Tensor a = torch::rand(
-            {m, m},
-            torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-        torch::Tensor sym_a = a.mm(a.t());
-        auto b = torch::symeig(sym_a, eigenvectors, upper);
-        ForEachDevice([&](const torch::Device& device) {
-          torch::Tensor lazy_a = CopyToDevice(sym_a, device);
-          auto lazy_b = torch::symeig(lazy_a, eigenvectors, upper);
-          AllClose(
-              std::get<0>(b),
-              std::get<0>(lazy_b),
-              /*rtol=*/3e-2,
-              /*atol=*/1e-2);
-          if (eigenvectors) {
-            AllClose(
-                std::get<1>(b).abs(),
-                std::get<1>(lazy_b).abs(),
-                /*rtol=*/3e-2,
-                /*atol=*/1e-2);
-          } else {
-            EXPECT_EQ(std::get<1>(b).sizes(), std::get<1>(lazy_b).sizes());
-          }
-        });
-      }
-    }
-  }
-}
-
 TEST_F(LazyOpsTest, TestCholesky) {
   static const int dims[] = {4, 7};
   for (auto m : dims) {
