@@ -68,10 +68,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() override = default;
 
