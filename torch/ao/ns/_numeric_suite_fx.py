@@ -766,7 +766,7 @@ def prepare_n_shadows_model(
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
     custom_tracer: Any = None,
-) -> torch.nn.Module:
+) -> GraphModule:
     """
     Given a model with a graph with M ops such as
 
@@ -936,7 +936,7 @@ def _n_shadows_compare_weights(
     example_inputs: Any,
     qconfig_mapping: QConfigMapping,
     backend_config: BackendConfig,
-) -> torch.nn.Module:
+) -> NSResultsType:
     """
     Note: this API is not recommended for wide usage, it is only
     provided for customers who need to migrate from the `add_loggers`

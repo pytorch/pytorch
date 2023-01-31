@@ -146,6 +146,21 @@ class UnsupportedModuleCall(torch.nn.Module):
         return 1 + self.mod(x * 1.5)
 
 
+class ModuleWithStaticForward(torch.nn.Module):
+    @staticmethod
+    def forward(x):
+        return x * torch.sigmoid(x)
+
+
+class ModuleCallModuleWithStaticForward(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mod = ModuleWithStaticForward()
+
+    def forward(self, x):
+        return self.mod(x)
+
+
 class ModuleStaticMethodCall(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -696,6 +711,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_submodules2 = make_test(SubmoduleExample())
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
+    test_module_call_module_with_static_forward = make_test(
+        ModuleCallModuleWithStaticForward()
+    )
     test_module_static_method = make_test(ModuleStaticMethodCall())
     test_fnmember = make_test(FnMember())
     test_fnmembercmp1 = make_test(FnMemberCmp(F.relu))
