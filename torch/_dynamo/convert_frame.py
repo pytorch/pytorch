@@ -414,6 +414,7 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
+        # breakpoint()
         if config.output_code:
             log.info(
                 format_bytecode(

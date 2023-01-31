@@ -1594,6 +1594,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inst.target,
             **VariableTracker.propagate(ctx),
         )
+        # 3.11 no longer uses a block stack, but we still keep track of one
+        # so that we know which contexts are currently active.
         if isinstance(self, InstructionTranslator):
             self.block_stack.append(BlockStackEntry(id(exit), inst.target, self.real_stack_len(), ctx))
         else:
@@ -1602,6 +1604,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         self.push(exit)
         self.push(ctx.enter(self))
+
+    # cell creation is already handled by existing logic
+    def MAKE_CELL(self, inst):
+        pass
+
+    # def COPY_FREE_VARS(self, ints):
+    #     unimplemented("COPY_FREE_VARS can only be called on inlined functions")
 
     def copy_graphstate(self) -> InstructionTranslatorGraphState:
         """Create a checkpoint of the current state by copying everything"""
@@ -2108,6 +2117,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
         self.push(self.closure_cells[inst.argval])
+
+    # def COPY_FREE_VARS(self, inst):
+    #     for name, cell in self.closure_cells.items():
+    #         self.symbolic_locals[name] = cell
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)
