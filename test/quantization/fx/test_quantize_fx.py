@@ -1619,28 +1619,29 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.conv2 = nn.Conv2d(1, 1, 1)
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.linear = nn.Linear(9, 3)
 
             def forward(self, x):
-                x = self.conv1(x)
-                x = self.conv2(x)
+                x = self.conv(x)
+                x = x.reshape((1, -1))
+                x = self.linear(x)
                 return x
 
         m = M().eval()
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        example_inputs = (torch.randn(1, 1, 1, 1),)
+        example_inputs = (torch.randn(1, 1, 3, 3),)
         m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         m(*example_inputs)
         m = convert_fx(m)
         m(*example_inputs)
-        # first conv is quantized, second conv is not quantized
+        # conv is quantized, linear is not quantized
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_module(nnq.Conv2d),
             ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
@@ -1911,6 +1912,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 
+    @override_qengines
     def test_qconfig_dict_with_fused_modules(self):
         class LinearReLUModel(torch.nn.Module):
             def __init__(self, relu):
@@ -1950,7 +1952,8 @@ class TestQuantizeFx(QuantizationTestCase):
         for model in [LinearReLUModel, ConvReLUModel, ConvBnReLUModel]:
             for relu in [torch.nn.ReLU(), torch.nn.functional.relu, torch.relu]:
                 m = model(relu).eval()
-                qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping("fbgemm")
+                qengine = torch.backends.quantized.engine
+                qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping(qengine)
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
 
@@ -5795,6 +5798,16 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
+        # TODO Currently it's required that separate ops in a fused op/module have the same qconfig.
+        #      Need to be able to support fusion of ops with different qconfigs
+        # Since tanh must have 'fixed_qparams_qconfig' while linear should use
+        # the global qconfig, we need to set qconfigs for them manually here for
+        # fusion and cannot put such configs in onednn's default qconfig_mapping.
+        # Known issue:
+        # Cannot fuse linear - tanh and quantize standalone tanh at the same time.
+        qconfig = get_default_qconfig('onednn')
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig)
+        qconfig_mapping.set_object_type(torch.nn.Tanh, qconfig)
         with override_quantized_engine('onednn'):
             m = LinearTanhModel()
             self._test_linear_activation_fusion_lowering_helper(
@@ -5805,6 +5818,70 @@ class TestQuantizeFx(QuantizationTestCase):
                 nniq.LinearTanh,
                 nn.Linear,
                 nn.Tanh)
+
+    @override_qengines
+    def test_linear_size_view(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_relu=False):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 32)
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                if self.use_relu:
+                    x = self.relu(x)
+                return x.view(x.size(0), 1, 4, 8)
+
+        for use_relu in [False, True]:
+            model_fp32 = M(use_relu).eval()
+            qengine = torch.backends.quantized.engine
+            qconfig_mapping = get_default_qconfig_mapping(qengine)
+            x = torch.randn((5, 16))
+            model_fp32(x)
+            prepared_model = prepare_fx(model_fp32, qconfig_mapping, x)
+            prepared_model(x)
+            quantized_model = convert_fx(prepared_model)
+            node_occurrence = {
+                ns.call_module(nnq.Linear): 0 if use_relu else 1,
+                ns.call_module(nniq.LinearReLU): 1 if use_relu else 0,
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
+
+    @override_qengines
+    def test_linear_shape_view(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_relu=False):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 32)
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                if self.use_relu:
+                    x = self.relu(x)
+                return x.view(x.shape[0], 1, 4, 8)
+
+        for use_relu in [False, True]:
+            model_fp32 = M(use_relu).eval()
+            qengine = torch.backends.quantized.engine
+            qconfig_mapping = get_default_qconfig_mapping(qengine)
+            x = torch.randn((5, 16))
+            model_fp32(x)
+            prepared_model = prepare_fx(model_fp32, qconfig_mapping, x)
+            prepared_model(x)
+            quantized_model = convert_fx(prepared_model)
+            node_occurrence = {
+                ns.call_module(nnq.Linear): 0 if use_relu else 1,
+                ns.call_module(nniq.LinearReLU): 1 if use_relu else 0,
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -8518,8 +8595,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
                     return x
 
             qengine = torch.backends.quantized.engine
-            qconfig_dict = {"": get_default_qat_qconfig(qengine),
-                            "object_type": [(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)]}
+            qconfig_dict = QConfigMapping() \
+                .set_global(get_default_qat_qconfig(qengine)) \
+                .set_object_type(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)
 
             train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
             eval_output = [[torch.randint(0, 10, (12, 1))]]

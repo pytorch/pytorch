@@ -972,8 +972,7 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
-
-        if backend_str == Backend.GLOO:
+        elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
@@ -1009,6 +1008,7 @@ def _new_process_group_helper(
             backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
             extended_api = backend_plugin.extended_api
+            backend_type = ProcessGroup.BackendType.CUSTOM
 
             if not extended_api:
                 backend_class = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
