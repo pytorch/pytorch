@@ -4318,7 +4318,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     base = torch.where(mask, end, start)
     output = coeff * (end - start) + base
     # make sure the decomposition output's stride is same as non-decomposition path.
-    strides = utils.compute_elementwise_output_strides(*inputs)
+    strides = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != strides:
         new_output = torch.empty_strided(
             output.shape,
@@ -4331,6 +4331,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         new_output.copy_(output)
         output = new_output
     return output
+
 
 @register_decomposition(aten.linspace)
 @out_wrapper()
