@@ -1,0 +1,37 @@
+name: anaconda-prune
+
+on:
+  push:
+    branches:
+      - postnightly
+  pull_request:
+    paths:
+      - .github/workflows/prune-nightly-anaconda-packages.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+
+jobs:
+  anaconda-prune-pytorch-nightly:
+    name: anaconda-prune-pytorch-nightly
+    uses: ./.github/workflows/_prune-anaconda-packages.yml
+    with: 
+    #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+      packages: "pytorch torchvision torchaudio torchtext"
+      channel: pytorch-nightly
+    secrets:
+      CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      
+  anaconda-prune-pytorch-test:
+    name: anaconda-prune-pytorch-test
+    uses: ./.github/workflows/_prune-anaconda-packages.yml
+    with: 
+    #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+      packages: "pytorch torchvision torchaudio torchtext"
+      channel: pytorch-test
+    secrets:
+      CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
