@@ -8,10 +8,9 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.onnx._internal import fx as fx_onnx
 from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
-
 model_name = "sshleifer/tiny-gpt2"
 ftm = FakeTensorMode(allow_non_fake_inputs=True, allow_fallback_kernels=False)
-ctx = fx_onnx.TorchLoadPathCaptureContext()
+ctx = fx_onnx.FxToOnnxContext()
 with ftm, ctx:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     inputs = tokenizer("Hello world!", return_tensors="pt")

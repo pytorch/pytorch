@@ -112,7 +112,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
         ftm = FakeTensorMode(allow_non_fake_inputs=True, allow_fallback_kernels=False)
-        ctx = fx_onnx.TorchLoadPathCaptureContext()
+        ctx = fx_onnx.FxToOnnxContext()
         # The following coed block does several things.
         #  1. Create a model whose parameters and buffers are all FakeTensor's.
         #  2. Convert nn.Module into ONNX model without initializers.

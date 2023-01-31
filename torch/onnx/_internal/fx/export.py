@@ -7,7 +7,7 @@ import itertools
 import operator
 import os
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 try:
     import onnx
@@ -791,40 +791,6 @@ def export_without_parameters_and_buffers(
         bound.args,
         replaced_attrs,
     )
-
-
-class TorchLoadPathCaptureContext:
-    """Context manager to capture the path of torch.load().
-
-    This context manager is used to capture the path of torch.load() in
-    order to save the external data of the model to the same directory
-    as the model.
-
-    Example:
-        with TorchLoadPathCaptureContext() as path:
-            torch.load(model_path)
-        # path is the directory of model_path.
-    """
-
-    def __init__(self):
-        # List of file paths processed by torch.load.
-        self.paths: List[str] = []
-        # Original version of torch.load.
-        self.torch_load = torch.load
-
-        def torch_load_wrapper(f, *args, **kwargs):
-            # Record path.
-            self.paths.append(f)
-            # Then, call the original torch.load.
-            return self.torch_load(f, *args, **kwargs)
-
-        self.torch_wrapper = torch_load_wrapper
-
-    def __enter__(self):
-        torch.load = self.torch_wrapper
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        torch.load = self.torch_load
 
 
 def _create_tensor_proto_with_external_data(
