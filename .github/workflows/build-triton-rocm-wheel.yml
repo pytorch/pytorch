@@ -52,32 +52,23 @@ jobs:
       - name: Build Triton ROCm wheel
         run: |
           set -x
-          mkdir -p "${RUNNER_TEMP}/artifacts/"
-          container_name=$(docker run \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}:/pytorch" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w /artifacts/ \
-            "${DOCKER_IMAGE}"      \
-          )
 
           # Determine python executable for given version
           case $PY_VERS in
           3.7)
-            PYTHON_EXECUTABLE=/opt/python/cp37-cp37m/bin/python
+            PYTHON_BIN_PATH=/opt/python/cp37-cp37m/bin
             ;;
           3.8)
-            PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
+            PYTHON_BIN_PATH=/opt/python/cp38-cp38/bin
             ;;
           3.9)
-            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
+            PYTHON_BIN_PATH=/opt/python/cp39-cp39/bin
             ;;
           3.10)
-            PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+            PYTHON_BIN_PATH=/opt/python/cp310-cp310/bin
             ;;
           3.11)
-            PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
+            PYTHON_BIN_PATH=/opt/python/cp311-cp311/bin
             ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
@@ -85,8 +76,27 @@ jobs:
             ;;
           esac
 
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install lit
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py --rocm
+          # create run.sh to set python bin path
+          mkdir -p "${RUNNER_TEMP}/scripts/"
+          echo '#!/bin/bash' > "${RUNNER_TEMP}/scripts/run.sh"
+          echo "export PYTHON_BIN_PATH=${PYTHON_BIN_PATH}" >> "${RUNNER_TEMP}/scripts/run.sh"
+          echo 'export PATH=${PYTHON_BIN_PATH}:$PATH' >> "${RUNNER_TEMP}/scripts/run.sh"
+          echo '$@' >> "${RUNNER_TEMP}/scripts/run.sh"
+          chmod +x "${RUNNER_TEMP}/scripts/run.sh"
+
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/scripts:/scripts" \
+            -w /artifacts/ \
+            "${DOCKER_IMAGE}"      \
+          )
+
+          docker exec -t "${container_name}" /scripts/run.sh python -m pip install lit==15.0.7
+          docker exec -t "${container_name}" /scripts/run.sh python /pytorch/.github/scripts/build_triton_wheel.py --rocm
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
