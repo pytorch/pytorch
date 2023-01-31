@@ -850,8 +850,11 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
       num_splits);
 
   debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
-  // TODO: Need to check if this cast is okay
-  return std::make_tuple(output, logsumexp, (int64_t)philox_seed, (int64_t)philox_offset, debug_attn_mask);
+
+  int64_t signed_philox_seed = sdp::bit_cast<int64_t>(philox_seed);
+  int64_t signed_philox_offset= sdp::bit_cast<int64_t>(philox_offset);
+
+  return std::make_tuple(output, logsumexp, signed_philox_seed, signed_philox_offset, debug_attn_mask);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor(), Tensor(), 0, 0, Tensor());

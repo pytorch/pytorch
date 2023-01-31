@@ -21,6 +21,14 @@
 
 namespace sdp {
 
+template <typename To, typename From>
+To bit_cast(From f) {
+  static_assert(sizeof(To) == sizeof(From));
+  To t;
+  std::memcpy(&t, &f, sizeof(f));
+  return t;
+}
+
 struct sdp_params {
   const at::Tensor& query;
   const at::Tensor& key;
