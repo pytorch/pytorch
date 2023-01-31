@@ -26,6 +26,7 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
 from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
+from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _reversible_functions():
+    def _reversible_binops():
         # function -> (forward magic method name, reverse magic method name)
         fns = {
             operator.add: ("__add__", "__radd__"),
@@ -332,10 +333,61 @@ class BuiltinVariable(VariableTracker):
             return out
 
         # Handle functions that are reversible (e.g. __add__ / __radd__)
-        reversible_functions = self._reversible_functions()
-        if self.fn in reversible_functions:
-            forward_name, reverse_name = reversible_functions[self.fn]
-            return self._call_reversible(tx, forward_name, reverse_name, args, kwargs)
+        reversible_binops = self._reversible_binops()
+        if self.fn in reversible_binops:
+            assert len(kwargs) == 0 and len(args) == 2
+
+            # Call reverse for user-defined variables, if any
+            forward_name, reverse_name = reversible_binops[self.fn]
+            if any([isinstance(arg, UserDefinedVariable) for arg in args]):
+                if isinstance(args[0], UserDefinedVariable):
+                    return args[0].call_method(tx, forward_name, args[1:], kwargs)
+                else:
+                    return args[1].call_method(tx, reverse_name, [args[0]], kwargs)
+
+            # Insert operator directly into the graph for dynamic shape args
+            if self._dynamic_args(*args, **kwargs):
+                return self._dyn_proxy(tx, *args, **kwargs)
+
+            # Handle special cases for list / tuple.
+            # TODO: Develop a proper abstraction to avoid this nonsense
+            a, b = args[0], args[1]
+            if (
+                self.fn is operator.mul
+                and isinstance(a, (variables.ListVariable, variables.TupleVariable))
+                and isinstance(b, variables.ConstantVariable)
+            ):
+                return a.__class__(
+                    items=a.items * b.as_python_constant(), mutable_local=MutableLocal()
+                ).add_options(self, a, b)
+            elif (
+                self.fn is operator.mul
+                and isinstance(a, (variables.ListVariable, variables.TupleVariable))
+                and isinstance(b, variables.ConstantVariable)
+            ):
+                return b.__class__(
+                    items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
+                ).add_options(self, a, b)
+            elif (
+                self.fn is operator.add
+                and isinstance(a, variables.TupleVariable)
+                and isinstance(b, variables.TupleVariable)
+            ):
+                return variables.TupleVariable(a.items + b.items, **options)
+            elif (
+                self.fn is operator.add
+                and isinstance(a, variables.TupleVariable)
+                and isinstance(b, variables.ConstantVariable)
+            ):
+                return variables.TupleVariable(
+                    a.items + list(b.unpack_var_sequence(self)), **options
+                )
+            elif self.fn is operator.add and isinstance(a, variables.BaseListVariable):
+                return type(a)(a.items + b.items, **options)
+
+            # Other cases are handled by the constant handler...
+            if not has_constant_handler:
+                return self._dyn_proxy(tx, *args, **kwargs)
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
@@ -370,27 +422,6 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
         return super().call_function(tx, args, kwargs)
-
-    def _call_reversible(self, tx, forward_name, reverse_name, args, kwargs):
-        # Call reverse (e.g. __radd__) if forward (e.g. __add__) isn't supported.
-        # This can be the case when doing int + SymInt, for example.
-        forward_res = args[0].call_method(tx, forward_name, args[1:], kwargs)
-        if (
-            forward_res.is_python_constant()
-            and forward_res.as_python_constant() is NotImplemented
-        ):
-            assert len(args) == 2
-            reverse_res = args[1].call_method(tx, reverse_name, [args[0]], kwargs)
-            if (
-                reverse_res.is_python_constant()
-                and reverse_res.as_python_constant() is NotImplemented
-            ):
-                unimplemented(
-                    f"unsupported function {forward_name} over args {str(args[0])}, "
-                    f"{str(args[1])} (reverse function {reverse_name} is also unsupported)"
-                )
-            return reverse_res
-        return forward_res
 
     def _call_min_max(self, tx, a, b):
         if self.tensor_args(a, b):
@@ -505,7 +536,6 @@ class BuiltinVariable(VariableTracker):
         return variables.SliceVariable(args)
 
     def _dyn_proxy(self, tx, *args, **kwargs):
-        assert self._dynamic_args(*args, **kwargs)
         from .builder import wrap_fx_proxy
 
         options = VariableTracker.propagate(self, args, kwargs.values())

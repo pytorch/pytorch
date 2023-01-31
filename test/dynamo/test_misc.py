@@ -199,6 +199,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         expected_op_count = 13 if torch._dynamo.testing.config.dynamic_shapes else 1
         self.assertEqual(counts.op_count, expected_op_count)
 
+    def test_user_defined_binop(self):
+        class MyClass:
+            def __init__(self, value):
+                self.value = value
+
+            def __radd__(self, other):
+                return self.value + other
+
+        def fn(x, c):
+            y = x.shape[0] + c
+            return x + y
+
+        counts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(counts)(fn)
+
+        x = torch.randn(3)
+        c = MyClass(4)
+        ref = fn(x, c)
+        res = opt_fn(x, c)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(counts.frame_count, 1)
+        expected_op_count = 4 if torch._dynamo.testing.config.dynamic_shapes else 1
+        self.assertEqual(counts.op_count, expected_op_count)
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
@@ -670,13 +695,38 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
-    def test_tuple_mul(self):
-        def fn(a):
-            b = (2, 3)
-            c = 2 * b * 4
-            return a + sum(c)
+    def test_list_slice_mul(self):
+        def fn(count):
+            a = [1, 2, 3]
+            head_mask = count * a[1:] * count
+            return head_mask
 
-        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertEqual(opt_fn(2), [2, 3] * 4)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
+
+    def test_tuple_mul(self):
+        def fn(count):
+            head_mask = count * (2, 3) * count
+            return head_mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertEqual(opt_fn(2), (2, 3) * 4)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
+
+    def test_tuple_mul_with_shape(self):
+        def fn(a):
+            x = a.shape[0]
+            y = 2 * (x, 2) * 2
+            return a + y[5]
+
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=5
+        )
 
     def test_user_getattr1(self):
         class MyConfig(dict):

@@ -132,11 +132,6 @@ class ConstantVariable(VariableTracker):
             search = args[0].as_python_constant()
             result = search in self.value
             return ConstantVariable(result, **options)
-        elif name == "__mul__" and len(args) == 1 and args[0].is_python_constant():
-            # Hard-code case for e.g. [1, 2, 3] * 5 for now.
-            return ConstantVariable(
-                getattr(operator, name)(self.value, const_args[0]), **options
-            )
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
