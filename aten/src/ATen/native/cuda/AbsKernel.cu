@@ -15,7 +15,7 @@ struct AbsFunctor {
   }
 };
 
-constexpr char abs_name[] = "abs_kernel";
+const char abs_name[] = "abs_kernel";
 void abs_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (at::isComplexType(dtype)) {

@@ -20,7 +20,7 @@
 
 namespace at::native {
         namespace {
-            constexpr char bessel_y1_name[] = "bessel_y1_forward";
+            const char bessel_y1_name[] = "bessel_y1_forward";
 
             void bessel_y1_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

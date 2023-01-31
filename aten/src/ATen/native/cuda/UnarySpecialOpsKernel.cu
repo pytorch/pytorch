@@ -19,7 +19,7 @@
 
 namespace at::native {
 
-constexpr char exp2_name[] = "exp2_kernel";
+const char exp2_name[] = "exp2_kernel";
 void exp2_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
@@ -41,7 +41,7 @@ void exp2_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-constexpr char i0_name[] = "i0";
+const char i0_name[] = "i0";
 void i0_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0_cuda", [&]() {
@@ -63,7 +63,7 @@ void i0_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // See note [Jiterator]
-constexpr char i0e_name[] = "calc_i0e";
+const char i0e_name[] = "calc_i0e";
 void i0e_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0e_cuda", [&]() {
@@ -84,7 +84,7 @@ void i0e_kernel_cuda(TensorIteratorBase& iter) {
 
 // See note [Jiterator]
 
-constexpr char i1_name[] = "i1";
+const char i1_name[] = "i1";
 void i1_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
@@ -102,7 +102,7 @@ void i1_kernel_cuda(TensorIteratorBase& iter) {
   #endif // AT_USE_JITERATOR()
 }
 
-constexpr char i1e_name[] = "i1e";
+const char i1e_name[] = "i1e";
 void i1e_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cuda", [&]() {
@@ -120,7 +120,7 @@ void i1e_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-constexpr char sigmoid_name[] = "sigmoid";
+const char sigmoid_name[] = "sigmoid";
 void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -159,7 +159,7 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-constexpr char sinc_name[] = "sinc";
+const char sinc_name[] = "sinc";
 void sinc_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
@@ -217,7 +217,7 @@ void logit_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {
       });
 }
 
-constexpr char ndtri_name[] = "ndtri";
+const char ndtri_name[] = "ndtri";
 void ndtri_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cuda", [&]() {
@@ -234,7 +234,7 @@ void ndtri_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-constexpr char log_ndtr_name[] = "log_ndtr";
+const char log_ndtr_name[] = "log_ndtr";
 void log_ndtr_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "log_ndtr_cuda", [&]() {
@@ -259,7 +259,7 @@ void erf_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-constexpr char erfc_name[] = "erfc_kernel";
+const char erfc_name[] = "erfc_kernel";
 void erfc_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "erfc_cuda", [&]() {
@@ -278,7 +278,7 @@ void erfc_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-constexpr char erfinv_name[] = "erfinv_kernel";
+const char erfinv_name[] = "erfinv_kernel";
 void erfinv_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfinv_cuda", [&]() {
@@ -296,7 +296,7 @@ void erfinv_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-constexpr char erfcx_name[] = "erfcx";
+const char erfcx_name[] = "erfcx";
 void erfcx_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "erfcx_cuda", [&]() {
@@ -313,7 +313,7 @@ void erfcx_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-constexpr char kaiser_window_name[] = "kaiser_window";
+const char kaiser_window_name[] = "kaiser_window";
 void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, double beta_){
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
@@ -347,7 +347,7 @@ void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, 
   #endif
 }
 
-constexpr char entr_name[] = "entr";
+const char entr_name[] = "entr";
 void entr_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "entr_cuda", [&]() {

@@ -96,6 +96,7 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     return f
 
 
+@make_boxed_compiler
 def _draw_graph_compile(fx_g, _, name, clear_meta=True):
     print(fx_g.code)
     draw_graph(fx_g, name, clear_meta=clear_meta)
@@ -103,9 +104,7 @@ def _draw_graph_compile(fx_g, _, name, clear_meta=True):
 
 
 def draw_graph_compile(name):
-    return make_boxed_compiler(
-        partial(_draw_graph_compile, name=name)
-    )
+    return partial(_draw_graph_compile, name=name)
 
 
 @make_boxed_compiler
