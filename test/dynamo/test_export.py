@@ -106,7 +106,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             def forward(self, x):
                 if torch.all(x):
                     return x * x
-                else: 
+                else:
                     raise ValueError("bad")
 
         module = MyModule()
@@ -115,7 +115,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, _ = torch._dynamo.export(module, *input)
         resB = graph(*input)
         self.assertTrue(torch._dynamo.utils.same(resA, resB))
-    
+
     def test_export_graph_bypass(self):
         inp = [
             torch.tensor([0.1, 0.1]),
