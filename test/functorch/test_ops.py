@@ -1340,7 +1340,6 @@ class TestOperators(TestCase):
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
-        xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
@@ -1507,7 +1506,6 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
-        xfail('symeig'),  # Forward AD not implemented and no decomposition
         xfail('take'),  # vmap: inplace into regular tensor
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
