@@ -1047,6 +1047,15 @@ class CommonTemplate:
             self.assertEqual(expect, actual)
         self.assertEqual(expect, actual)
 
+    def test_arange6(self):
+        def fn(x):
+            return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
+
+        # Test that float arguments are truncated to int when dtype is set explicitly
+        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        self.common(fn, (make_arg(1, dtype=torch.float32),))
+        self.common(fn, (make_arg(1, dtype=torch.int64),))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x

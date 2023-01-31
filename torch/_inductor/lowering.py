@@ -1298,29 +1298,44 @@ def arange(
         start = 0
 
     args = (start, end, step)
-    integer_args = all(isinstance(arg, (int, sympy.Expr)) for arg in args)
 
     if dtype is None:
+        integer_args = all(isinstance(arg, (int, sympy.Expr)) for arg in args)
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
-    length = sympy.ceiling(
-        sympy.Rational(end - start, step) if integer_args else (end - start) / step
-    )
+    is_integer = is_integer_dtype(dtype)
+    if is_integer:
+        xstart = int(start) if not isinstance(start, sympy.Expr) else start
+        xend = int(end) if not isinstance(end, sympy.Expr) else end
+        xstep = int(step) if not isinstance(step, sympy.Expr) else step
 
-    if integer_args:
+    # For int64 we truncate arguments to int before calculating length, but
+    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
+    if dtype == torch.int64:
+        length = sympy.ceiling((xend - xstart) / xstep)
+    else:
+        length = sympy.ceiling((end - start) / step)
+
+    if is_integer:
 
         def fn(index):
-            return ops.index_expr(step * index[0] + start, dtype)
+            return ops.index_expr(xstep * index[0] + xstart, dtype=dtype)
 
     else:
         computation_dtype = get_computation_dtype(dtype)
 
+        def get_param(x):
+            if isinstance(x, sympy.Expr):
+                return ops.index_expr(x, dtype=computation_dtype)
+            else:
+                return ops.constant(x, dtype=computation_dtype)
+
         def fn(index):
-            ind = ops.index_expr(index[0], computation_dtype)
-            xstep = ops.constant(step, dtype=computation_dtype)
-            xstart = ops.constant(start, dtype=computation_dtype)
-            inc = ops.mul(xstep, ind)
-            val = ops.add(xstart, inc)
+            ind = ops.index_expr(index[0], dtype=computation_dtype)
+            pstep = get_param(step)
+            pstart = get_param(start)
+            inc = ops.mul(pstep, ind)
+            val = ops.add(pstart, inc)
             return ops.to_dtype(val, dtype)
 
     return Pointwise.create(
