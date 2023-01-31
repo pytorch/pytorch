@@ -445,6 +445,7 @@ class WrapperCodeGen(CodeGen):
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
+        output_buffer.set_reuses_buffer(input_buffer)
         self.write_reuse_line(input_buffer, output_buffer)
 
     def codegen_cuda_device_guard_enter(self, device_idx):

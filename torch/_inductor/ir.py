@@ -1888,6 +1888,8 @@ class Buffer(IRNode):
     name: str
     layout: Layout
 
+    _reuses_buffer: Optional[Buffer] = None
+
     def make_indexer(self):
         return self.layout.make_indexer()
 
@@ -1971,6 +1973,14 @@ class Buffer(IRNode):
 
     def realize(self):
         pass
+
+    def set_reuses_buffer(self, buffer):
+        self._reuses_buffer = buffer
+
+    def reuses_buffer(self, buffer):
+        return (
+            self._reuses_buffer and self._reuses_buffer.get_name() == buffer.get_name()
+        )
 
 
 class InputBuffer(Buffer):
