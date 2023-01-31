@@ -1107,7 +1107,7 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
 
     # Check Accuracy
     if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-        log.warning("Accuracy failed for the TorchDyanmo produced graph")
+        log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
