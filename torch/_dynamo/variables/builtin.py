@@ -136,6 +136,33 @@ class BuiltinVariable(VariableTracker):
         }
         return fns
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def _reversible_functions():
+        # function -> (forward magic method name, reverse magic method name)
+        fns = {
+            operator.add: ("__add__", "__radd__"),
+            operator.sub: ("__sub__", "__rsub__"),
+            operator.mul: ("__mul__", "__rmul__"),
+            operator.truediv: ("__truediv__", "__rtruediv__"),
+            operator.floordiv: ("__floordiv__", "__rfloordiv__"),
+            operator.mod: ("__mod__", "__rmod__"),
+            pow: ("__pow__", "__rpow__"),
+            operator.pow: ("__pow__", "__rpow__"),
+
+            # Don't support these for now, since the corresponding reverse magic methods
+            # aren't defined on SymInt / SymFloat.
+
+            # operator.matmul: ("__matmul__", "__rmatmul__"),
+            # divmod: ("__divmod__", "__rdivmod__"),
+            # operator.lshift: ("__lshift__", "__rlshift__"),
+            # operator.rshift: ("__rshift__", "__rrshift__"),
+            # operator.and_: ("__and__", "__rand__"),
+            # operator.or_: ("__or__", "__ror__"),
+            # operator.xor: ("__xor__", "__rxor__"),
+        }
+        return fns
+
     def can_insert_in_graph(self):
         return self.fn in self._fx_graph_functions()
 
@@ -306,6 +333,12 @@ class BuiltinVariable(VariableTracker):
             )
             return out
 
+        # Handle functions that are reversible (e.g. __add__ / __radd__)
+        reversible_functions = self._reversible_functions()
+        if self.fn in reversible_functions:
+            forward_name, reverse_name = reversible_functions[self.fn]
+            return self._call_reversible(tx, forward_name, reverse_name, args, kwargs)
+
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
             try:
@@ -339,6 +372,15 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
         return super().call_function(tx, args, kwargs)
+
+    def _call_reversible(self, tx, forward_name, reverse_name, args, kwargs):
+        # Call reverse (e.g. __radd__) if forward (e.g. __add__) isn't supported.
+        # This can be the case when doing int + SymInt, for example.
+        forward_res = args[0].call_method(tx, forward_name, args[1:], kwargs)
+        if forward_res is NotImplemented:
+            assert len(args) == 2
+            return args[1].call_method(tx, reverse_name, [args[0]], kwargs)
+        return forward_res
 
     def _call_min_max(self, tx, a, b):
         if self.tensor_args(a, b):
@@ -465,10 +507,6 @@ class BuiltinVariable(VariableTracker):
             **options,
         )
 
-    def call_mod(self, tx, *args, **kwargs):
-        if self._dynamic_args(*args, **kwargs):
-            return self._dyn_proxy(tx, *args, **kwargs)
-
     def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
@@ -523,45 +561,8 @@ class BuiltinVariable(VariableTracker):
             ]
             return variables.TupleVariable(items, **options)
 
-    def call_mul(self, tx, a, b):
-        if isinstance(
-            a, (variables.ListVariable, variables.TupleVariable)
-        ) and isinstance(b, variables.ConstantVariable):
-            return a.__class__(
-                items=a.items * b.as_python_constant(), mutable_local=MutableLocal()
-            ).add_options(self, a, b)
-        elif isinstance(
-            b, (variables.ListVariable, variables.TupleVariable)
-        ) and isinstance(a, variables.ConstantVariable):
-            return b.__class__(
-                items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
-            ).add_options(self, a, b)
-        # TODO this doesn't generalize in other builtin operators.
-        elif isinstance(a, variables.ConstantVariable) and isinstance(
-            b, DynamicShapeVariable
-        ):
-            return b.call_method(tx, "__rmul__", [a], {})
-        else:
-            return a.call_method(tx, "__mul__", [b], {})
-
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
-
-    def call_add(self, tx, *args, **kwargs):
-        return args[0].call_method(tx, "__add__", args[1:], kwargs)
-
-    def call_sub(self, tx, *args, **kwargs):
-        # Commute sub when the right-hand side is symbolic
-        # (since e.g. int.__sub__(int, SymInt) is not implemented).
-        if len(args) == 2 and args[1].python_type() in (torch.SymInt, torch.SymFloat):
-            return args[1].call_method(tx, "__rsub__", [args[0]], kwargs)
-        return args[0].call_method(tx, "__sub__", args[1:], kwargs)
-
-    def call_truediv(self, tx, *args, **kwargs):
-        return args[0].call_method(tx, "__truediv__", args[1:], kwargs)
-
-    def call_floordiv(self, tx, *args, **kwargs):
-        return args[0].call_method(tx, "__floordiv__", args[1:], kwargs)
 
     def call_iadd(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
