@@ -9,7 +9,7 @@ namespace impl {
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
 void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
-  if (torchDispatchModeState.stack_.size() == 0) {
+  if (torchDispatchModeState.stack_.empty()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, true);
@@ -19,12 +19,12 @@ void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
 
 const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
   TORCH_CHECK(
-      torchDispatchModeState.stack_.size() > 0,
+      !torchDispatchModeState.stack_.empty(),
       "trying to pop from empty mode stack");
   std::shared_ptr<SafePyObject> out = torchDispatchModeState.stack_.back();
   torchDispatchModeState.stack_.pop_back();
 
-  if (torchDispatchModeState.stack_.size() == 0) {
+  if (torchDispatchModeState.stack_.empty()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, false);
@@ -50,7 +50,7 @@ const TorchDispatchModeTLS& TorchDispatchModeTLS::get_state() {
 
 void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
   torchDispatchModeState = state;
-  if (torchDispatchModeState.stack_.size() == 0) {
+  if (torchDispatchModeState.stack_.empty()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, false);
@@ -64,7 +64,8 @@ void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
 // UTIL
 
 bool dispatch_mode_enabled() {
-  return TorchDispatchModeTLS::stack_len() > 0;
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
+      TorchDispatchModeTLS::stack_len() > 0;
 }
 
 } // namespace impl

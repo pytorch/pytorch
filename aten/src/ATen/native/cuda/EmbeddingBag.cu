@@ -34,8 +34,7 @@
 #include <thrust/iterator/reverse_iterator.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #if !CUB_SUPPORTS_SCAN_BY_KEY()
 template<typename index_t>
@@ -560,5 +559,4 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   return output;
 }
 
-}
-}
+} // namespace at::native

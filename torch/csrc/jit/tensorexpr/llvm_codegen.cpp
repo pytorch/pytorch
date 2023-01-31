@@ -74,9 +74,7 @@ C10_DEFINE_bool(
     false,
     "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 c10::optional<std::string>& LLVMTargetTriple() {
   static c10::optional<std::string> triple = c10::nullopt;
@@ -348,9 +346,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 LLVMCodeGen::~LLVMCodeGen() = default;
 
