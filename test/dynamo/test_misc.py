@@ -157,14 +157,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = 4 + y
             y = 5 * y
             y = 2 % y
-            y = 3 ** y
+            y = 3**y
             y = 10 // y
             y = pow(2, y)
             y = 10 / y
-            return y
+            return x + y
 
-        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=0, expected_ops_dynamic=10,
-                                            expected_frame_count=0, expected_frame_count_dynamic=1)
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=11
+        )
 
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
@@ -179,11 +180,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 y = p + y
                 y = p * y
                 y = p % y
-                y = p ** y
+                y = p**y
                 y = p // y
                 y = pow(p, y)
                 y = p / y
-                return y
+                return x + y
 
         counts = torch._dynamo.testing.CompileCounter()
         mod = MyModule()
@@ -194,13 +195,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = optimized_mod(x)
 
         self.assertTrue(same(ref, res))
-        if torch._dynamo.testing.config.dynamic_shapes:
-            self.assertEqual(counts.frame_count, 1)
-            self.assertEqual(counts.op_count, 12)
-        else:
-            # constant folding
-            self.assertEqual(counts.frame_count, 0)
-            self.assertEqual(counts.op_count, 0)
+        self.assertEqual(counts.frame_count, 1)
+        expected_op_count = 13 if torch._dynamo.testing.config.dynamic_shapes else 1
+        self.assertEqual(counts.op_count, expected_op_count)
 
     def test_builtin_isinstance(self):
         def fn(x):

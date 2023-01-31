@@ -184,15 +184,9 @@ class CompileCounterWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
 
-def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None,
-                  expected_frame_count=None, expected_frame_count_dynamic=None):
+def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
     if config.dynamic_shapes and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
-
-    if config.dynamic_shapes and expected_frame_count_dynamic is not None:
-        expected_frame_count = expected_frame_count_dynamic
-    if expected_frame_count is None:
-        expected_frame_count = 1
 
     actual = CompileCounter()
     if expected_ops is None:
@@ -221,7 +215,7 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None,
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
     self.assertTrue(same(val2b, correct2))
-    self.assertEqual(actual.frame_count, expected_frame_count)
+    self.assertEqual(actual.frame_count, 1)
     if expected_ops is not None:
         self.assertEqual(actual.op_count, expected_ops)
 

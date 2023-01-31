@@ -947,7 +947,7 @@ def wrap_fx_proxy_cls(
         # For example, if __add__ returns NotImplemented, we should try __radd__
         # and leave __add__ out of the graph.
         proxy.node.graph.erase_node(proxy.node)
-        return example_value
+        return ConstantVariable(example_value)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

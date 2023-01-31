@@ -149,10 +149,8 @@ class BuiltinVariable(VariableTracker):
             operator.mod: ("__mod__", "__rmod__"),
             pow: ("__pow__", "__rpow__"),
             operator.pow: ("__pow__", "__rpow__"),
-
             # Don't support these for now, since the corresponding reverse magic methods
             # aren't defined on SymInt / SymFloat.
-
             # operator.matmul: ("__matmul__", "__rmatmul__"),
             # divmod: ("__divmod__", "__rdivmod__"),
             # operator.lshift: ("__lshift__", "__rlshift__"),
@@ -377,9 +375,21 @@ class BuiltinVariable(VariableTracker):
         # Call reverse (e.g. __radd__) if forward (e.g. __add__) isn't supported.
         # This can be the case when doing int + SymInt, for example.
         forward_res = args[0].call_method(tx, forward_name, args[1:], kwargs)
-        if forward_res is NotImplemented:
+        if (
+            forward_res.is_python_constant()
+            and forward_res.as_python_constant() is NotImplemented
+        ):
             assert len(args) == 2
-            return args[1].call_method(tx, reverse_name, [args[0]], kwargs)
+            reverse_res = args[1].call_method(tx, reverse_name, [args[0]], kwargs)
+            if (
+                reverse_res.is_python_constant()
+                and reverse_res.as_python_constant() is NotImplemented
+            ):
+                unimplemented(
+                    f"unsupported function {forward_name} over args {str(args[0])}, "
+                    f"{str(args[1])} (reverse function {reverse_name} is also unsupported)"
+                )
+            return reverse_res
         return forward_res
 
     def _call_min_max(self, tx, a, b):
