@@ -418,7 +418,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
 
             if has_bf16_support():
-                with torch.backends.mkldnn.flags(enabled=False):
+                with torch.backends.mkldnn.flags(enabled=True):
                     print(conv)
                     print(data.size())
                     x_bf16 = data.to(dtype=torch.bfloat16)
