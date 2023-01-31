@@ -629,13 +629,6 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def get_innermost_fake_tensor_mode():
-    for m in reversed(torch.utils._python_dispatch._get_current_dispatch_mode_stack()):
-        if isinstance(m, FakeTensorMode):
-            return m
-    return None
-
-
 def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
@@ -646,7 +639,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode: Any = get_innermost_fake_tensor_mode()
+        fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
@@ -702,7 +695,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), python_dispatcher_mode, fake_tensor_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
