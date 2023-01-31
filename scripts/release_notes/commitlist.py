@@ -143,7 +143,7 @@ class CommitList:
         files_changed = features['files_changed']
         for file in files_changed:
             file_lowercase = file.lower()
-            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
+            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.ci', '.azure_pipelines']):
                 category = 'releng'
                 break
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
