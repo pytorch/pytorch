@@ -3,10 +3,14 @@ name: upload
 on:
   workflow_call:
     inputs:
-      build_name:
+      packages:
         required: true
         type: string
-        description: The build's name
+        description: The packages to prune
+      channel:
+        required: true
+        type: string
+        description: The channel to prune packages
     secrets:
       conda-pytorchbot-token:
         required: true

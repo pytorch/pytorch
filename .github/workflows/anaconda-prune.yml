@@ -1,6 +1,8 @@
 name: anaconda-prune
 
 on:
+  schedule:
+    - cron: 45 1,7,13,19 * * *
   push:
     branches:
       - postnightly
