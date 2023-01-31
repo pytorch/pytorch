@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 from collections import namedtuple
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
@@ -243,6 +243,32 @@ class TestTypesAndAnnotation(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
             scripted_mod = torch.jit.script(mod)
+
+
+    def test_ignoring_fn_with_nonscriptable_types(self):
+        class CFX(object):
+            def __init__(self, a: List[torch.Tensor]) -> None:
+                self.a = a
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.sin(x)
+
+            @torch.jit._drop
+            def __iter__(self) -> Iterator[torch.Tensor]:
+                return iter(self.a)
+
+            @torch.jit._drop
+            def __fx_create_arg__(self, tracer: torch.fx.Tracer) -> torch.fx.node.Argument:
+                # torch.fx classes are not scriptable
+                return tracer.create_node(
+                    "call_function",
+                    CFX,
+                    args=(tracer.create_arg(self.features),),
+                    kwargs={},
+                )
+
+        torch.jit.script(CFX)
+
 
     def test_unimported_type_resolution(self):
         # verify fallback from the python resolver to the c++ resolver
