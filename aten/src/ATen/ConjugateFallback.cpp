@@ -1,8 +1,7 @@
 #include <ATen/native/MathBitsFallback.h>
 #include <ATen/native/MathBitFallThroughLists.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 struct ConjFallback : MathOpFallback {
   ConjFallback() : MathOpFallback(DispatchKey::Conjugate, "conjugate") {}
   bool is_bit_set(const Tensor& tensor) override {
@@ -63,5 +62,4 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
 }
 
-}
-} // namespace at
+} // namespace at::native

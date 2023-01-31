@@ -341,7 +341,7 @@ inline InferredType tryToInferType(py::handle input) {
     auto enum_type = py::cast<TypePtr>(
         py::module::import("torch.jit.annotations")
             .attr("try_ann_to_type")(enum_class, SourceRange()));
-    return InferredType(enum_type);
+    return InferredType(std::move(enum_type));
   }
 
   py::bool_ isClass =
@@ -387,7 +387,7 @@ inline InferredType tryToInferType(py::handle input) {
         auto class_type = py::cast<ClassTypePtr>(script_class);
 
         if (class_type && !class_type->is_module()) {
-          return InferredType(class_type);
+          return InferredType(std::move(class_type));
         }
       }
     }
@@ -432,7 +432,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
         return type_match.reason();
       }
     }
-    return InferredType(TupleType::create(element_types));
+    return InferredType(TupleType::create(std::move(element_types)));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
@@ -478,7 +478,8 @@ inline InferredType tryToInferContainerType(py::handle input) {
       key_type = *unified_key;
       value_type = *unified_value;
     }
-    return InferredType(DictType::create(key_type, value_type));
+    return InferredType(
+        DictType::create(std::move(key_type), std::move(value_type)));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
     size_t len = py::len(list);
@@ -548,6 +549,21 @@ inline bool isTraceableType(const TypePtr& type) {
 inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.success()) {
+    auto object = py::cast<py::object>(input);
+    if (auto mod = as_module(object)) {
+      // if obj is already a ScriptModule, just return its ivalue
+      auto ptr = mod.value()._ivalue();
+      // explict copy semantics for strong ownership of the resource.
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
+
+    // Check if the obj is a ScriptObject.
+    if (auto script_obj = as_object(object)) {
+      auto ptr = script_obj.value()._ivalue();
+      return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
+          ptr.release());
+    }
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
@@ -581,7 +597,7 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return IValue(std::move(elems));
+  return IValue(elems);
 }
 
 inline IValue createGenericDict(
@@ -594,7 +610,7 @@ inline IValue createGenericDict(
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
-  return IValue(std::move(elems));
+  return IValue(elems);
 }
 
 template <class T>
