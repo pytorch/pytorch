@@ -82,6 +82,12 @@ class FxToOnnxContext:
             torch.fx._symbolic_trace._wrapped_methods_to_patch
         )
         if (torch.Tensor, "__getitem__") not in desired_wrapped_methods:
+            # Adding `__getitem__` to the patching list will make tensor indexing traceable via
+            # torch.fx.symbolic_trace. Otherwise, `tensor[x, :, y]` cannot be traced.
+            # This happens because `__getitem__` is neither under torch domain nor an aten operator,
+            # so the patching (or similar Proxy-generating mechanism) doesn't happen automatically.
+            # Note that torch.fx.symbolic_trace defines FX_PATCH_GETITEM environment variable for
+            # enabling the line below for patching.
             desired_wrapped_methods.append((torch.Tensor, "__getitem__"))
         torch.fx._symbolic_trace._wrapped_methods_to_patch = desired_wrapped_methods
 
