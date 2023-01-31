@@ -152,8 +152,7 @@ c10_lib.impl("all_reduce", _all_reduce_cpu)
 
 RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh]
 
-# FIXME not the actual Python API, just here to help try it
-def all_reduce(self: torch.Tensor, reduceOp: str, tag: str, group: RANK_TYPES):
+def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -184,5 +183,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, tag: str, group: RANK_TYPES):
         raise ValueError("TODO DeviceMesh")
     else:
         raise ValueError("Invalid type for group")
+
     tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, rankset, stride)
     return AsyncCollectiveTensor(tensor)

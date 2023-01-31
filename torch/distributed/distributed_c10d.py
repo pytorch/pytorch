@@ -1087,7 +1087,7 @@ def _new_process_group_helper(
     _pg_backend_map[pg] = str(backend_config)
     #"" is the default tag for user PGs
     pg_tag = pg_tag or ""
-    _world.tags_to_pg.get(pg_tag, []).append(pg)
+    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
     return pg
 
@@ -3777,7 +3777,8 @@ def new_subgroups_by_enumeration(
 
 
 def _try_find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
-    for group, group_ranks in _world.tags_to_pg[tag].items():
+    for group in _world.tags_to_pg.get(tag, []):
+        group_ranks = get_process_group_ranks(group)
         good = all(r in group_ranks for r in ranks)
         if good:
             return group
