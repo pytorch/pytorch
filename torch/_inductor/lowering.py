@@ -3390,25 +3390,28 @@ def _is_ir_node_and_cuda(x):
     type_promotion_kind=None,
 )
 def pow(a, b):
+    # For pow_integer we want to know if the exponent is promoted from a
+    # smaller width type, since that requires fewer iterations to compute the
+    # power
+    promoted_dtype = get_promoted_dtype(
+        a,
+        b,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    )
+    b_dtype = b.get_dtype() if isinstance(b, TensorBox) else promoted_dtype
+    a = to_dtype(a, promoted_dtype) if isinstance(a, TensorBox) else a
+    b = to_dtype(b, promoted_dtype) if isinstance(b, TensorBox) else b
+
     if isinstance(a, Number):
         if a == 1:
             return full_like(b, 1)
-        if a == 2 and is_float_dtype(b.get_dtype()):
+        if a == 2 and is_float_dtype(promoted_dtype):
             return exp2(b)
 
     if isinstance(b, float) and b == int(b):
         b = int(b)
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
-
-    # For pow_integer we want to preserve if the exponent is a smaller width
-    # type, since that requires fewer iterations to compute the power
-    promoted_dtype = get_promoted_dtype(
-        a,
-        b,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    )
-    a = to_dtype(a, promoted_dtype) if isinstance(a, TensorBox) else constant_like(a)(b)
 
     is_integer_pow = is_integer_dtype(promoted_dtype)
     embed_exponent = isinstance(b, int) and (-32 < b < 32 or is_integer_pow)
@@ -3431,7 +3434,7 @@ def pow(a, b):
 
         def fn(idx):
             return pow_integer(
-                a_loader(idx), b_loader(idx), a.get_dtype(), b.get_dtype()
+                a_loader(idx), b_loader(idx), a.get_dtype(), b_dtype
             )
 
         return Pointwise.create(
@@ -3441,7 +3444,6 @@ def pow(a, b):
             ranges=a.get_size(),
         )
 
-    b = to_dtype(b, promoted_dtype) if isinstance(b, TensorBox) else constant_like(b)(a)
     return pow_native(a, b)
 
 
