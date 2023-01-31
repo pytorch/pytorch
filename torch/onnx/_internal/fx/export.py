@@ -7,7 +7,7 @@ import itertools
 import operator
 import os
 from types import ModuleType
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 try:
     import onnx
@@ -32,7 +32,7 @@ from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
-from torch.onnx._internal import jit_utils, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.utils import _pytree
 
 
@@ -46,14 +46,22 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
     exporter.
     """
 
+    @_beartype.beartype
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return False
 
+    @_beartype.beartype
+    def to_bool(self, obj: "torch.fx.Proxy") -> bool:
+        # This is a hack to tracing through if-else Python blocks.
+        # It may generate incorrect ONNX graphs if the if-else block
+        return False
 
+
+@_beartype.beartype
 def module_expansion_symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
     concrete_args: Optional[Dict[str, Any]] = None,
-) -> torch.fx.GraphModule:
+) -> "torch.fx.GraphModule":
     _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full", "empty"]
 
     def gen_constructor_wrapper(target):
@@ -100,6 +108,7 @@ def module_expansion_symbolic_trace(
             setattr(torch, name, orig)
 
 
+@_beartype.beartype
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
     table: Dict[torch._ops.OpOverload, str] = {}
 
@@ -137,6 +146,7 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
 
+@_beartype.beartype
 def _create_onnx_friendly_decomposition_table() -> Dict[
     torch._ops.OpOverload, Callable
 ]:
@@ -159,6 +169,7 @@ def _create_onnx_friendly_decomposition_table() -> Dict[
 _ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
 
 
+@_beartype.beartype
 def _retrieve_or_wrap_scalar_as_constant(
     g, fx_node_arg, fx_name_to_ts_value, example_output
 ):
@@ -217,6 +228,7 @@ def _retrieve_or_wrap_scalar_as_constant(
     return ts_value
 
 
+@_beartype.beartype
 def _wrap_fx_args_as_ts_args(g, root, node, fx_name_to_ts_value):
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
@@ -244,6 +256,7 @@ def _wrap_fx_args_as_ts_args(g, root, node, fx_name_to_ts_value):
     )
 
 
+@_beartype.beartype
 def _fill_tensor_types(ts_values, expected_values):
     flat_ts_values, _ = _pytree.tree_flatten(ts_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
@@ -251,6 +264,7 @@ def _fill_tensor_types(ts_values, expected_values):
         ts_value.setType(torch._C.TensorType.create_from_tensor(expected_value))
 
 
+@_beartype.beartype
 def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     # TODO(wechi): To get rid of TorchScript dependency,
     # "g" should just be onnx.GraphProto or an equivalent
@@ -258,7 +272,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     g = torch._C.Graph()
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
-    # To connect the values to nodes in the TorchScript graph, we maintian
+    # To connect the values to nodes in the TorchScript graph, we maintain
     # fx_name_to_ts_value. Basically, we want to translate
     #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
     # to
@@ -446,6 +460,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     return g, ts_name_to_real_tensor
 
 
+@_beartype.beartype
 def _ts_graph_to_onnx_model_in_protobuf(
     ts_graph, ts_name_to_real_tensor, opset_version
 ) -> Union["onnx.ModelProto", bytes]:
@@ -466,6 +481,7 @@ def _ts_graph_to_onnx_model_in_protobuf(
     return proto
 
 
+@_beartype.beartype
 def _shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
     # Use this FakeTensorMode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor
@@ -503,6 +519,7 @@ def _shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *
     return decomposed_module
 
 
+@_beartype.beartype
 def _rename_placeholder_targets(
     module: torch.fx.GraphModule, reference_module: torch.fx.GraphModule
 ):
@@ -522,6 +539,7 @@ def _rename_placeholder_targets(
     module.recompile()
 
 
+@_beartype.beartype
 def _export(
     module: torch.fx.GraphModule,
     opset_version=None,
@@ -564,10 +582,11 @@ def _export(
         # Return ModelProto in binary format.
         return onnx_model
     # Return ModelProto in readable format (printable).
-    model_proto = onnx.ModelProto.FromString(onnx_model)
+    model_proto: "onnx.ModelProto" = onnx.ModelProto.FromString(onnx_model)
     return model_proto
 
 
+@_beartype.beartype
 def export(
     fn: Union[torch.nn.Module, Callable],
     opset_version,
@@ -595,6 +614,7 @@ def export(
     )
 
 
+@_beartype.beartype
 def export_without_kwargs(
     fn: Union[torch.nn.Module, Callable],
     opset_version,
@@ -633,10 +653,10 @@ def export_without_kwargs(
 
     class GraphCaptureCompiler:
         def __init__(self):
-            self.captured_graph: Optional[torch.fx.GraphModule] = None
+            self.captured_graph: Optional["torch.fx.GraphModule"] = None
             self.captured_graph_count = 0
 
-        def compile(self, gm: torch.fx.GraphModule, _):
+        def compile(self, gm: "torch.fx.GraphModule", _):
             assert self.captured_graph_count == 0
             self.captured_graph = gm
             self.captured_graph_count += 1
@@ -657,10 +677,11 @@ def export_without_kwargs(
     )
 
 
-def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
+@_beartype.beartype
+def _move_placeholder_to_front(graph_module: "torch.fx.GraphModule") -> None:
     """
     This function move all placeholder nodes to the front of the graph node list.
-    In torch.fx.Graph, placehoder is a special assignment node. If it's not
+    In torch.fx.Graph, placeholder is a special assignment node. If it's not
     executed in the beginning, it could overwrite values computed by upstream
     nodes.
     """
@@ -679,12 +700,17 @@ def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
         first_not_placeholder.prepend(placeholder)
 
 
-def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
+@_beartype.beartype
+def _replace_get_attr_with_placeholder(
+    graph_module: "torch.fx.GraphModule",
+) -> Tuple[torch.Tensor, ...]:
     """
     Replace get_attr with placeholder.
+    The parameters and buffers accessed by the original get_attr are returned;
+    they are useful when creating random inputs for the modified graph_module.
     """
     graph = graph_module.graph
-    replaced_attrs = []
+    replaced_attrs: List[torch.Tensor] = []
     for node in graph.nodes:
         if node.op == "get_attr":
             replaced_attr: Optional[torch.Tensor] = None
@@ -719,21 +745,17 @@ def _replace_get_attr_with_placeholder(graph_module: torch.fx.GraphModule):
 
             replaced_attrs.append(replaced_attr)
 
-    return replaced_attrs
+    return tuple(replaced_attrs)
 
 
-def export_without_parameters_and_buffers(
+@_beartype.beartype
+def _trace_into_fx_graph_via_fx_symbolic_trace(
     module: torch.nn.Module,
     *args,
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
-    use_binary_format: bool = True,
-    opset_version: int = None,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
-):
-    if opset_version is None:
-        opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+) -> Tuple["torch.fx.GraphModule", Tuple[Any, ...]]:
     signature = inspect.signature(module.forward)
 
     # We hope the input kwargs will be mapped to bound.args after binding.
@@ -754,12 +776,39 @@ def export_without_parameters_and_buffers(
     for param_name, param_value in bound.arguments.items():
         if isinstance(param_value, torch.Tensor):
             # param_value can be, e.g., a real tensor or a fake tensor.
-            # param_value is treated as substitable tensor symbol (aka placeholder).
+            # param_value is treated as substitutable tensor symbol (aka placeholder).
             concrete_args[param_name] = torch.fx._symbolic_trace.PH
         else:
             concrete_args[param_name] = param_value
 
-    graph_module = module_expansion_symbolic_trace(module, concrete_args=concrete_args)
+    return (
+        module_expansion_symbolic_trace(module, concrete_args=concrete_args),
+        bound.args,
+    )
+
+
+@_beartype.beartype
+def export_without_parameters_and_buffers(
+    module: torch.nn.Module,
+    *args,
+    decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
+    use_binary_format: bool = True,
+    opset_version: int = None,
+    # kwargs are the keyword arguments to call "module"; that is,
+    # module(*args, **kwargs) must run.
+    **kwargs,
+) -> Tuple[
+    Union["onnx.ModelProto", bytes],
+    "torch.fx.GraphModule",
+    Tuple[Any, ...],
+    Tuple[Any, ...],
+]:
+    if opset_version is None:
+        opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+
+    graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
+        module, *args, **kwargs
+    )
 
     # Make sure all placeholder nodes are executed before get_attr nodes.
     # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
@@ -775,29 +824,30 @@ def export_without_parameters_and_buffers(
     replaced_attrs = _replace_get_attr_with_placeholder(graph_module)
     # Move all newly created placeholder nodes to the front of the graph.
     _move_placeholder_to_front(graph_module)
-    # Finalize the graph editting.
+    # Finalize the graph editing.
     graph_module.recompile()
 
     return (
         _export(
             graph_module,
             opset_version,
-            *bound.args,
+            *bound_args,
             *replaced_attrs,
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
         ),
         graph_module,
-        bound.args,
+        bound_args,
         replaced_attrs,
     )
 
 
+@_beartype.beartype
 def _create_tensor_proto_with_external_data(
     tensor: torch.Tensor, name: str, location: str, basepath: str
-):
+) -> "onnx.TensorProto":
     """Create a TensorProto with external data from a PyTorch tensor.
-    The external data is saved in os.path.join(basepath, location).
+    The external data is saved to os.path.join(basepath, location).
 
     Args:
         tensor: Tensor to be saved.
@@ -857,13 +907,38 @@ def _create_tensor_proto_with_external_data(
     return tensor_proto
 
 
+@_beartype.beartype
 def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
     torch_load_paths: Tuple[str, ...],
-    onnx_model: onnx.ModelProto,
-):
+    onnx_model: "onnx.ModelProto",
+) -> None:
+    """Load PyTorch tensors from files and add to "onnx_model" as external initializers.
+
+    Output files:
+        ONNX model file path:
+        ONNX initializer folder: os.path.join(basepath, initializer_location)
+
+    After running this function, you can do
+        ort_sess = onnxruntime.InferenceSession(os.path.join(basepath, model_location))
+    to execute the model.
+
+    Arguments:
+        basepath: Base path of the external data file (e.g., "/tmp/large-onnx-model").
+        model_location: Relative location of the ONNX model file.
+            E.g., "model.onnx" so that the model file is saved to
+            "/tmp/large-onnx-model/model.onnx".
+        initializer_location: Relative location of the ONNX initializer folder.
+            E.g., "initializers" so that the initializers are saved to
+            "/tmp/large-onnx-model/initializers".
+        torch_load_paths: Files which containing serialized PyTorch tensors to be saved
+            as ONNX initializers. They are loaded by torch.load.
+        onnx_model: ONNX model to be saved with external initializers.
+            If an input name matches a tensor loaded from "torch_load_paths",
+            the tensor will be saved as that input's external initializer.
+    """
     onnx_model_with_initializers = onnx.ModelProto()
     onnx_model_with_initializers.CopyFrom(onnx_model)
     onnx_input_names = [input.name for input in onnx_model.graph.input]
@@ -872,7 +947,7 @@ def save_model_with_external_data(
         state_ditc = torch.load(path)
         for name, tensor in state_ditc.items():
             # Basically, "transformer.attention.self.query.weight" is mapped
-            # to "transformer_attention_self_query_weight" for mimicing the
+            # to "transformer_attention_self_query_weight" for mimicking the
             # name-modifying code in FX-to-ONNX exporter.
             # See function _replace_get_attr_with_placeholder for details.
             refined_name = name.replace(".", "_")

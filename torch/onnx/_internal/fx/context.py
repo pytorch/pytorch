@@ -6,8 +6,11 @@ import torch
 
 class FxToOnnxContext:
     """Context manager to make PyTorch friendly to FX-to-ONNX exporter.
+    This class means to collect all "patches" required by FX-to-ONNX
+    exporter. If PyTorch needs to be patched, please use this class to
+    manage the patch.
 
-    This context overwrides severl torch functions to support symbolic
+    This context overrides several torch functions to support symbolic
     export of large scale models.
 
     torch.load:
@@ -19,6 +22,9 @@ class FxToOnnxContext:
         model loading. FakeTensor's are created instead. Real tensors
         cannot be fitted into single machine's memory for the targeted
         model scale.
+    torch.fx._symbolic_trace._wrapped_methods_to_patch:
+        This list is extended with (torch.Tensor, "__getitem__") so that
+        weight[x, :, y] becomes exportable with torch.fx.symbolic_trace.
 
     Search for FxToOnnxContext in test_fx_to_onnx_with_onnxruntime.py for
     example usage.
