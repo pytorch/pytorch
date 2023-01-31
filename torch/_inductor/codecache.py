@@ -507,13 +507,6 @@ class PyCodeCache:
         return cls.cache[key]
 
 
-@functools.lru_cache(None)
-def patch_triton_dir():
-    os.environ["TRITON_CACHE_DIR"] = os.environ.get(
-        "TRITON_CACHE_DIR", os.path.join(cache_dir(), "triton")
-    )
-
-
 class TritonCodeCache:
     @staticmethod
     def get_name(mod):
@@ -522,7 +515,6 @@ class TritonCodeCache:
 
     @classmethod
     def load(cls, source_code):
-        patch_triton_dir()
         mod = PyCodeCache.load(source_code)
         return getattr(mod, cls.get_name(mod))
 

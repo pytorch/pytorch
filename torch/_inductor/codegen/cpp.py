@@ -179,7 +179,7 @@ class CppPrinter(ExprPrinter):
             x = f"({x} / {div})"
         return f"{x} % {mod}"
 
-    def _print_IndexingDiv(self, expr):
+    def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
@@ -223,6 +223,16 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def exp(x):
         return f"{x}.exp()"
+
+    @staticmethod
+    def exp2(x):
+        return f"{x}.exp2()"
+
+    @staticmethod
+    def expm1(x):
+        # decompose for a better performance
+        vec_one = f"decltype({x})(1)"
+        return f"{x}.exp() - {vec_one}"
 
     @staticmethod
     def erf(x):
@@ -299,6 +309,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
+
+    @staticmethod
+    def tan(a):
+        return f"{a}.tan()"
 
     @staticmethod
     def tanh(a):
@@ -391,10 +405,6 @@ class CppVecOverrides(OpOverrides):
         return f"({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"{x}.expm1()"
-
-    @staticmethod
     def log1p(x):
         return f"{x}.log1p()"
 
@@ -425,6 +435,14 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def exp2(x):
+        return f"std::exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def erf(x):
         return f"std::erf({x})"
 
@@ -441,8 +459,8 @@ class CppOverrides(OpOverrides):
         return f"std::log1p({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"std::expm1({x})"
+    def tan(x):
+        return f"std::tan({x})"
 
     @staticmethod
     def tanh(x):
@@ -1678,7 +1696,7 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
+            main_loop_range = ir.FloorDiv(self.size, sympy_factor)
             main_loop = LoopLevel(self.var, main_loop_range)
             main_loop.parallel = self.parallel
             main_loop.collapsed = False

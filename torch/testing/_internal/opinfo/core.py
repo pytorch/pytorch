@@ -1167,6 +1167,17 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def sample_inputs_sparse(
+        self, layout, device, dtype, requires_grad=False, **kwargs
+    ):
+        """Returns an iterable of SampleInputs that contain inputs with a
+        specified sparse layout.
+        """
+        sample_inputs_mth = getattr(
+            self, "sample_inputs_" + str(layout).split(".", 1)[-1]
+        )
+        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
+
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         coo layout.
@@ -2571,6 +2582,7 @@ class ForeachFuncInfo(OpInfo):
         dtypesIfROCM=None,
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
+        supports_autograd=False,
         **kwargs,
     ):
         super().__init__(
@@ -2579,6 +2591,7 @@ class ForeachFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
             **kwargs,
         )
 

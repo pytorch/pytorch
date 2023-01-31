@@ -704,15 +704,18 @@ class {module_name}(torch.nn.Module):
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
+        res = type(self).__new__(type(self))
+        memo[id(self)] = res
         fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        res = GraphModule(fake_mod, fake_mod.__dict__['_graph'])
-        res.meta = copy.deepcopy(self.meta)
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
+        GraphModule.__init__(res, fake_mod, fake_mod.__dict__['_graph'])
+        res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
         return res
+
 
     def __copy__(self):
         res = GraphModule(self, self.graph)
-        res.meta = self.meta
+        res.meta = getattr(self, 'meta', {})
         return res
 
     @compatibility(is_backward_compatible=False)
