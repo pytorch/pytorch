@@ -831,6 +831,20 @@ struct PythonPrintImpl {
         ss << "fork(" << name << ")";
         printOutputDefinition(node, ss.str());
       } break;
+      case prim::awaitable: {
+        // the subgraph gets emitted as another function
+        auto name = genName("__awaitable_function");
+        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
+        indent();
+        body_ << "def " << name << "():\n";
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
+          assignValue(graph->inputs().at(i), node->inputs().at(i));
+        }
+        printBody(graph->block());
+        std::stringstream ss;
+        ss << "awaitable(" << name << ")";
+        printOutputDefinition(node, ss.str());
+      } break;
       case prim::Enter: {
         const auto in = node->inputs().at(0);
         const auto out = node->outputs().at(0);
