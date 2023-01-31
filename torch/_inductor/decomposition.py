@@ -24,7 +24,7 @@ inductor_decompositions = get_decompositions(
         aten._to_copy,
     ]
 )
-decompositions = {**core_aten_decompositions, **inductor_decompositions}
+decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 
 def register_decomposition(ops):

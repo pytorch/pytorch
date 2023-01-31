@@ -169,16 +169,20 @@ def get_decompositions(
 import torch._decomp.decompositions
 import torch._refs
 
+aten = torch.ops.aten
+
 # This list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-aten = torch.ops.aten
-core_aten_decompositions = get_decompositions(
+# Do not directly use this list, use core_aten_decompositions() to get a copy instead
+CORE_ATEN_DECOMPOSITIONS = get_decompositions(
     [
         aten.linspace,
         aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
+        aten.addcmul_,
+        aten.addcdiv_,
         aten.avg_pool2d_backward,
         aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
@@ -281,3 +285,7 @@ core_aten_decompositions = get_decompositions(
         aten.zero,
     ]
 )
+
+# Returns a copy of the CORE_ATEN_DECOMPOSITIONS
+def core_aten_decompositions() -> Dict[OpOverload, Callable]:
+    return CORE_ATEN_DECOMPOSITIONS.copy()
