@@ -334,7 +334,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-bionic-cuda7-py3_10-gcc7-sm86-build:
+  linux-bionic-cuda11.7-py3_10-gcc7-sm86-build:
     name: linux-bionic-cuda11.7-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
