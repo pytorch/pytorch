@@ -20,11 +20,11 @@ class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._saved_config = dict(config.to_dict())
+        cls._saved_config = config.save_config()
 
     def tearDown(self):
         super().tearDown()
-        config.update(self._saved_config)
+        config.load_config(self._saved_config)
 
     def test_set(self):
         config.max_fusion_size = 13337
