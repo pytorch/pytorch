@@ -4,16 +4,16 @@ on:
   push:
     branches:
       - postnightly
+      - weiwangmeta/migrate_anaconda_prune_to_gha
   pull_request:
     paths:
-      - .github/workflows/prune-nightly-anaconda-packages.yml
+      - .github/workflows/anaconda-prune.yml
+      - .github/workflows/_prune-anaconda-packages.yml
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
-
-jobs:
 
 jobs:
   anaconda-prune-pytorch-nightly:
