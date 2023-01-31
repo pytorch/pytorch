@@ -11,7 +11,7 @@
 
 namespace at::native {
 
-const char sin_name[] = "sin";
+constexpr char sin_name[] = "sin";
 void sin_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {

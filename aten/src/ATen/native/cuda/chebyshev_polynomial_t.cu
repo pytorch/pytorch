@@ -10,7 +10,7 @@
 
 namespace at::native {
         namespace {
-            const char chebyshev_polynomial_t_name[] = "chebyshev_polynomial_t_forward";
+            constexpr char chebyshev_polynomial_t_name[] = "chebyshev_polynomial_t_forward";
 
             void chebyshev_polynomial_t_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

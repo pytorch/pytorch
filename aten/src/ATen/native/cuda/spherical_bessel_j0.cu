@@ -20,7 +20,7 @@
 
 namespace at::native {
         namespace {
-            const char spherical_bessel_j0_name[] = "spherical_bessel_j0_forward";
+            constexpr char spherical_bessel_j0_name[] = "spherical_bessel_j0_forward";
 
             void spherical_bessel_j0_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

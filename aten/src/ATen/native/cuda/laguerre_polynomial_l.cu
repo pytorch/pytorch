@@ -10,7 +10,7 @@
 
 namespace at::native {
         namespace {
-            const char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
+            constexpr char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
 
             void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

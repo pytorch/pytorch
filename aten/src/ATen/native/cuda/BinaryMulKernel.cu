@@ -18,7 +18,7 @@
 
 namespace at::native {
 
-const char mul_name[] = "mul_kernel";
+constexpr char mul_name[] = "mul_kernel";
 void mul_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (common_dtype == kComplexHalf) {
