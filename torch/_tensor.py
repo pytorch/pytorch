@@ -504,6 +504,10 @@ class Tensor(torch._C._TensorBase):
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
 
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
         Example::
 
             >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
@@ -789,7 +793,7 @@ class Tensor(torch._C._TensorBase):
             except ValueError:
                 pass
 
-        if isinstance(split_size, int):
+        if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(self, split_size, dim)
@@ -1283,7 +1287,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
+        with _C.DisableTorchFunctionSubclass():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret

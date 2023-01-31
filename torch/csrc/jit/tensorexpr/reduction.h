@@ -27,9 +27,8 @@ class TORCH_API Reducer {
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
-  Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
-    interaction_ = interaction;
-  }
+  Reducer(ExprHandle init, RI interaction)
+      : init_(init.node()), interaction_(std::move(interaction)) {}
   virtual ~Reducer() = default;
 
   ExprPtr initializer() const {
@@ -115,7 +114,7 @@ class TORCH_API Reducer {
       const std::vector<VarPtr>& reduce_args) {
     ExprHandle accum =
         ExprHandle(alloc<Load>(body.dtype(), accumulator, output_args));
-    auto e = interaction(accum, body);
+    auto e = interaction(std::move(accum), std::move(body));
     return e.node();
   }
   static ExprHandle complete(
@@ -125,7 +124,7 @@ class TORCH_API Reducer {
       const std::vector<ExprHandle>& output_args,
       const std::vector<VarHandle>& reduce_args) {
     ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
-    auto e = interaction(accum, body);
+    auto e = interaction(std::move(accum), std::move(body));
     return e;
   }
 

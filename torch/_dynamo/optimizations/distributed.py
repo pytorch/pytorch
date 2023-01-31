@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
-import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
 from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
@@ -96,6 +95,13 @@ class DDPOptimizer:
      - DDPOptimizer always ignores all buffers, regardless of their ignore flag, since buffers do not require gradients,
        and therefore aren't allreduced by DDP.  (They are broadcast during forward, but this is not covered by
        DDPOptimizer)
+
+    Debugging
+     - Generally, it is easiest to debug DDPOptimizer in a single process program, using pdb.
+     - In many cases, the log messages are helpful (they show bucket size assignments)-
+       just configure torch._dynamo.config.log_level to info or debug.
+     - See `benchmarks/dynamo/distributed.py` for a simple harness that will run a toy model or a torchbench model
+       in a single process (or with torchrun, in multiple processes)
 
     Args:
         bucket_bytes_cap (int): Controls the size of buckets, in bytes, used to determine graphbreaks.  Should be
@@ -274,7 +280,7 @@ class DDPOptimizer:
             # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
             # to match what aot_autograd exepcts. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
-                with fx_traceback.append_stack_trace(n.stack_trace):
+                with self._set_current_node(n):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
                     new_args = []
                     assert fake_mode

@@ -125,10 +125,10 @@ class TORCH_API ExtCallMemoryReuse : public IRMutator {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
+  BufferArg(const Tensor& tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
-  BufferArg(const BufPtr& buf) : buf_(buf) {}
+  BufferArg(BufPtr buf) : buf_(std::move(buf)) {}
 
   VarPtr var() const {
     return isVar_ ? var_ : buf_->base_handle();

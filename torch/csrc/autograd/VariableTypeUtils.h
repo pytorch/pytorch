@@ -120,10 +120,8 @@ inline void rebase_history(
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
-        // TODO: eliminate const_cast
-        // NOLINTNEXTLINE(bugprone-use-after-move)
         auto output_nr = grad_fn->add_input_metadata(var);
-        impl::rebase_history(var, {std::move(grad_fn), output_nr});
+        impl::rebase_history(var, {grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Node::undefined_input());
       }
