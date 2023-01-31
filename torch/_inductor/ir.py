@@ -1470,13 +1470,15 @@ class ReinterpretView(BaseView):
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
-    def codegen_inplace_reference(self):
+    def mutate(self):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
         if offset != "0":
-            return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
-        return f"{self.get_name()}.as_strided_({size}, {stride})"
+            self.mutate_code = (
+                f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
+            )
+        self.mutate_code = f"{self.get_name()}.as_strided_({size}, {stride})"
 
 
 class SliceView(View):
@@ -2789,27 +2791,6 @@ class ExternKernelAlloc(ExternKernel):
 
     def apply_constraint(self):
         raise NotImplementedError
-
-
-class InplaceView(ExternKernel):
-    def codegen(self, wrapper):
-        wrapper.writeline(f"{self.inputs[0].codegen_inplace_reference()}")
-
-    def should_allocate(self):
-        return False
-
-    def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
-
-    def __init__(self, x):
-        super().__init__(
-            None,
-            MutationLayout(x),
-            self.unwrap_storage([x]),
-            (),
-        )
-        self.name = V.graph.register_buffer(self)
 
 
 class InplaceBernoulliFallback(ExternKernel):
