@@ -165,10 +165,7 @@ class TestCppExtensionJIT(common.TestCase):
                 #   PTX file    1: cudaext_archflags.1.sm_61.ptx
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
-            if IS_WINDOWS:
-                print("Not wiping extensions build folder because Windows")
-            else:
-                shutil.rmtree(temp_dir)
+            shutil.rmtree(temp_dir)
 
             if old_envvar is None:
                 os.environ.pop('TORCH_CUDA_ARCH_LIST')
@@ -179,17 +176,17 @@ class TestCppExtensionJIT(common.TestCase):
     @unittest.skipIf(TEST_ROCM, "disabled on rocm")
     def test_jit_cuda_archflags(self):
         # Test a number of combinations:
-        #   - the default for the machine we're testing on
         #   - Separators, can be ';' (most common) or ' '
         #   - Architecture names
         #   - With/without '+PTX'
+        #   - The default for the machine we're testing on, always test this last to avoid breaking other tests
+        #     with an unexpected CUDA arch
 
         n = torch.cuda.device_count()
         capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Volta": (['70'], ['70']),
         }
@@ -203,6 +200,10 @@ class TestCppExtensionJIT(common.TestCase):
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)
+
+        # Run the default CUDA arch of the machine we are testing on
+        expected = ([f"{c[0]}{c[1]}" for c in capabilities], None)
+        self._run_jit_cuda_archflags('', expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
