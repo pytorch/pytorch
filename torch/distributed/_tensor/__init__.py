@@ -81,8 +81,8 @@ def distribute_tensor(
             output.requires_grad_(tensor.requires_grad)
             local_tensor = output
         elif placement.is_replicate():
-            local_tensor = local_tensor.contiguous()
-            device_mesh.broadcast(local_tensor, mesh_dim=idx)
+            placement = cast(Replicate, placement)
+            local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"

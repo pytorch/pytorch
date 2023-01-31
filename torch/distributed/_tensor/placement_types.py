@@ -87,7 +87,7 @@ class Shard(Placement):
         return_offset: bool = False,
     ) -> Tuple[int, int]:
         """
-        returns the local shard size and offset on a given tensor dim
+        Returns the local shard size and offset on a given tensor dim
         """
         assert (
             size_on_dim >= num_chunks
@@ -107,7 +107,7 @@ class Shard(Placement):
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         """
-        shard and scatter a tensor on a mesh dimension (use coordinate
+        Shard and scatter a tensor on a mesh dimension (use coordinate
         0 on the mesh dimension as source of truth)
         """
         my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
@@ -135,7 +135,7 @@ class Shard(Placement):
         mesh_dim: int,
     ) -> torch.Tensor:
         """
-        reduce and scatter a tensor on a mesh dimension
+        Reduce and scatter a tensor on a mesh dimension
         """
         my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
         num_chunks = mesh.size(dim=mesh_dim)
@@ -168,8 +168,9 @@ class Shard(Placement):
         mesh_dim: int,
     ) -> torch.Tensor:
         """
-        This function all_gather all shards and return a tensor that
-        is replicated on the previously sharded mesh dimension
+        For Shard -> Replicate, we all_gather all shards and
+        return a tensor that is replicated on the previously
+        sharded mesh dimension
         """
         my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
         num_chunks = mesh.size(dim=mesh_dim)
@@ -234,6 +235,74 @@ class Replicate(Placement):
     def __repr__(self) -> str:
         return "Replicate()"
 
+    def _replicate_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int
+    ) -> torch.Tensor:
+        """
+        Replicate (broadcast) a torch.Tensor on a mesh dimension
+        (use coordinate 0 on the mesh dimension as source of truth)
+        """
+        tensor = tensor.contiguous()
+        mesh.broadcast(tensor, mesh_dim=mesh_dim)
+        return tensor
+
+    def _to_shard_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_spec: Shard,
+    ) -> torch.Tensor:
+        """
+        For Replicate -> Shard, we split the replicate tensor
+        and return the corresponding cloned local shard (to avoid
+        modifying the original replicated tensor)
+        """
+        my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
+        # TODO: what should happen if rank is not in the mesh?
+        # see issue https://github.com/pytorch/tau/pull/492
+        assert (
+            my_coordinate is not None
+        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+        num_chunks = mesh.size(dim=mesh_dim)
+
+        shards, _ = shard_spec._split_tensor(
+            tensor,
+            num_chunks,
+            with_padding=False,
+            contiguous=False
+        )
+        return shards[my_coordinate].clone()
+
+    def _to_partial_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int
+    ):
+        """
+        For Replicate -> Partial, we zero out all other ranks of the
+        current mesh dim and leave only 1 rank have the data, to
+        perform a "zero cost" reshard. (with clone to avoid modifying
+        the original replicated tensor)
+        """
+        my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
+        # TODO: what should happen if rank is not in the mesh?
+        # see issue https://github.com/pytorch/tau/pull/492
+        assert (
+            my_coordinate is not None
+        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is not None and my_coordinate != 0:
+            new_local_tensor = tensor.clone().zero_()
+        else:
+            new_local_tensor = tensor.clone()
+
+        return new_local_tensor
+
 
 class _Partial(Placement):
     # This is a default partial placement with element-wise reduce op
@@ -247,26 +316,32 @@ class _Partial(Placement):
     def __init__(self, reduce_op: c10d.ReduceOp = c10d.ReduceOp.SUM):  # type: ignore[assignment]
         self.reduce_op: c10d.ReduceOp = reduce_op
 
-    def _to_replicate(
+    def _to_replicate_tensor(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # out-of-place all_reduce to replicate, since the current partial DTensor
-        # might get used by other ops as well, so we can't inplace modify it
+        """
+        For Partial -> Replicate, we do out-of-place all_reduce to replicate,
+        since the current partial DTensor might get used by other ops as well,
+        so we can't inplace modify it
+        """
         cloned_local = CommTensor(tensor.clone(memory_format=torch.contiguous_format))
         mesh.all_reduce(
             cloned_local, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
         )
         return cloned_local
 
-    def _to_shard(
+    def _to_shard_tensor(
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        shard_spec: Placement,
+        shard_spec: Shard,
     ) -> torch.Tensor:
+        """
+        For Partial -> Shard, we do reduce_scatter according
+        to the shard spec.
+        """
         # by default call reduce_shard_tensor of the shard_spec.
-        shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(
             tensor, mesh, self.reduce_op, mesh_dim  # type: ignore[call-arg]
         )
