@@ -10,4 +10,5 @@ __all__ = [
     'LinearLeakyReLU',
     'LinearTanh',
     'ConvAdd2d',
+    'ConvAddReLU2d',
 ]
