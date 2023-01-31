@@ -1,8 +1,7 @@
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
-                        _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _maximize_doc, _default_to_fused_or_foreach)
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
+                        _capturable_doc, _differentiable_doc, _foreach_doc, _maximize_doc, _default_to_foreach)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -252,9 +251,9 @@ def adamw(
 
     # Respect when the user inputs False/True for foreach.
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
+        foreach = _default_to_foreach(
             [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, has_fused=False)
+            differentiable=differentiable)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

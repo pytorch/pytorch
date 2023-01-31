@@ -69,14 +69,14 @@ class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
 # In another word, this field is an reference to the tensor, not the tensor itself.
 @dataclass
 class TensorArgument:
-    name: str   # identifier of the tensor, which must exist in graph's tensor_values
+    name: str   # identifier of the tensor, which must exist in graph's ivalues map
 
 # This is a SymInt Arugment used in the args of an node
 # We intentionally don't store the SymInt's value here, as the same SymInt argument can be used in multiple nodes
 # This field is an reference to the SymInt
 @dataclass
 class SymIntArgument:
-    name: str   # identifier of the symint, which must exist in graph's symint_values
+    name: str   # identifier of the symint, which must exist in graph's symint_values map
 
 #  Permissible return types for operators
 # !!! Notice: this assumes that a node can only return Tensor(s) and Symint(s), and not other int/float/bool types...
@@ -95,9 +95,7 @@ class ReturnArgument:  # Union, ONLY EXACTLY ONE of the following fields can be 
 # !!! This is a Union struct, but there is no good python construct to model this
 @dataclass
 class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
-    # A special type for representing python None in the arguments
-    # This must only be used for ops that accepts None as an argument, e.g. Tensor?, Scalar?, int?, int[]?
-    as_none: bool = None
+    # None          # !!! This is used for nullable arguments, is this the right way to handle None?
 
     as_tensor: TensorArgument = None
     as_tensors: List[TensorArgument] = None   # Tensor[], used by aten.cat, and condition ops
@@ -127,6 +125,18 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
     as_layout: Layout = None
     as_device: Device = None
 
+# !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
+#     Tensor?
+#     Scalar?
+#     ScalarType?
+#     bool?
+#     int?
+#     int[]?
+#     float[]?
+#     SymInt[]?
+#     MemoryFormat?
+#     Layout?
+#     Device?
 
 ################################################################################
 # Following section is the defining the schema of serializing a concrete tensor
@@ -137,7 +147,7 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 #     - This is used in the serialization of a concrete tensor, e.g. model weight
 #     - In this case, sizes and strides must be concrete ints, and cannot be symbolic
 #     - stride and storage_offset have to used to correctly reconstruct the tensor from the storage
-#   2. Represent the property of a virtual tensor (see TensorValue below)
+#   2. Represent the property of a virtual tensor (see IValue below)
 #     - In this case, sizes and strides can be either concrete ints or symbolic ints.
 #     - device/strides/storage_offset/layout/memory_format are tied to pytorch's implementation.
 #       These are faithful capture of tensor's detail in pytorch's executions during tracing
@@ -196,21 +206,16 @@ class Tensor:
 
 
 ################################################################################
-# Following section is defining the schema of 3 level construct: GraphModule, Graph, Node
+# Following section is the defining the schema of 3 level construct: GraphModule, Graph, Node
 
-# TensorValue has no corresponding class in fx
-# TensorValue is the "tensor results" that are passed between nodes in the graph
-# TensorValue is a named virtual tensor, with an TensorMeta that describes the properties of the tensor
+# IValue has no corresponding class in fx
+# IValue is the "values" that are passed between nodes in the graph
+# IValue is a named virtual tensor, with an optional TensorMeta that describes the properties of the tensor
+# !!! Consider using a more descriptive name, e.g. TensorValue, TensorPlaceholder, TensorArgument, etc.
 @dataclass
-class TensorValue:
-    name: str           # unique identifier of the TensorValue, referenced in Argument.as_tensor field
-    meta: TensorMeta    # tensor meta
+class IValue:
+    meta: TensorMeta
 
-
-@dataclass
-class SymIntValue:
-    name: str       # unique identifier of the SymIntValue, referenced in Argument.as_symint field
-    value: SymInt
 
 @dataclass
 class NodeMetadata:
@@ -262,11 +267,14 @@ class Graph:
     nodes: List[Node]
 
     # Tensor values that appear in the graph
-    # They could be graph inputs, graph outputs, or intermediate tensor values produced by nodes
-    tensor_values: List[TensorValue]
+    # They could be graph inputs, graph outputs, or intermediate values produced by nodes
+    # The key is a unique identifider name for the IValue
+    # The name will be used in the graph and node to refer to the IValue
+    ivalues: Dict[str, IValue]
 
-    # SymInt values that appear in the graph
-    symint_values: List[SymIntValue]
+    # SymInts that appear in the graph
+    # Key is the name/identifier of the SymInt, not the expression of the SymInt
+    symint_values: Dict[str, SymInt]
 
 
 # Maps to fx.GraphModule
@@ -284,7 +292,7 @@ class GraphModule:
 
     # Stateful fields of the graph module
 
-    # The name of the tensor will be used to bind to the TensorValues of Graph
+    # The name of the tensor will be used to bind to the IValues of Graph Inputs
     # !!! Consider storing them in the Graph.
     # There are functional difference between buffers and parameters, so they are stored separately.
     parameters: Dict[str, Tensor]
