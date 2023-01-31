@@ -87,6 +87,9 @@ class BaseListVariable(VariableTracker):
         elif name == "__add__":
             assert not kwargs and len(args) == 1
             return type(self)(self.items + args[0].items, **options)
+        elif name == "__mul__" and args[0].is_python_constant():
+            assert not kwargs and len(args) == 1
+            return type(self)(self.items * args[0].as_python_constant())
         elif (
             name == "__contains__"
             and len(args) == 1
@@ -271,6 +274,9 @@ class TupleVariable(BaseListVariable):
             return TupleVariable(
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
+        elif name == "__mul__" and args[0].is_python_constant():
+            assert not kwargs and len(args) == 1
+            return type(self)(self.items * args[0].as_python_constant())
         return super().call_method(tx, name, args, kwargs)
 
 

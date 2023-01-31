@@ -670,6 +670,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
+    def test_tuple_mul(self):
+        def fn(a):
+            b = (2, 3)
+            c = 2 * b * 4
+            return a + sum(c)
+
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
+
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
