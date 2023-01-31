@@ -176,10 +176,18 @@ public:
   __m512d abs_() const {
     // values: a + ib
     // not using abs_2_ to prevent overflow/underflow for large/small numbers
-    auto shift = _mm512_permute_pd(values, 0x55);        // b       a
-    auto a = _mm512_mask_blend_pd(0x55, values, shift);  // a       a
-    auto b = _mm512_mask_blend_pd(0xAA, values, shift);  // b       b
-    return Sleef_hypotd8_u05(a, b);                      // abs     abs
+    auto mask = _mm512_set1_pd(-0.f);
+    auto fabs_val = _mm512_andnot_pd(mask, values);     // |a|    |b|
+    auto fabs_shf = _mm512_permute_pd(fabs_val, 0x55);  // |b|    |a|
+    auto fabs_max = _mm512_max_pd(fabs_val, fabs_shf);  // max    max
+    auto fabs_min = _mm512_min_pd(fabs_val, fabs_shf);  // min    min
+    // following: max * sqrt(1 + min / max)
+    auto t = _mm512_div_pd(fabs_min, fabs_max);
+    auto t2 = _mm512_mul_pd(t, t);
+    auto t21 = _mm512_add_pd(t2, _mm512_set1_pd(1.0f));
+    auto t21_sqrt = _mm512_sqrt_pd(t21);
+    auto res = _mm512_mul_pd(t21_sqrt, fabs_max);
+    return res;
   }
   Vectorized<c10::complex<double>> abs() const {
     const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,

@@ -159,10 +159,18 @@ public:
   __m256 abs_() const {
     // values: a + ib
     // not using abs_2_ to prevent overflow/underflow for large/small numbers
-    auto shift = _mm256_permute_ps(values, 0xB1);   // b       a
-    auto a = _mm256_blend_ps(values, shift, 0x55);  // a       a
-    auto b = _mm256_blend_ps(values, shift, 0xAA);  // b       b
-    return Sleef_hypotf8_u05(a, b);                // abs     abs
+    auto mask = _mm256_set1_ps(-0.f);
+    auto fabs_val = _mm256_andnot_ps(mask, values);     // |a|    |b|
+    auto fabs_shf = _mm256_permute_ps(fabs_val, 0xB1);  // |b|    |a|
+    auto fabs_max = _mm256_max_ps(fabs_val, fabs_shf);  // max    max
+    auto fabs_min = _mm256_min_ps(fabs_val, fabs_shf);  // min    min
+    // following: max * sqrt(1 + min / max)
+    auto t = _mm256_div_ps(fabs_min, fabs_max);
+    auto t2 = _mm256_mul_ps(t, t);
+    auto t21 = _mm256_add_ps(t2, _mm256_set1_ps(1.0f));
+    auto t21_sqrt = _mm256_sqrt_ps(t21);
+    auto res = _mm256_mul_ps(t21_sqrt, fabs_max);
+    return res;
   }
   Vectorized<c10::complex<float>> abs() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
