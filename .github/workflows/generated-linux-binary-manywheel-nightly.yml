@@ -169,7 +169,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -371,48 +371,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -452,14 +412,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_7-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_2-test
@@ -518,48 +472,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -599,14 +513,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_7-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_3-test
@@ -761,7 +669,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -963,48 +871,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1044,14 +912,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_2-test
@@ -1110,48 +972,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1191,14 +1013,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_3-test
@@ -1353,7 +1169,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1555,48 +1371,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1636,14 +1412,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_2-test
@@ -1702,48 +1472,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1783,14 +1513,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_3-test
@@ -1945,7 +1669,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2147,48 +1871,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -2228,14 +1912,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_2-test
@@ -2294,48 +1972,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -2375,14 +2013,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_3-test
@@ -2537,7 +2169,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
