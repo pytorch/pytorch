@@ -269,7 +269,7 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type
 }
 
 # The difference between STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP and STATIC_LOWER_FUSED_MODULE_MAP:
-# The refer node inside STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP has 2 dq inputs.
+# The refer node inside STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP has 2 inputs.
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement static quantized module class for lowering
