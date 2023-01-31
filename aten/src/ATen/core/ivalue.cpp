@@ -108,8 +108,6 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       }
       case Tag::GenericList:
         return ListType::create(v.toList().elementType());
-      case Tag::Await:
-        return AwaitType::create(v.toAwait()->elementType());
       case Tag::Future:
         return FutureType::create(v.toFuture()->elementType());
       case Tag::RRef:
@@ -237,7 +235,6 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       break;
     }
     case Tag::Future:
-    case Tag::Await:
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -328,7 +325,6 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
     case Tag::Future:
-    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -379,7 +375,6 @@ size_t IValue::hash(const IValue& v) {
     case Tag::GenericList:
     case Tag::Blob:
     case Tag::Future:
-    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -810,8 +805,6 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
-    case IValue::Tag::Await:
-      return out << "Await";
     case IValue::Tag::Uninitialized:
       return out << "Uninitialized";
     case IValue::Tag::Device:
