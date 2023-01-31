@@ -38,8 +38,12 @@ fi
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
 PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *311* ]]; then
+  # Numpy is yet not avaiable on default conda channel
+  EXTRA_CONDA_FLAGS="-c=malfet"
+fi
+
 if [[ "\$python_nodot" = *310* ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.21.2"
@@ -47,7 +51,6 @@ if [[ "\$python_nodot" = *310* ]]; then
 fi
 
 if [[ "\$python_nodot" = *39*  ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
