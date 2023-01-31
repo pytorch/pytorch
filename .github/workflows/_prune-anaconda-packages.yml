@@ -24,6 +24,8 @@ jobs:
 
       - name: Prune binaries
         env:
+          CHANNEl: ${{ inputs.channel }}
+          PACKAGES: ${{ inputs.packages }}
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
         run: |
             set -ex
