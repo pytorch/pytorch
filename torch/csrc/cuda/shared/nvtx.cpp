@@ -17,19 +17,20 @@ namespace shared {
 // registry idea from NVIDIA/nvtx-plugins  @jdekhtiar
 class DomainCategoryRegistry {
  public:
-  DomainCategoryRegistry() {}
+  DomainCategoryRegistry() = default;
 
   ~DomainCategoryRegistry() {
-    for (auto& domain : domains)
+    for (auto& domain : domains) {
       nvtxDomainDestroy(domain.second);
+    }
   }
 
   nvtxDomainHandle_t getDomain(const std::string& domain_name) {
-    auto it = domains.find(domain_name);
-    if (it != domains.end())
+    if (const auto it = domains.find(domain_name); it != domains.end()) {
       return it->second;
+    }
 
-    nvtxDomainHandle_t domain_handle = nvtxDomainCreateA(domain_name.c_str());
+    const auto domain_handle = nvtxDomainCreateA(domain_name.c_str());
     domains[domain_name] = domain_handle;
     return domain_handle;
   }
@@ -37,18 +38,21 @@ class DomainCategoryRegistry {
   uint64_t getCategory(
       const std::string& category_name,
       std::optional<std::string> domain_name) {
-    std::string id = category_name + "@" + domain_name.value_or("");
-    auto it = categories.find(id);
-    if (it != categories.end())
+    const auto id = category_name + "@" + domain_name.value_or("");
+    if (const auto it = categories.find(id); it != categories.end()) {
       return it->second;
+    }
 
-    if (domain_name) // category local to domain
+    if (domain_name) {
+      // category local to domain
       nvtxDomainNameCategoryA(
           getDomain(domain_name.value()),
           category_offset,
           category_name.c_str());
-    else // category local to process
+    } else {
+      // category local to process
       nvtxNameCategoryA(category_offset, category_name.c_str());
+    }
 
     categories[id] = category_offset;
     return category_offset++;
@@ -71,8 +75,9 @@ nvtxEventAttributes_t getAttributes(
   eventAttrib.version = NVTX_VERSION;
   eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
 
-  if (category)
+  if (category) {
     eventAttrib.category = registry.getCategory(category.value(), domain);
+  }
 
   if (color) {
     eventAttrib.colorType = NVTX_COLOR_ARGB;
@@ -94,15 +99,16 @@ int rangePush(
 #ifdef USE_ROCM
   return roctxRangePushA(msg.c_str());
 #else
-  if (!domain && !category && !color)
+  if (!domain && !category && !color) {
     return nvtxRangePushA(msg.c_str());
+  }
 
-  nvtxEventAttributes_t eventAttrib =
-      getAttributes(msg, domain, category, color);
+  const auto eventAttrib = getAttributes(msg, domain, category, color);
 
-  if (domain)
+  if (domain) {
     return nvtxDomainRangePushEx(
         registry.getDomain(domain.value()), &eventAttrib);
+  }
 
   return nvtxRangePushEx(&eventAttrib);
 #endif
@@ -112,8 +118,9 @@ int rangePop(std::optional<std::string> domain) {
 #ifdef USE_ROCM
   return roctxRangePop();
 #else
-  if (domain)
+  if (domain) {
     return nvtxDomainRangePop(registry.getDomain(domain.value()));
+  }
 
   return nvtxRangePop();
 #endif
@@ -127,16 +134,17 @@ void mark(
 #ifdef USE_ROCM
   return roctxMarkA(msg.c_str());
 #else
-  if (!domain && !category && !color)
+  if (!domain && !category && !color) {
     return nvtxMarkA(msg.c_str());
+  }
 
-  nvtxEventAttributes_t eventAttrib =
-      getAttributes(msg, domain, category, color);
+  const auto eventAttrib = getAttributes(msg, domain, category, color);
 
-  if (domain)
+  if (domain) {
     return nvtxDomainMarkEx(registry.getDomain(domain.value()), &eventAttrib);
+  }
 
-  return nvtxMarkEx(&eventAttrib);
+  nvtxMarkEx(&eventAttrib);
 #endif
 }
 
@@ -148,15 +156,16 @@ uint64_t rangeStart(
 #ifdef USE_ROCM
   return roctxRangeStartA(msg.c_str());
 #else
-  if (!domain && !category && !color)
+  if (!domain && !category && !color) {
     return nvtxRangeStartA(msg.c_str());
+  }
 
-  nvtxEventAttributes_t eventAttrib =
-      getAttributes(msg, domain, category, color);
+  const auto eventAttrib = getAttributes(msg, domain, category, color);
 
-  if (domain)
+  if (domain) {
     return nvtxDomainRangeStartEx(
         registry.getDomain(domain.value()), &eventAttrib);
+  }
 
   return nvtxRangeStartEx(&eventAttrib);
 #endif
@@ -166,10 +175,11 @@ void rangeEnd(const uint64_t& range_id, std::optional<std::string> domain) {
 #ifdef USE_ROCM
   return roctxRangeStop(range_id);
 #else
-  if (domain)
+  if (domain) {
     return nvtxDomainRangeEnd(registry.getDomain(domain.value()), range_id);
+  }
 
-  return nvtxRangeEnd(range_id);
+  nvtxRangeEnd(range_id);
 #endif
 }
 
