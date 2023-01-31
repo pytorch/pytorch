@@ -69,7 +69,7 @@ os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation
 
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
+subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
 # test vars
 os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
@@ -227,14 +227,11 @@ if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
 
     subprocess.run('aws s3 cp \"s3://ossci-windows/Restore PyTorch Environment.lnk\" \"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"', shell=True)
 
-os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\set_env.bat')
-
 subprocess.run('echo ' + str(os.environ), shell=True)
 subprocess.run('env', shell=True)
 
 subprocess.run('conda run -n test_env' + " python setup.py bdist_wheel", shell=True)
 
-'''
 subprocess.run("sccache --show-stats", shell=True)
 subprocess.run('conda run -n test_env' + ' python -c \"import os, glob; os.system(\'python -mpip install \'' +
     ' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"', shell=True)
@@ -265,5 +262,3 @@ subprocess.run('sccache --show-stats --stats-format json | jq .stats > sccache-s
     os.environ['BUILD_ENVIRONMENT'] + '-' + os.environ['OUR_GITHUB_JOB_ID'] + '.json', shell=True)
 
 subprocess.run('sccache --stop-server', shell=True)
-
-'''
