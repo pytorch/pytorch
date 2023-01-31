@@ -1939,6 +1939,7 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d packed test")
     def test_conv_transpose2d_packed(self):
         x_shape = (1, 3, 28, 28)
         mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
