@@ -1,8 +1,9 @@
-#include <ATen/native/vulkan/impl/Common.h>
+#include <ATen/native/vulkan/ops/Common.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
+namespace ops {
 
 api::utils::uvec3 adaptive_work_group_size(
     const api::utils::uvec3& global_work_group) {
@@ -21,6 +22,7 @@ api::utils::uvec3 adaptive_work_group_size(
   return local_group_size;
 }
 
+} // namespace ops
 } // namespace vulkan
 } // namespace native
 } // namespace at
