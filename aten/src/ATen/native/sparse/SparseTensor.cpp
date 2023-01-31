@@ -758,6 +758,11 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   }
 
   if (t.layout() == at::kSparse) {
+    TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
+                "sparse_mask(): the number of sparse dimensions in `self` ",
+                "should match that of the `mask`. ",
+                "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
+                "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
     auto res = at::empty({0}, t.options());
     sparse_mask_intersection_out_stub(res.device().type(), res, t, mask);
     return res;
