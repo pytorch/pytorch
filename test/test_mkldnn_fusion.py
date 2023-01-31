@@ -20,6 +20,7 @@ class PointwisePostOp(NamedTuple):
     algorithm : str = ""
 
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
@@ -330,6 +331,50 @@ class TestMkldnnFusion(JitTestCase):
                     fused = torch.ops.mkldnn._linear_pointwise(
                         v, other, mod.linear.weight, mod.linear.bias, attr
                     )
+                    self.assertEqual(ref, fused)
+
+    def test_conv_transpose_unary_fusion_ops(self):
+        class M(nn.Module):
+            def __init__(self, unary_fn, dim, in_channels, out_channels, kernel_size, **kwargs):
+                super(M, self).__init__()
+                self.conv_transpose = CONV_TRANSPOSE_MODULES[dim](in_channels, out_channels, kernel_size, **kwargs)
+                self.unary = unary_fn
+
+            def forward(self, x):
+                x = self.conv_transpose(x)
+                x = self.unary(x)
+                return x
+
+        input_shapes = {2: (28, 28)}
+        kernel_size = 3
+        for pointwise_name, pointwise_info in self._unary_list().items():
+            for dim in [2]:
+                channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
+                options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
+                for bias, dilation, groups, memory_format in options:
+                    oC = 32 * groups
+                    iC = 3 * groups
+                    x_shape = (1, iC) + input_shapes[dim]
+                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    mod = M(pointwise_info.pointwise_module, dim, iC, oC, kernel_size, dilation=dilation, groups=groups, bias=bias)
+                    mod = mod.to(memory_format=memory_format).eval()
+                    with torch.no_grad():
+                        ref = mod(x)
+                        attr = pointwise_info.attr
+                        scalars = pointwise_info.scalars
+                        algorithm = pointwise_info.algorithm
+                        fused = torch.ops.mkldnn._convolution_transpose_pointwise(
+                            x,
+                            mod.conv_transpose.weight,
+                            mod.conv_transpose.bias,
+                            mod.conv_transpose.padding,
+                            mod.conv_transpose.output_padding,
+                            mod.conv_transpose.stride,
+                            mod.conv_transpose.dilation,
+                            mod.conv_transpose.groups,
+                            attr,
+                            scalars,
+                            algorithm)
                     self.assertEqual(ref, fused)
 
 if __name__ == "__main__":
