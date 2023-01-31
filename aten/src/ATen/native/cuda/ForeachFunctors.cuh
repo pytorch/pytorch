@@ -556,7 +556,7 @@ struct power_functor {
 };
 
 template <typename T>
-struct alt_power_functor {
+struct reverse_power_functor {
   C10_DEVICE T operator()(const T& a, const T& b) const {
     return pow(b, a);
   }

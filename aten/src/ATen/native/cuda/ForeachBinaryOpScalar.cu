@@ -130,7 +130,7 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(const Scalar& scalar, Te
   if (!can_use_fast_route(exponent)) {
     return at::native::foreach_scalar_pow_list_kernel_slow(scalar, exponent);
   }
-  return all_types_complex_half_bfloat16<alt_power_functor, true>(exponent, scalar);
+  return all_types_complex_half_bfloat16<reverse_power_functor, true>(exponent, scalar);
 }
 
 // In the case of division, integer inputs will result in float.
