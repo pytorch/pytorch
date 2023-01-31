@@ -122,7 +122,7 @@ conv_configs = _get_conv_configs(conv_dtype_configs)
 #    add
 
 def _fuse_conv_add_left(is_qat, add, conv, _):
-    return nni.ConvAdd2d(add, conv)
+    return nni.ConvAdd2d(conv, add)
 
 def _conv_add_root_node_getter_left(pattern):
     _, conv, _ = pattern
@@ -147,7 +147,7 @@ def _fuse_conv_bn_add_left(is_qat, add, bn_conv, _):
         raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, add)))
     else:
         fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-        return nni.ConvAdd2d(add, fused_conv)
+        return nni.ConvAdd2d(fused_conv, add)
 
 def _conv_bn_add_root_node_getter_left(add_pattern):
     _, bn_conv, _ = add_pattern
@@ -194,7 +194,7 @@ for with_bn, add_op in conv_add_left_optioins:
 #    add
 
 def _fuse_conv_add_right(is_qat, add, _, conv):
-    return nni.ConvAdd2d(add, conv)
+    return nni.ConvAdd2d(conv, add)
 
 def _conv_add_root_node_getter_right(pattern):
     add, _, conv = pattern
@@ -219,7 +219,7 @@ def _fuse_conv_bn_add_right(is_qat, add, _, bn_conv):
         raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, add)))
     else:
         fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-        return nni.ConvAdd2d(add, fused_conv)
+        return nni.ConvAdd2d(fused_conv, add)
 
 def _conv_bn_add_root_node_getter_right(pattern):
     add, _, bn_conv = pattern
@@ -278,7 +278,7 @@ conv_configs.append(
 
 def _fuse_conv_add_relu_left(is_qat, relu, add_pattern):
     add, conv, _ = add_pattern
-    return nni.ConvAddReLU2d(relu, add, conv)
+    return nni.ConvAddReLU2d(conv, add, relu)
 
 def _conv_add_relu_root_node_getter_left(pattern):
     relu, add_pattern = pattern
@@ -308,7 +308,7 @@ def _fuse_conv_bn_add_relu_left(is_qat, relu, add_pattern):
         raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, add, relu)))
     else:
         fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-        return nni.ConvAddReLU2d(relu, add, fused_conv)
+        return nni.ConvAddReLU2d(fused_conv, add, relu)
 
 def _conv_bn_add_relu_root_node_getter_left(pattern):
     relu, add_pattern = pattern
@@ -360,7 +360,7 @@ for with_bn, add_op in conv_add_relu_left_optioins:
 
 def _fuse_conv_add_relu_right(is_qat, relu, add_pattern):
     add, _, conv = add_pattern
-    return nni.ConvAddReLU2d(relu, add, conv)
+    return nni.ConvAddReLU2d(conv, add, relu)
 
 def _conv_add_relu_root_node_getter_right(pattern):
     relu, add_pattern = pattern
@@ -390,7 +390,7 @@ def _fuse_conv_bn_add_relu_right(is_qat, relu, add_pattern):
         raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, add, relu)))
     else:
         fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-        return nni.ConvAddReLU2d(relu, add, fused_conv)
+        return nni.ConvAddReLU2d(fused_conv, add, relu)
 
 def _conv_bn_add_relu_root_node_getter_right(pattern):
     relu, add_pattern = pattern

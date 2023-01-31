@@ -482,36 +482,34 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_channelwise
         )
+        batch_size = 2
+        in_channels_per_group = 2
+        length = 8
+        out_channels_per_group = 2
+        groups = 3
+        kernel = 3
+        stride = 2
+        pad = 1
+        dilation = 1
+        # Tests the correctness of the conv2d module.
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (length,)
+        kernel_size = (kernel, )
+        stride = (stride, )
+        pad = (pad, )
+        dilation = (dilation, )
+        X_scale = 1.3
+        X_zero_point = 2
+        W_scale = [0.5]
+        W_zero_point = [0] if qengine_is_onednn() else [3]
+        Y_scale = 5.0
+        Y_zero_point = 4
+        qconv_cls = nniq.ConvReLU1d
+        module_name = "QuantizedConvReLU1d"
         for pad_mode, use_bias, use_channelwise in options:
-            if torch.backends.quantized.engine == "qnnpack":
-                use_channelwise = False
-            batch_size = 2
-            in_channels_per_group = 2
-            length = 8
-            out_channels_per_group = 2
-            groups = 3
-            kernel = 3
-            stride = 2
-            pad = 1
-            dilation = 1
-            # Tests the correctness of the conv2d module.
-            in_channels = in_channels_per_group * groups
-            out_channels = out_channels_per_group * groups
-            input_feature_map_size = (length,)
-            kernel_size = (kernel, )
-            stride = (stride, )
-            pad = (pad, )
-            dilation = (dilation, )
-            X_scale = 1.3
-            X_zero_point = 2
-            W_scale = [0.5]
-            W_zero_point = [0] if qengine_is_onednn() else [3]
-            Y_scale = 5.0
-            Y_zero_point = 4
             if torch.backends.quantized.engine == 'qnnpack':
                 use_channelwise = False
-            qconv_cls = nniq.ConvReLU1d
-            module_name = "QuantizedConvReLU1d"
             qconv_module = qconv_cls(
                 in_channels, out_channels, kernel, stride, pad,
                 dilation, groups, use_bias, padding_mode=pad_mode
@@ -594,38 +592,38 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_channelwise
         )
+        batch_size = 2
+        in_channels_per_group = 2
+        H = 8
+        W = 8
+        out_channels_per_group = 2
+        groups = 3
+        kernel_h = 3
+        kernel_w = 3
+        stride_h = 2
+        stride_w = 2
+        pad_h = 1
+        pad_w = 1
+        dilation = 1
+        # Tests the correctness of the conv2d module.
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (H, W)
+        kernel_size = (kernel_h, kernel_w)
+        stride = (stride_h, stride_w)
+        padding = (pad_h, pad_w)
+        dilation = (dilation, dilation)
+        X_scale = 1.3
+        X_zero_point = 2
+        W_scale = [0.5]
+        W_zero_point = [0] if qengine_is_onednn() else [3]
+        Y_scale = 5.0
+        Y_zero_point = 4
+        qconv_cls = nniq.ConvReLU2d
+        module_name = "QuantizedConvReLU2d"
         for pad_mode, use_bias, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
-            batch_size = 2
-            in_channels_per_group = 2
-            H = 8
-            W = 8
-            out_channels_per_group = 2
-            groups = 3
-            kernel_h = 3
-            kernel_w = 3
-            stride_h = 2
-            stride_w = 2
-            pad_h = 1
-            pad_w = 1
-            dilation = 1
-            # Tests the correctness of the conv2d module.
-            in_channels = in_channels_per_group * groups
-            out_channels = out_channels_per_group * groups
-            input_feature_map_size = (H, W)
-            kernel_size = (kernel_h, kernel_w)
-            stride = (stride_h, stride_w)
-            padding = (pad_h, pad_w)
-            dilation = (dilation, dilation)
-            X_scale = 1.3
-            X_zero_point = 2
-            W_scale = [0.5]
-            W_zero_point = [0] if qengine_is_onednn() else [3]
-            Y_scale = 5.0
-            Y_zero_point = 4
-            qconv_cls = nniq.ConvReLU2d
-            module_name = "QuantizedConvReLU2d"
             qconv_module = qconv_cls(
                 in_channels, out_channels, kernel_size, stride, padding,
                 dilation, groups, use_bias, padding_mode=pad_mode
@@ -651,45 +649,44 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_channelwise
         )
+        batch_size = 2
+        in_channels_per_group = 2
+        H = 8
+        W = 8
+        D = 8
+        out_channels_per_group = 2
+        groups = 3
+        kernel_h = 3
+        kernel_w = 3
+        kernel_d = 3
+        stride_h = 2
+        stride_w = 2
+        stride_d = 2
+        pad_mode = "zeros"  # 3d doesn't support reflect padding
+        pad_h = 1
+        pad_w = 1
+        pad_d = 1
+        dilation = 1
+        # Tests the correctness of the conv3d module.
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (D, H, W)
+        kernel_size = (kernel_d, kernel_h, kernel_w)
+        stride = (stride_d, stride_h, stride_w)
+        padding = (pad_d, pad_h, pad_w)
+        dilation = (dilation, dilation, dilation)
+        X_scale = 1.3
+        X_zero_point = 2
+        W_scale = [0.5]
+        W_zero_point = [0] if qengine_is_onednn() else [3]
+        Y_scale = 5.0
+        Y_zero_point = 4
+        qconv_cls = nnq.Conv3d
+        module_name = "QuantizedConv3d"
         for use_bias, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
-            batch_size = 2
-            in_channels_per_group = 2
-            H = 8
-            W = 8
-            D = 8
-            out_channels_per_group = 2
-            groups = 3
-            kernel_h = 3
-            kernel_w = 3
-            kernel_d = 3
-            stride_h = 2
-            stride_w = 2
-            stride_d = 2
-            pad_mode = "zeros"  # 3d doesn't support reflect padding
-            pad_h = 1
-            pad_w = 1
-            pad_d = 1
-            dilation = 1
-            # Tests the correctness of the conv3d module.
-            in_channels = in_channels_per_group * groups
-            out_channels = out_channels_per_group * groups
-            input_feature_map_size = (D, H, W)
-            kernel_size = (kernel_d, kernel_h, kernel_w)
-            stride = (stride_d, stride_h, stride_w)
-            padding = (pad_d, pad_h, pad_w)
-            dilation = (dilation, dilation, dilation)
-            X_scale = 1.3
-            X_zero_point = 2
-            W_scale = [0.5]
-            W_zero_point = [0] if qengine_is_onednn() else [3]
-            Y_scale = 5.0
-            Y_zero_point = 4
-
             with override_quantized_engine('fbgemm'):
-                qconv_cls = nnq.Conv3d
-                module_name = "QuantizedConv3d"
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -714,45 +711,44 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],  # use_bias
             [True, False],  # use_channelwise
         )
+        batch_size = 2
+        in_channels_per_group = 2
+        H = 8
+        W = 8
+        D = 8
+        out_channels_per_group = 2
+        groups = 3
+        kernel_h = 3
+        kernel_w = 3
+        kernel_d = 3
+        stride_h = 2
+        stride_w = 2
+        stride_d = 2
+        pad_mode = "zeros"  # 3d doesn't support reflect padding
+        pad_h = 1
+        pad_w = 1
+        pad_d = 1
+        dilation = 1
+        # Tests the correctness of the conv3d module.
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (D, H, W)
+        kernel_size = (kernel_d, kernel_h, kernel_w)
+        stride = (stride_d, stride_h, stride_w)
+        padding = (pad_d, pad_h, pad_w)
+        dilation = (dilation, dilation, dilation)
+        X_scale = 1.3
+        X_zero_point = 2
+        W_scale = [0.5]
+        W_zero_point = [0] if qengine_is_onednn() else [3]
+        Y_scale = 5.0
+        Y_zero_point = 4
+        qconv_cls = nniq.ConvReLU3d
+        module_name = "QuantizedConvReLU3d"
         for use_bias, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
-            batch_size = 2
-            in_channels_per_group = 2
-            H = 8
-            W = 8
-            D = 8
-            out_channels_per_group = 2
-            groups = 3
-            kernel_h = 3
-            kernel_w = 3
-            kernel_d = 3
-            stride_h = 2
-            stride_w = 2
-            stride_d = 2
-            pad_mode = "zeros"  # 3d doesn't support reflect padding
-            pad_h = 1
-            pad_w = 1
-            pad_d = 1
-            dilation = 1
-            # Tests the correctness of the conv3d module.
-            in_channels = in_channels_per_group * groups
-            out_channels = out_channels_per_group * groups
-            input_feature_map_size = (D, H, W)
-            kernel_size = (kernel_d, kernel_h, kernel_w)
-            stride = (stride_d, stride_h, stride_w)
-            padding = (pad_d, pad_h, pad_w)
-            dilation = (dilation, dilation, dilation)
-            X_scale = 1.3
-            X_zero_point = 2
-            W_scale = [0.5]
-            W_zero_point = [0] if qengine_is_onednn() else [3]
-            Y_scale = 5.0
-            Y_zero_point = 4
-
             with override_quantized_engine('fbgemm'):
-                qconv_cls = nniq.ConvReLU3d
-                module_name = "QuantizedConvReLU3d"
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -782,39 +778,38 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 [True, False],  # use_bias
                 [True, False],  # use_channelwise
             )
+            batch_size = 2
+            in_channels_per_group = 2
+            H = 8
+            W = 8
+            out_channels_per_group = 2
+            groups = 3
+            kernel_h = 3
+            kernel_w = 3
+            stride_h = 2
+            stride_w = 2
+            pad_h = 1
+            pad_w = 1
+            dilation = 1
+            # Tests the correctness of the conv2d module.
+            in_channels = in_channels_per_group * groups
+            out_channels = out_channels_per_group * groups
+            input_feature_map_size = (H, W)
+            kernel_size = (kernel_h, kernel_w)
+            stride = (stride_h, stride_w)
+            padding = (pad_h, pad_w)
+            dilation = (dilation, dilation)
+            X_scale = 1.3
+            X_zero_point = 2
+            X2_scale = 1.2
+            X2_zero_point = 1
+            W_scale = [0.5]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
+            Y_scale = 5.0
+            Y_zero_point = 4
+            qconv_cls = nniq.ConvAdd2d
+            module_name = "QuantizedConvAdd2d"
             for pad_mode, use_bias, use_channelwise in options:
-                batch_size = 2
-                in_channels_per_group = 2
-                H = 8
-                W = 8
-                out_channels_per_group = 2
-                groups = 3
-                kernel_h = 3
-                kernel_w = 3
-                stride_h = 2
-                stride_w = 2
-                pad_h = 1
-                pad_w = 1
-                dilation = 1
-                # Tests the correctness of the conv2d module.
-                in_channels = in_channels_per_group * groups
-                out_channels = out_channels_per_group * groups
-                input_feature_map_size = (H, W)
-                kernel_size = (kernel_h, kernel_w)
-                stride = (stride_h, stride_w)
-                padding = (pad_h, pad_w)
-                dilation = (dilation, dilation)
-                X_scale = 1.3
-                X_zero_point = 2
-                X2_scale = 1.2
-                X2_zero_point = 1
-                W_scale = [0.5]
-                W_zero_point = [0] if qengine_is_onednn() else [3]
-                Y_scale = 5.0
-                Y_zero_point = 4
-
-                qconv_cls = nniq.ConvAdd2d
-                module_name = "QuantizedConvAdd2d"
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -823,7 +818,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 conv_module = nn.Conv2d(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode)
-                conv_module = torch.ao.nn.intrinsic.ConvAdd2d(torch.add, conv_module)
+                conv_module = torch.ao.nn.intrinsic.ConvAdd2d(conv_module, torch.add)
                 conv_module = conv_module.float()
 
                 self._test_conv_api_impl(
@@ -842,39 +837,38 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 [True, False],  # use_bias
                 [True, False],  # use_channelwise
             )
+            batch_size = 2
+            in_channels_per_group = 2
+            H = 8
+            W = 8
+            out_channels_per_group = 2
+            groups = 3
+            kernel_h = 3
+            kernel_w = 3
+            stride_h = 2
+            stride_w = 2
+            pad_h = 1
+            pad_w = 1
+            dilation = 1
+            # Tests the correctness of the conv2d module.
+            in_channels = in_channels_per_group * groups
+            out_channels = out_channels_per_group * groups
+            input_feature_map_size = (H, W)
+            kernel_size = (kernel_h, kernel_w)
+            stride = (stride_h, stride_w)
+            padding = (pad_h, pad_w)
+            dilation = (dilation, dilation)
+            X_scale = 1.3
+            X_zero_point = 2
+            X2_scale = 1.2
+            X2_zero_point = 1
+            W_scale = [0.5]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
+            Y_scale = 5.0
+            Y_zero_point = 4
+            qconv_cls = nniq.ConvAddReLU2d
+            module_name = "QuantizedConvAddReLU2d"
             for pad_mode, use_bias, use_channelwise in options:
-                batch_size = 2
-                in_channels_per_group = 2
-                H = 8
-                W = 8
-                out_channels_per_group = 2
-                groups = 3
-                kernel_h = 3
-                kernel_w = 3
-                stride_h = 2
-                stride_w = 2
-                pad_h = 1
-                pad_w = 1
-                dilation = 1
-                # Tests the correctness of the conv2d module.
-                in_channels = in_channels_per_group * groups
-                out_channels = out_channels_per_group * groups
-                input_feature_map_size = (H, W)
-                kernel_size = (kernel_h, kernel_w)
-                stride = (stride_h, stride_w)
-                padding = (pad_h, pad_w)
-                dilation = (dilation, dilation)
-                X_scale = 1.3
-                X_zero_point = 2
-                X2_scale = 1.2
-                X2_zero_point = 1
-                W_scale = [0.5]
-                W_zero_point = [0] if qengine_is_onednn() else [3]
-                Y_scale = 5.0
-                Y_zero_point = 4
-
-                qconv_cls = nniq.ConvAddReLU2d
-                module_name = "QuantizedConvAddReLU2d"
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -883,7 +877,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 conv_module = nn.Conv2d(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode)
-                conv_module = torch.ao.nn.intrinsic.ConvAddReLU2d(nn.ReLU(), torch.add, conv_module)
+                conv_module = torch.ao.nn.intrinsic.ConvAddReLU2d(conv_module, torch.add, nn.ReLU())
                 conv_module = conv_module.float()
 
                 self._test_conv_api_impl(
