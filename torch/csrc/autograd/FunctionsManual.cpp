@@ -4725,12 +4725,6 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
 }
 
-Tensor sparse_constructor_values_backward(
-    const Tensor& sparse_grad_out,
-    const Tensor& indices) {
-  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
-}
-
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
 // in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
