@@ -15,6 +15,8 @@ def is_built() -> bool:
 @_lru_cache()
 def is_available() -> bool:
     r"""Returns a bool indicating if MPS is currently available."""
+    if not hasattr(torch._C, '_is_mps_available'):
+        return False
     return torch._C._is_mps_available()
 
 

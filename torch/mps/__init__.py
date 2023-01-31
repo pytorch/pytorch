@@ -9,7 +9,7 @@ import torch._C
 
 _initialized = False
 _initialization_lock = threading.Lock()
-default_generator: torch._C.Generator = ()  # type: ignore[assignment]
+default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
 def init():
     r"""Initialize PyTorch's MPS state.
@@ -32,6 +32,8 @@ def _lazy_init():
 @lru_cache()
 def is_available() -> bool:
     r"""Returns a bool indicating if MPS is currently available."""
+    if not hasattr(torch._C, '_is_mps_available'):
+        return False
     return torch._C._is_mps_available()
 
 @lru_cache()
@@ -47,7 +49,7 @@ def synchronize() -> None:
 def get_rng_state() -> Tensor:
     r"""Returns the random number generator state as a ByteTensor."""
     _lazy_init()
-    return default_generator.get_state()
+    return default_mps_generator.get_state()
 
 def set_rng_state(new_state: Tensor) -> None:
     r"""Sets the random number generator state.
@@ -56,7 +58,7 @@ def set_rng_state(new_state: Tensor) -> None:
     """
     _lazy_init()
     new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
-    default_generator.set_state(new_state_copy)
+    default_mps_generator.set_state(new_state_copy)
 
 def manual_seed(seed: int) -> None:
     r"""Sets the seed for generating random numbers
@@ -67,17 +69,17 @@ def manual_seed(seed: int) -> None:
         return
     _lazy_init()
     seed = int(seed)
-    default_generator.manual_seed(seed)
+    default_mps_generator.manual_seed(seed)
 
 def seed() -> None:
     r"""Sets the seed for generating random numbers to a random number."""
     _lazy_init()
-    default_generator.seed()
+    default_mps_generator.seed()
 
 def is_initialized():
     r"""Returns whether PyTorch's MPS state has been initialized."""
     return _initialized
 
 __all__ = [
-    'default_generator', 'get_rng_state', 'is_available', 'manual_seed',
+    'default_mps_generator', 'get_rng_state', 'is_available', 'manual_seed',
     'seed', 'set_rng_state', 'synchronize', 'init', 'is_initialized']

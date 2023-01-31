@@ -33,7 +33,7 @@ static PyObject* MPSModule_initExtension(PyObject* self, PyObject* noargs) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto gen = at::mps::detail::getDefaultMPSGenerator();
   auto default_mps_generator = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
-  set_module_attr("default_generator", (PyObject*) default_mps_generator);
+  set_module_attr("default_mps_generator", (PyObject*) default_mps_generator);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
