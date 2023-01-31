@@ -739,9 +739,9 @@ def as_strided(x, size, stride, storage_offset=None):
         # as_strided ignores views
         x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_contiguous_storage_and_layout(x):
+    if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
-    storage, old_layout = ir.as_contiguous_storage_and_layout(x)
+    storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
         old_layout.device,
         old_layout.dtype,
@@ -762,7 +762,7 @@ def as_strided_(x, size, stride, storage_offset=None):
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
-        return inputs[0]
+        return clone(inputs[0])
 
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
@@ -3405,7 +3405,9 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
+    if isinstance(changed_data, ir.StorageBox) and not (
+        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+    ):
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data
