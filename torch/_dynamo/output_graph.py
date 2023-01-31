@@ -757,8 +757,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
-        # Clear cache for conversion of real -> fake tensors
-        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
