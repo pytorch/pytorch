@@ -9,23 +9,21 @@ from typing import List
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
+import torch._dynamo.config as dynamo_config
+
 import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.optimizations.normalize import normalize_ir
-from torch._dynamo.optimizations.training import (
-    aot_autograd,
-    is_aot_autograd_safe_to_run,
-)
+from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
-
-from . import config, metrics, overrides
+from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -90,7 +88,7 @@ def _warn_tf32_disabled():
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         warnings.warn(
-            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
 
@@ -133,24 +131,29 @@ def compile_fx_inner(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
-
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = fake_mode_from_tensors(example_inputs)
-    graph = GraphLowering(
-        gm,
-        shape_env=shape_env,
-        num_static_inputs=num_fixed,
-        graph_id=graph_id,
-        fake_mode=fake_mode,
-    )
-    with V.set_graph_handler(graph):
-        graph.run(*example_inputs)
-        compiled_fn = graph.compile_to_fn()
+    fake_mode = fake_mode_from_tensors(
+        example_inputs
+    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+
+    with V.set_fake_mode(fake_mode):
+        pattern_matcher.fx_passes(gm)
+        V.debug.fx_graph_transformed(gm, example_inputs)
+
+        graph = GraphLowering(
+            gm,
+            shape_env=shape_env,
+            num_static_inputs=num_fixed,
+            graph_id=graph_id,
+        )
+        with V.set_graph_handler(graph):
+            graph.run(*example_inputs)
+            compiled_fn = graph.compile_to_fn()
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -199,10 +202,16 @@ def clone_preserve_strides(x):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
+    def is_aligned(storage_offset, dtype):
+        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
+
     check_inputs = [
         i
         for i in range(len(inputs))
-        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        if (
+            i not in static_input_idxs
+            or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
+        )
         and inputs[i].device.type == "cuda"
     ]
 
@@ -364,10 +373,6 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
 
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
-        log.warning("Aot Autograd is not safe to run, so falling back to eager")
-        return model_
-
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
@@ -376,7 +381,9 @@ def compile_fx(
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(config.triton.cudagraphs and not config.dynamic_shapes)
+    cudagraphs = BoxedBool(
+        config.triton.cudagraphs and not dynamo_config.dynamic_shapes
+    )
 
     graph_id = next(_graph_counter)
 

@@ -885,7 +885,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 // we are designing a better semantics to include both inheritance and inference
 Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
-      proposed_shape.size() > 0,
+      !proposed_shape.empty(),
       "shape '[]' is invalid for a nested tensor");
   auto self_ptr = get_nested_tensor_impl(self);
   // basic information before reshaping
@@ -972,7 +972,7 @@ Tensor _nested_view_from_buffer(
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
-      proposed_shape.size() > 0,
+      !proposed_shape.empty(),
       "shape '[]' is invalid for a nested tensor");
   auto self_ptr = get_nested_tensor_impl(self);
   // basic information before reshaping
