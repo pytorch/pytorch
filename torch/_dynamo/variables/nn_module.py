@@ -218,21 +218,32 @@ class NNModuleVariable(VariableTracker):
                     "Must provide a valid source in order to inline, "
                     "since inlined function may have default args which must be guarded."
                 )
-                class_source = AttrSource(self.source, "__class__")
                 if is_lazy:
-                    fn = mod.__call__.__func__
-                    fn_source = AttrSource(
-                        AttrSource(self.source, "__call__"), "__func__"
-                    )
+                    if istype(mod.__call__, types.FunctionType):
+                        fn = mod.__call__
+                        fn_source = AttrSource(self.source, "__call__")
+                    else:
+                        assert istype(mod.__call__, types.MethodType)
+                        fn = mod.__call__.__func__
+                        fn_source = AttrSource(
+                            AttrSource(self.source, "__call__"), "__func__"
+                        )
+                        args = [self] + args
                 else:
-                    fn = mod.forward.__func__
-                    fn_source = AttrSource(
-                        AttrSource(self.source, "forward"), "__func__"
-                    )
+                    if istype(mod.forward, types.FunctionType):
+                        fn = mod.forward
+                        fn_source = AttrSource(self.source, "forward")
+                    else:
+                        assert istype(mod.forward, types.MethodType)
+                        fn = mod.forward.__func__
+                        fn_source = AttrSource(
+                            AttrSource(self.source, "forward"), "__func__"
+                        )
+                        args = [self] + args
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
-                    [self] + args,
+                    args,
                     kwargs,
                 )
 
