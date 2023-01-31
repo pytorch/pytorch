@@ -983,7 +983,7 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     helper_for_dump_minify(contents)
 
 
-def wrap_backend_debug(compiler_fn, compiler_name: str):
+def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
     As opposed to wrap_compiler_debug, this wrapper intercepts at the
@@ -993,8 +993,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     repro.tar.gz.
     """
 
-    @functools.wraps(compiler_fn)
+    @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
             if config.repro_level == 3:
@@ -1003,7 +1004,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -1020,9 +1021,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(
-                        copy.deepcopy(gm), example_inputs, **kwargs
-                    )
+                    compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
@@ -1046,7 +1045,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     )
                     raise
         else:
-            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_gm = compiler_fn(gm, example_inputs)
 
         return compiled_gm
 
