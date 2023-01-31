@@ -806,6 +806,16 @@ def sample_inputs_cauchy(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(median, gamma))
 
 
+def error_inputs_cauchy(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    invalid_scale = 0
+    yield ErrorInput(
+        SampleInput(t, args=(invalid_scale,)),
+        error_type=RuntimeError,
+        error_regex=r"cauchy_ expects sigma > 0.0, but found sigma={}".format(invalid_scale),
+    )
+
+
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -8806,8 +8816,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_autograd=False,
            sample_inputs_func=sample_inputs_cauchy,
-           # TODO: error_inputs_func -- see why torch.Tensor.cauchy_
-           # does not check gamma > 0 while torch.distributions.cauchy.Cauchy does
+           error_inputs_func=error_inputs_cauchy,
            skips=(
               # Tests that assume input tensor has a meaningful effect on output tensor
               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
