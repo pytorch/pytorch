@@ -157,14 +157,14 @@ class Context final {
     return std::unique_lock<std::mutex>(cmd_mutex_);
   }
 
- private:
-  inline void set_cmd() {
+  inline void set_cmd(bool reusable = false) {
     if (!cmd_) {
-      cmd_ = command_pool_.get_new_cmd();
+      cmd_ = command_pool_.get_new_cmd(reusable);
       cmd_.begin();
     }
   }
 
+ private:
   DescriptorSet submit_compute_prologue(
       CommandBuffer&,
       const ShaderInfo&,
@@ -196,10 +196,8 @@ class Context final {
       const VkFence fence_handle,
       Arguments&&...);
 
- private:
   void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
 
- public:
   void flush();
 };
 
