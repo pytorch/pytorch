@@ -128,6 +128,7 @@ decompositions = get_decompositions(
         aten.bucketize,
         aten.zero_,
         aten.zero,
+        aten.lerp,
     ]
 )
 
