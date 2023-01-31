@@ -191,7 +191,9 @@ public:
     // substitute res == 0 where fabs_max == 0
     auto zero = _mm512_set1_pd(0.f);
     auto maskz = _mm512_cmp_pd_mask(zero, fabs_max, _CMP_EQ_OQ);
-    res = blendv(res, zero, maskz);
+    auto maskz_vec = _mm512_mask_set1_epi64(_mm512_castpd_si512(zero), maskz,
+                                            0xFFFFFFFFFFFFFFFF);
+    res = blendv(res, zero, _mm512_castsi512_pd(maskz_vec));
     return res;
   }
   Vectorized<c10::complex<double>> abs() const {

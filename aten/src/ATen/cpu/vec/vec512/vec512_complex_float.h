@@ -697,7 +697,7 @@ public:
     // substitute res == 0 where fabs_max == 0
     auto zero = _mm512_set1_ps(0.f);
     auto maskz = _mm512_cmp_ps_mask(zero, fabs_max, _CMP_EQ_OQ);
-    res = blendv(res, zero, maskz);
+    res = _mm512_mask_blend_ps(maskz, res, zero);
     return res;
   }
   Vectorized<c10::complex<float>> abs() const {
