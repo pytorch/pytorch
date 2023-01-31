@@ -40,14 +40,11 @@ inline void _vec_log_softmax_lastdim(
   // size of L1D cache on many processors. Some processors have 48 KB L1D cache
   // nowadays, so maybe in the future, we can leverage the knowledge of a
   // machine's L1D cache size.
-  int64_t CHUNK_SIZE = std::max(
-      (int64_t)1,
-      (int64_t)(at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size)));
+  int64_t CHUNK_SIZE = std::max<int64_t>(
+      1,
+      at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size));
 
-  // we assume that at::GRAIN_SIZE is an appropriate grain-size.
-  int64_t grain_size = std::max(
-      (Vec::size() * internal::GRAIN_SIZE) / (16 * dim_size),
-      (int64_t)1);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
 
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
@@ -114,7 +111,7 @@ inline void _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
-  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       scalar_t* input_data = input_data_base + i * dim_size;
@@ -148,7 +145,7 @@ inline void _vec_softmax_lastdim<BFloat16>(
     int64_t dim_size) {
   using bVec = vec::Vectorized<BFloat16>;
   using fVec = vec::Vectorized<float>;
-  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer.
     std::unique_ptr<float []> buffer(new float[dim_size]);
@@ -270,8 +267,8 @@ inline void _vec_softmax_backward(
   using Vec = vec::Vectorized<scalar_t>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max(
-      int64_t(BLOCK_SIZE / dim_size / sizeof(scalar_t)), (int64_t)Vec::size());
+  int64_t CHUNK_SIZE = std::max<int64_t>(
+      BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
   CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
@@ -353,8 +350,8 @@ inline void _vec_softmax_backward<BFloat16>(
   using fVec = vec::Vectorized<float>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max(
-      int64_t(BLOCK_SIZE / dim_size / sizeof(BFloat16)), (int64_t)bVec::size());
+  int64_t CHUNK_SIZE = std::max<int64_t>(
+      BLOCK_SIZE / dim_size / sizeof(BFloat16), bVec::size());
   CHUNK_SIZE = CHUNK_SIZE / bVec::size() * bVec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
@@ -481,8 +478,8 @@ inline void _vec_log_softmax_backward(
   using Vec = vec::Vectorized<scalar_t>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max(
-      int64_t(BLOCK_SIZE / dim_size / sizeof(scalar_t)), (int64_t)Vec::size());
+  int64_t CHUNK_SIZE = std::max<int64_t>(
+      BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
   CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
@@ -563,8 +560,8 @@ inline void _vec_log_softmax_backward<BFloat16>(
   using fVec = vec::Vectorized<float>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max(
-      int64_t(BLOCK_SIZE / dim_size / sizeof(BFloat16)), (int64_t)bVec::size());
+  int64_t CHUNK_SIZE = std::max<int64_t>(
+      BLOCK_SIZE / dim_size / sizeof(BFloat16), bVec::size());
   CHUNK_SIZE = CHUNK_SIZE / bVec::size() * bVec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
@@ -695,7 +692,7 @@ inline void _vec_softmax(
   using Vec_bf16 = vec::Vectorized<BFloat16>;
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  int64_t grain_size = std::max(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = internal::GRAIN_SIZE / dim_size;
   int vectorized_step = Vec_bf16().size(); // Currently, we only support BFloat16 in this special implementation
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
@@ -801,7 +798,7 @@ inline void _vec_softmax(
   using Vec = vec::Vectorized<scalar_t>;
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  int64_t grain_size = std::max(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = internal::GRAIN_SIZE / dim_size;
   int vectorized_step = Vec().size();
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
@@ -893,7 +890,7 @@ inline void _vec_logsoftmax(
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max(int64_t(BLOCK_SIZE / dim_size / sizeof(scalar_t)), (int64_t) Vec::size());
+  int64_t CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
   CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
 
@@ -997,7 +994,7 @@ inline void _vec_logsoftmax<BFloat16>(
   using bVec = vec::Vectorized<BFloat16>;
   using fVec = vec::Vectorized<float>;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max(int64_t(BLOCK_SIZE / dim_size / sizeof(BFloat16)), (int64_t) bVec::size());
+  int64_t CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(BFloat16), bVec::size());
   CHUNK_SIZE = CHUNK_SIZE / bVec::size() * bVec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
 
