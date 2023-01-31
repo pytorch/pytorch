@@ -1335,7 +1335,10 @@ class Module:
 
     def register_forward_pre_hook(
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -1396,7 +1399,10 @@ class Module:
 
     def register_forward_hook(
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -1531,6 +1537,10 @@ class Module:
                     result = hook_result
 
         if bw_hook:
+            if not isinstance(result, (torch.Tensor, tuple)):
+                warnings.warn("For backward hooks to be called,"
+                              " module output should be a Tensor or a tuple of Tensors"
+                              f" but received {type(result)}")
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks

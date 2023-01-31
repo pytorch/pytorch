@@ -56,7 +56,7 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
 
 inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
-    return nullopt;
+    return c10::nullopt;
   }
   return scales->at(idx);
 }

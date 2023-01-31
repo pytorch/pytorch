@@ -7,7 +7,7 @@
 #include <c10/core/Scalar.h>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -57,7 +57,7 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
 }
 
 void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar lim1, at::native::detail::ClampLimits minmax){
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_min_scalar_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
     auto lim0_val = lim0.to<opmath_t>();
     auto lim1_val = lim1.to<opmath_t>();
@@ -125,4 +125,4 @@ void _assert_async_cuda(const Tensor& self_tensor) {
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

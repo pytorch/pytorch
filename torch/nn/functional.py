@@ -4831,9 +4831,8 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
-
-_scaled_dot_product_attention = _add_docstr(
-    torch._C._nn._scaled_dot_product_attention, r"""
+scaled_dot_product_attention = _add_docstr(
+    torch._C._nn.scaled_dot_product_attention, r"""
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
@@ -4845,14 +4844,11 @@ Args:
      attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
          is supported, where a value of True indicates that the element *should* take part in attention.
      dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
-         otherwise, the second return value is unspecified
      is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
 
 
 Returns a tuple containing:
     output (Tensor): Attention output; shape (N, ..., L, E)
-    attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
 
 Shape legend:
     N: Batch size
@@ -4862,6 +4858,19 @@ Shape legend:
 
 """)
 
+
+def _scaled_dot_product_attention(
+        query: Tensor,
+        key: Tensor,
+        value,
+        attn_mask: Optional[Tensor] = None,
+        dropout_p: float = 0.0,
+        need_attn_weights: bool = False,
+        is_causal: bool = False):
+    r""" TODO This function is for merge purposes only and needs to be removed
+    """
+    warnings.warn("This function is deprecated please rebuild your models with the public version of sdpa.")
+    return torch._C._nn.scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
@@ -5187,24 +5196,23 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
 
-    if attn_mask is not None:
-        if attn_mask.size(0) == 1:
-            attn_mask = attn_mask.unsqueeze(0)
-        else:
-            attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
-
-    q = q.view(bsz, num_heads, tgt_len, head_dim)
-    k = k.view(bsz, num_heads, src_len, head_dim)
-    v = v.view(bsz, num_heads, src_len, head_dim)
-
-    attn_output, attn_output_weights = _scaled_dot_product_attention(
-        q, k, v, attn_mask, dropout_p, need_weights, is_causal)
-    attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
-
     if need_weights:
+        B, Nt, E = q.shape
+        q_scaled = q / math.sqrt(E)
+        if attn_mask is not None:
+            attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
+        else:
+            attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+        attn_output_weights = softmax(attn_output_weights, dim=-1)
+        if dropout_p > 0.0:
+            attn_output_weights = dropout(attn_output_weights, p=dropout_p)
+
+        attn_output = torch.bmm(attn_output_weights, v)
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
         # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
@@ -5216,6 +5224,24 @@ def multi_head_attention_forward(
             attn_output_weights = attn_output_weights.squeeze(0)
         return attn_output, attn_output_weights
     else:
+        # attn_mask can be either (L,S) or (N*num_heads, L, S)
+        # if attn_mask's shape is (1, L, S) we need to unsqueeze to (1, 1, L, S)
+        # in order to match the input for SDPA of (N, num_heads, L, S)
+        if attn_mask is not None:
+            if attn_mask.size(0) == 1 and attn_mask.dim() == 3:
+                attn_mask = attn_mask.unsqueeze(0)
+            else:
+                attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
+
+        q = q.view(bsz, num_heads, tgt_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, head_dim)
+        v = v.view(bsz, num_heads, src_len, head_dim)
+
+        attn_output = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
         if not is_batched:
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)

@@ -162,15 +162,15 @@ class BinaryOpNode : public ExprNode<Op> {
             // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
-        lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
-        rhs_(CastIfNeeded(rhs_v, ExprNode<Op>::dtype())) {}
+        lhs_(CastIfNeeded(std::move(lhs_v), ExprNode<Op>::dtype())),
+        rhs_(CastIfNeeded(std::move(rhs_v), ExprNode<Op>::dtype())) {}
 
  private:
   static ExprPtr CastIfNeeded(ExprPtr expr, Dtype dst_dtype) {
     if (expr->dtype() == dst_dtype) {
       return expr;
     }
-    return Cast::make(dst_dtype, ExprHandle(expr)).node();
+    return Cast::make(dst_dtype, ExprHandle(std::move(expr))).node();
   }
 
   ExprPtr lhs_;
@@ -232,29 +232,32 @@ class BitwiseOpNode : public BinaryOpNode<Op> {
 
 class TORCH_API And : public BitwiseOpNode<And> {
  public:
-  And(ExprPtr lhs, ExprPtr rhs) : BitwiseOpNode(lhs, rhs, IRNodeType::kAnd) {}
+  And(ExprPtr lhs, ExprPtr rhs)
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAnd) {}
 };
 
 class TORCH_API Or : public BitwiseOpNode<Or> {
  public:
-  Or(ExprPtr lhs, ExprPtr rhs) : BitwiseOpNode(lhs, rhs, IRNodeType::kOr) {}
+  Or(ExprPtr lhs, ExprPtr rhs)
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOr) {}
 };
 
 class TORCH_API Xor : public BitwiseOpNode<Xor> {
  public:
-  Xor(ExprPtr lhs, ExprPtr rhs) : BitwiseOpNode(lhs, rhs, IRNodeType::kXor) {}
+  Xor(ExprPtr lhs, ExprPtr rhs)
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kXor) {}
 };
 
 class TORCH_API Lshift : public BitwiseOpNode<Lshift> {
  public:
   Lshift(ExprPtr lhs, ExprPtr rhs)
-      : BitwiseOpNode(lhs, rhs, IRNodeType::kLshift) {}
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kLshift) {}
 };
 
 class TORCH_API Rshift : public BitwiseOpNode<Rshift> {
  public:
   Rshift(ExprPtr lhs, ExprPtr rhs)
-      : BitwiseOpNode(lhs, rhs, IRNodeType::kRshift) {}
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kRshift) {}
 };
 
 // TODO: add TORCH_API
@@ -349,16 +352,16 @@ ExprPtr getImmediateByType(Dtype dtype, T initialVal) {
 }
 
 template <typename T>
-ExprPtr immLike(ExprPtr e, T v) {
+ExprPtr immLike(const ExprPtr& e, T v) {
   return getImmediateByType<T>(e->dtype(), v);
 }
 
 template <typename T>
-ExprPtr immLike(ExprHandle e, T v) {
+ExprPtr immLike(const ExprHandle& e, T v) {
   return immLike(e.node(), v);
 }
 
-inline c10::optional<int64_t> intValue(ExprPtr e) {
+inline c10::optional<int64_t> intValue(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)      \
   if (auto v = to<Name##Imm>(e)) { \
     return v->value();             \
@@ -368,12 +371,12 @@ inline c10::optional<int64_t> intValue(ExprPtr e) {
   return c10::nullopt;
 }
 
-inline c10::optional<int64_t> intValue(ExprHandle e) {
+inline c10::optional<int64_t> intValue(const ExprHandle& e) {
   return intValue(e.node());
 }
 
 template <typename T>
-T immediateAs(ExprPtr e) {
+T immediateAs(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value();                     \
@@ -385,12 +388,12 @@ T immediateAs(ExprPtr e) {
 }
 
 template <typename T>
-T immediateAs(ExprHandle e) {
+T immediateAs(const ExprHandle& e) {
   return immediateAs<T>(e.node());
 }
 
 template <typename T>
-bool immediateEquals(ExprPtr e, T val) {
+bool immediateEquals(const ExprPtr& e, T val) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == val;              \
@@ -401,11 +404,11 @@ bool immediateEquals(ExprPtr e, T val) {
   return false;
 }
 
-TORCH_API bool immediateIsNegative(ExprPtr e);
+TORCH_API bool immediateIsNegative(const ExprPtr& e);
 
-TORCH_API bool immediateIsPositive(ExprPtr e);
+TORCH_API bool immediateIsPositive(const ExprPtr& e);
 
-TORCH_API bool immediateIsZero(ExprPtr e);
+TORCH_API bool immediateIsZero(const ExprPtr& e);
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
@@ -441,7 +444,7 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
 
   Ramp(ExprPtr base, ExprPtr stride, int lanes)
       : ExprNodeBase(Dtype(base->dtype(), lanes)),
-        base_(base),
+        base_(std::move(base)),
         stride_(std::move(stride)),
         lanes_(lanes) {}
 
@@ -509,7 +512,7 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
   }
   Broadcast(ExprPtr value, int lanes)
       : ExprNodeBase(Dtype(value->dtype(), lanes)),
-        value_(value),
+        value_(std::move(value)),
         lanes_(lanes) {}
 
  private:
@@ -564,7 +567,7 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   IfThenElse(ExprPtr c, ExprPtr t, ExprPtr f)
       : ExprNodeBase(t->dtype()),
         condition_(std::move(c)),
-        true_(t),
+        true_(std::move(t)),
         false_(std::move(f)) {}
 
  private:
@@ -657,7 +660,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       : ExprNodeBase(ret_val1->dtype()),
         lhs_(std::move(lhs)),
         rhs_(std::move(rhs)),
-        ret_val1_(ret_val1),
+        ret_val1_(std::move(ret_val1)),
         ret_val2_(std::move(ret_val2)),
         compare_op_(cmp_op),
         bias_(bias) {}
@@ -841,7 +844,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, ExprPtr v1)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype())),
-        params_({v1}),
+        params_({std::move(v1)}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 1) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -851,7 +854,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, ExprPtr v1, ExprPtr v2)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype(), v2->dtype())),
-        params_({v1, v2}),
+        params_({std::move(v1), std::move(v2)}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 2) {
       throw malformed_input("bad arg count in Intrinsics");

@@ -66,6 +66,13 @@ class PrepareCustomConfig:
         self.output_quantized_indexes: List[int] = []
         self.preserved_attributes: List[str] = []
 
+    def __repr__(self):
+        dict_nonempty = {
+            k: v for k, v in self.__dict__.items()
+            if len(v) > 0
+        }
+        return f"PrepareCustomConfig({dict_nonempty})"
+
     def set_standalone_module_name(
             self,
             module_name: str,
@@ -292,6 +299,13 @@ class ConvertCustomConfig:
         self.observed_to_quantized_mapping: Dict[QuantType, Dict[Type, Type]] = {}
         self.preserved_attributes: List[str] = []
 
+    def __repr__(self):
+        dict_nonempty = {
+            k: v for k, v in self.__dict__.items()
+            if len(v) > 0
+        }
+        return f"ConvertCustomConfig({dict_nonempty})"
+
     def set_observed_to_quantized_mapping(
             self,
             observed_class: Type,
@@ -367,6 +381,13 @@ class FuseCustomConfig:
 
     def __init__(self):
         self.preserved_attributes: List[str] = []
+
+    def __repr__(self):
+        dict_nonempty = {
+            k: v for k, v in self.__dict__.items()
+            if len(v) > 0
+        }
+        return f"FuseCustomConfig({dict_nonempty})"
 
     def set_preserved_attributes(self, attributes: List[str]) -> FuseCustomConfig:
         """

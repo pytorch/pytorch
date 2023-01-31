@@ -158,11 +158,12 @@ class _TestParametrizer(object):
                 if the tests are not part of a device-specific set
 
         Returns:
-            Generator object returning 3-tuples of:
+            Generator object returning 4-tuples of:
                 test (fn): Parametrized test function; must support a device arg and args for any params
                 test_name (str): Parametrized suffix for the test (e.g. opname_int64); will be appended to
                     the base name of the test
                 param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
+                decorator_fn (callable): Callable[[Dict], List] for list of decorators to apply given param_kwargs
         """
         raise NotImplementedError
 
@@ -196,10 +197,9 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     def composite_fn(test, generic_cls, device_cls,
                      old_parametrize_fn=old_parametrize_fn,
                      new_parametrize_fn=new_parametrize_fn):
-        old_tests = [(test, test_name, param_kwargs) for (test, test_name, param_kwargs) in
-                     old_parametrize_fn(test, generic_cls, device_cls)]
-        for (old_test, old_test_name, old_param_kwargs) in old_tests:
-            for (new_test, new_test_name, new_param_kwargs) in \
+        old_tests = list(old_parametrize_fn(test, generic_cls, device_cls))
+        for (old_test, old_test_name, old_param_kwargs, old_dec_fn) in old_tests:
+            for (new_test, new_test_name, new_param_kwargs, new_dec_fn) in \
                     new_parametrize_fn(old_test, generic_cls, device_cls):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
@@ -211,7 +211,11 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
                                                    old_test_name)
-                yield (new_test, merged_test_name, full_param_kwargs)
+
+                def merged_decorator_fn(param_kwargs, old_dec_fn=old_dec_fn, new_dec_fn=new_dec_fn):
+                    return list(old_dec_fn(param_kwargs)) + list(new_dec_fn(param_kwargs))
+
+                yield (new_test, merged_test_name, full_param_kwargs, merged_decorator_fn)
 
     return composite_fn
 
@@ -250,9 +254,14 @@ def instantiate_parametrized_tests(generic_cls):
             assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
             setattr(generic_cls, name, instantiated_test)
 
-        for (test, test_suffix, param_kwargs) in class_attr.parametrize_fn(
+        for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
+
+            # Apply decorators based on full param kwargs.
+            for decorator in decorator_fn(param_kwargs):
+                test = decorator(test)
+
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
     return generic_cls
 
@@ -329,7 +338,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -362,7 +371,7 @@ class parametrize(_TestParametrizer):
         if len(self.arg_names) == 0:
             # No additional parameters needed for the test.
             test_name = ''
-            yield (test, test_name, {})
+            yield (test, test_name, {}, lambda _: [])
         else:
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
@@ -370,19 +379,18 @@ class parametrize(_TestParametrizer):
             values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
+
+                decorators = []
                 if isinstance(values, subtest):
                     sub = values
                     values = sub.arg_values
                     maybe_name = sub.name
 
-                    # Apply decorators.
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in sub.decorators:
-                        test_wrapper = decorator(test_wrapper)
-
+                    decorators = sub.decorators
                     gen_test = test_wrapper
                 else:
                     gen_test = test
@@ -398,10 +406,11 @@ class parametrize(_TestParametrizer):
                 }
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
-                if '.' in test_name:
-                    raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
-                yield (gen_test, test_name, param_kwargs)
+                def decorator_fn(_, decorators=decorators):
+                    return decorators
+
+                yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
                 raise ValueError('An empty arg_values was passed to @parametrize. '
@@ -1447,7 +1456,9 @@ class CudaNonDefaultStream():
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
             self.beforeStreams[-1].synchronize()
-            torch._C._cuda_setStream(deviceStream._cdata)
+            torch._C._cuda_setStream(stream_id=deviceStream.stream_id,
+                                     device_index=deviceStream.device_index,
+                                     device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
     def __exit__(self, exec_type, exec_value, traceback):
@@ -1455,7 +1466,9 @@ class CudaNonDefaultStream():
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
         for d in range(torch.cuda.device_count()):
-            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+            torch._C._cuda_setStream(stream_id=self.beforeStreams[d].stream_id,
+                                     device_index=self.beforeStreams[d].device_index,
+                                     device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
@@ -1848,32 +1861,6 @@ class TensorOrArrayPair(TensorLikePair):
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
 
-        # This is a slow and ugly hack to allow the comparison of hybrid sparse CSR tensors with strided ones. If
-        # `check_layout=False` (default), the tensors will be converted to strided by calling `.to_dense()` on them.
-        # However, this is not yet supported for hybrid sparse CSR and thus we need to do it manually for now.
-        # FIXME: Remove this as soon as `.to_dense` is supported for hybrid sparse CSR tensors
-        if not self.check_layout:
-            self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
-
-    def _handle_hybrid_sparse_csr(self, actual, expected):
-        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-        if not ((actual.layout in compressed_sparse_layouts) or (expected.layout in compressed_sparse_layouts)):
-            return actual, expected
-
-        def to_dense(tensor):
-            if tensor.layout not in compressed_sparse_layouts:
-                return tensor
-
-            def partial_to_dense(tensor):
-                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
-                    return tensor.to_dense()
-                lst = [partial_to_dense(torch.select_copy(tensor, 0, i)) for i in range(len(tensor))]
-                return torch.stack(lst) if lst else tensor.to_dense()
-
-            return partial_to_dense(tensor)
-
-        return [to_dense(input) for input in [actual, expected]]
-
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
@@ -2233,6 +2220,29 @@ class TestCase(expecttest.TestCase):
         check_if_enable(self)
         set_rng_seed(SEED)
 
+        # Save global check sparse tensor invariants state that can be
+        # restored from tearDown:
+        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @torch.sparse.check_sparse_tensor_invariants(False)
+        # decorator to disable the invariant checks.
+        torch.sparse.check_sparse_tensor_invariants.enable()
+
+    def tearDown(self):
+        # There exists test cases that override TestCase.setUp
+        # definition, so we cannot assume that _check_invariants
+        # attribute is defined in general.
+        if hasattr(self, '_check_invariants'):
+            # Restore the global check sparse tensor invariants state
+            if self._check_invariants:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+            else:
+                torch.sparse.check_sparse_tensor_invariants.disable()
+
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
                            *, device, dtype, random=True):
@@ -2482,6 +2492,8 @@ class TestCase(expecttest.TestCase):
                                enable_batch=True,
                                enable_hybrid=True,
                                enable_zero_sized=True,
+                               enable_non_contiguous_indices=True,
+                               enable_non_contiguous_values=True,
                                enable_batch_variable_nse=False,
                                output_tensor=True,
                                patterns=None):
@@ -2493,6 +2505,7 @@ class TestCase(expecttest.TestCase):
         - tensor values are sorted sequences for COO and CSR formats, e.g. [1, 2, 3, 4]
         - the generated tensors represent the same mathematical tensor for all layouts
         - the generated tensors include regular, zero-sized, and optionally, batched or/and hybrid tensors.
+        - the generated tensors include contiguous or non-contiguous tensors both in indices and values
 
         If output_tensor is True, yield tensors with the given
         layout. Otherwise, yield inputs to the corresponding tensor
@@ -2516,6 +2529,8 @@ class TestCase(expecttest.TestCase):
             for args, kwargs in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype,
                                                             enable_batch=enable_batch, enable_hybrid=enable_hybrid,
                                                             enable_zero_sized=enable_zero_sized,
+                                                            enable_non_contiguous_indices=enable_non_contiguous_indices,
+                                                            enable_non_contiguous_values=enable_non_contiguous_values,
                                                             enable_batch_variable_nse=enable_batch_variable_nse,
                                                             output_tensor=False):
                 if layout is torch.strided:
@@ -2709,6 +2724,21 @@ class TestCase(expecttest.TestCase):
                   [[1, 0],
                    [0, 0]]], [(1, 1)], ([()] if enable_batch_variable_nse else []))]
 
+        def non_contiguous_copy(t, dim=-1, offset=0):
+            # return a copy of t that is non-contiguous along the
+            # given dimension and with the given storage offset
+            self.assertTrue(t.is_contiguous())
+            if dim < 0:
+                dim = dim + t.ndim
+            assert dim >= 0 and dim < t.ndim
+            step = max(2, offset + 1)
+            tmp = torch.zeros((*t.shape[:dim], t.shape[dim] * step, *t.shape[dim + 1:]), dtype=t.dtype, device=t.device)
+            dim_slices = (*((slice(None),) * dim), slice(offset, None, step))
+            r = tmp[dim_slices].copy_(t)
+            self.assertFalse(r.is_contiguous())
+            self.assertEqual(t, r)
+            return r
+
         # the main loop of the method:
         for pattern, blocksizes, densesizes in patterns:
             if not enable_hybrid:
@@ -2725,6 +2755,23 @@ class TestCase(expecttest.TestCase):
                     values = generate_values(data[-1], densesize).to(device=device, dtype=dtype)
                     yield (*indices, values), dict(device=device, dtype=dtype,
                                                    size=pattern.shape + densesize)
+
+                    if enable_non_contiguous_indices and pattern.ndim > 2:
+                        # sparse compressed indices can be sliced only along batch dimensions
+                        for (dim, offset) in {(0, 1), (-2, 0)}:
+                            indices_copy = [non_contiguous_copy(a, dim=dim, offset=offset) for a in indices]
+                            yield (*indices_copy, values), dict(device=device, dtype=dtype,
+                                                                size=pattern.shape + densesize)
+
+                            if enable_non_contiguous_values:
+                                values_copy = non_contiguous_copy(values, dim=-1, offset=1)
+                                yield (*indices_copy, values_copy), dict(device=device, dtype=dtype,
+                                                                         size=pattern.shape + densesize)
+
+                    if enable_non_contiguous_values:
+                        values_copy = non_contiguous_copy(values, dim=-1, offset=1)
+                        yield (*indices, values_copy), dict(device=device, dtype=dtype,
+                                                            size=pattern.shape + densesize)
 
         # zero-sized tensor inputs, non-batch, non-hybrid/hybrid
         if enable_zero_sized:
@@ -3800,6 +3847,25 @@ def coalescedonoff(f):
     return wrapped
 
 
+def is_coalesced_indices(s):
+    indices = s._indices()
+    hash_coeffs = (1,) + s.shape[s.sparse_dim() - 1:0:-1]
+    hash_indices = torch.tensor(hash_coeffs, device=s.device).cumprod(-1).flip(-1)
+    if s.sparse_dim() > 1:
+        hash_indices.unsqueeze_(-1)
+        hash_indices = (indices * hash_indices).sum(0)
+    else:
+        hash_indices = indices * hash_indices
+
+    # check if indices are sorted
+    res = torch.allclose(hash_indices, hash_indices.sort()[0])
+
+    # check if there are no repeated indices
+    res = res and torch.allclose(hash_indices, hash_indices.unique())
+
+    return res
+
+
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():
@@ -4058,9 +4124,10 @@ def outs_and_grads(fn, graph_inps, inps):
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
     for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
     return outs, grads
 
 def compare_equal_outs_and_grads(test, m1, m2, inps):
