@@ -17562,12 +17562,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
-        skips=(
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
