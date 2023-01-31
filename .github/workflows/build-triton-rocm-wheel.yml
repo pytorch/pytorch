@@ -1,4 +1,4 @@
-name: Build Triton wheels
+name: Build Triton ROCm wheels
 
 on:
   push:
@@ -49,7 +49,7 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
-      - name: Build Triton wheel
+      - name: Build Triton ROCm wheel
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
