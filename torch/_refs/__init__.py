@@ -4332,6 +4332,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         output = new_output
     return output
 
+
 @register_decomposition(aten.linspace)
 @out_wrapper()
 def linspace(

@@ -529,6 +529,7 @@ def create_unary_module(node: torch.fx.node):
         F.gelu: nn.GELU,
         F.relu6: nn.ReLU6,
         F.silu: nn.SiLU,
+        F.hardsigmoid: nn.Hardsigmoid,
         torch.relu: nn.ReLU,
         torch.sigmoid: nn.Sigmoid,
         torch.tanh: nn.Tanh,
@@ -766,6 +767,7 @@ unary_modules_map = {
     nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
     nn.ReLU6: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.SiLU: UnaryAttr("swish"),
+    nn.Hardsigmoid: UnaryAttr("hardsigmoid"),
 }
 
 unary_ops = [
@@ -779,6 +781,7 @@ unary_ops = [
     nn.GELU,
     nn.ReLU6,
     nn.SiLU,
+    nn.Hardsigmoid,
     # functional
     F.relu,
     F.sigmoid,
@@ -789,6 +792,7 @@ unary_ops = [
     F.gelu,
     F.relu6,
     F.silu,
+    F.hardsigmoid,
     torch.relu,
     torch.sigmoid,
     torch.tanh,
