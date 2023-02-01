@@ -155,8 +155,11 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         if isinstance(group[0], list):
             nested_list = cast(List[List[int]], group)
             rankset = []
+            stride = -1
             for rs in nested_list:
                 rankset.extend(rs)
+                if stride != -1 and stride != len(rs):
+                    raise ValueError(f"group sizes must be identical found {stride} and {len(rs)}")
                 stride = len(rs)
         else:
             rankset = cast(List[int], group)
@@ -177,9 +180,9 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
             rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, stride).flatten().tolist()
             tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
         else:
-            raise ValueError("Invalid type for group")
+            raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
-        raise ValueError("Invalid type for group")
+        raise ValueError(f"Invalid type for group, must be one of List, Processgroup, DeviceMesh or (DeviceMesh, int) but found {type(group)} - {group}")
 
     return (tag, rankset, stride)
 

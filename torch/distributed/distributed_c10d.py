@@ -935,6 +935,9 @@ def _new_process_group_helper(
     this function returns GroupMember.NON_GROUP_MEMBER.
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
+
+    Notes:
+        Passing a PG and no tag should somehow ensure we recover exactly that PG. So <maybe> we need to NS tags.
     """
     global _world
 
