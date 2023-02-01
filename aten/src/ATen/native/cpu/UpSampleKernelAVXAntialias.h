@@ -26,6 +26,9 @@ Like PIL, Pillow is licensed under the open source HPND License
 #include <ATen/cpu/vec/intrinsics.h>
 #include <c10/util/irange.h>
 
+#include <ATen/ops/empty.h>
+
+
 namespace {
 
 static __m128i inline mm_cvtepu8_epi32(void* ptr) {
@@ -202,86 +205,6 @@ void ImagingResampleVertical(
   }
 }
 
-template <typename scale_type, class F>
-uint32_t* ImagingResampleInner(
-    uint32_t* unpacked_input_p,
-    int xin,
-    int yin,
-    int xout,
-    int yout,
-    bool align_corners,
-    const scale_type& scales,
-    bool antialias) {
-  int need_horizontal, need_vertical;
-
-  uint32_t* unpacked_output_p = nullptr;
-  uint32_t* unpacked_output_temp_p = nullptr;
-
-  need_horizontal = xout != xin;
-  need_vertical = yout != yin;
-
-  if (need_horizontal) {
-    int interp_dim = 3;
-    auto [horiz_indices_weights, ksize_horiz, horiz_weights_precision] =
-        F::compute_indices_int16_weights_aa(
-            /*input_size=*/xin,
-            /*output_size=*/xout,
-            /*stride=*/1,
-            /*ndims=*/4,
-            /*reshape_dim=*/interp_dim,
-            /*align_corners=*/align_corners,
-            /*opt_scale=*/scales[interp_dim - 2],
-            /*antialias=*/antialias);
-
-    unpacked_output_temp_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yin);
-    ImagingResampleHorizontal(
-        unpacked_output_temp_p,
-        unpacked_input_p,
-        ksize_horiz,
-        horiz_indices_weights,
-        horiz_weights_precision,
-        xout,
-        yin,
-        xin);
-    unpacked_output_p = unpacked_input_p = unpacked_output_temp_p;
-  }
-  if (need_vertical) {
-    int interp_dim = 2;
-    auto [vert_indices_weights, ksize_vert, vert_weights_precision] =
-        F::compute_indices_int16_weights_aa(
-            /*input_size=*/yin,
-            /*output_size=*/yout,
-            /*stride=*/1,
-            /*ndims=*/4,
-            /*reshape_dim=*/interp_dim,
-            /*align_corners=*/align_corners,
-            /*opt_scale=*/scales[interp_dim - 2],
-            /*antialias=*/antialias);
-
-    unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
-    ImagingResampleVertical(
-        unpacked_output_p,
-        unpacked_input_p,
-        ksize_vert,
-        vert_indices_weights,
-        vert_weights_precision,
-        xout,
-        yout);
-    if (unpacked_output_temp_p != nullptr) {
-      free(unpacked_output_temp_p);
-    }
-  }
-
-  if (unpacked_output_p == nullptr) {
-    // Happens if need_horizontal and need_vertical are both False.
-    // But this should never be hit because we check for that in
-    // upsample_avx_bilinear()
-    unpacked_output_p = unpacked_input_p;
-  }
-
-  return unpacked_output_p;
-}
-
 // This is the only public entry point in this file.  It supports bilinear
 // mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
@@ -311,44 +234,96 @@ void upsample_avx_bilinear(
   auto yout = output.size(2);
   auto num_pixels_input = xin * yin;
 
-  uint32_t* unpacked_input_p =
-      (uint32_t*)malloc(sizeof(uint32_t) * num_pixels_input);
-  uint32_t* unpacked_output_p = nullptr;
-
   if (xin == xout && yin == yout) {
     output.copy_(input);
     return;
   }
 
+  auto unpacked_input = at::empty({num_pixels_input}, at::CPU(at::kInt));
+
+  auto need_horizontal = xout != xin;
+  auto need_vertical = yout != yin;
+
+  int ksize_horiz, ksize_vert;
+  std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
+  unsigned int horiz_weights_precision, vert_weights_precision;
+
+  if (need_horizontal) {
+    int interp_dim = 3;
+    std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
+        F::compute_indices_int16_weights_aa(
+            /*input_size=*/xin,
+            /*output_size=*/xout,
+            /*stride=*/1,
+            /*ndims=*/4,
+            /*reshape_dim=*/interp_dim,
+            /*align_corners=*/align_corners,
+            /*opt_scale=*/scales[interp_dim - 2],
+            /*antialias=*/antialias);
+  }
+
+  if (need_vertical) {
+    int interp_dim = 2;
+    std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
+        F::compute_indices_int16_weights_aa(
+            /*input_size=*/yin,
+            /*output_size=*/yout,
+            /*stride=*/1,
+            /*ndims=*/4,
+            /*reshape_dim=*/interp_dim,
+            /*align_corners=*/align_corners,
+            /*opt_scale=*/scales[interp_dim - 2],
+            /*antialias=*/antialias);
+  }
+
   // TODO: The unpack / pack operations create a copy of the original input and
-  // ouptut tensor. There should be a way to avoid these copies by instead
+  // output tensor. There should be a way to avoid these copies by instead
   // modifying the low-level kernels. Or maybe at least avoid copying the entire
   // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
+    uint32_t* unpacked_input_p = (uint32_t*) unpacked_input.data_ptr<int>();
     unpack_rgb(
         (uint8_t*)unpacked_input_p,
         input[i],
         input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
-    unpacked_output_p = ImagingResampleInner<scale_type, F>(
-        unpacked_input_p,
-        xin,
-        yin,
-        xout,
-        yout,
-        align_corners,
-        scales,
-        antialias);
+    at::Tensor unpacked_output_temp, unpacked_output;
+    uint32_t* unpacked_output_p = nullptr;
+
+    if (need_horizontal) {
+      unpacked_output_temp = at::empty({xout * yin}, at::CPU(at::kInt));
+      uint32_t* unpacked_output_temp_p = (uint32_t*) unpacked_output_temp.data_ptr<int>();
+      ImagingResampleHorizontal(
+          unpacked_output_temp_p,
+          unpacked_input_p,
+          ksize_horiz,
+          horiz_indices_weights,
+          horiz_weights_precision,
+          xout,
+          yin,
+          xin);
+      unpacked_output_p = unpacked_input_p = unpacked_output_temp_p;
+    }
+    if (need_vertical) {
+      unpacked_output = at::empty({xout * yout}, at::CPU(at::kInt));
+      unpacked_output_p = (uint32_t*) unpacked_output.data_ptr<int>();
+      ImagingResampleVertical(
+          unpacked_output_p,
+          unpacked_input_p,
+          ksize_vert,
+          vert_indices_weights,
+          vert_weights_precision,
+          xout,
+          yout);
+    }
+
+    TORCH_INTERNAL_ASSERT(unpacked_output_p != nullptr);
 
     pack_rgb(
         (const uint8_t*)unpacked_output_p,
         output[i],
         output.is_contiguous(at::MemoryFormat::ChannelsLast));
-    if (unpacked_output_p != nullptr && unpacked_output_p != unpacked_input_p) {
-      free(unpacked_output_p);
-    }
   }
-  free(unpacked_input_p);
 }
 
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
