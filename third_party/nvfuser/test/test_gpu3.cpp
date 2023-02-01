@@ -7358,8 +7358,8 @@ TEST_F(NVFuserTest, FusionExprSortMatmulLikeSchedule_CUDA) {
 
   constexpr int M1 = 5, M2 = 5, N1 = 6, N2 = 6, K1 = 2, K2 = 2;
 
-  auto tv0 = makeContigConcreteTensor({M1, M2, K1, K2});
-  auto tv1 = makeContigConcreteTensor({N1, N2, K1, K2});
+  auto tv0 = makeContigConcreteTensor({M1, M2, K1, K2}, DataType::Double);
+  auto tv1 = makeContigConcreteTensor({N1, N2, K1, K2}, DataType::Double);
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
@@ -7384,7 +7384,7 @@ TEST_F(NVFuserTest, FusionExprSortMatmulLikeSchedule_CUDA) {
   tv4->inlineAt(6);
   tv10->inlineAt(4);
 
-  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(kDouble).device(at::kCUDA, 0);
 
   at::Tensor t0 = at::randn({M1, M2, K1, K2}, options);
   at::Tensor t1 = at::randn({N1, N2, K1, K2}, options);
