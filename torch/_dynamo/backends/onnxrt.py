@@ -1,3 +1,4 @@
+import os
 import tempfile
 
 import torch
@@ -23,9 +24,19 @@ except ImportError:
     _np_dtype = None
 
 
+def default_provider(device_type):
+    if "ONNXRT_PROVIDER" in os.environ:
+        return os.environ["ONNXRT_PROVIDER"]
+    return {
+        "cpu": "CPUExecutionProvider",
+        "cuda": "CUDAExecutionProvider",
+        # "TensorrtExecutionProvider" is another option
+    }[device_type]
+
+
 @register_backend
 @fake_tensor_unsupported
-def onnxrt(gm, example_inputs, *, filename=None):
+def onnxrt(gm, example_inputs, *, filename=None, provider=None):
     if filename is None:
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp:
             return onnxrt(gm, example_inputs, filename=tmp.name)
@@ -51,11 +62,8 @@ def onnxrt(gm, example_inputs, *, filename=None):
     )
     del example_inputs, example_outputs
 
-    provider = {
-        "cpu": "CPUExecutionProvider",
-        "cuda": "CUDAExecutionProvider",
-        # "TensorrtExecutionProvider" is another option
-    }[device_type]
+    if provider is None:
+        provider = default_provider(device_type)
     assert provider in onnxruntime.get_available_providers()
     session = onnxruntime.InferenceSession(filename, providers=[provider])
 
