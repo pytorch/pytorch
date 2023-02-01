@@ -123,7 +123,7 @@ class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                &cudnnCreateTensorDescriptor,
                                                &cudnnDestroyTensorDescriptor> {
  public:
-  TensorDescriptor() {}
+  TensorDescriptor() = default;
   explicit TensorDescriptor(const at::Tensor &t, size_t pad = 0) {
     set(t, pad);
   }
@@ -305,6 +305,7 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
   void set(cudnnDataType_t datatype) {
     AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
   }
+#if CUDNN_VERSION >= 7600
   void setEx(
       cudnnDataType_t datatype,
       cudnnLossNormalizationMode_t normMode,
@@ -312,6 +313,7 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
+#endif
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor

@@ -118,14 +118,14 @@ class DeviceMesh(object):
         # check default pg backend, should support device_type
         if device_type == "cpu":
             assert (
-                self._backend == "gloo" or self._backend == "local"
+                self._backend == "gloo" or self._backend == "threaded"
             ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
         elif device_type == "cuda":
             if self._backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "local"
+            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type, but got {device_type}"
@@ -264,6 +264,9 @@ class DeviceMesh(object):
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
+    def __hash__(self):
+        return hash((self.mesh, id(self)))
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
@@ -319,6 +322,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if output.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
@@ -366,6 +375,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if tensor.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0

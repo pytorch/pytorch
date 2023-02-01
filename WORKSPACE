@@ -203,12 +203,6 @@ new_local_repository(
     path = "/usr/",
 )
 
-new_local_repository(
-    name = "cudnn_frontend",
-    build_file = "@//third_party:cudnn_frontend.BUILD",
-    path = "third_party/cudnn_frontend/",
-)
-
 local_repository(
     name = "com_github_google_flatbuffers",
     path = "third_party/flatbuffers",
@@ -262,6 +256,21 @@ local_repository(
 local_repository(
     name = "unused_fbgemm",
     path = "third_party/fbgemm",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_googletest",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/googletest",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_gflags",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/gflags",
+)
+
+local_repository(
+    name = "unused_kineto_dynolog_glog",
+    path = "third_party/kineto/libkineto/third_party/dynolog/third_party/glog",
 )
 
 local_repository(
