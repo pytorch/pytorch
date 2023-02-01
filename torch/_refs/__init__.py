@@ -4318,18 +4318,9 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     base = torch.where(mask, end, start)
     output = coeff * (end - start) + base
     # make sure the decomposition output's stride is same as non-decomposition path.
-    strides = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
-    if output.stride() != strides:
-        new_output = torch.empty_strided(
-            output.shape,
-            strides,
-            dtype=output.dtype,
-            layout=output.layout,
-            device=output.device,
-            requires_grad=output.requires_grad,
-        )
-        new_output.copy_(output)
-        output = new_output
+    stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
+    if output.stride() != stride:
+        return prims.copy_strided(output, stride)
     return output
 
 
