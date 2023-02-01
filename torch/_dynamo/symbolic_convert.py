@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented, Unsupported
+from .exc import BackendCompilerFailed, unimplemented, Unsupported, UnsupportedButRetryAfterGraphBreak
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -359,37 +359,52 @@ def break_graph_if_unsupported(*, push):
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
+
+                retry_after_graph_break = isinstance(excp, UnsupportedButRetryAfterGraphBreak)
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, reason=reason)
-            self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
-            for _ in range(push):
-                self.push(UnknownVariable())
 
-            resume_call_insts = self.create_call_resume_at(self.next_instruction)
-            # Check if there is a block stack entry with GradModeVariable. And
-            # wrap the instruction causing the graph break inside a try..finally
-            # block. See more details at
-            # https://github.com/pytorch/torchdynamo/issues/207
-            cleanup = []
-            if len(self.block_stack) == 1 and isinstance(
-                self.block_stack[0].with_context, GradModeVariable
-            ):
-                ctx_variable = self.block_stack[0].with_context
-
-                cg = PyCodegen(self)
-                setup_finally, cleanup = ctx_variable.reconstruct(
-                    cg, resume_call_insts[0]
+            if retry_after_graph_break:
+                # We're going to retry the instruction that caused
+                # the graph break
+                resume_call_insts = self.create_call_resume_at(self.current_instruction)
+                self.output.add_output_instructions(
+                    resume_call_insts,
                 )
-                self.output.add_output_instructions(setup_finally)
 
-            self.output.add_output_instructions([inst])
+            else:
+                # Skip over the instruction that caused the graph break
+                self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
-            # Add the cleanup instructions from try..finally block
-            self.output.add_output_instructions(cleanup)
-            self.output.add_output_instructions(
-                resume_call_insts,
-            )
+                for _ in range(push):
+                    self.push(UnknownVariable())
+
+                resume_call_insts = self.create_call_resume_at(self.next_instruction)
+
+                # Check if there is a block stack entry with GradModeVariable. And
+                # wrap the instruction causing the graph break inside a try..finally
+                # block. See more details at
+                # https://github.com/pytorch/torchdynamo/issues/207
+                cleanup = []
+                if len(self.block_stack) == 1 and isinstance(
+                    self.block_stack[0].with_context, GradModeVariable
+                ):
+                    ctx_variable = self.block_stack[0].with_context
+
+                    cg = PyCodegen(self)
+                    setup_finally, cleanup = ctx_variable.reconstruct(
+                        cg, resume_call_insts[0]
+                    )
+                    self.output.add_output_instructions(setup_finally)
+
+                self.output.add_output_instructions([inst])
+
+                # Add the cleanup instructions from try..finally block
+                self.output.add_output_instructions(cleanup)
+                self.output.add_output_instructions(
+                    resume_call_insts,
+                )
 
         return wrapper
 

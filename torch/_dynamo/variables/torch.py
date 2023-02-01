@@ -15,7 +15,7 @@ from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..exc import unimplemented
+from ..exc import unimplemented, UnsupportedButRetryAfterGraphBreak
 from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -270,7 +270,7 @@ class TorchVariable(VariableTracker):
                 GradModeVariable._guards_singleton
             )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
-            unimplemented(f"dynamic shapes: {self.value.__name__}")
+            raise UnsupportedButRetryAfterGraphBreak(f"dynamic shapes: {self.value.__name__}")
         elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
             # This code block implements inlining the __torch_function__
             # override of a tensor.

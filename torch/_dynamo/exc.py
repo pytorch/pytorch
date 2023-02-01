@@ -66,6 +66,13 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+# Similar to Unsupported, but we should retry the instruction
+# that caused a graph break when we resume, if forward progress
+# would be made (otherwise, is treated like Unsupported)
+class UnsupportedButRetryAfterGraphBreak(Unsupported):
+    pass
+
+
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
