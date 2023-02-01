@@ -25,7 +25,6 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from warnings import warn
 from pathlib import Path
-import rockset  # type: ignore[import]
 
 from gitutils import (
     GitRepo,
@@ -41,10 +40,10 @@ from trymerge_explainer import (
 
 class JobCheckState:
     def __init__(self, name: str, url: str, status: Optional[str], classification: Optional[str] = None):
-        self.name: str = name
-        self.url: str = url
-        self.status: Optional[str] = status
-        self.classification: Optional[str] = classification
+        self.name = name
+        self.url = url
+        self.status = status
+        self.classification = classification
 
     def __repr__(self) -> str:
         return f"JobCheckState([{self.name},{self.url},{self.status},{self.classification}])"
@@ -1322,6 +1321,7 @@ where
 """
     for _ in range(3):
         try:
+            import rockset  # type: ignore[import]
             res = rockset.RocksetClient(
                 host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
             ).sql(query)
@@ -1355,9 +1355,7 @@ def get_classifications(
         else:
             insert(merge_base_jobs, name, rockset_result)
 
-    res: Dict[str, JobCheckState] = {}
     for name, check in checks.items():
-        res[name] = check
         if check.status == "SUCCESS":
             continue
         head_sha_job = head_sha_jobs.get(name)
@@ -1368,11 +1366,10 @@ def get_classifications(
             and head_sha_job["conclusion"] == merge_base_job["conclusion"]
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
-            res[name].classification = "BROKEN_TRUNK"
+            check.classification = "BROKEN_TRUNK"
         elif any([rule.matches(head_sha_job) for rule in flaky_rules_json]):
-            res[name].classification = "FLAKY"
-    assert(len(res) == len(checks))
-    return res
+            check.classification = "FLAKY"
+    return checks
 
 
 def get_combined_checks_from_pr_and_land_validation(
