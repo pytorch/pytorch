@@ -464,12 +464,6 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif value in tensor_dunder_fns:
-            return TorchVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif istype(value, types.FunctionType):
             return UserFunctionVariable(
                 value,

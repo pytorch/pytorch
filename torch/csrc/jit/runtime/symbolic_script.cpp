@@ -222,6 +222,32 @@ const std::vector<std::string> functions = {
             # FIXME: torchscript: torch.zeros(sizes, grad.options())
             return torch.zeros(sizes).to(grad).scatter_(dim, indices, grad)
 
+        def gather(self,
+                    dim: int,
+                    index,
+                    *,
+                    sparse_grad: bool = False):
+            output = torch.gather(self, dim, index, sparse_grad = sparse_grad)
+            def backward(grad_output):
+                if (sparse_grad):
+                    return torch.gather_backward(grad_output, self, dim, index, sparse_grad), None, None, None
+                grad_self = torch.zeros_like(self)
+                grad_self = torch.scatter_add(grad_self, dim, index, grad_output)
+                return grad_self, None, None, None
+            return output, backward
+
+        def index_select(self,
+                         dim: int,
+                         index):
+            output = torch.index_select(self, dim, index)
+            self_size = self.size()
+
+            def backward(grad_output):
+                grad_self = torch.zeros_like(self, memory_format=1).index_add(dim, index, grad_output)
+                return grad_self, None, None
+
+            return output, backward
+
         # def topk(self,
         #          k: int,
         #          dim: int = -1,

@@ -8,6 +8,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
@@ -743,6 +744,8 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   return dst;
 }
 
+DEFINE_DISPATCH(sparse_mask_intersection_out_stub);
+
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   TORCH_CHECK(
       mask.sizes().equals(t.sizes()),
@@ -753,6 +756,17 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 
   if (!mask.numel()) {
     return mask.clone().to(t.device(), t.scalar_type());
+  }
+
+  if (t.layout() == at::kSparse) {
+    TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
+                "sparse_mask(): the number of sparse dimensions in `self` ",
+                "should match that of the `mask`. ",
+                "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
+                "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
+    auto res = at::empty({0}, t.options());
+    sparse_mask_intersection_out_stub(res.device().type(), res, t, mask);
+    return res;
   }
 
   const auto mask_values = mask._values();
