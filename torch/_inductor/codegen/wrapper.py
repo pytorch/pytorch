@@ -511,7 +511,7 @@ class WrapperCodeGen(CodeGen):
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value.data, ir.ReinterpretView):
-                    self.wrapper_call.writeline(value.data.mutate_code)
+                    self.wrapper_call.writeline(value.data.codegen_reference_mutation())
 
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()

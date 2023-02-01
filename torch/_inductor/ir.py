@@ -1470,15 +1470,13 @@ class ReinterpretView(BaseView):
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
-    def mutate(self):
+    def codegen_reference_mutation(self):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
         if offset != "0":
-            self.mutate_code = (
-                f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
-            )
-        self.mutate_code = f"{self.get_name()}.as_strided_({size}, {stride})"
+            return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
+        return f"{self.get_name()}.as_strided_({size}, {stride})"
 
 
 class SliceView(View):
