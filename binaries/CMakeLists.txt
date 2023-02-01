@@ -62,7 +62,7 @@ if(USE_CUDA)
   if(BUILD_TEST)
     # Core overhead benchmark
     caffe2_binary_target("core_overhead_benchmark_gpu.cc")
-    target_link_libraries(core_overhead_benchmark_gpu benchmark ${CUDA_curand_LIBRARY})
+    target_link_libraries(core_overhead_benchmark_gpu benchmark ${CUDA_curand_LIBRARY} caffe2_nvrtc)
   endif()
 endif()
 
