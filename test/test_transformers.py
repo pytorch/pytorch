@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     freeze_rng_state,
     TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM,
     slowTest,
     set_default_dtype,
     gradcheck
@@ -30,12 +29,10 @@ from torch.testing._internal.common_utils import (
 
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
-from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
+from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
-
-PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
