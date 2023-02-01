@@ -64,7 +64,7 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const {
+void OperatorEntry::assertSignatureIsCorrect(const CppSignature& call_signature, bool has_symint) const {
   if (has_symint) {
     if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
       reportSignatureError(call_signature, *sym_cpp_signature_);

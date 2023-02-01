@@ -658,15 +658,15 @@ struct TORCH_API RangeValue : SugaredValue {
   }
 
  private:
-  Value* start_;
-  Value* end_;
-  Value* step_;
+  Value* start_{};
+  Value* end_{};
+  Value* step_{};
   // a flag to determine if it's a simple range() call with only end_ from
   // arguments If true, we will not insert length calculation and index
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
-  bool has_only_end_;
-  c10::optional<int64_t> static_len_ = c10::nullopt;
+  bool has_only_end_{};
+  c10::optional<int64_t> static_len_;
 };
 
 // Specialized Tree structure to matched against for special handling

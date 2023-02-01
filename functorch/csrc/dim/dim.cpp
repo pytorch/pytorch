@@ -166,7 +166,7 @@ struct Dim : public py::base<Dim> {
         return batchtensor_;
     }
 private:
-    int64_t size_;
+    int64_t size_{-1};
     at::Tensor range_;
     at::Tensor batchtensor_;
 };

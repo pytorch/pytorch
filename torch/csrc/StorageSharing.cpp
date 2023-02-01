@@ -91,10 +91,10 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
       "_share_filename_: only available on CPU");
   auto self = (THPStorage*)_self;
   c10::StorageImpl* storage = self->cdata;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  THManagedMapAllocator* ctx;
+  THManagedMapAllocator* ctx =
+      THManagedMapAllocator::fromDataPtr(storage->data_ptr());
   // Storage is already in shared memory, just return a handle
-  if ((ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr()))) {
+  if (ctx) {
     // done
   } else {
     // TODO: retry on collision

@@ -80,7 +80,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
     StreamData3Holder(struct c10::StreamData3 d) {
       val = d;
     }
-    StreamData3Holder() = default;
+    StreamData3Holder() = delete;
     struct c10::StreamData3 val;
 };
 
@@ -1261,12 +1261,12 @@ public:
   friend MaybeOwnedTraits<IValue>;
 
   Payload payload;
-  Tag tag;
+  Tag tag{IValue::Tag::None};
   friend struct WeakIValue;
 };
 
 struct TORCH_API WeakIValue final {
-  WeakIValue() : tag(IValue::Tag::None), is_intrusive_ptr(false) {}
+  WeakIValue() = default;
 
   WeakIValue(const WeakIValue& rhs)
       : payload(rhs.payload),
@@ -1378,8 +1378,8 @@ struct TORCH_API WeakIValue final {
  private:
   using Payload = IValue::Payload::TriviallyCopyablePayload;
   Payload payload;
-  IValue::Tag tag;
-  bool is_intrusive_ptr;
+  IValue::Tag tag{IValue::Tag::None};
+  bool is_intrusive_ptr{false};
 };
 
 // An owning pointer to a type. When the type is class type, it requires a pair
