@@ -104,7 +104,7 @@ template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
   std::string msg =
       c10::str("the derivative for '", name, "' is not implemented.");
-  if (strlen(reason) > 0) {
+  if (reason[0] != '\0') {
     msg = c10::str(msg, " ", reason);
   };
   TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
@@ -4723,12 +4723,6 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto out = grad *
       ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
   return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
-}
-
-Tensor sparse_constructor_values_backward(
-    const Tensor& sparse_grad_out,
-    const Tensor& indices) {
-  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
