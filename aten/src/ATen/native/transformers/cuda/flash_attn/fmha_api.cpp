@@ -491,9 +491,9 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
             dq_tmp.zero_();
         }
     }
-
+    bool is_dropout = p_dropout > 0.0;
     TORCH_CHECK(
-        at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
+        !is_dropout || at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
         "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
     at::PhiloxCudaState philox_args{philox_seed, philox_offset};
     params.philox_args = philox_args;
