@@ -162,6 +162,122 @@ class BuiltinVariable(VariableTracker):
         }
         return fns
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def _binop_handlers():
+        # Multiple dispatch mechanism defining custom binop behavior for certain type
+        # combinations. Handlers are attempted in order, and will be used if the type checks
+        # match. They are expected to have the signature:
+        # fn(tx, arg0: VariableTracker, arg1: VariableTracker, options) -> VariableTracker
+
+        # Override table contains: op_fn -> [list of handlers]
+        op_handlers = {}
+        for (
+            op,
+            (forward_name, reverse_name),
+        ) in BuiltinVariable._reversible_binops().items():
+            handlers = []
+
+            # User-defined args (highest precedence)
+            def user_defined_handler(
+                tx, a, b, options, forward_name=forward_name, reverse_name=reverse_name
+            ):
+                # Manually handle reversing logic if needed (e.g. call __radd__)
+                if isinstance(a, UserDefinedVariable):
+                    return a.call_method(tx, forward_name, [b], {})
+                else:
+                    return b.call_method(tx, reverse_name, [a], {})
+
+            handlers.append(
+                ((UserDefinedVariable, VariableTracker), user_defined_handler)
+            )
+            handlers.append(
+                ((VariableTracker, UserDefinedVariable), user_defined_handler)
+            )
+
+            # Dynamic shape args
+            def dynamic_handler(tx, a, b, options, fn=op):
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function", fn, *proxy_args_kwargs([a, b], {})
+                    ),
+                    **options,
+                )
+
+            handlers.append(((DynamicShapeVariable, VariableTracker), dynamic_handler))
+            handlers.append(((VariableTracker, DynamicShapeVariable), dynamic_handler))
+
+            op_handlers[op] = handlers
+
+        # Special cases - lower precedence but still prefer these over constant folding
+
+        # List-like addition (e.g. [1, 2] + [3, 4])
+        list_like_addition_handlers = [
+            (
+                (variables.BaseListVariable, variables.BaseListVariable),
+                lambda tx, a, b, options: type(a)(a.items + b.items, **options),
+            ),
+            (
+                (variables.TupleVariable, variables.ConstantVariable),
+                lambda tx, a, b, options: variables.TupleVariable(
+                    a.items + list(b.unpack_var_sequence(tx)), **options
+                ),
+            ),
+            (
+                (variables.ConstantVariable, variables.TupleVariable),
+                lambda tx, a, b, options: type(b)(
+                    list(a.unpack_var_sequence(tx)) + b.items, **options
+                ),
+            ),
+        ]
+        op_handlers[operator.add].extend(list_like_addition_handlers)
+
+        # List-like expansion (e.g. [1, 2, 3] * 3)
+        def expand_list_like(tx, lst, const, options):
+            return lst.__class__(
+                items=lst.items * const.as_python_constant(),
+                mutable_local=MutableLocal(),
+                **options,
+            )
+
+        list_like_expansion_handlers = [
+            (
+                (variables.ListVariable, variables.ConstantVariable),
+                expand_list_like,
+            ),
+            (
+                (variables.TupleVariable, variables.ConstantVariable),
+                expand_list_like,
+            ),
+            (
+                (variables.ConstantVariable, variables.ListVariable),
+                lambda tx, a, b, options: expand_list_like(tx, b, a, options),
+            ),
+            (
+                (variables.ConstantVariable, variables.TupleVariable),
+                lambda tx, a, b, options: expand_list_like(tx, b, a, options),
+            ),
+        ]
+        op_handlers[operator.mul].extend(list_like_expansion_handlers)
+
+        return op_handlers
+
+    @staticmethod
+    def _find_binop_handler(op, a, b):
+        handlers = BuiltinVariable._binop_handlers()
+        if op not in handlers:
+            return None
+
+        # Return first handler that matches the type checks
+        for ((type1, type2), handler) in handlers[op]:
+            if isinstance(a, type1) and isinstance(b, type2):
+                return handler
+
+        return None
+
     def can_insert_in_graph(self):
         return self.fn in self._fx_graph_functions()
 
@@ -337,57 +453,12 @@ class BuiltinVariable(VariableTracker):
         if self.fn in reversible_binops:
             assert len(kwargs) == 0 and len(args) == 2
 
-            # Call reverse for user-defined variables, if any
-            forward_name, reverse_name = reversible_binops[self.fn]
-            if any([isinstance(arg, UserDefinedVariable) for arg in args]):
-                if isinstance(args[0], UserDefinedVariable):
-                    return args[0].call_method(tx, forward_name, args[1:], kwargs)
-                else:
-                    return args[1].call_method(tx, reverse_name, [args[0]], kwargs)
-
-            # Insert operator directly into the graph for dynamic shape args
-            if self._dynamic_args(*args, **kwargs):
-                return self._dyn_proxy(tx, *args, **kwargs)
-
-            # Handle special cases for list / tuple.
-            # TODO: Develop a proper abstraction to avoid this nonsense
-            a, b = args[0], args[1]
-            if (
-                self.fn is operator.mul
-                and isinstance(a, (variables.ListVariable, variables.TupleVariable))
-                and isinstance(b, variables.ConstantVariable)
-            ):
-                return a.__class__(
-                    items=a.items * b.as_python_constant(), mutable_local=MutableLocal()
-                ).add_options(self, a, b)
-            elif (
-                self.fn is operator.mul
-                and isinstance(a, (variables.ListVariable, variables.TupleVariable))
-                and isinstance(b, variables.ConstantVariable)
-            ):
-                return b.__class__(
-                    items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
-                ).add_options(self, a, b)
-            elif (
-                self.fn is operator.add
-                and isinstance(a, variables.TupleVariable)
-                and isinstance(b, variables.TupleVariable)
-            ):
-                return variables.TupleVariable(a.items + b.items, **options)
-            elif (
-                self.fn is operator.add
-                and isinstance(a, variables.TupleVariable)
-                and isinstance(b, variables.ConstantVariable)
-            ):
-                return variables.TupleVariable(
-                    a.items + list(b.unpack_var_sequence(self)), **options
-                )
-            elif self.fn is operator.add and isinstance(a, variables.BaseListVariable):
-                return type(a)(a.items + b.items, **options)
-
-            # Other cases are handled by the constant handler...
-            if not has_constant_handler:
-                return self._dyn_proxy(tx, *args, **kwargs)
+            # Try to find a handler for the arg types; otherwise, fall through to constant handler
+            binop_handler = BuiltinVariable._find_binop_handler(
+                self.fn, args[0], args[1]
+            )
+            if binop_handler:
+                return binop_handler(tx, args[0], args[1], options)
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:

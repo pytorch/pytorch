@@ -721,11 +721,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_tuple_mul_with_shape(self):
         def fn(a):
             x = a.shape[0]
-            y = 2 * (x, 2) * 2
-            return a + y[5]
+            y = 2 * (x, 3) * 2
+            return a + y[4]
 
+        # expect 3 ops post folding for dynamic case: size, index, add
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=5
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=3
         )
 
     def test_user_getattr1(self):
