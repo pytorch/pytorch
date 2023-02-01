@@ -62,6 +62,7 @@ struct TORCH_API Operator {
   struct UnparsedFunctionSchema final {
     std::string schema_string_;
     mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
+    c10::optional<ArgumentTypes> argument_types_;
   };
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct JitOnlyOperator final {
@@ -84,6 +85,16 @@ struct TORCH_API Operator {
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
                 UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
+
+    Operator(
+            std::string schema,
+            Operation op,
+            c10::AliasAnalysisKind alias_analysis,
+            ArgumentTypes argument_types)
+            : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                    UnparsedFunctionSchema{std::move(schema), alias_analysis, argument_types}),
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
@@ -164,7 +175,9 @@ struct TORCH_API Operator {
           if (op.schema_.is_right()) {
             auto& unmaterializedSchema = op.schema_.right();
             FunctionSchema schema =
-                parseSchema(unmaterializedSchema.schema_string_);
+                    unmaterializedSchema.argument_types_.has_value() ?
+                    parseSchema(unmaterializedSchema.schema_string_, unmaterializedSchema.argument_types_.value()) :
+                    parseSchema(unmaterializedSchema.schema_string_);
             if (unmaterializedSchema.alias_analysis_.has_value()) {
               // TODO What if it gets set later?
               schema.setAliasAnalysis(*unmaterializedSchema.alias_analysis_);

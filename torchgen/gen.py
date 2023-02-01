@@ -539,19 +539,7 @@ class RegisterSchema:
         if not self.selector.is_native_function_selected(f):
             return None
         tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
-        map = {
-            "fp32": "ScalarType::Float",
-            "i32": "ScalarType::Int",
-            "i64": "ScalarType::Long",
-        }
-        types = []
-        comma = ", "
-        if f.type_constraints:
-            print(f.type_constraints)
-            for k in f.type_constraints:
-                types.append(f"""{{"{k}", {{ {comma.join(map.get(t, "INVALID") for t in f.type_constraints[k])} }} }}""")
-
-        return f"m.def({cpp_string(str(f.func))}, {tags}, {{ {comma.join(types)} }});\n"
+        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
 # Generates Operators.h and Operators.cpp.

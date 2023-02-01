@@ -8,14 +8,6 @@ import torch
 
 from . import external_utils
 
-try:
-    import torch._prims
-    import torch._refs
-
-    HAS_REFS_PRIMS = True
-except ImportError:
-    HAS_REFS_PRIMS = False
-
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
@@ -118,13 +110,10 @@ skipfiles_inline_module_allowlist = {
     torch.distributions,
     torch.testing,
     torch.ao.nn,
+    torch._refs,
+    torch._prims,
+    torch._decomp,
 }
-if HAS_REFS_PRIMS:
-    skipfiles_inline_module_allowlist |= {
-        torch._refs,
-        torch._prims,
-        torch._decomp,
-    }
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -152,6 +141,7 @@ repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
+# This requires dynamic_shapes to be True.
 capture_scalar_outputs = False
 
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
@@ -181,11 +171,11 @@ inductor_import = dynamo_import.replace("dynamo", "inductor")
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# Disables graph breaking on rnn. YMMV with backends.
+allow_rnn = False
+
 # root folder of the project
-if "torch." in dynamo_import:
-    base_dir = dirname(dirname(dirname(abspath(__file__))))
-else:
-    base_dir = dirname(dirname(abspath(__file__)))
+base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
 

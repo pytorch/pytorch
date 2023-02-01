@@ -198,7 +198,7 @@ bool IsValidONNXControlflowNode(const Node* n) {
   // nodes later, when the subgraph has already completed shape inferencing.
   auto node_kind = n->kind();
   if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
-    if (n->blocks().size() == 0) {
+    if (n->blocks().empty()) {
       return false;
     }
   }
@@ -413,7 +413,7 @@ void ConvertGraphToONNXProto(
 }
 
 c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
-  if (n->inputs().size() == 0) {
+  if (n->inputs().empty()) {
     return c10::nullopt;
   }
   std::vector<at::Tensor> inputTensorValues;
@@ -958,7 +958,7 @@ void ProcessReshapeNode(Node* n, int opset_version) {
     auto static_shape_value =
         ConstantValueMap::GetValueInto1DInt64Vector(shape_name);
     auto symbolic_input_shape = ConstantValueMap::GetShape(input_name);
-    if (symbolic_input_shape && static_shape_value.size() > 0) {
+    if (symbolic_input_shape && !static_shape_value.empty()) {
       auto final_shape = ComputeShapeFromReshape(
           n,
           symbolic_input_shape.value(),
@@ -2061,10 +2061,8 @@ void ONNXShapeTypeInference(
         const char shape_err[] = "ShapeInferenceError";
         // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
         const char type_err[] = "TypeInferenceError";
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        if ((strstr(ex.what(), shape_err) == NULL) &&
-            // NOLINTNEXTLINE(modernize-use-nullptr)
-            (strstr(ex.what(), type_err) == NULL)) {
+        if ((strstr(ex.what(), shape_err) == nullptr) &&
+            (strstr(ex.what(), type_err) == nullptr)) {
           throw;
         }
       }

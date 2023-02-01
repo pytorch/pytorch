@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 ExprHandle ExprHandle::operator+(const ExprHandle& other) const {
   return Add::make(*this, other);
@@ -367,7 +365,7 @@ std::vector<ExprPtr> make_contiguous_strides(
     const std::vector<ExprHandle>& dims) {
   std::vector<ExprPtr> strides;
 
-  if (dims.size() > 0) {
+  if (!dims.empty()) {
     strides.resize(dims.size());
     auto si = immLike(dims[0], 1);
     // NOLINTNEXTLINE
@@ -565,6 +563,4 @@ ExprHandle expr_to_vec(ExprHandle v, int lanes) {
   }
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

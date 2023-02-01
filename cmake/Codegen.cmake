@@ -108,6 +108,34 @@ if(INTERN_BUILD_ATEN_OPS)
     list(APPEND CUSTOM_BUILD_FLAGS
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
+  # Edge ops registration
+  if(USE_EDGE_OPS)
+    file(GLOB_RECURSE edge_script "${CMAKE_CURRENT_LIST_DIR}/../torchgen/gen_edge.py")
+    file(GLOB_RECURSE edge_templates "${CMAKE_CURRENT_LIST_DIR}/../test/edge/templates/*\.cpp")
+
+    set(GEN_EDGE_OPS_COMMAND
+        "${PYTHON_EXECUTABLE}" -m torchgen.gen_edge
+        --source-path ${CMAKE_CURRENT_LIST_DIR}/../test/edge
+        --install_dir ${CMAKE_BINARY_DIR}/edge
+        --edge_ops_yaml_path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/edge.yaml
+        --aten_yaml_path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        --tags-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+        )
+    set("GEN_EDGE_OPS_sources" ${CMAKE_BINARY_DIR}/edge/RegisterEdgeOps.cpp)
+    message(STATUS "Generating sources for Edge ops")
+    add_custom_command(
+            COMMENT "Generating ATen unboxing sources"
+            OUTPUT
+            ${GEN_EDGE_OPS_sources}
+            COMMAND ${GEN_EDGE_OPS_COMMAND}
+            DEPENDS ${edge_script} ${edge_templates}
+            ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+            ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+            WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+  else() # Otherwise do not generate or include sources into build.
+    set(GEN_EDGE_OPS_sources "")
+  endif()
 
   # Codegen unboxing
   if(USE_LIGHTWEIGHT_DISPATCH)
@@ -232,7 +260,7 @@ if(INTERN_BUILD_ATEN_OPS)
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
       ${generated_headers} ${core_generated_headers} ${cpu_vec_generated_headers} ${ops_generated_headers}
       ${generated_sources} ${core_generated_sources} ${cpu_vec_generated_sources} ${ops_generated_sources}
-      ${generated_declarations_yaml} ${generated_unboxing_sources})
+      ${generated_declarations_yaml} ${generated_unboxing_sources} ${GEN_EDGE_OPS_sources})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
