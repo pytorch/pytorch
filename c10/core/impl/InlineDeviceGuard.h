@@ -2,7 +2,7 @@
 
 // This file provides implementations of InlineDeviceGuard and
 // InlineOptionalDeviceGuard.
-
+#ifdef USE_CUDA
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -110,7 +110,7 @@ class InlineDeviceGuard {
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) = delete;
 
   ~InlineDeviceGuard() {
-#if defined(USE_CUDA)
+#ifdef USE_CUDA
     if (original_device_.is_cuda() && original_device_.index() >= 0) {
       if (at::cuda::detail::hasPrimaryContext(original_device_.index())) {
         impl_.uncheckedSetDevice(original_device_);
