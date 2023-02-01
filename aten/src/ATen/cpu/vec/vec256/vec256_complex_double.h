@@ -121,25 +121,7 @@ public:
     return _mm256_hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m256d abs_() const {
-    // values: a + ib
-    // not using abs_2_ to prevent overflow/underflow for large/small numbers
-    auto mask = _mm256_set1_pd(-0.f);
-    auto fabs_val = _mm256_andnot_pd(mask, values);     // |a|    |b|
-    auto fabs_shf = _mm256_permute_pd(fabs_val, 0x05);  // |b|    |a|
-    auto fabs_max = _mm256_max_pd(fabs_val, fabs_shf);  // max    max
-    auto fabs_min = _mm256_min_pd(fabs_val, fabs_shf);  // min    min
-    // following: max * sqrt(1 + min / max)
-    auto t = _mm256_div_pd(fabs_min, fabs_max);
-    auto t2 = _mm256_mul_pd(t, t);
-    auto t21 = _mm256_add_pd(t2, _mm256_set1_pd(1.0f));
-    auto t21_sqrt = _mm256_sqrt_pd(t21);
-    auto res = _mm256_mul_pd(t21_sqrt, fabs_max);
-
-    // substitute res == 0 where fabs_max == 0
-    auto zero = _mm256_set1_pd(0.f);
-    auto maskz = _mm256_cmp_pd(zero, fabs_max, _CMP_EQ_OQ);
-    res = _mm256_blendv_pd(res, zero, maskz);
-    return res;
+    return _mm256_sqrt_pd(abs_2_());                // abs     abs
   }
   Vectorized<c10::complex<double>> abs() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
