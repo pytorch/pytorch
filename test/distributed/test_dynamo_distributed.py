@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import os
 import random
 import unittest
 from unittest.mock import patch
@@ -10,7 +9,6 @@ import torch
 import torch._dynamo
 from torch._dynamo.optimizations.distributed import DDPOptimizer
 import torch._dynamo.test_case
-import torch.distributed as dist
 from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
@@ -21,10 +19,12 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    DynamoDistributedSingleProcTestCase,
+    DynamoDistributedMultiProcTestCase,
     import_transformers_or_skip,
     skip_if_lt_x_gpu,
-    requires_nccl
+    requires_nccl,
+    _dynamo_dist_per_rank_init,
 )
 import torch._dynamo.logging
 
@@ -128,21 +128,6 @@ class CheckSplitsCompiler:
         self.compiler_called += 1
         return gm
 
-@contextmanager
-def _per_rank_init(rank, world_size):
-    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
-    # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6789'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    yield
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    dist.destroy_process_group()
-
 
 # This simulates DDP, but it doesn't actually do any process communication;
 # it just has enough properties so that the dynamo distributed optimization is
@@ -219,39 +204,16 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 # single process version; if it's just a problem in the Dynamo distributed
 # optimizer, you should be able to repro it single process!
 @requires_nccl()
-class TestDistributedMultiProc(MultiProcessTestCase):
-    def setUp(self):
-        super(TestDistributedMultiProc, self).setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(TestDistributedMultiProc, self).tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self) -> int:
-        return torch.cuda.device_count()
-
-    @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
-        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
-        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        # _set_ddp_with_replicated_tensor(True)
-
-        # The rest is copypasta from MultiProcessTestCase._run
-        self = cls(test_name)
-        self.rank = rank
-        self.file_name = file_name
-        self.run_test(test_name, parent_pipe)
-
+class TestMultiProc(DynamoDistributedMultiProcTestCase):
+    """
+    Note: MultiProcTestCase spawns processes per test and is slow.
+    Prefer MultiThreadedTestCase for most tests. Perhaps use this one
+    sparingly for integration tests.
+    """
     @skip_if_lt_x_gpu(2)
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             self.assertFalse(config.optimize_ddp)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             m = DDP(m, device_ids=[self.rank])
@@ -266,7 +228,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
 
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model)
             run_hf_bert_ddp(self, model, inputs, "inductor")
@@ -275,14 +237,14 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(1)
     def test_fsdp_aot_eager(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
@@ -306,7 +268,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
@@ -343,7 +305,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             )
             return model
 
-        with _per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             for (wrap_policy, test_instance) in (
                 (
                     None,
@@ -379,33 +341,13 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
 
 @requires_nccl()
-class TestDistributed(torch._dynamo.test_case.TestCase):
+class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
-    Test harness initializes dist process group
+    Test harness initializes dist process group.
+
+    Test simple things here since they are simpler to debug.
+    Use TestMultiProc for things that really need to run on multiple nodes
     """
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        # _exit_stack is set up in TestCase
-        cls._exit_stack.enter_context(
-            patch.dict(
-                os.environ,
-                {
-                    "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
-                },
-            )
-        )
-        cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        dist.init_process_group("nccl", rank=cls.rank, world_size=1)
-
-    @classmethod
-    def tearDownClass(cls):
-        dist.destroy_process_group()
-        super().tearDownClass()
 
     def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
         m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(self.device)
