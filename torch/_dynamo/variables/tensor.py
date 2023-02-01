@@ -1,6 +1,7 @@
 import inspect
 import itertools
 import operator
+import types
 from typing import Dict, List
 
 import torch.fx
@@ -185,10 +186,7 @@ class TensorVariable(VariableTracker):
                 # these attributes are implemented under tp_getset, which appear
                 # as `getset_descriptor`s, (compared to, say, methods which appear
                 # as `method_descriptor`s)
-                if not (
-                    str(getattr(type(static_attr), "__name__", None))
-                    == "getset_descriptor"
-                ):
+                if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
                 return wrap_fx_proxy(
