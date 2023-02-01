@@ -379,7 +379,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)
-        
+
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
