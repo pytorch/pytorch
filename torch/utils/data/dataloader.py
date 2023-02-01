@@ -46,7 +46,11 @@ __all__ = [
     "default_convert",
 ]
 
-T_co = TypeVar('T_co', covariant=True)
+# SampleT_co used to be defined as T_co before adding BatchT_co as a generic parameter to DataLoader and renaming T_co to SampleT_co for clarity.
+# To avoid breaking code using T_co, we alias it
+SampleT_co = TypeVar('SampleT_co', covariant=True)
+T_co = SampleT_co
+BatchT_co = TypeVar('BatchT_co', covariant=True)
 T = TypeVar('T')
 _worker_init_fn_t = Callable[[int], None]
 
@@ -127,7 +131,7 @@ def _share_dist_seed(generator, pg):
     return _shared_seed.item()
 
 
-class DataLoader(Generic[T_co]):
+class DataLoader(Generic[SampleT_co, BatchT_co]):
     r"""
     Data loader. Combines a dataset and a sampler, and provides an iterable over
     the given dataset.
@@ -211,7 +215,7 @@ class DataLoader(Generic[T_co]):
     .. warning:: See :ref:`reproducibility`, and :ref:`dataloader-workers-random-seed`, and
                  :ref:`data-loading-randomness` notes for random seed related questions.
     """
-    dataset: Dataset[T_co]
+    dataset: Dataset[SampleT_co]
     batch_size: Optional[int]
     num_workers: int
     pin_memory: bool
@@ -220,10 +224,10 @@ class DataLoader(Generic[T_co]):
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
     prefetch_factor: Optional[int]
-    _iterator : Optional['_BaseDataLoaderIter']
+    _iterator : Optional['_BaseDataLoaderIter[BatchT_co]']
     __initialized = False
 
-    def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
+    def __init__(self, dataset: Dataset[SampleT_co], batch_size: Optional[int] = 1,
                  shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
                  batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
@@ -381,7 +385,7 @@ class DataLoader(Generic[T_co]):
 
         torch.set_vital('Dataloader', 'enabled', 'True')  # type: ignore[attr-defined]
 
-    def _get_iterator(self) -> '_BaseDataLoaderIter':
+    def _get_iterator(self) -> '_BaseDataLoaderIter[BatchT_co]':
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -427,7 +431,7 @@ class DataLoader(Generic[T_co]):
 
     # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
     # since '_BaseDataLoaderIter' references 'DataLoader'.
-    def __iter__(self) -> '_BaseDataLoaderIter':
+    def __iter__(self) -> '_BaseDataLoaderIter[BatchT_co]':
         # When using a single worker the returned iterator should be
         # created everytime to avoid reseting its state
         # However, in the case of a multiple workers iterator
@@ -565,7 +569,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked))
 
 
-class _BaseDataLoaderIter(object):
+class _BaseDataLoaderIter(Generic[BatchT_co]):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None
@@ -608,7 +612,7 @@ class _BaseDataLoaderIter(object):
         self._num_yielded = 0
         self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
 
-    def __iter__(self) -> '_BaseDataLoaderIter':
+    def __iter__(self) -> '_BaseDataLoaderIter[BatchT_co]':
         return self
 
     def _reset(self, loader, first_iter=False):
@@ -624,10 +628,10 @@ class _BaseDataLoaderIter(object):
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
 
-    def _next_data(self):
+    def _next_data(self) -> BatchT_co:
         raise NotImplementedError
 
-    def __next__(self) -> Any:
+    def __next__(self) -> BatchT_co:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
                 # TODO(https://github.com/pytorch/pytorch/issues/76750)
@@ -659,8 +663,8 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError("{} cannot be pickled", self.__class__.__name__)
 
 
-class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
-    def __init__(self, loader):
+class _SingleProcessDataLoaderIter(_BaseDataLoaderIter[BatchT_co]):
+    def __init__(self, loader: DataLoader):
         super(_SingleProcessDataLoaderIter, self).__init__(loader)
         assert self._timeout == 0
         assert self._num_workers == 0
@@ -674,7 +678,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)
 
-    def _next_data(self):
+    def _next_data(self) -> BatchT_co:
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
@@ -682,7 +686,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         return data
 
 
-class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
+class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter[BatchT_co]):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
@@ -992,7 +996,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #     processing indices already in `index_queue` if we are already shutting
     #     down.
 
-    def __init__(self, loader):
+    def __init__(self, loader: DataLoader):
         super(_MultiProcessingDataLoaderIter, self).__init__(loader)
 
         self._prefetch_factor = loader.prefetch_factor
@@ -1118,7 +1122,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         for _ in range(self._prefetch_factor * self._num_workers):
             self._try_put_index()
 
-    def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
+    def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL) -> Tuple[bool, BatchT_co]:
         # Tries to fetch data from `self._data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
@@ -1264,7 +1268,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 # 3. Run the script with the `send` option in the second shell:
 # (shell2) ./test_socket.py sock_tmp 1017 send
 
-    def _get_data(self):
+    def _get_data(self) -> BatchT_co:
         # Fetches data from `self._data_queue`.
         #
         # We check workers' status every `MP_STATUS_CHECK_INTERVAL` seconds,
@@ -1297,7 +1301,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 if success:
                     return data
 
-    def _next_data(self):
+    def _next_data(self) -> BatchT_co:
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -1366,7 +1370,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._tasks_outstanding += 1
         self._send_idx += 1
 
-    def _process_data(self, data):
+    def _process_data(self, data: BatchT_co) -> BatchT_co:
         self._rcvd_idx += 1
         self._try_put_index()
         if isinstance(data, ExceptionWrapper):
