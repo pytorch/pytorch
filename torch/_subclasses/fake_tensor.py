@@ -218,6 +218,8 @@ class FakeTensorConverter(object):
         *,
         source=None,
     ):
+        if t is None:
+            return
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo

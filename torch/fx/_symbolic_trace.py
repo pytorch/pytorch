@@ -464,6 +464,7 @@ class Tracer(TracerBase):
             # entry is equivalent to push/pop on a list
             self.module_stack[_scope.module_path] = _scope.module_type
             if not self.is_leaf_module(m, module_qualified_name):
+                # Calling into forward can expand sub-modules into ops in the traced graph.
                 ret_val = forward(*args, **kwargs)
             else:
                 ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
@@ -471,6 +472,7 @@ class Tracer(TracerBase):
             assert key == _scope.module_path, f" Unexpected key {key}"
 
         return ret_val
+
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
