@@ -29,7 +29,7 @@ jobs:
   anaconda-prune-pytorch-test:
     name: anaconda-prune-pytorch-test
     uses: ./.github/workflows/_prune-anaconda-packages.yml
-    with: 
+    with:
     #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
       packages: "pytorch torchvision torchaudio torchtext"
       channel: pytorch-test

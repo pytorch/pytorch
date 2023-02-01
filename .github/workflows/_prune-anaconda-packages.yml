@@ -1,4 +1,4 @@
-name: upload
+name: Prune Anaconda Binaries
 
 on:
   workflow_call:
