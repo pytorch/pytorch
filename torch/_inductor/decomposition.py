@@ -315,10 +315,10 @@ def round_dec(x, decimals=0):
 
 
 @register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
-def rsub(a, b):
+def rsub(a, b, alpha=1):
     if isinstance(b, numbers.Number):
         b = torch.tensor(b, dtype=a.dtype, device=a.device)
-    return b - a
+    return torch.sub(b, a, alpha=alpha)
 
 
 @register_decomposition([aten.nan_to_num])
