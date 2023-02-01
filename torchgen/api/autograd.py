@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import cast, Dict, List, Match, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Match, Optional, Sequence, Set, Tuple
 
 from torchgen import local
 
@@ -337,6 +337,17 @@ def match_differentiability_info(
             f.func.name.name.base.split("_foreach_")[-1]
             == function_schema.name.name.base
             and not function_schema.name.name.inplace
+            and (
+                True
+                if len(f.func.arguments.post_self_positional) == 0
+                else all(
+                    ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
+                    for arg, ref_arg in zip(
+                        f.func.arguments.flat_non_out,
+                        function_schema.arguments.flat_non_out,
+                    )
+                )
+            )
         )
 
     def find_info(
@@ -378,8 +389,13 @@ Attempted to convert a derivative formula for a mutable operator
         base_op_name = f.func.name.name
         if is_foreach_func(f):
             # TODO(crcrpar): Support non-unary foreach functions
+            _is_foreach_add = (
+                base_op_name.base == "_foreach_add"
+                and f.func.name.overload_name in ("List",)
+            )
             if len(f.func.arguments.post_self_positional) > 0:
-                return None, False
+                if not _is_foreach_add:
+                    return None, False
             for function_schema in functional_info_by_signature:
                 if not is_reference_for_foreach(f, function_schema):
                     continue
@@ -412,7 +428,7 @@ Attempted to convert a derivative formula for a mutable operator
                 modified_derivative_formulas: List[Derivative] = []
                 all_var_names: List[str] = []
                 for derivative in ref_diff_info.derivatives:
-                    # note(crcrpar): `grads` and `result` are a sequence of Tensors.
+                    # note(crcrpar): Assumption: `grads` and `result` always are a sequence of Tensors.
                     modified_formula = derivative.original_formula.replace(
                         "grad", "grads[i]"
                     ).replace("result", "result[i]")
@@ -427,17 +443,28 @@ Attempted to convert a derivative formula for a mutable operator
                         use_ilistref_for_tensor_lists=f.part_of_structured_group,
                     ):
                         for ref_input in derivative.saved_inputs:
-                            mapped_name = map_refarg2foreacharg[
-                                cast(str, ref_input.nctype.name)
-                            ]
+                            ref_input_jit_name = ref_input.expr.split(".")[0]
+                            mapped_name = map_refarg2foreacharg[ref_input_jit_name]
+                            if isinstance(map_name2arg[mapped_name].type, ListType):
+                                mapped_expr = mapped_name + "[i]"
+                            else:
+                                mapped_expr = mapped_name
+                            new_expr = ref_input.expr.replace(
+                                ref_input_jit_name, mapped_expr
+                            )
+                            modified_formula = modified_formula.replace(
+                                ref_input.expr, new_expr
+                            )
+
+                            nctype = cpp.argument_type(
+                                map_name2arg[mapped_name], binds=mapped_name
+                            )
+                            canonical_nctype = NamedCType(
+                                nctype.name, nctype.type.remove_const_ref()
+                            )
                             saved_inputs.append(
                                 SavedAttribute(
-                                    nctype=cpp.argument_type(
-                                        map_name2arg[mapped_name], binds=mapped_name
-                                    ),
-                                    expr=ref_input.expr.replace(
-                                        cast(str, ref_input.nctype.name), mapped_name
-                                    ),
+                                    nctype=canonical_nctype, expr=mapped_name
                                 )
                             )
                         for ref_output in derivative.saved_outputs:
@@ -462,12 +489,15 @@ Attempted to convert a derivative formula for a mutable operator
                     all_saved_outputs.extend(saved_outputs)
                     modified_derivative = Derivative(
                         formula=modified_formula,
-                        original_formula=modified_formula,
+                        original_formula=derivative.formula,
                         var_names=tuple(var_names),
                         saved_inputs=tuple(saved_inputs),
                         saved_outputs=tuple(saved_outputs),
                         named_gradients=set(),
                     )
+                    if _is_foreach_add:
+                        print(f"  ref:     {derivative}")
+                        print(f"  foreach: {modified_derivative}")
                     modified_derivative_formulas.append(modified_derivative)
                 with local.parametrize(
                     use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
@@ -482,6 +512,9 @@ Attempted to convert a derivative formula for a mutable operator
                         )
                         for var in all_var_names
                     ]
+                assert len(modified_derivative_formulas) == len(
+                    ref_diff_info.derivatives
+                )
                 diff_info = DifferentiabilityInfo(
                     name=base_op_name.base,
                     func=f,
