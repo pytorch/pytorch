@@ -59,7 +59,7 @@ class WorkflowCheckState:
 
 class FlakyRule:
     def __init__(self, name: str, captures: List[str]):
-        self.name: str = name
+        self.name = name
         self.captures = captures
 
     def matches(self, job: Optional[Dict[str, Any]]) -> bool:
