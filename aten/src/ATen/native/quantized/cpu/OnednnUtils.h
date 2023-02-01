@@ -15,7 +15,9 @@ using PrimitiveCacheKey = std::tuple<
     std::vector<int64_t>, // input_shape
     double, // output_scale
     int64_t, // output_zero_point
-    int64_t>; // OMP_number_of_threads
+    int64_t, // OMP_number_of_threads
+    double, // accum_scale
+    int64_t>; // accum_zero_point
 
 enum CacheKeyIndex {
   InputScale,
@@ -91,40 +93,26 @@ struct LinearPrimitiveCache : PrimitiveCache {
 struct ConvPrimitiveCache : PrimitiveCache {
   ConvPrimitiveCache() {}
 
-  ConvPrimitiveCache(const PrimitiveCacheKey& key,
-                     const ConvDesc& conv_desc,
-                     const ideep::tensor& bias,
-                     const ideep::attr_t bias_attr) {
+  ConvPrimitiveCache(
+      const PrimitiveCacheKey& key,
+      const ConvParams& params,
+      const ideep::tensor& bias) {
     this->key = key;
-    this->primitive_desc = conv_desc;
-    this->primitive = Conv(this->primitive_desc);
-    // Construct tensor of input zero point
-    ideep::tensor::desc input_zp_desc = {{1}, ideep::data_type::s32, {1}};
-    this->input_zp_tensor.init(input_zp_desc, ideep::engine::cpu_engine());
-    auto zp_data_ptr = reinterpret_cast<int32_t *>(this->input_zp_tensor.get_data_handle());
-    zp_data_ptr[0] = std::get<InputZeroPoint>(key);
-    // Construct expected bias
-    this->expected_bias = bias.reorder_if_differ_in(conv_desc.bias_desc(), bias_attr);
+    this->params = params;
+    if (!bias.is_empty()) {
+      this->expected_bias =
+          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
+    }
   }
 
-  ConvDesc primitive_desc;
-  Conv primitive;
-  ideep::tensor input_zp_tensor;
   ideep::tensor expected_bias;
+  ConvParams params;
 
-  inline ConvDesc& get_primitive_desc() {
-    return primitive_desc;
+  ConvParams& get_params() {
+    return params;
   }
 
-  inline Conv& get_primitive() {
-    return primitive;
-  }
-
-  inline ideep::tensor& get_src_zp_tensor() {
-    return input_zp_tensor;
-  }
-
-  inline ideep::tensor& get_bias() {
+  ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -132,37 +120,26 @@ struct ConvPrimitiveCache : PrimitiveCache {
 struct DeconvPrimitiveCache : PrimitiveCache {
   DeconvPrimitiveCache() {}
 
-  DeconvPrimitiveCache(const PrimitiveCacheKey& key,
-                       const DeconvDesc& deconv_desc,
-                       const ideep::tensor& bias,
-                       const ideep::attr_t bias_attr,
-                       const ideep::tensor& input_zero_point) {
+  DeconvPrimitiveCache(
+      const PrimitiveCacheKey& key,
+      const DeconvParams& params,
+      const ideep::tensor& bias) {
     this->key = key;
-    this->primitive_desc = deconv_desc;
-    this->primitive = Deconv(this->primitive_desc);
-    this->input_zp_tensor = std::move(input_zero_point);
-    // Construct expected bias
-    this->expected_bias = bias.reorder_if_differ_in(deconv_desc.bias_desc(), bias_attr);
+    this->params = params;
+    if (!bias.is_empty()) {
+      this->expected_bias =
+          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
+    }
   }
 
-  DeconvDesc primitive_desc;
-  Deconv primitive;
-  ideep::tensor input_zp_tensor;
+  DeconvParams params;
   ideep::tensor expected_bias;
 
-  inline DeconvDesc& get_primitive_desc() {
-    return primitive_desc;
+  DeconvParams& get_params() {
+    return params;
   }
 
-  inline Deconv& get_primitive() {
-    return primitive;
-  }
-
-  inline ideep::tensor& get_src_zp_tensor() {
-    return input_zp_tensor;
-  }
-
-  inline ideep::tensor& get_bias() {
+  ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -294,6 +271,18 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
       const at::Tensor& input,
       bool reduce_range) override;
 
+  at::Tensor apply_add(
+      const at::Tensor& input,
+      const at::Tensor& accum,
+      double output_scale,
+      int64_t output_zero_point);
+
+  at::Tensor apply_add_relu(
+      const at::Tensor& input,
+      const at::Tensor& accum,
+      double output_scale,
+      int64_t output_zero_point);
+
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
@@ -338,6 +327,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,
+      const c10::optional<at::Tensor>& accum,
       double output_scale,
       int64_t output_zero_point);
 
@@ -401,18 +391,27 @@ static bool is_weight_symmetric_quant(
   return is_symmetric;
 }
 
-// Check if onednn should be used w.r.t fbgemm
+// When qengine is x86, use this util func to check if onednn kernel
+// is preferred than fbgemm's to get better performance.
 static bool should_use_onednn_quant(
     const at::Tensor& weight,
     bool is_transposed_conv,
     int groups,
     torch::List<int64_t> output_padding) {
+  // Performance of onednn is only validated on Linux right now.
+  // Also, the heuristics for dispatching are based on perf data on Linux.
+  // So, for x86 qengine, we always use fbgemm kernels if OS is not Linux.
+  // TODO Support more OSs.
+#if !defined(__linux__)
+  return false;
+#else
   bool vnni_available = cpuinfo_has_x86_avx512vnni();
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
       std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
   return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
+#endif
 }
 
 } // onednn_utils

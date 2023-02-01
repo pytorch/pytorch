@@ -215,7 +215,7 @@ class NCCLComm {
 
 // Helper that automatically cleans up premul sums.
 struct ncclRedOpRAII {
-  ncclRedOpRAII() {}
+  ncclRedOpRAII() = default;
   ncclRedOpRAII(ncclRedOp_t op) : op_(op) {}
   ncclRedOpRAII(ncclRedOp_t op, ncclComm_t comm) :
     op_(op), comm_(comm), premul_sum_(true) {}

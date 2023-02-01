@@ -25,6 +25,8 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <utility>
+
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
     torch_jit_disable_cat,
@@ -323,7 +325,7 @@ void insertTypeGuard(
     guard_types.emplace_back(
         type_converter(input->type()->expect<TensorType>()));
   }
-  if (!inputs_to_check.size()) {
+  if (inputs_to_check.empty()) {
     return;
   }
 
@@ -340,7 +342,7 @@ void insertTypeGuard(
       guarded_node->owningGraph()
           ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
           ->insertBefore(guarded_node);
-  typecheck_node->tys_(attr::types, guard_types);
+  typecheck_node->tys_(attr::types, std::move(guard_types));
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
 
   std::unordered_map<Value*, Value*> typechecked_inputs;
@@ -691,7 +693,7 @@ class TensorExprFuser {
     }
 
     Node* prev_fusion_group =
-        initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
+        !initial_fusion_groups.empty() ? initial_fusion_groups[0] : nullptr;
 
     for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
       // Try merging the just created fusion group into the previous one.
@@ -1313,7 +1315,7 @@ class TensorExprFuser {
 
     std::string line;
     while (std::getline(in_ss, line, ':')) {
-      if (line.size() == 0) {
+      if (line.empty()) {
         continue;
       }
       operators_not_to_fuse.insert(c10::Symbol::aten(line));

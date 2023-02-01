@@ -1537,6 +1537,10 @@ class Module:
                     result = hook_result
 
         if bw_hook:
+            if not isinstance(result, (torch.Tensor, tuple)):
+                warnings.warn("For backward hooks to be called,"
+                              " module output should be a Tensor or a tuple of Tensors"
+                              f" but received {type(result)}")
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
@@ -2315,7 +2319,7 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         r"""Sets gradients of all model parameters to zero. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 

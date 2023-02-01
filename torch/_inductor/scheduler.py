@@ -11,11 +11,12 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, dynamo_utils, has_triton
+from .utils import cache_on_self, cmp, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -297,7 +298,10 @@ class SchedulerNode(BaseSchedulerNode):
         ):
             return super().allocate()
 
-        if config.inplace_buffers and getattr(V.kernel, "mutations", None) is not None:
+        if config.inplace_buffers and (
+            not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+            or getattr(V.kernel, "mutations", None) is not None
+        ):
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
@@ -545,7 +549,7 @@ class NodeUser:
 
 
 class Scheduler:
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def __init__(self, nodes):
         super(Scheduler, self).__init__()
         self.backends = {}
@@ -1085,7 +1089,7 @@ class Scheduler:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def codegen(self):
         for node in self.nodes:
             self.buffer_names_no_longer_needed.update(node.last_usage)

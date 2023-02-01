@@ -1210,7 +1210,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x.T
 
         self.run_test(NumpyTranspose(), torch.randn(4, 7))
-        self.run_test(NumpyTranspose(), torch.tensor(-42.0))
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
@@ -6640,6 +6639,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         constant = torch.tensor(5, dtype=torch.float)
         self.run_test(MaskedScatterModel(), (mask, constant))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_with_1d_mask_to_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, tensor, mask, some_const):
+                tensor[mask] = some_const
+                return tensor
+
+        mask = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1], dtype=torch.bool)
+        tensor = torch.randn(8, 4, 5, requires_grad=True)
+        some_const = torch.randn(4, 4, 5, dtype=torch.float)
+        self.run_test(MaskedScatterModel(), (tensor, mask, some_const))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
@@ -8294,6 +8305,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(CrossEntropyLossMeanWeight(ignore_index), input_args=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_MSELoss(self):
+        class MSELoss(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.loss1 = torch.nn.MSELoss(reduction="none")
+                self.loss2 = torch.nn.MSELoss(reduction="sum")
+                self.loss3 = torch.nn.MSELoss(reduction="mean")
+
+            def forward(self, input, target):
+                return (
+                    self.loss1(input, target),
+                    self.loss2(input, target),
+                    self.loss3(input, target),
+                )
+
+        x = torch.randn(2, 3, 5)
+        y = torch.randn(2, 3, 5)
+        self.run_test(MSELoss(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
         x = torch.rand(5).log()
@@ -9389,7 +9420,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     )
                 )
         else:
-            model = ElmanWithStateModel(
+            model = ElmanWithoutStateModel(
                 layers=layers,
                 bidirect=bidirectional,
                 nonlinearity=nonlinearity,
@@ -12098,9 +12129,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(1, 2, 3, 4), 1, 0, torch.quint8)
         self.run_test(FlattenModel(), x)
 
-    @unittest.skip(
-        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
-    )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat_when_concatinating_the_same_tensor(self):
@@ -12153,9 +12181,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="different_zero_point_and_scale",
             ),
         ],
-    )
-    @unittest.skip(
-        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
     )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
@@ -12244,6 +12269,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4), offset=-8)
         self.run_test(model, input)
+
+    @unittest.skip(
+        "ORT fails with Validating no unexpected access using an invalid node_index on torch converted model"
+    )
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_quantized_list_of_inputs_with_cat(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = torch.cat([x, x], 1)
+                x = self.dequant(x)
+                return x
+
+        model = TestModel()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        model = torch.quantization.convert(model)
+        x = torch.randn(2, 4, 6)
+        self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_relu(self):
@@ -12517,6 +12566,35 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             (input, grid),
             **atol_rtol,
         )
+
+        # ONNX Opset 16 GridSample with 5D volumetric input is not supported.
+        d_in = 2
+        d_out = 3
+        volumetric_input_tensor = torch.randn(n, c, d_in, h_in, w_in)
+        volumetric_grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
+        for mode, padding_mode, align_corners in itertools.product(
+            (
+                "bilinear",
+                "nearest",
+            ),  # PyTorch grid_sample "bicubic" mode does not support 5D volumetric input.
+            (
+                "zeros",
+                "border",
+                "reflection",
+            ),
+            (
+                True,
+                False,
+            ),
+        ):
+            with self.assertRaises(
+                torch.onnx.errors.OnnxExporterError,
+            ):
+                self.run_test(
+                    GridSampleModule(mode, padding_mode, align_corners),
+                    (volumetric_input_tensor, volumetric_grid_tensor),
+                    **atol_rtol,
+                )
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:

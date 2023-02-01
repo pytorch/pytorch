@@ -166,7 +166,7 @@ struct Dim : public py::base<Dim> {
         return batchtensor_;
     }
 private:
-    int64_t size_;
+    int64_t size_{-1};
     at::Tensor range_;
     at::Tensor batchtensor_;
 };
@@ -1085,8 +1085,8 @@ inline int64_t _Tensor_ndim(py::handle h) {
 inline py::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
     c10::optional<PyObject*> mb_obj =
-        t->unsafeGetTensorImpl()->check_pyobj(getPyInterpreter());
-    if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->owns_pyobj()) {
+        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+    if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
     }
     return A.autorelease(py::object::checked_steal(THPVariable_Wrap(*t)));
@@ -2874,7 +2874,7 @@ struct WrappedOperator : public py::base<WrappedOperator> {
         name = orig.attr("__name__");
         doc = orig.attr("__doc__");
         dim_name = std::move(dim_name_);
-        if (!py::is_none(doc) && dim_name.size() > 0) {
+        if (!py::is_none(doc) && !dim_name.empty()) {
             doc = py::unicode_from_format("%S\nArgument '%s' can be either an integer or a torchdim.Dim object.\n", doc.ptr(), dim_name.c_str());
         }
         method_def.ml_name = py::is_none(name) ? "" : PyUnicode_AsUTF8(name.ptr());
