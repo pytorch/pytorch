@@ -174,12 +174,6 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# How to import torchdynamo, either torchdynamo or torch._dynamo
-dynamo_import = __name__.replace(".config", "")
-
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = dynamo_import.replace("dynamo", "inductor")
-
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
