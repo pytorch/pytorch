@@ -668,7 +668,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return
 
         try:
-            value = self.f_globals[name]
+            if (
+                self.f_globals[name] in torch._C._TensorBase.__dict__.values()
+                and self.f_globals[name].__name__ in dir(torch.ops.aten)
+                and isinstance(
+                    getattr(torch.ops.aten, self.f_globals[name].__name__),
+                    torch._ops.OpOverloadPacket,
+                )
+            ):
+                # torch.Tensor.{fn} to torch.ops.aten.{fn}
+                value = getattr(torch.ops.aten, self.f_globals[name].__name__)
+            else:
+                value = self.f_globals[name]
         except KeyError:
             return self.load_builtin(inst)
 
