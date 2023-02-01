@@ -1199,11 +1199,13 @@ class ShapeEnv:
                 index_expr = f"[{source.idx}]"
             return f"{info.name}{index_expr}"
 
-        def register_unique_name(source: Source) -> str:
+        def register_unique_name(source: Union[str, Source]) -> str:
             if isinstance(source, TensorPropertySource):
                 source_name = f"{source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
-            else:
+            elif isinstance(source, Source):
                 source_name = flat_name(source.name())
+            else:
+                source_name = source
 
             # Makes sure there are no repeated names.
             # It's very unlikely the loop-body will be executed more than once.
@@ -1261,14 +1263,16 @@ class ShapeEnv:
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
             assert isinstance(source, Source)
+
             if t is None:
+                continue
+            if source.name() in source_expr_to_info:
                 continue
 
             if isinstance(t, SymInt):
                 symint_name = register_unique_name(source)
                 source_expr_to_info[source.name()] = SourceInfo(symint_name, source, SymInt)
                 parameter_source_infos.append(source_expr_to_info[source.name()])
-
                 track_symint(source, t)
                 continue
 
@@ -1344,7 +1348,7 @@ class ShapeEnv:
                 if info.type != torch.Tensor:
                     continue
 
-                variable_name = f"{info.name}_variable"
+                variable_name = register_unique_name(f"{info.name}_variable")
                 source_creation.append(f"auto {variable_name} = reinterpret_cast<THPVariable*>({info.name});")
 
                 for tensor_property in TensorProperty:
