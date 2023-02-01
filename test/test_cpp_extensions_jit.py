@@ -8,7 +8,6 @@ import warnings
 import re
 import tempfile
 import subprocess
-import stat
 import glob
 
 import torch.testing._internal.common_utils as common
