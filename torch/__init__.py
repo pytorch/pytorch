@@ -1324,7 +1324,7 @@ class _TorchCompileInductorWrapper:
             # cudagraphs conflicts with dynamic shapes
             self.config["triton.cudagraphs"] = False
             assert "triton.cudagraphs" not in (
-                    passes or ()
+                passes or ()
             ), "triton.cudagraphs does not support dynamic shapes"
 
     def apply_mode(self, mode: Optional[str]):
