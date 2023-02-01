@@ -181,7 +181,10 @@ class BaseSchedulerNode:
         if (
             isinstance(self.node, (SchedulerNode,))
             and config.inplace_buffers
-            and getattr(V.kernel, "mutations", None) is not None
+            and (
+                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                or getattr(V.kernel, "mutations", None) is not None
+            )
         ):
             from .codegen.wrapper import buffer_reuse_key
 

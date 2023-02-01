@@ -265,7 +265,11 @@ from torch.fx.experimental.proxy_tensor import make_fx
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += "mod = make_fx(Repro())(*args)\n"
+    # TODO: fake may be better for performance here
+    tracing_mode = "real"
+    if config.dynamic_shapes:
+        tracing_mode = "symbolic"
+    model_str += f"mod = make_fx(Repro(), tracing_mode={repr(tracing_mode)})(*args)\n"
     return model_str
 
 
@@ -676,7 +680,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
+    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
     return passing
 
 
@@ -1107,7 +1111,7 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
 
     # Check Accuracy
     if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-        log.warning("Accuracy failed for the TorchDyanmo produced graph")
+        log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
