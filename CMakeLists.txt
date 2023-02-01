@@ -8,6 +8,12 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
+# Enables CMake to set LTO on compilers other than Intel.
+cmake_policy(SET CMP0069 NEW)
+# Enable the policy for CMake subprojects.
+# protobuf currently causes issues
+#set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 # Suppress warning flags in default MSVC configuration.  It's not
 # mandatory that we do this (and we don't if cmake is old), but it's
 # nice when it's possible, and it's possible on our Windows configs.
