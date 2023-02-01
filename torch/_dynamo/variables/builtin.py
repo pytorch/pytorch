@@ -23,7 +23,7 @@ from ..utils import (
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker
+from .base import MutableLocal, typestr, VariableTracker
 from .dicts import ConstDictVariable
 from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
 
@@ -690,7 +690,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchVariable,
+            TensorVariable,
             UserFunctionVariable,
         )
         from .builder import VariableBuilder
@@ -852,3 +852,66 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable(id(mod))
         else:
             unimplemented(f"call_id with args {args}")
+
+    def _comparison(self, tx, left, right):
+        """
+        Used to implement comparison operators for different types.
+        For example, list1 < list2 is implemented differently from tensor1 < tensor2
+        """
+        from . import (
+            BaseListVariable,
+            ConstantVariable,
+            TensorVariable,
+            UserFunctionVariable,
+        )
+        from .tensor import (
+            supported_const_comparison_ops,
+            supported_tensor_comparison_ops,
+        )
+
+        op = self.fn
+
+        def _unimplemented():
+            unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
+
+        if isinstance(left, UserFunctionVariable):
+            if op not in supported_const_comparison_ops.values():
+                _unimplemented()
+            if not isinstance(right, UserFunctionVariable):
+                _unimplemented()
+            return ConstantVariable(op(left.fn, right.fn))
+
+        if isinstance(left, BaseListVariable):
+            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
+                _unimplemented()
+            return BaseListVariable.generic_list_compare(left, tx, op, right)
+
+        if isinstance(left, TensorVariable):
+            from .builder import wrap_fx_proxy
+
+            if op not in supported_tensor_comparison_ops.values():
+                _unimplemented()
+            return wrap_fx_proxy(
+                tx,
+                op(left.as_proxy(), right.as_proxy()),
+            )
+
+        if isinstance(left, DynamicShapeVariable):
+            if op not in supported_tensor_comparison_ops.values():
+                _unimplemented()
+
+            return DynamicShapeVariable.create(
+                tx,
+                op(left.as_proxy(), right.as_proxy()),
+                dyn_shape=None,
+            )
+
+        _unimplemented()
+
+    call_eq = _comparison
+    call_gt = _comparison
+    call_lt = _comparison
+    call_le = _comparison
+    call_ne = _comparison
+    call_is_ = _comparison
+    call_is_not = _comparison
