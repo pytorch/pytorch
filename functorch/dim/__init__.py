@@ -172,7 +172,7 @@ softmax = _wrap(torch.nn.functional.softmax, single_dim=True, reduce=False)
 
 
 def rearrange(tensor: Tensor, equation: str, **kwargs) -> Tensor:
-    r"""Flattens or coalesces dimensions of the input tensor based on the given equation. 
+    r"""Flattens or coalesces dimensions of the input tensor based on the given equation.
     Implemented as a thin wrapper around `functorch.dim.dims`
 
     Equation:
@@ -181,12 +181,12 @@ def rearrange(tensor: Tensor, equation: str, **kwargs) -> Tensor:
 
         Both sides of the equation will take a series of space-seperated axis groupings.
         The groupings are positional, and can be either of the form
-        `axis_name` (single axis) or `(axis_0, axis_1, ..)`. 
-        
-        There must be exactly as many axis groupings on the left as the tensor 
+        `axis_name` (single axis) or `(axis_0, axis_1, ..)`.
+
+        There must be exactly as many axis groupings on the left as the tensor
         dimension of the input tensor. Individual axis names must appear exactly once on both sides.
-        
-        Where there is more than one axis in a given axis grouping on the left (input side), the 
+
+        Where there is more than one axis in a given axis grouping on the left (input side), the
         dimensions of at most one axis can be unknown (so it can be inferred from the input tensor shape).
 
         There should not be any spaces separating brackets and axis names.
@@ -221,23 +221,23 @@ def rearrange(tensor: Tensor, equation: str, **kwargs) -> Tensor:
         if len(split) != 2:
             raise ValueError(f"While parsing equation: {equation} should be of the form `before_axes -> after_axes`")
         lhs, rhs = split[0].split(), split[1].split()
-        
+
         lhs_idents, rhs_idents = set(), set()
-        
+
         for ident in lhs:
             lhs_idents.add(ident.replace('(', '').replace(')', ''))
         for ident in rhs:
             rhs_idents.add(ident.replace('(', '').replace(')', ''))
-        
+
         # Should we just check that `rhs_idents.is_subset(lhs_idents)`?
         if lhs_idents != rhs_idents:
             raise ValueError(f"While parsing equation: lhs axes {lhs_idents} != rhs axes {rhs_idents}")
-        
+
         lhs, rhs, axes = (',').join(lhs), (',').join(rhs), (',').join(lhs_idents)
         return lhs, rhs, axes
-    
+
     lhs, rhs, axes = parse_equation(equation)
-                                          
+
     kwarg_dim_def = "\n".join(["{}.size={}".format(key, kwargs[key]) for key in kwargs])
 
     exec_string = r"""
@@ -245,7 +245,7 @@ def rearrange(tensor: Tensor, equation: str, **kwargs) -> Tensor:
 {kwarg_dim_def}
 res = tensor[{lhs}].order({rhs})
     """.format(num_axes=len(axes.split(',')), kwarg_dim_def=kwarg_dim_def, lhs=lhs, rhs=rhs, axes=axes)
-    
+
     env = {"dims": dims, "tensor": tensor}
     exec(exec_string, {}, env)
     return env["res"]
