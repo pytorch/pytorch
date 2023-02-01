@@ -5,7 +5,7 @@ import sys
 debug = False
 
 # Whether to disable a progress bar for autotuning
-disable_progress = True
+disable_progress = False
 
 # Whether to enable printing the source code for each future
 verbose_progress = False
@@ -81,13 +81,13 @@ def is_fbcode():
 
 compile_threads = (
     1
-    if sys.platform == "win32" or is_fbcode()
-    else min(
-        32,
-        len(os.sched_getaffinity(0))
-        if hasattr(os, "sched_getaffinity")
-        else os.cpu_count(),
-    )
+    # if sys.platform == "win32" or is_fbcode()
+    # else min(
+    #     32,
+    #     len(os.sched_getaffinity(0))
+    #     if hasattr(os, "sched_getaffinity")
+    #     else os.cpu_count(),
+    # )
 )
 
 # If kernel is fused, the name is generated from the origin node op names

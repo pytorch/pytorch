@@ -34,6 +34,7 @@ from .common import (
     index_prevent_reordering,
     Kernel,
     OpOverrides,
+    PrecomputedSizeArg,
     SizeArg,
     TensorArg,
 )
@@ -55,7 +56,7 @@ def signature_of(arg):
                 return new_tye
         else:
             return tye
-    if isinstance(arg, SizeArg):
+    if isinstance(arg, (SizeArg, PrecomputedSizeArg)):
         return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
@@ -66,8 +67,9 @@ def config_of(args):
     def is_aligned(x):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
-        assert isinstance(x, SizeArg)
-        return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+        if isinstance(x, (SizeArg, PrecomputedSizeArg)):
+            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+        raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     return instance_descriptor(tuple(divisible_by_16), ())
@@ -526,6 +528,19 @@ class IterationRangesEntry(IterationRanges):
         self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
+    def precomputed_args(self):
+        # for dynamic shapes, find parts of indexing expressions that have to be precomputed
+        precomputed_args = []
+        if isinstance(self.expr, sympy.Symbol):
+            return precomputed_args
+        assert isinstance(self.expr, (ir.FloorDiv, ir.ModularIndexing)), type(self.expr)
+        for arg in self.expr.args[1:]:
+            if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
+                symbols = arg.free_symbols
+                if len(symbols) > 0 and all(s.name.startswith("s") for s in symbols):
+                    precomputed_args.append(arg)
+        return precomputed_args
+
     def symbol(self):
         return sympy_symbol(self.name)
 
@@ -563,6 +578,9 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
         self.reduction_hint = reduction_hint
+        # maps of dynamic sizes that have to be precomputed on the host to the kernel args
+        self.precomputed_sizes = {}
+        self.inv_precomputed_sizes = {}
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -590,6 +608,13 @@ class TritonKernel(Kernel):
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
             self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
+
+    def lookup_precomputed_size(self, expr):
+        if expr not in self.precomputed_sizes:
+            sym = sympy_symbol(f"ps{len(self.precomputed_sizes)}")
+            self.precomputed_sizes[expr] = sym
+            self.inv_precomputed_sizes[sym] = expr
+        return self.precomputed_sizes[expr]
 
     def disable_reduction(self):
         @contextlib.contextmanager
@@ -830,6 +855,15 @@ class TritonKernel(Kernel):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         for sym in sorted(expr.free_symbols, key=str):
             if sym in self.range_tree_nodes:
+                # if indexing expression is complicated, we precompute it on the host side
+                # and send the result as a kernel argument
+                replacements = {}
+                for ps in self.range_tree_nodes[sym].precomputed_args():
+                    replacements[ps] = self.lookup_precomputed_size(ps)
+                if len(replacements) > 0:
+                    self.range_tree_nodes[sym].expr = sympy_subs(
+                        self.range_tree_nodes[sym].expr, replacements
+                    )
                 self.range_tree_nodes[sym].codegen()
         return expr
 
@@ -1074,6 +1108,12 @@ class TritonKernel(Kernel):
             )
 
         argdefs, _, signature = self.args.python_argdefs()
+        # maps actual expression to PrecomputedSizeArg
+        for i, arg in enumerate(signature):
+            if isinstance(arg, PrecomputedSizeArg):
+                signature[i] = PrecomputedSizeArg(
+                    arg.name, self.inv_precomputed_sizes[arg.expr]
+                )
 
         mutated_args = set()
         for mutation in self.mutations:
@@ -1204,6 +1244,8 @@ class TritonKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
+        for sym, expr in self.inv_precomputed_sizes.items():
+            code.writeline(f"{sym} = {texpr(expr)}")
         call_args = ", ".join(call_args)
         stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
         code.writeline(
@@ -1423,6 +1465,7 @@ class TritonScheduling:
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
+
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
