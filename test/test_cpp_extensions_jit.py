@@ -160,15 +160,19 @@ class TestCppExtensionJIT(common.TestCase):
                 "verbose": True,
                 "build_directory": temp_dir,
             }
-            p = mp.Process(target=torch.utils.cpp_extension.load, kwargs=params)
 
-            # Compile and load the test CUDA arch in a different Python process to avoid
-            # polluting the current one and causes test_jit_cuda_extension to fail on
-            # Windows. There is no clear way to unload a module after it has been imported
-            # and torch.utils.cpp_extension.load builds and loads the module in one go.
-            # See https://github.com/pytorch/pytorch/issues/61655 for more details
-            p.start()
-            p.join()
+            if IS_WINDOWS:
+                p = mp.Process(target=torch.utils.cpp_extension.load, kwargs=params)
+
+                # Compile and load the test CUDA arch in a different Python process to avoid
+                # polluting the current one and causes test_jit_cuda_extension to fail on
+                # Windows. There is no clear way to unload a module after it has been imported
+                # and torch.utils.cpp_extension.load builds and loads the module in one go.
+                # See https://github.com/pytorch/pytorch/issues/61655 for more details
+                p.start()
+                p.join()
+            else:
+                torch.utils.cpp_extension.load(**params)
 
             # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
