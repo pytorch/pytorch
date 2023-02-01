@@ -1726,13 +1726,16 @@ class CommonTemplate:
             raise unittest.SkipTest("only support cpu conv2d packed test")
 
         x_shape = (1, 3, 56, 56)
-        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
-        v = torch.randn(x_shape, dtype=torch.float32)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
+        for mode_train in [True, False]:
+            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
+                mode=mode_train
             )
+            v = torch.randn(x_shape, dtype=torch.float32)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
@@ -1769,6 +1772,7 @@ class CommonTemplate:
             [1, 4],
             ["same", 0],
             test_memory_format,
+            [True, False],
         )
 
         for (
@@ -1779,6 +1783,7 @@ class CommonTemplate:
             groups,
             padding,
             memory_format,
+            mode_train,
         ) in options:
             oC = 32 * groups
             iC = 3 * groups
@@ -1792,7 +1797,7 @@ class CommonTemplate:
                 dilation=dilation,
                 groups=groups,
                 bias=bias,
-            ).eval()
+            ).train(mode=mode_train)
 
             # TODO: add bf16 test for cpu path?
             # TODO: this test fails when requires_grad=False
@@ -1865,6 +1870,7 @@ class CommonTemplate:
             [1, 4],
             ["same", 0],
             test_memory_format,
+            [True, False],
         )
 
         for (
@@ -1876,6 +1882,7 @@ class CommonTemplate:
             groups,
             padding,
             memory_format,
+            mode_train,
         ) in options:
             oC = 32 * groups
             iC = 3 * groups
@@ -1890,7 +1897,7 @@ class CommonTemplate:
                 padding,
                 bias,
                 kernel_size=kernel_size,
-            ).eval()
+            ).train(mode=mode_train)
             mod = mod.to(memory_format=memory_format)
             # TODO: add bf16 test
             v = torch.randn(x_shape, dtype=torch.float32).to(
@@ -1903,7 +1910,7 @@ class CommonTemplate:
                 )
 
     def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
         for input_shape, bias in options:
             mod = torch.nn.Sequential(
                 torch.nn.Linear(input_shape[-1], 30, bias=bias)
