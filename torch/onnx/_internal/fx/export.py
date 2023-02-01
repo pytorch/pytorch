@@ -19,7 +19,7 @@ except ImportError:
             "ONNX is not available. Please install ONNX to use this feature."
         )
 
-    onnx.__getattr__ = _onnx_not_available
+    onnx.__getattr__ = _onnx_not_available  # type: ignore[assignment]
 
 import torch
 import torch._C
@@ -433,12 +433,12 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 current_attr = getattr(current_attr, sub_attr_name)
 
             v = g.addInput(node.name)
-            v.setType(torch._C.TensorType.create_from_tensor(current_attr))
+            v.setType(torch._C.TensorType.create_from_tensor(current_attr))  # type: ignore[assignment]
             assert (
                 v is not None
             ), f"Node creates None with target={node.target} and name={node.name}"
             fx_name_to_ts_value[node.name] = v
-            ts_name_to_real_tensor[v.debugName()] = current_attr
+            ts_name_to_real_tensor[v.debugName()] = current_attr  # type: ignore[assignment]
         else:
             # TODO(wechi): Support get_attr, call_module, call_method.
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
@@ -542,9 +542,9 @@ def _rename_placeholder_targets(
 @_beartype.beartype
 def _export(
     module: torch.fx.GraphModule,
-    opset_version=None,
+    opset_version: int = None,
     *args,
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
+    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
 ) -> Union["onnx.ModelProto", bytes]:
     # Export FX graph to ONNX ModelProto.
@@ -791,7 +791,7 @@ def _trace_into_fx_graph_via_fx_symbolic_trace(
 def export_without_parameters_and_buffers(
     module: torch.nn.Module,
     *args,
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
+    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
     opset_version: int = None,
     # kwargs are the keyword arguments to call "module"; that is,
