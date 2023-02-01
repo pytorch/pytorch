@@ -117,7 +117,7 @@ class Std(IntFlag):
         Any other input raises an exception
         """
 
-        def to_std(v: str) -> Std:
+        def to_std(v: str) -> Std:  # type: ignore[return]
             s = Std(int(v))
             if s in Std:
                 return s
