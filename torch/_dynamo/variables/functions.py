@@ -258,18 +258,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
 
-    def compare(self, tx, op, right, **options):
-        from .constant import ConstantVariable
-        from .tensor import supported_const_comparison_ops
-
-        if op not in supported_const_comparison_ops:
-            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
-        if not isinstance(right, UserFunctionVariable):
-            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
-        return ConstantVariable(
-            supported_const_comparison_ops[op](self.fn, right.fn), **options
-        )
-
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""

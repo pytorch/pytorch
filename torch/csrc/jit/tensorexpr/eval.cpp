@@ -689,7 +689,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
               "Number of dimensions did not match number of strides", buf);
         }
         size_t buf_size = 1;
-        if (dims.size() > 0) {
+        if (!dims.empty()) {
           ExprHandle buf_size_expr = ExprHandle(immLike(dims[0], 1));
           ExprHandle negative_one = ExprHandle(immLike(dims[0], -1));
           for (const auto& i : c10::irange(dims.size())) {
@@ -984,7 +984,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       values[i] = this->value();
     }
     std::vector<TInput> v1;
-    if (values.size() >= 1ULL) {
+    if (!values.empty()) {
       v1 = values[0].as_vec<TInput>();
     }
     std::vector<TInput> v2;
