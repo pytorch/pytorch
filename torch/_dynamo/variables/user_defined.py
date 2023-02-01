@@ -326,7 +326,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         elif isinstance(subobj, types.FunctionType):
             return variables.UserMethodVariable(subobj, self, source=source, **options)
-        elif hasattr(subobj, "__get__"):
+        elif isinstance(subobj, torch.distributions.utils.lazy_property):
             return variables.UserMethodVariable(
                 subobj.__get__, self, source=source, **options
             ).call_function(tx, [], {})
