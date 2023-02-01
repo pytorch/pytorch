@@ -2,6 +2,7 @@
 import operator
 from enum import Enum
 from typing import Dict, List
+from unittest.mock import patch
 
 import torch
 
