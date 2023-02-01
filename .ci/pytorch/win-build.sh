@@ -41,7 +41,6 @@ fi
 export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}"\win-test-helpers"
 
 # These variables are set for the python build
-<<'com'
 if [ $DEBUG == "1" ]
 then
   export BUILD_TYPE="debug"
@@ -55,9 +54,8 @@ then
 else
   export CONDA_PARENT_DIR="C:\Jenkins"
 fi
-com
 
-export PATH="C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;"$PATH
+#export PATH="C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;"$PATH
 
 export INSTALLER_DIR=${SCRIPT_HELPERS_DIR}"\installation-helpers"
 
@@ -67,18 +65,16 @@ export LIB=${TMP_DIR_WIN}"\mkl\lib;"$LIB
 
 export INSTALL_FRESH_CONDA="1"
 
-export PATH=${CONDA_PARENT_DIR}"\Miniconda3\Library\bin;"${CONDA_PARENT_DIR}"\Miniconda3;"${CONDA_PARENT_DIR}"\Miniconda3\Scripts;"$PATH
+#export PATH=${CONDA_PARENT_DIR}"\Miniconda3\Library\bin;"${CONDA_PARENT_DIR}"\Miniconda3;"${CONDA_PARENT_DIR}"\Miniconda3\Scripts;"$PATH
 
 export DISTUTILS_USE_SDK="1"
 
-export PATH=${TMP_DIR_WIN}"\bin;"$PATH
+#export PATH=${TMP_DIR_WIN}"\bin;"$PATH
 
-<<'###'
 if [ $TORCH_CUDA_ARCH_LIST == "" ]
 then
   export TORCH_CUDA_ARCH_LIST="5.2"
 fi
-###
 
 export SCCACHE_IDLE_TIMEOUT="0"
 
@@ -105,7 +101,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-python3 ${SCRIPT_HELPERS_DIR}"/build_pytorch.py"
+python ${SCRIPT_HELPERS_DIR}"/build_pytorch.py"
 
 env
 
