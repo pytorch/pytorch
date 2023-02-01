@@ -11,6 +11,7 @@
 #include <string>
 
 using c10::AliasInfo;
+using c10::AwaitType;
 using c10::BoolType;
 using c10::CapsuleType;
 using c10::ComplexType;
@@ -81,7 +82,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (text.size() > 0 && islower(text[0])) {
+    if (!text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
@@ -339,6 +340,14 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Await") {
+    L.next(); // Await
+    L.expect('(');
+    auto p = parseType();
+    auto subtype = std::move(p.first);
+    auto subalias = std::move(p.second);
+    L.expect(')');
+    fake_value = real_value = c10::TypeFactory::create<AwaitType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');

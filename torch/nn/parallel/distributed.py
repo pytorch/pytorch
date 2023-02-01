@@ -1147,7 +1147,6 @@ class DistributedDataParallel(Module, Joinable):
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
-            buffer_hook_registered = hasattr(self, "buffer_hook")
             if self._check_sync_bufs_pre_fwd():
                 self._sync_buffers()
 

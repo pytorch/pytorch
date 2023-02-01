@@ -866,6 +866,149 @@ class TestAutograd(TestCase):
         x.sum().backward()
         # Should run fine
 
+    def test_prehook_ordering(self):
+        # Hooks registered to tensor are ordered before those
+        # that are registered to grad_fn
+        log = []
+
+        def hook1(g):
+            log.append(1)
+            return g * 3
+
+        def hook2(gs):
+            log.append(2)
+            return tuple(g * 2 for g in gs)
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+
+        b.grad_fn.register_prehook(hook2)
+        b.register_hook(hook1)
+        b.grad_fn.register_prehook(hook2)
+
+        acc = b.grad_fn.next_functions[0][0]
+        a.register_hook(hook1)
+        acc.register_prehook(hook2)
+        a.register_hook(hook1)
+
+        b.sum().backward(retain_graph=True)
+        self.assertEqual(log, [1, 2, 2, 1, 1, 2])
+
+        # grad also runs hooks on accumulate grad nodes, even though
+        # the accumulate grad nodes are not actually executed
+        log = []
+        torch.autograd.grad(b.sum(), inputs=(a,), retain_graph=True)
+        self.assertEqual(log, [1, 2, 2, 1, 1])
+
+        log = []
+        b.sum().backward(inputs=(b,))
+        self.assertEqual(log, [1, 2, 2])
+        # retains_grad hooks would not observe modifications by all pre hooks
+        # because they are executed after
+        self.assertEqual(b.grad.item(), 3)
+
+    def test_retains_grad_can_always_observe_tensor_prehook(self):
+        def tensor_prehook(g):
+            return g * 2
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        b.register_hook(tensor_prehook)
+        b.retain_grad()
+        b.register_hook(tensor_prehook)
+
+        b.clone().backward()
+        self.assertEqual(b.grad.item(), 4)
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        b.retain_grad()
+        b.register_hook(tensor_prehook)
+
+        b.clone().backward()
+        self.assertEqual(b.grad.item(), 2)
+
+    def test_accumulate_grad_posthooks_can_observe_tensor_prehook(self):
+        # Post hooks on accumulate should be able to observe changes to
+        # grad made by tensor prehooks
+        a = torch.tensor(1., requires_grad=True)
+
+        def tensor_prehook(g):
+            return g * 2
+
+        def posthook(gO, gI):
+            self.assertTrue(torch.allclose(gI[0], a * 2))
+            self.assertEqual(len(gO), 0)
+
+        def prehook(gI):
+            self.assertTrue(torch.allclose(gI[0], a * 2))
+            self.assertEqual(len(gI), 1)
+
+        b = a.clone()
+        acc = b.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+        acc.register_prehook(prehook)
+        a.register_hook(tensor_prehook)
+
+        b.backward()
+
+    def test_hook_edge_case_when_called_with_grad(self):
+        # grad executes the tensor hooks of the next node but not
+        # grad_fn pre hooks or the post hooks
+        a = torch.tensor(1., requires_grad=True)
+        b = a * 2
+        c = b * 2
+
+        tensor_hook_count = [0]
+        prehook_count = [0]
+        posthook_count = [0]
+
+        def reset_counts():
+            nonlocal tensor_hook_count, prehook_count, posthook_count
+            tensor_hook_count = [0]
+            prehook_count = [0]
+            posthook_count = [0]
+
+        def tensor_prehook(g):
+            tensor_hook_count[0] += 1
+
+        def prehook(g):
+            prehook_count[0] += 1
+
+        def posthook(gI, gO):
+            posthook_count[0] += 1
+
+        a.register_hook(tensor_prehook)
+        b.register_hook(tensor_prehook)
+        acc = b.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+        acc.register_prehook(prehook)
+        b.grad_fn.register_hook(posthook)
+        b.grad_fn.register_prehook(prehook)
+
+        torch.autograd.grad(c, inputs=(b), retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 1)
+        self.assertEqual(posthook_count[0], 0)
+        self.assertEqual(prehook_count[0], 0)
+        reset_counts()
+
+        torch.autograd.grad(c, inputs=(a, b), retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 2)
+        self.assertEqual(posthook_count[0], 1)
+        self.assertEqual(prehook_count[0], 1)
+        reset_counts()
+
+        c.backward(retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 2)
+        self.assertEqual(posthook_count[0], 2)
+        self.assertEqual(prehook_count[0], 2)
+        reset_counts()
+
+        c.backward(inputs=(a, b), retain_graph=True)
+        self.assertEqual(tensor_hook_count[0], 2)
+        self.assertEqual(posthook_count[0], 2)
+        self.assertEqual(prehook_count[0], 2)
+
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
         intermediates = [l * i + l * l for i, l in enumerate(leaves)]
@@ -1270,8 +1413,7 @@ class TestAutograd(TestCase):
         self.assertEqual(input * 18, input.grad)
 
     # NB: See test/cpp/api/autograd.cpp for more tests on the interaction between
-    #     retains_grad and hooks in cpp. There's no point testing in python because
-    #     Python hooks use a completely different mechanism.
+    #     retains_grad and hooks in cpp
     def test_retain_grad_inplace(self):
         a = torch.tensor([1.], requires_grad=True).clone()
         a.retain_grad()
@@ -1281,13 +1423,43 @@ class TestAutograd(TestCase):
 
         a = torch.tensor([1.], requires_grad=True).clone()
         a.retain_grad()
-        # Inplace multiple times is OK, the real test here would be in cpp though
-        # because the index here is always zero, having cpp hooks in addition,
-        # will force us to properly update the index
+        # Inplace multiple times is OK
         a.mul_(2)
         a.mul_(2)
         a.sum().backward()
         self.assertEqual(a.grad, torch.tensor([1.]))
+
+    def test_retains_grad_inplace_multiple_outputs(self):
+        class DoubleMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, g1, g2):
+                return g1 * 2 + g2 * 3
+
+        var_mean = partial(torch.var_mean, dim=0)
+
+        for fn in (DoubleMul.apply, var_mean):
+            b = torch.rand(3, 3, requires_grad=True)
+            var, mean = fn(b)
+            var.retain_grad()
+            mean.retain_grad()
+            # node has two retains_grad hooks
+            var.mul_(2)
+            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            (var + mean).sum().backward()
+            gvar = var.grad
+            gmean = mean.grad
+
+            a = b.detach().requires_grad_(True)
+            var, mean = fn(a)
+            var.mul_(2)
+            out = (var + mean).sum()
+            gvar_expected, gmean_expected = torch.autograd.grad(out, inputs=(var, mean))
+            self.assertTrue(torch.allclose(gvar, gvar_expected))
+            self.assertTrue(torch.allclose(gmean, gmean_expected))
 
     def test_retain_grad_inplace_over_view(self):
         base = torch.tensor([1.], requires_grad=True).clone()
@@ -1303,6 +1475,116 @@ class TestAutograd(TestCase):
         # the grad would still be None
         self.assertEqual(view.grad, view2.grad)
         self.assertEqual(view.grad, torch.tensor([1.]))
+
+    def test_tensor_hooks_inplace(self):
+        # Check that the second hook gets registered to the new version of tensor
+        count1 = [0]
+        count2 = [0]
+
+        def fn1(grad):
+            count1[0] += 1
+            # x2 from mul, x2 from fn2
+            self.assertEqual(grad, torch.tensor([4.]))
+            return grad * 2
+
+        def fn2(grad):
+            count2[0] += 1
+            self.assertEqual(grad, torch.tensor([1.]))
+            return grad * 2
+
+        a = torch.tensor([1.], requires_grad=True)
+        b = a.clone()
+        b.register_hook(fn1)
+        b.mul_(2)
+        b.register_hook(fn2)
+        b.sum().backward()
+        self.assertEqual(count1[0], 1)
+        self.assertEqual(count2[0], 1)
+        self.assertEqual(a.grad, torch.tensor([8.]))
+
+        count3 = [0]
+
+        def fn3(grad):
+            count3[0] += 1
+            self.assertEqual(grad, torch.tensor([4.]))
+            return grad * 2
+
+        a = torch.tensor([1.], requires_grad=True)
+        b = a.clone()
+        b.register_hook(fn3)
+        # Inplace multiple times is OK
+        b.mul_(2)
+        b.mul_(2)
+        b.sum().backward()
+        self.assertEqual(count1[0], 1)
+        self.assertEqual(a.grad, torch.tensor([8.]))
+
+    def test_tensor_hooks_inplace_multiple_outputs(self):
+        class DoubleMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, g1, g2):
+                return g1 * 2 + g2 * 3
+
+        var_mean = partial(torch.var_mean, dim=0)
+
+        for fn in (DoubleMul.apply, var_mean):
+            counts = [0, 0, 0]
+
+            def fn0(grad):
+                counts[0] += 1
+                self.assertEqual(grad, torch.ones_like(out1) * 2)
+
+            def fn1(grad):
+                counts[1] += 1
+                self.assertEqual(grad, torch.ones_like(out1) * 3)
+
+            def fn2(grad):
+                counts[2] += 1
+                self.assertEqual(grad, torch.ones_like(out1))
+
+            b = torch.rand(3, 3, requires_grad=True)
+            out1, out2 = fn(b)
+            out1.register_hook(fn0)
+            out2.register_hook(fn1)
+            # node refers to two hook dicts
+            # out1 no longer no longer points to its old hook dict
+            out1.mul_(2)
+            # fn2 is registered to out1's new hook dict
+            out1.register_hook(fn2)
+            (out1 + out2 * 3).sum().backward()
+            self.assertEqual(counts, [1, 1, 1])
+
+    def test_tensor_hooks_inplace_over_view(self):
+        # There might be a better UX here, but this is the way it is now
+        count = [0]
+
+        def fn0(grad):
+            self.fail()
+
+        def fn1(grad):
+            self.fail()
+
+        def fn2(grad):
+            count[0] += 1
+            self.assertEqual(grad, torch.tensor([1.]))
+
+        base = torch.tensor([1.], requires_grad=True).clone()
+        view = base[:]
+        view2 = base[:]
+        view.register_hook(fn0)
+        view2.register_hook(fn1)
+        view.mul_(2)
+        # We need to explicitly trigger an update to view to update its grad_fn
+        view2.grad_fn
+        view2.register_hook(fn2)
+        (view + view2).sum().backward()
+        # The hooks originally registered to view are not fired, one must explicitly
+        # trigger an update to the view's grad_fn, and then register a new hook
+        self.assertEqual(count[0], 1)
 
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -4199,14 +4481,6 @@ Done""")
                         out.backward(retain_graph=True)
 
                 out.backward()
-
-    # TODO: update these tests to use the linalg module and move to test_linalg.py
-    @skipIfNoLapack
-    def test_symeig_no_eigenvectors(self):
-        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
-        w, v = torch.symeig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
-            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
@@ -9486,7 +9760,7 @@ class TestAllowMutationOnSaved(TestCase):
             out = (a**2).sum()
 
         msg = "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(AssertionError, msg):
             out.backward()
 
         # Different context
@@ -9495,7 +9769,7 @@ class TestAllowMutationOnSaved(TestCase):
             out = (a**2).sum()
 
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
-            with self.assertRaisesRegex(RuntimeError, msg):
+            with self.assertRaisesRegex(AssertionError, msg):
                 out.backward()
 
     def test_disallow_nesting(self):
@@ -10317,6 +10591,33 @@ class TestAutogradMultipleDispatch(TestCase):
 
         TestFn.apply(inp, None).sum().backward()
         self.assertFalse(threads_eq)
+
+    @onlyCUDA
+    def test_backward_tls_stash(self):
+
+        local = threading.local()
+        local.my_obj = {}
+        local.my_obj[10] = 10
+        test_self = self
+        torch._C._stash_obj_in_tls("my_obj", local.my_obj)
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x, self):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                test_self.assertTrue(torch._C._is_key_in_tls("my_obj"))
+                test_self.assertTrue(torch._C._get_obj_in_tls("my_obj")[10] == 10)
+                torch._C._get_obj_in_tls("my_obj")[10] = 5
+                return gO, None
+
+        inp = torch.rand(10, device="cuda", requires_grad=True)
+
+        TestFn.apply(inp, None).sum().backward()
+        self.assertEqual(local.my_obj[10], 5)
+
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence

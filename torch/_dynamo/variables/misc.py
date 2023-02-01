@@ -306,6 +306,8 @@ class ContextWrappingVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         assert len(args) == 1
+        if isinstance(args[0], NestedUserFunctionVariable):
+            args[0] = UserFunctionVariable(args[0].get_function())
         assert isinstance(args[0], UserMethodVariable) or isinstance(
             args[0], UserFunctionVariable
         )
@@ -546,6 +548,16 @@ class BlackHoleVariable(VariableTracker):
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
+
+
+class AutogradFunctionContextVariable(VariableTracker):
+    """
+    A autograd.function context used after graph break in forward.
+    Any call method on this context object will be graph break.
+    The is different from BlackHoleVariable which is only used in inference mode.
+    """
+
+    pass
 
 
 class LambdaVariable(VariableTracker):
