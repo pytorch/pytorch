@@ -25,6 +25,8 @@ jobs:
     #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
       packages: "pytorch torchvision torchaudio torchtext"
       channel: pytorch-nightly
+    secrets: 
+     conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
 
   anaconda-prune-pytorch-test:
     name: anaconda-prune-pytorch-test
@@ -33,3 +35,5 @@ jobs:
     #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
       packages: "pytorch torchvision torchaudio torchtext"
       channel: pytorch-test
+    secrets: 
+     conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
