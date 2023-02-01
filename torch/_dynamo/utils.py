@@ -1278,3 +1278,10 @@ def fqn(obj: Any):
     Returns the fully qualified name of the object.
     """
     return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def ifdyn(count1, count2):
+    if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
