@@ -9420,7 +9420,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     )
                 )
         else:
-            model = ElmanWithStateModel(
+            model = ElmanWithoutStateModel(
                 layers=layers,
                 bidirect=bidirectional,
                 nonlinearity=nonlinearity,
