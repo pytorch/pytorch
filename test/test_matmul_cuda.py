@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
+from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -41,7 +41,7 @@ class TestMatmulCuda(TestCase):
         super(self.__class__, self).tearDown()
 
     @onlyCUDA
-    @unittest.skipIf((torch.version.cuda is not None) and (not CUDA11OrLater), "Only CUDA 11+ is supported")
+    @unittest.skipIf((torch.version.cuda is not None) and int(torch.version.cuda.split(".")[0]) < 11, "Only CUDA 11+ is supported")
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
@@ -115,7 +115,7 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
     @onlyCUDA
-    @unittest.skipIf((torch.version.cuda is not None) and (not CUDA11OrLater), "Only CUDA 11+ is supported")
+    @unittest.skipIf((torch.version.cuda is not None) and int(torch.version.cuda.split(".")[0]) < 11, "Only CUDA 11+ is supported")
     @skipIfRocmVersionLessThan((5, 2))
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
