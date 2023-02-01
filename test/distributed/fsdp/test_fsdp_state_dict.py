@@ -484,7 +484,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("use_orig_params", [True, False])
     def test_basic_save_and_load_state_dict(
         self,
-        state_dict_type: StateDictType,
+        state_dict_type: str,
         cpu_offload: bool,
         fp16: bool,
         state_dict_rank0_and_offload: bool,
@@ -570,7 +570,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("use_orig_params", [True, False])
     def test_buffers_save_and_load_state_dict(
         self,
-        state_dict_type: StateDictType,
+        state_dict_type: str,
         cpu_offload: bool,
         mixed_precision: bool,
         state_dict_rank0_and_offload: bool,
