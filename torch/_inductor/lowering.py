@@ -16,7 +16,6 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -1280,69 +1279,21 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
-@register_lowering([torch.arange, aten.arange])
-def arange(
-    start,
-    end=None,
-    step=1,
+@register_lowering(prims.iota)
+def iota(
+    length,
     *,
-    dtype=None,
-    device=None,
-    layout=torch.strided,
-    pin_memory=False,
+    start,
+    step,
+    dtype,
+    device,
+    requires_grad,
 ):
-    assert layout == torch.strided
-    assert not pin_memory
-    if end is None:
-        end = start
-        start = 0
-
-    if dtype is None:
-        args = (start, end, step)
-        integer_args = all(isinstance(arg, (int, sympy.Expr)) for arg in args)
-        dtype = torch.int64 if integer_args else torch.get_default_dtype()
-
-    device = decode_device(device)
-
-    is_integer = is_integer_dtype(dtype)
-    if is_integer:
-        xstart = int(start) if not isinstance(start, sympy.Expr) else start
-        xend = int(end) if not isinstance(end, sympy.Expr) else end
-        xstep = int(step) if not isinstance(step, sympy.Expr) else step
-
-    # For int64 we truncate arguments to int before calculating length, but
-    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64:
-        length = sympy.ceiling((xend - xstart) / xstep)
-    else:
-        length = sympy.ceiling((end - start) / step)
-
-    if is_integer:
-
-        def fn(index):
-            return ops.index_expr(xstep * index[0] + xstart, dtype=dtype)
-
-    else:
-        computation_dtype = get_computation_dtype(dtype)
-
-        if device.type == "cpu" and computation_dtype == torch.float32:
-            # ATen kernel uses acc_type
-            computation_dtype = torch.float64
-
-        def get_param(x):
-            if isinstance(x, sympy.Expr):
-                return ops.index_expr(x, dtype=computation_dtype)
-            else:
-                return ops.constant(x, dtype=computation_dtype)
-
-        def fn(index):
-            ind = ops.index_expr(index[0], dtype=computation_dtype)
-            inc = ops.mul(ind, get_param(step))
-            val = ops.add(inc, get_param(start))
-            return ops.to_dtype(val, dtype)
+    def fn(index):
+        return ops.index_expr(step * index[0] + start, dtype=dtype)
 
     return Pointwise.create(
-        device=device,
+        device=decode_device(device),
         dtype=dtype,
         inner_fn=fn,
         ranges=[length],

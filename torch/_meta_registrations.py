@@ -1788,27 +1788,6 @@ def zeros_like(
     )
 
 
-# hacky: Please remove after math.ceil works with arange
-@register_meta(aten.arange.default)
-def arange(end, **kwargs):
-    if isinstance(end, FloatLike):
-        end = math.ceil(end)  # type: ignore[arg-type]
-
-    def is_integral(x):
-        return isinstance(x, IntLike) or isinstance(x, bool)
-
-    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
-    if set_to_integral_dtype:
-        kwargs["dtype"] = torch.int64
-
-    return aten.empty([end], **kwargs)
-
-
-@register_meta(aten.arange.start)
-def arange_start(start, end, **kwargs):
-    return aten.arange(end - start, **kwargs)
-
-
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
     ndim = self.dim()
