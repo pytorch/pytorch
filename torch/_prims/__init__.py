@@ -2209,7 +2209,7 @@ def _copy_strided_aten(a: Tensor, stride: ShapeType) -> Tensor:
 
 
 _copy_strided_doc = """
-  Copies the data in a to a new tensor with a size and given stride.
+  Copies the data in a to a new tensor, the new tensor has same shape with a size, but has different stride.
   """
 
 # TODO: Remove safe casting and implement on reference instead
