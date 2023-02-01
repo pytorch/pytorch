@@ -65,10 +65,16 @@ jobs:
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
         shell: powershell
+        continue-on-error: true
         run: |
           # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process
           # This needs to be run before checking out PyTorch to avoid locking the working directory
-          Get-Process -Name "python" | Stop-Process -Force
+          try {
+              Get-Process -Name "python" | Stop-Process -Force
+          }
+          catch [NoProcessFoundForGivenName,Microsoft.PowerShell.Commands.GetProcessCommand] {
+              Write-Output "No leftover process, continuing"
+          }
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
