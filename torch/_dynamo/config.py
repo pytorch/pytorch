@@ -62,9 +62,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
-# run FX normalization passes in optimizer
-normalize_ir = False
-
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
