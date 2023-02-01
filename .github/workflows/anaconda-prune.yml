@@ -11,6 +11,8 @@ on:
     paths:
       - .github/workflows/anaconda-prune.yml
       - .github/workflows/_prune-anaconda-packages.yml
+      - scripts/release/anaconda-prune/run.sh
+      - scripts/release/anaconda-prune/prune.sh
   workflow_dispatch:
 
 concurrency:
@@ -22,18 +24,16 @@ jobs:
     name: anaconda-prune-pytorch-nightly
     uses: ./.github/workflows/_prune-anaconda-packages.yml
     with:
-    #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
-      packages: "pytorch torchvision torchaudio torchtext"
+      packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
       channel: pytorch-nightly
-    secrets: 
+    secrets:
      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
 
   anaconda-prune-pytorch-test:
     name: anaconda-prune-pytorch-test
     uses: ./.github/workflows/_prune-anaconda-packages.yml
     with:
-    #packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
-      packages: "pytorch torchvision torchaudio torchtext"
+      packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
       channel: pytorch-test
-    secrets: 
+    secrets:
      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
