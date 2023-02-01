@@ -16,11 +16,6 @@ cpp_wrapper = False
 # dead code elimination
 dce = False
 
-# assume input tensors are dynamic
-dynamic_shapes = (
-    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
-)  # Use dynamic shapes if torchdynamo dynamic shapes is set
-
 # assume weight tensors are fixed size
 static_weight_shapes = True
 
@@ -41,6 +36,12 @@ epilogue_fusion = False
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
+
+# enable pattern match+replace optimizations
+pattern_matcher = True
+
+# enable reordering pass
+reordering = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -101,9 +102,6 @@ kernel_name_max_ops = 10
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
-
-# How to import torchdynamo, either torchdynamo or torch.dynamo
-dynamo_import = inductor_import.replace("inductor", "dynamo")
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
@@ -175,7 +173,7 @@ class triton:
     # should we give different names to kernels
     ordered_kernel_names = False
     # should we put op names in kernel names
-    descriptive_kernel_names = True
+    descriptive_kernel_names = False
 
 
 # create a directory containing lots of debug information
@@ -189,8 +187,11 @@ class trace:
     # Save python logger call >=logging.INFO
     info_log = False
 
-    # Save input FX graph (post decomps)
+    # Save input FX graph (post decomps, pre optimization)
     fx_graph = True
+
+    # Save FX graph after transformations
+    fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
     ir_pre_fusion = True
