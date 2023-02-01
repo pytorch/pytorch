@@ -57,6 +57,11 @@ class ObservedGraphModule(GraphModule):
 def _is_observed_module(module: Any) -> bool:
     return hasattr(module, "meta") and "_observed_graph_module_attrs" in module.meta
 
+def _get_observed_graph_module_attr(model: Union[torch.nn.Module, GraphModule], attr_name: str) -> Any:
+    if hasattr(model, "meta") and "_observed_graph_module_attrs" in model.meta:  # type: ignore[operator, index]
+        return getattr(model.meta["_observed_graph_module_attrs"], attr_name)  # type: ignore[index]
+    return None
+
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
         preserved_attr_names = preserved_attr_names.union(set([
@@ -71,11 +76,6 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
 
 def _is_observed_standalone_module(module: Any) -> bool:
     return _is_observed_module(module) and module.meta["_observed_graph_module_attrs"].is_observed_standalone_module
-
-def _get_observed_graph_module_attr(model: GraphModule, attr_name: str) -> Any:
-    if hasattr(model, "meta") and "_observed_graph_module_attrs" in model.meta:  # type: ignore[operator, index]
-        return getattr(model.meta["_observed_graph_module_attrs"], attr_name)
-    return None
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):
