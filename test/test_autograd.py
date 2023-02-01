@@ -4482,14 +4482,6 @@ Done""")
 
                 out.backward()
 
-    # TODO: update these tests to use the linalg module and move to test_linalg.py
-    @skipIfNoLapack
-    def test_symeig_no_eigenvectors(self):
-        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
-        w, v = torch.symeig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
-            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
-
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):
@@ -9768,7 +9760,7 @@ class TestAllowMutationOnSaved(TestCase):
             out = (a**2).sum()
 
         msg = "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(AssertionError, msg):
             out.backward()
 
         # Different context
@@ -9777,7 +9769,7 @@ class TestAllowMutationOnSaved(TestCase):
             out = (a**2).sum()
 
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
-            with self.assertRaisesRegex(RuntimeError, msg):
+            with self.assertRaisesRegex(AssertionError, msg):
                 out.backward()
 
     def test_disallow_nesting(self):

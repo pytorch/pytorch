@@ -104,6 +104,7 @@ class BaseListVariable(VariableTracker):
     @staticmethod
     def generic_list_compare(left, tx, op, right, **options):
         from .builder import wrap_fx_proxy
+        from .builtin import BuiltinVariable
         from .tensor import DynamicShapeVariable
 
         assert not (
@@ -127,12 +128,9 @@ class BaseListVariable(VariableTracker):
         for l_r in zip(left.items, right.items):
             l = l_r[0]
             r = l_r[1]
-            # When iterating over the zipped items, we invoke compare.
-            # .compare must return a DynamicShapeVariable, a TensorVariable,  or raise unimplemented
-            # If unimplemented is raised, we rely on checkpointing state to roll us back and not write these operations to the graph
-            comp = l.compare(tx, op, r, **options)
+            comp = BuiltinVariable(op).call_function(tx, [l, r], {})
             list_type = type(comp)
-            if isinstance(comp, TorchVariable):
+            if isinstance(comp, variables.TensorVariable):
                 unimplemented("List Comparison for Tensors is not yet supported")
             comps.append(comp)
 
@@ -302,11 +300,6 @@ class ListVariable(BaseListVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def compare(self, tx, op, right, **options):
-        if not isinstance(right, ListVariable):
-            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
-        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
-
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
@@ -341,12 +334,6 @@ class TupleVariable(BaseListVariable):
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
         return super().call_method(tx, name, args, kwargs)
-
-    def compare(self, tx, op, right, **options):
-        # All tuple-like python constructs can be validly compared (e.g. torch.Size vs tuple)
-        if not isinstance(right, TupleVariable):
-            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
-        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
 
 
 class SizeVariable(TupleVariable):
