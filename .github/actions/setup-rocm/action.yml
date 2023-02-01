@@ -56,6 +56,13 @@ runs:
             echo "$msg"
             exit 1
         fi
+    - name: Runner diskspace health check
+      uses: actions/diskspace-cleanup
+      if: always()
+      env:
+          DISKSPACE-CUTOFF: 70
+      with:
+          diskspace-cutoff: "$DISKSPACE-CUTOFF"
 
     - name: Runner health check disconnect on failure
       if: ${{ failure() }}
