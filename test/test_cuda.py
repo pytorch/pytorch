@@ -1738,9 +1738,9 @@ except RuntimeError as e:
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
             t = torch.randn(1024 * 1024 * 8, device='cuda:' + str(idx))
             if IS_JETSON:
-                # w/o sleeping, mem_get_info will run before memory allocated has actually increased.
+                # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure
-                torch.cuda._sleep(10**8)
+                torch.cuda.synchronize()
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
 
             self.assertTrue(after_free_bytes < before_free_bytes)
