@@ -13633,14 +13633,12 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_copy_Tensor_symint
   tags: view_copy
-  autogen: split_copy.Tensor_out
 
 - func: split_with_sizes_copy(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_with_sizes_copy_symint
   tags: view_copy
-  autogen: split_with_sizes_copy.out
 
 - func: squeeze_copy(Tensor self) -> Tensor
   variants: function
@@ -13745,7 +13743,22 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: unbind_copy_int
   tags: view_copy
-  autogen: unbind_copy.int_out
+
+- func: unbind_copy.int_out(Tensor self, int dim=0, *, Tensor(a!)[] out) -> ()
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: unbind_copy_int_out
+
+- func: split_copy.Tensor_out(Tensor self, SymInt split_size, int dim=0, *, Tensor(a!)[] out) -> ()
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: split_copy_Tensor_out
+
+
+- func: split_with_sizes_copy.out(Tensor self, SymInt[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: split_with_sizes_copy_out
 
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
