@@ -316,10 +316,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
-        if isinstance(subobj, torch.distributions.utils.lazy_property):
-            return variables.UserMethodVariable(
-                subobj.__get__, self, source=source, **options
-            ).call_function(tx, [], {})
         elif isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(
                 subobj.__get__(self.value), source=source, **options
@@ -330,6 +326,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         elif isinstance(subobj, types.FunctionType):
             return variables.UserMethodVariable(subobj, self, source=source, **options)
+        elif hasattr(subobj, "__get__"):
+            return variables.UserMethodVariable(
+                subobj.__get__, self, source=source, **options
+            ).call_function(tx, [], {})
 
         if (
             name in getattr(value, "__dict__", {})
