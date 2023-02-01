@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from operator_inp_utils import OperatorInputsLoader
 
-from torch._dynamo.optimizations.backends import cudagraphs_inner
+from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
