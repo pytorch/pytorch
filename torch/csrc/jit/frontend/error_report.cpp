@@ -48,7 +48,7 @@ ErrorReport::CallStack::~CallStack() {}
 
 std::string get_stacked_errors(const std::vector<Call>& error_stack) {
   std::stringstream msg;
-  if (error_stack.size() > 0) {
+  if (!error_stack.empty()) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
 

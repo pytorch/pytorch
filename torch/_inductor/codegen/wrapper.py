@@ -6,9 +6,11 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+from torch._dynamo.utils import dynamo_timed
+
 from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
-from ..utils import cache_on_self, dynamo_utils, has_triton, sympy_dot, sympy_product
+from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
@@ -469,7 +471,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
@@ -547,9 +549,9 @@ class WrapperCodeGen(CodeGen):
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
-                f"""
-                from {config.dynamo_import}.testing import rand_strided
-                from {config.inductor_import}.utils import print_performance
+                """
+                from torch._dynamo.testing import rand_strided
+                from torch._inductor.utils import print_performance
                 """,
                 strip=True,
             )
@@ -631,6 +633,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             '''
             #include <dlfcn.h>
             #include <assert.h>
+
+            template <typename KernelFunc>
+            KernelFunc load_cpp_kernel(const char* so_filename) {
+                KernelFunc kernel_cpp;
+                auto kernel_cpp_lib = dlopen(so_filename, RTLD_NOW);
+                assert(kernel_cpp_lib != nullptr);
+                *(void **) (&kernel_cpp) = dlsym(kernel_cpp_lib, "kernel");
+                return kernel_cpp;
+            }
+
             """
         )
         with self.wrapper_call.indent():
@@ -702,11 +714,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         kernel_path = self.get_kernel_path(kernel)
-
-        self.writeline(f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);')
-        self.writeline(f"assert({name}_lib != nullptr);")
-        self.writeline(f"void (*{name})({arg_types});")
-        self.writeline(f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");')
+        self.writeline(
+            f'static auto {name} = load_cpp_kernel<void (*)({arg_types})>("{kernel_path}");'
+        )
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
