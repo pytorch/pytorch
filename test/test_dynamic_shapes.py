@@ -16,7 +16,7 @@ from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import SymNode, \
-    sym_sqrt, sym_int, sym_float to_node, GuardOnDataDependentSymNode, \
+    FloorDiv, ShapeEnv, sym_sqrt, sym_int, sym_float, to_node, GuardOnDataDependentSymNode, \
     guard_bool, guard_int, guard_float
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymBool, SymInt, SymFloat

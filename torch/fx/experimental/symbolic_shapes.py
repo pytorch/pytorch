@@ -390,7 +390,11 @@ if HAS_SYMPY:
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
-        return sympy.expand(r)
+        try:
+            return sympy.expand(r)
+        except RecursionError:
+            log.warning(f"RecursionError in sympy.expand({r})")
+            return r
     else:
         return r
 
