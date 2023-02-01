@@ -1719,6 +1719,39 @@ class CommonTemplate:
                 (v,),
             )
 
+    def test_conv_sym_shape(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.upsample = torch.nn.UpsamplingNearest2d(scale_factor=2)
+                self.conv = torch.nn.Conv2d(
+                    768,
+                    256,
+                    kernel_size=1,
+                    padding=0,
+                    stride=1,
+                    dilation=1,
+                    **kwargs,
+                )
+
+            def forward(self, x, y):
+                x = self.upsample(x)
+                z = torch.cat([x, y], dim=1)
+                z = self.conv(z)
+                return z
+
+        v1 = torch.randn([8, 256, 12, 26])
+        v2 = torch.randn([8, 512, 24, 52])
+
+        with torch.no_grad():
+            self.common(
+                M().eval(),
+                (v1, v2),
+            )
+
     def test_conv2d_packed(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d packed test")
@@ -5237,6 +5270,7 @@ class CommonTemplate:
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
     "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
+    "test_conv_sym_shape_dynamic_shapes": ("cpu"),  # TODO： fix me
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
