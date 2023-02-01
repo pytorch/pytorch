@@ -38,7 +38,7 @@ if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
     rm "$CI_SCRIPTS_DIR"/*
 fi
 
-export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}"\win-test-helpers"
+export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}/win-test-helpers
 
 # These variables are set for the python build
 if [ $DEBUG == "1" ]
@@ -55,7 +55,7 @@ else
   export CONDA_PARENT_DIR="C:\Jenkins"
 fi
 
-#export PATH="C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;"$PATH
+export PATH="C:\Program^ Files\CMake\bin;C:\Program^ Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program^ Files\Git\cmd;C:\Program^ Files\Amazon\AWSCLI;C:\Program^ Files\Amazon\AWSCLI\bin;"${PATH}
 
 export INSTALLER_DIR=${SCRIPT_HELPERS_DIR}"\installation-helpers"
 
@@ -65,11 +65,11 @@ export LIB=${TMP_DIR_WIN}"\mkl\lib;"$LIB
 
 export INSTALL_FRESH_CONDA="1"
 
-#export PATH=${CONDA_PARENT_DIR}"\Miniconda3\Library\bin;"${CONDA_PARENT_DIR}"\Miniconda3;"${CONDA_PARENT_DIR}"\Miniconda3\Scripts;"$PATH
+export PATH=${CONDA_PARENT_DIR}"\Miniconda3\Library\bin;"${CONDA_PARENT_DIR}"\Miniconda3;"${CONDA_PARENT_DIR}"\Miniconda3\Scripts;"${PATH}
 
 export DISTUTILS_USE_SDK="1"
 
-#export PATH=${TMP_DIR_WIN}"\bin;"$PATH
+export PATH=${TMP_DIR_WIN}"\bin;"${PATH}
 
 if [ $TORCH_CUDA_ARCH_LIST == "" ]
 then
