@@ -550,6 +550,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     # Use higher tolerance for XLA since XLA cause numerical unstability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
+    torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -1918,17 +1919,10 @@ def run(runner, args, original_dir=None):
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
-        # We only have a CI skip list for aot_eager right now.  When inductor
-        # comes online, add that skip list too.
-        assert (
-            args.backend == "aot_eager"
-        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
-        # Only dump error on CI
-        args.quiet = True
         args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
