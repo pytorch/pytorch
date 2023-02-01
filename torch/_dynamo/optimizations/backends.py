@@ -523,7 +523,9 @@ def ipex(subgraph):
     try:
         import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
     except ImportError:
-        log.exception("ipex backend fails. Cannot import intel_extension_for_pytorch")
+        log.exception(
+            "Unable to import Intel Extension for PyTorch (IPEX). Please install the right version of IPEX that matches the PyTorch version being used. Refer to https://github.com/intel/intel-extension-for-pytorch for details."
+        )
         raise
 
     from torch.utils._mode_utils import no_dispatch
