@@ -146,7 +146,7 @@ struct TORCH_API AutogradContext {
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
   // will always be alive when we want to use it.
   std::weak_ptr<Node> grad_fn_;
-  bool has_freed_buffers_;
+  bool has_freed_buffers_{false};
 
   void save_variables();
 

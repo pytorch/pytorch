@@ -267,6 +267,18 @@ def _make_conv_test_input(
 
     return (X, X_q, W, W_q, b if use_bias else None)
 
+def _make_conv_add_extra_input_tensor(scale, zero_point, sizes):
+    (X_value_min, X_value_max) = (0, 4)
+    X_init = torch.randint(
+        X_value_min,
+        X_value_max,
+        sizes  # Infer the size of tensor to do the add
+    )
+    X = scale * (X_init - zero_point).float()
+    X_q = torch.quantize_per_tensor(
+        X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+    return X, X_q
+
 def skipIfNoFBGEMM(fn):
     reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
     if isinstance(fn, type):
@@ -305,6 +317,25 @@ def skipIfNoQNNPACK(fn):
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
+    return wrapper
+
+def withQNNPACKBackend(fn):
+    # TODO(future PR): consider combining with skipIfNoQNNPACK,
+    # will require testing of existing callsites
+    reason = 'Quantized operations require QNNPACK.'
+    if isinstance(fn, type):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        with override_quantized_engine('qnnpack'):
+            fn(*args, **kwargs)
+
     return wrapper
 
 def skipIfNoONEDNN(fn):
@@ -1419,6 +1450,66 @@ class LinearTanhModel(torch.nn.Module):
 
     def get_example_inputs(self) -> Tuple[Any, ...]:
         return (torch.rand(1, 5),)
+
+class ConvBnAddReluModel(torch.nn.Module):
+    def __init__(self,
+                 with_bn=True,
+                 with_relu=True,
+                 left_conv=True,
+                 two_conv=True,
+                 use_torch_add=True):
+        super().__init__()
+        self.conv = nn.Conv2d(5, 5, (2, 2))
+        self.conv2 = nn.Conv2d(5, 5, (2, 2))
+        self.bn = nn.BatchNorm2d(5)
+        self.relu = nn.ReLU()
+        self.with_bn = with_bn
+        self.with_relu = with_relu
+        self.two_conv = two_conv
+        self.left_conv = left_conv
+        self.use_torch_add = use_torch_add
+
+    def forward(self, x1, x2):
+        if self.two_conv:
+            if self.use_torch_add:
+                if self.with_bn:
+                    x = torch.add(self.bn(self.conv(x1)), self.conv2(x1))
+                else:
+                    x = torch.add(self.conv(x1), self.conv2(x1))
+            else:
+                if self.with_bn:
+                    x = self.bn(self.conv(x1)) + self.conv2(x1)
+                else:
+                    x = self.conv(x1) + self.conv2(x1)
+        else:
+            if self.use_torch_add:
+                if self.left_conv:
+                    if self.with_bn:
+                        x = torch.add(self.bn(self.conv(x1)), x2)
+                    else:
+                        x = torch.add(self.conv(x1), x2)
+                else:
+                    if self.with_bn:
+                        x = torch.add(x2, self.bn(self.conv(x1)))
+                    else:
+                        x = torch.add(x2, self.conv(x1))
+            else:
+                if self.left_conv:
+                    if self.with_bn:
+                        x = self.bn(self.conv(x1)) + x2
+                    else:
+                        x = self.conv(x1) + x2
+                else:
+                    if self.with_bn:
+                        x = x2 + self.bn(self.conv(x1))
+                    else:
+                        x = x2 + self.conv(x1)
+        if self.with_relu:
+            x = self.relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5, 3, 3), torch.rand(1, 5, 2, 2))
 
 # TODO: self.fc should be self.conv
 class ConvReluModel(torch.nn.Module):
