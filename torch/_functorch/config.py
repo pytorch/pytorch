@@ -9,6 +9,7 @@ Global flags for aot autograd
 """
 import os
 import logging
+import sys
 
 use_functionalize = True
 
@@ -39,4 +40,11 @@ max_dist_from_bw = 3
 
 log_level = (
     logging.DEBUG if debug_partitioner or debug_graphs or debug_joint else logging.INFO
+)
+
+from torch._dynamo.config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(
+    sys.modules[__name__],
+    ignore_set={"repro_after", "repro_level"},
 )

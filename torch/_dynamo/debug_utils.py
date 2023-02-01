@@ -226,8 +226,10 @@ def generate_config_string():
         f"""\
 import {config.dynamo_import}.config
 import {config.inductor_import}.config
+import torch._functorch.config
 {config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
 {config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
         """
     )
 
