@@ -98,7 +98,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     if (length < 0)
       throw python_error();
     if (is_storage) {
-      length /= elementSize(scalar_type);
+      length /= static_cast<int64_t>(elementSize(scalar_type));
     }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
@@ -200,11 +200,11 @@ void recursive_store(
     IntArrayRef strides,
     int64_t dim,
     ScalarType scalarType,
-    int elementSize,
+    size_t elementSize,
     PyObject* obj) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
 
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   bool is_symfloat = torch::is_symfloat(obj);
   bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
@@ -604,9 +604,9 @@ c10::TensorOptions typeIdWithDefault(
     int64_t device_idx,
     c10::DispatchKey dispatch_key) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
-  if (!r.isNone(device_idx)) {
+  if (!r.isNone(static_cast<int>(device_idx))) {
     // TODO: This line doesn't seem to be exercised at all in tests
-    options = options.device(r.device(device_idx).type());
+    options = options.device(r.device(static_cast<int>(device_idx)).type());
   }
   return options;
 }

@@ -175,7 +175,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
 
   auto array = THPObjectPtr(PyArray_New(
       &PyArray_Type,
-      prepared_tensor.dim(),
+      static_cast<int>(prepared_tensor.dim()),
       sizes.data(),
       dtype,
       strides.data(),
