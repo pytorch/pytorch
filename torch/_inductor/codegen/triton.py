@@ -1332,8 +1332,18 @@ class TritonScheduling:
                 continue
             done.add(node)
 
+            def requires_closing_previous_reduction(node, node_schedule):
+                if rnumel == 1:
+                    return False
+                if not current_loop_writes & node.recursive_predecessors:
+                    return False
+                assert node_schedule
+                if isinstance(node_schedule[-1], (EnableReduction, DisableReduction)):
+                    return False
+                return node_schedule[-1].is_reduction()
+
             if fits_in_main_body(node):
-                if current_loop_writes & node.recursive_predecessors and rnumel != 1:
+                if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
                 current_loop_writes.add(node.get_name())
