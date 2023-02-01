@@ -3,12 +3,11 @@
 
 namespace at { namespace native {
 
-void _fused_adam_amsgrad_cuda_impl_(
+void _fused_adamw_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
     at::TensorList exp_avg_sqs,
-    at::TensorList max_exp_avg_sqs,
     at::TensorList state_steps,
     const double lr,
     const double beta1,
