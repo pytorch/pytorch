@@ -50,6 +50,7 @@ inline vec_scalar_t<scalar_t> init_value() {
   } else if (reduce == ReductionType::MAX) {
     val = -std::numeric_limits<acc_t>::infinity();
   } else {
+    TORCH_INTERNAL_ASSERT(reduce == ReductionType::MIN);
     val = std::numeric_limits<acc_t>::infinity();
   }
   return val;
@@ -125,6 +126,7 @@ inline T update(const T& x, const T& y) {
   } else if (reduce == ReductionType::MAX) {
     return _max(x, y);
   } else {
+    TORCH_INTERNAL_ASSERT(reduce == ReductionType::MIN);
     return _min(x, y);
   }
 }
