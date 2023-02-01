@@ -63,8 +63,6 @@ class LocalSource(Source):
 class LocalInputSource(LocalSource):
     pos: int
 
-    dynamic_spec: Optional[Tuple[Optional[str], ...]]  # e.g. ['batch', 'seq', None]
-
 
 @dataclasses.dataclass
 class RandomValueSource(Source):

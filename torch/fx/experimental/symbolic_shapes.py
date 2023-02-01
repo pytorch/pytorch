@@ -671,24 +671,25 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source, dynamic_spec=None):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        from torch._dynamo.source import TensorPropertySource, TensorProperty, LocalInputSource
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         rank = len(ex.size())
 
-        if isinstance(source, LocalInputSource) and source.dynamic_spec:
-            assert len(source.dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
+        # breakpoint()
+        if dynamic_spec:
+            assert len(dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
 
             size = [None] * rank
             for i, val in enumerate(ex.size()):
-                if source.dynamic_spec[i]:
+                if dynamic_spec[i]:
                     size[i] = self.create_symbol(
-                        val, TensorPropertySource(source, TensorProperty.SIZE, i), name=source.dynamic_spec[i]
+                        val, TensorPropertySource(source, TensorProperty.SIZE, i), name=dynamic_spec[i]
                     )
                 else:
                     size[i] = sympy.Integer(val)

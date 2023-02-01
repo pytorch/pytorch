@@ -161,12 +161,14 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
+        dynamic_spec=None,
     ):
         assert source is not None
         super(VariableBuilder, self).__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
+        self.dynamic_spec = dynamic_spec
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -657,6 +659,7 @@ class VariableBuilder:
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
+            dynamic_spec=self.dynamic_spec,
         )
 
         # TODO: I think the result is guaranteed to be fake with
@@ -822,6 +825,7 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
+            kwargs["dynamic_spec"] = options.get("dynamic_spec", None)
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
@@ -962,7 +966,10 @@ class TrackedFake:
 
 
 def wrap_to_fake_tensor_and_record(
-    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
+    e, tx, ignore_subclass=False, *,
+    source: Optional[Source],
+    is_tensor: bool,
+    dynamic_spec=None,
 ):
     # breakpoint()
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
@@ -980,6 +987,7 @@ def wrap_to_fake_tensor_and_record(
                 static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
+                dynamic_spec=dynamic_spec,
             )
         )
         if is_tensor:

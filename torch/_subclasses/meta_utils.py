@@ -160,7 +160,10 @@ class MetaConverter:
     # as part of this process, we will maintain this invariant!  (Even though
     # other users of this may not need it this property to be upheld.)
     def meta_tensor(
-        self, t, shape_env=None, callback=lambda t: t(), source: Optional[Source] = None
+        self, t, shape_env=None,
+        callback=lambda t: t(),
+        source: Optional[Source]=None,
+        dynamic_spec=None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -212,7 +215,7 @@ class MetaConverter:
         def sym_sizes_strides_storage_offset(t):
             if make_symbolic:
                 # breakpoint()
-                return shape_env.create_symbolic_sizes_strides_storage_offset(t, source)
+                return shape_env.create_symbolic_sizes_strides_storage_offset(t, source, dynamic_spec=dynamic_spec)
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -454,6 +457,7 @@ class MetaConverter:
         callback=lambda t: t(),
         ignore_subclass=False,
         source=None,
+        dynamic_spec=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -502,7 +506,7 @@ class MetaConverter:
                     ctx = torch._C.DisableTorchFunctionSubclass()
                 with ctx:
                     r = self.meta_tensor(
-                        t, shape_env=shape_env, callback=callback, source=source
+                        t, shape_env=shape_env, callback=callback, source=source, dynamic_spec=dynamic_spec
                     )
                 # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:

@@ -256,6 +256,7 @@ class VariableTracker(object, metaclass=HasPostInit):
         self,
         guards: Optional[Set] = None,
         source: Source = None,
+        dynamic_spec = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
     ):

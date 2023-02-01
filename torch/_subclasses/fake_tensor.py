@@ -218,6 +218,7 @@ class FakeTensorConverter(object):
         ignore_subclass=False,
         *,
         source=None,
+        dynamic_spec=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -251,6 +252,7 @@ class FakeTensorConverter(object):
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_spec=dynamic_spec,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -287,6 +289,7 @@ class FakeTensorConverter(object):
         shape_env=None,
         ignore_subclass=False,
         source=None,
+        dynamic_spec=None,
     ):
         # breakpoint()
         return self.from_real_tensor(
@@ -296,6 +299,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_spec=dynamic_spec,
         )
 
 
@@ -1082,6 +1086,7 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
+        dynamic_spec=None,
     ):
         # breakpoint()
         if static_shapes:
@@ -1094,6 +1099,7 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_spec=dynamic_spec,
         )
 
 

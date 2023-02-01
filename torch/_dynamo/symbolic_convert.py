@@ -1664,9 +1664,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(k, code_options["co_varnames"].index(k), self.dynamic_args.get(k, None))
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
+                    dynamic_spec=self.dynamic_args.get(k, None),
                 )(f_locals[k]),
             )
             for k in vars
