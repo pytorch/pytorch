@@ -41,6 +41,7 @@ fi
 export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}"\win-test-helpers"
 
 # These variables are set for the python build
+<<'com'
 if [ $DEBUG == "1" ]
 then
   export BUILD_TYPE="debug"
@@ -85,6 +86,7 @@ export CC="sccache-cl"
 export CXX="sccache-cl"
 
 export CMAKE_GENERATOR="Ninja"
+com
 
 set +ex
 grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/
