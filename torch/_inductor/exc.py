@@ -45,7 +45,7 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
                 There is a decomposition available for {target} in
                 torch._decomp.get_decompositions().  Please add this operator to the
-                `decompositions` list in {config.inductor_import}.decompositions
+                `decompositions` list in torch._inductor.decompositions
                 """
             )
         )

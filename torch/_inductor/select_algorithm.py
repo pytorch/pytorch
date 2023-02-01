@@ -134,8 +134,8 @@ class TritonTemplateKernel(TritonKernel):
             [
                 "import triton.language as tl",
                 "import triton",
-                f"from {config.inductor_import}.triton_ops.autotune import template",
-                f"from {config.inductor_import}.utils import instance_descriptor",
+                f"from torch._inductor.triton_ops.autotune import template",
+                f"from torch._inductor.utils import instance_descriptor",
                 "",
                 self.jit_line(),
                 f"def {self.kernel_name}({', '.join(arg_defs)}):",

@@ -713,7 +713,7 @@ class SkipFilesVariable(VariableTracker):
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(
-                f"call {config.dynamo_import}.disable() wrapped function {self.value}"
+                f"call torch._dynamo.disable() wrapped function {self.value}"
             )
         else:
             try:
