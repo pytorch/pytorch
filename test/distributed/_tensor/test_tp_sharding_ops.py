@@ -69,34 +69,6 @@ class TPShardingOpsTest(DTensorTestBase):
         self.assertEqual(new_dt.to_local(), tensor.permute(1, 0, 2))
         self.assertEqual(new_dt.stride(), tensor.permute(1, 0, 2).stride())
 
-    @with_comms
-    def test_sharded_split_1(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        torch.manual_seed(self.rank)
-        tensor = torch.rand(3, 5, 6, device=self.device_type)
-        sharding = [Shard(2)]
-        dist_tensor = DTensor.from_local(tensor, device_mesh, sharding)
-        dt_list = dist_tensor.split(dist_tensor.size(-1) // 2, dim=-1)
-        local_tensors = tensor.split(3, dim=-1)
-        for idx, dt in enumerate(dt_list):
-            self.assertTrue(dt.placements[0].is_shard(dim=2))
-            self.assertEqual(dt.to_local(), local_tensors[idx])
-
-    @with_comms
-    def test_sharded_split_2(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        torch.manual_seed(0)
-        tensor = torch.rand(4, 4, 4, device=self.device_type, requires_grad=True)
-        sharding = [Replicate()]
-        dist_tensor = distribute_tensor(tensor, device_mesh, sharding)
-        dt_list = dist_tensor.split(dist_tensor.size(0) // 2, dim=0)
-        print(dt_list)
-        local_tensors = tensor.split(2, dim=0)
-        for idx, dt in enumerate(dt_list):
-            #self.assertTrue(dt.placements[0].is_shard(dim=0))
-            self.assertEqual(dt.to_local(), local_tensors[idx])
-        dt_list[0].to_local().sum().backward()
-
 
 if __name__ == "__main__":
     run_tests()

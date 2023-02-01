@@ -29,6 +29,7 @@ from pathlib import Path
 
 from gitutils import (
     GitRepo,
+    are_ghstack_branches_in_sync,
     get_git_remote_name,
     get_git_repo_dir,
     patterns_to_regex,
@@ -619,6 +620,7 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
         return False
     return comment.author_login == "facebook-github-bot"
 
+
 def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:
     '''
     Get the open PRs in the stack that are below this PR.  Throws error if any of the PRs are out of sync.
@@ -646,9 +648,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
             entire_stack.append((pr, rev))
 
     for stacked_pr, rev in entire_stack:
-        commit_sha = stacked_pr.last_commit()['oid']
-        tree_sha = repo._run_git("rev-parse", commit_sha + "^{tree}")
-        if tree_sha not in repo.commit_message(rev):
+        if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on " +
                 f"branch {orig_ref} that would be merged into master.  " +
