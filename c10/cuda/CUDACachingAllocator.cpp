@@ -12,6 +12,7 @@
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <bitset>
+#include <cstdint>
 #include <deque>
 #include <iterator>
 #include <map>
@@ -183,6 +184,7 @@ struct Block {
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
   size_t size; // block size in bytes
+  size_t requested_size; // memory originally requested
   BlockPool* pool; // owning memory pool
   void* ptr; // memory address
   bool allocated; // in-use flag
@@ -204,6 +206,7 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
+        requested_size(0),
         pool(pool),
         ptr(ptr),
         allocated(0),
@@ -218,6 +221,7 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
+        requested_size(0),
         pool(nullptr),
         ptr(nullptr),
         allocated(0),
@@ -978,12 +982,16 @@ class DeviceCachingAllocator {
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
         update_stat_array(
-            stats.inactive_split_bytes, -block->size, params.stat_types);
+            stats.inactive_split_bytes,
+            -static_cast<std::int64_t>(block->size),
+            params.stat_types);
       } else {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-          update_stat(stats.inactive_split_bytes[stat_type], remaining->size);
+          update_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<std::int64_t>(remaining->size));
           update_stat(stats.inactive_split[stat_type], 1);
         });
       }
@@ -991,12 +999,15 @@ class DeviceCachingAllocator {
     } else if (already_split) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        update_stat(stats.inactive_split_bytes[stat_type], -block->size);
+        update_stat(
+            stats.inactive_split_bytes[stat_type],
+            -static_cast<std::int64_t>(block->size));
         update_stat(stats.inactive_split[stat_type], -1);
       });
     }
 
     block->allocated = true;
+    block->requested_size = orig_size;
     if (record_history) {
       trimHistoryBefore(block, (char*)block->ptr + size);
       block->history = std::make_unique<HistoryChain>(HistoryChain{
@@ -1018,9 +1029,16 @@ class DeviceCachingAllocator {
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], 1);
-      update_stat(stats.allocated_bytes[stat_type], block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
       update_stat(stats.active[stat_type], 1);
-      update_stat(stats.active_bytes[stat_type], block->size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          static_cast<std::int64_t>(block->requested_size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
@@ -1051,7 +1069,9 @@ class DeviceCachingAllocator {
         true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], -1);
-      update_stat(stats.allocated_bytes[stat_type], -block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->history) {
       record_trace(
@@ -1166,6 +1186,7 @@ class DeviceCachingAllocator {
       reset_accumulated_stat(stats.reserved_bytes[statType]);
       reset_accumulated_stat(stats.active_bytes[statType]);
       reset_accumulated_stat(stats.inactive_split_bytes[statType]);
+      reset_accumulated_stat(stats.requested_bytes[statType]);
     }
 
     stats.num_alloc_retries = 0;
@@ -1188,6 +1209,7 @@ class DeviceCachingAllocator {
       reset_peak_stat(stats.reserved_bytes[statType]);
       reset_peak_stat(stats.active_bytes[statType]);
       reset_peak_stat(stats.inactive_split_bytes[statType]);
+      reset_peak_stat(stats.requested_bytes[statType]);
     }
     reset_peak_stat(stats.oversize_allocations);
     reset_peak_stat(stats.oversize_segments);
@@ -1218,6 +1240,7 @@ class DeviceCachingAllocator {
         BlockInfo& block_info = segment_info.blocks.back();
 
         block_info.size = block->size;
+        block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
             !block->stream_uses.empty();
@@ -1228,6 +1251,7 @@ class DeviceCachingAllocator {
         }
         if (block_info.active) {
           segment_info.active_size += block_info.size;
+          segment_info.requested_size += block_info.requested_size;
         }
         HistoryChain* h = block->history.get();
         while (h) {
@@ -1403,6 +1427,7 @@ class DeviceCachingAllocator {
           block->history->h.context);
     }
     size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
 
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
@@ -1439,7 +1464,12 @@ class DeviceCachingAllocator {
           stats.inactive_split_bytes[stat_type],
           net_change_inactive_split_size);
       update_stat(stats.active[stat_type], -1);
-      update_stat(stats.active_bytes[stat_type], -original_block_size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          -static_cast<std::int64_t>(original_block_size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          -static_cast<std::int64_t>(requested_size));
     });
   }
 
@@ -1790,7 +1820,9 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], -1);
-      update_stat(stats.reserved_bytes[stat_type], -block->size);
+      update_stat(
+          stats.reserved_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
