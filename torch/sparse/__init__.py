@@ -68,8 +68,8 @@ mm = _add_docstr(_sparse._sparse_mm, r"""
 Args:
     mat1 (Tensor): the first sparse matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
-    reduce (str): the reduction operation to apply for non-unique indices
-        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
+    reduce (str, optional): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`). Default :obj:`"sum"`.
 
 Shape:
     The format of the output tensor of this function follows:

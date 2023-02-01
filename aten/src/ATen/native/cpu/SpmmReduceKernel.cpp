@@ -118,9 +118,12 @@ void spmm_reduce_kernel_impl(
   });
 }
 
-// update both val and arg
+// update both val and arg, used for `amin` and `amax`
+// it is a little troublesome to vectorize it since `scalar_t` and `index_t`
+// might have different vector length, for example, each vector holds 8 floats
+// and 4 int64_t.
 template <typename scalar_t, typename index_t, ReductionType reduce>
-inline void update2(scalar_t *val, scalar_t new_val, index_t *arg, index_t new_arg) {
+inline void update_with_index(scalar_t *val, scalar_t new_val, index_t *arg, index_t new_arg) {
   if ((reduce == ReductionType::MIN && new_val < *val) ||
       (reduce == ReductionType::MAX && new_val > *val) ||
       at::_isnan<scalar_t>(new_val)) {
@@ -174,7 +177,7 @@ void spmm_reduce_arg_kernel_impl(
 
           scalar_t* other_ptr = other_data + c * K;
           for (const auto k : c10::irange(K)) {
-            update2<scalar_t, index_t, reduce>(
+            update_with_index<scalar_t, index_t, reduce>(
                 &out_ptr[k], val *  other_ptr[k], &arg_out_ptr[k], index_t(e));
           };
         }
