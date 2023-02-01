@@ -709,7 +709,7 @@ def export_without_kwargs(
 
         def compile(self, graph_module: "torch.fx.GraphModule", _):
             assert self.captured_graph_count == 0
-            self.captured_graph = gm
+            self.captured_graph = graph_module
             self.captured_graph_count += 1
             return graph_module
 
