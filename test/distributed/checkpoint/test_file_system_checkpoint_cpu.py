@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import os
-import shutil
 import tempfile
 from typing import Dict
 
@@ -296,9 +294,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if s0 == s1:
                     continue
 
-                if dist.get_rank() == 0:
-                    shutil.rmtree(path, ignore_errors=True)
-                    os.makedirs(path)
                 dist.barrier()
 
                 model_to_save = MyShardedModel3(s0)
@@ -358,10 +353,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 "rank:1",
             ],
         )
-
-        if dist.get_rank() == 0:
-            shutil.rmtree(path, ignore_errors=True)
-            os.makedirs(path)
 
         model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
         model_to_save._register_state_dict_hook(state_dict_hook)
