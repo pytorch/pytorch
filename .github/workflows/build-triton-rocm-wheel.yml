@@ -28,7 +28,7 @@ jobs:
         py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.3
       PY_VERS: ${{ matrix.py_vers }}
     steps:
       - name: Setup SSH (Click me for login details)
@@ -85,12 +85,6 @@ jobs:
             ;;
           esac
 
-          # rocm image had extra python pip packages that caused triton to fail to locate python3
-          # we uninstall each individually in case base image changes available packages
-          for package in cget click importlib-metadata meson ninja si typing-extensions zipp
-          do
-            docker exec -t "${container_name}" python -m pip uninstall -y ${package} || true
-          done
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py --rocm
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
