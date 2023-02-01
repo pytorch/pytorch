@@ -142,4 +142,4 @@ aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
 # for debugging and can serve as a perf baseline.
 # TODO(jansel): rename to just "cudagraphs"?
-register_backend(name="aot_cudagraphs", compiler_fn=aot_cudagraphs)
+register_backend(name="cudagraphs", compiler_fn=aot_cudagraphs)

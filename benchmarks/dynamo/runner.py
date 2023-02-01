@@ -68,7 +68,7 @@ TABLE = {
         "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts ",
         "eager": "--training --backend=eager ",
         "aot_eager": "--training --backend=aot_eager ",
-        "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
+        "cudagraphs": "--training --backend=cudagraphs ",
         "aot_nvfuser": "--training --nvfuser --backend=aot_ts_nvfuser ",
         "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",

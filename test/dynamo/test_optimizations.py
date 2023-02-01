@@ -153,7 +153,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("aot_eager_decomp_partition")
 
     def test_aot_cudagraphs(self):
-        self._check_backend_works("aot_cudagraphs")
+        self._check_backend_works("cudagraphs")
 
     def test_aot_ts(self):
         self._check_backend_works("aot_ts")
