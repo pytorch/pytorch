@@ -326,7 +326,7 @@ class DTensorSpec(object):
         For example, we have a dist tensor that have the shape of
         [18, 20, 30], and device_mesh([0, 1, 2, 3]), placements:
         [Shard(1)], the dim_map of this placement would be:
-        [-1, 1, -1]. This representation is pretty helpful during
+        [-1, 0, -1]. This representation is pretty helpful during
         sharding propagation where we could know exactly each
         tensor dimension is sharded or not.
 
