@@ -3474,6 +3474,52 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
+    # specifically test for tensor.attribute -> torch.something()
+    def test_real_imag_tensor_attribute(self):
+        def fn(x, y):
+            a = x.real
+            b = x.imag
+            return torch.mul(torch.add(a, y), b)
+
+        x_real = torch.rand((4, 4))
+        x_imag = torch.rand((4, 4))
+        x = torch.complex(x_real, x_imag)
+        y = torch.rand((4, 4))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_T_tensor_attribute(self):
+        def fn(x, y):
+            a = x.T
+            return torch.add(a, y)
+
+        x = torch.rand((4, 4))
+        y = torch.rand((4, 4))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_recursive_tensor_attribute(self):
+        def fn(x, y):
+            a = x.real.T
+            b = x.imag
+            return torch.mul(torch.add(a, y), b)
+
+        x_real = torch.rand((4, 4))
+        x_imag = torch.rand((4, 4))
+        x = torch.complex(x_real, x_imag)
+        y = torch.rand((4, 4))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
