@@ -458,18 +458,23 @@ template <> Vectorized<c10::complex<double>> inline operator*(const Vectorized<c
 template <> Vectorized<c10::complex<double>> inline operator/(const Vectorized<c10::complex<double>> &a,
                                                              const Vectorized<c10::complex<double>> &b) {
   //re + im*i = (a + bi)  / (c + di)
-  //re = (ac + bd)/abs_2()
-  //im = (bc - ad)/abs_2()
-  auto b_abs = b.abs_();                     // |c,d|       |c,d|
-  auto a2 = _mm512_div_pd(a, b_abs);         // a/|c,d|     b/|c,d|
-  auto b2 = _mm512_div_pd(b, b_abs);         // c/|c,d|     d/|c,d|
-  auto acbd2 = _mm512_mul_pd(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
+  auto mask = _mm512_set1_pd(-0.f);
+  auto fabs_cd = _mm512_andnot_pd(mask, b);     // |c|    |d|
+  auto fabs_dc = _mm512_permute_pd(fabs_cd, 0x55);   // |d|    |c|
+  auto scale = _mm256_max_pd(fabs_cd, fabs_dc);  // sc     sc
+  auto a2 = _mm512_div_pd(a, scale);         // a/sc     b/sc
+  auto b2 = _mm512_div_pd(b, scale);         // c/sc     d/sc
+  auto acbd2 = _mm512_mul_pd(a2, b2);
 
   const __m512d sign_mask = _mm512_setr_pd(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto dc2 = _mm512_permute_pd(b2, 0x55);    // d/|c,d|         c/|c,d|
-  dc2 = _mm512_xor_pd(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
-  auto adbc2 = _mm512_mul_pd(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
-  auto res2 = Vectorized<c10::complex<double>>::hadd_pd(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  auto dc2 = _mm512_permute_pd(b2, 0x55);    // d/sc         c/sc
+  dc2 = _mm512_xor_pd(sign_mask, dc2);       // -d/|c,d|        c/sc
+  auto adbc2 = _mm512_mul_pd(a2, dc2);       //-ad/sc^2      bc/sc^2
+  auto res2 = Vectorized<c10::complex<double>>::hadd_pd(acbd2, adbc2);  //(ac+bd)/sc^2  (bc-ad)/sc^2
+
+  // get the denominator
+  auto denom2 = Vectorized<c10::complex<double>>(b2).abs_2_();  // (c^2+d^2)/sc^2   (c^2+d^2)/sc^2
+  res2 = _mm512_div_pd(res2, denom2);
   return res2;
 }
 

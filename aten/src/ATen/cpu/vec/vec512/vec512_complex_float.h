@@ -957,19 +957,24 @@ template <> Vectorized<c10::complex<float>> inline operator*(const Vectorized<c1
 template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c10::complex<float>> &a,
                                                             const Vectorized<c10::complex<float>> &b) {
   //re + im*i = (a + bi)  / (c + di)
-  //re = (ac + bd)/abs_2()
-  //im = (bc - ad)/abs_2()
-  auto b_abs = b.abs_();                     // |c,d|       |c,d|
-  auto a2 = _mm512_div_ps(a, b_abs);         // a/|c,d|     b/|c,d|
-  auto b2 = _mm512_div_ps(b, b_abs);         // c/|c,d|     d/|c,d|
-  auto acbd2 = _mm512_mul_ps(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
+  auto mask = _mm512_set1_ps(-0.f);
+  auto fabs_cd = _mm512_andnot_ps(mask, b);     // |c|    |d|
+  auto fabs_dc = _mm512_permute_ps(fabs_cd, 0xB1);   // |d|    |c|
+  auto scale = _mm512_max_ps(fabs_cd, fabs_dc);  // sc     sc
+  auto a2 = _mm512_div_ps(a, scale);         // a/sc     b/sc
+  auto b2 = _mm512_div_ps(b, scale);         // c/sc     d/sc
+  auto acbd2 = _mm512_mul_ps(a2, b2);
 
   const __m512 sign_mask = _mm512_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0,
                                           -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto dc2 = _mm512_permute_ps(b2, 0xB1);    // d/|c,d|         c/|c,d|
-  dc2 = _mm512_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
-  auto adbc2 = _mm512_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
-  auto res2 = Vectorized<c10::complex<float>>::hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
+  auto dc2 = _mm512_permute_ps(b2, 0xB1);    // d/sc         c/sc
+  dc2 = _mm512_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/sc
+  auto adbc2 = _mm512_mul_ps(a2, dc2);       //-ad/sc^2      bc/sc^2
+  auto res2 = Vectorized<c10::complex<float>>::hadd_ps(acbd2, adbc2);  //(ac+bd)/sc^2  (bc-ad)/sc^2
+
+  // get the denominator
+  auto denom2 = Vectorized<c10::complex<float>>(b2).abs_2_();  // (c^2+d^2)/sc^2   (c^2+d^2)/sc^2
+  res2 = _mm512_div_ps(res2, denom2);
   return res2;
 }
 

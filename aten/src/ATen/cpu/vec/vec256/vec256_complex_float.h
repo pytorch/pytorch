@@ -159,6 +159,11 @@ public:
   __m256 abs_() const {
     // values: a + ib
     // not using abs_2_ to prevent overflow/underflow for large/small numbers
+    // auto shift = _mm256_permute_ps(values, 0xB1);   // b       a
+    // return Sleef_hypotf8_u35(shift, values);                // abs     abs
+
+    // values: a + ib
+    // not using abs_2_ to prevent overflow/underflow for large/small numbers
     auto mask = _mm256_set1_ps(-0.f);
     auto fabs_val = _mm256_andnot_ps(mask, values);     // |a|    |b|
     auto fabs_shf = _mm256_permute_ps(fabs_val, 0xB1);  // |b|    |a|
@@ -175,6 +180,11 @@ public:
     auto zero = _mm256_set1_ps(0.f);
     auto maskz = _mm256_cmp_ps(zero, fabs_max, _CMP_EQ_OQ);
     res = _mm256_blendv_ps(res, zero, maskz);
+
+    // substitute res == inf where fabs_min == inf
+    auto inf = _mm256_set1_ps(std::numeric_limits<float>::infinity());
+    auto maski = _mm256_cmp_ps(inf, fabs_min, _CMP_EQ_OQ);
+    res = _mm256_blendv_ps(res, inf, maski);
     return res;
   }
   Vectorized<c10::complex<float>> abs() const {
@@ -420,20 +430,24 @@ template <> Vectorized<c10::complex<float>> inline operator*(const Vectorized<c1
 
 template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c10::complex<float>> &a, const Vectorized<c10::complex<float>> &b) {
   //re + im*i = (a + bi)  / (c + di)
-  //re = (ac + bd)/abs_2()
-  //im = (bc - ad)/abs_2()
-  auto b_abs = b.abs_();                     // |c,d|       |c,d|
-  auto a2 = _mm256_div_ps(a, b_abs);         // a/|c,d|     b/|c,d|
-  auto b2 = _mm256_div_ps(b, b_abs);         // c/|c,d|     d/|c,d|
-  auto acbd2 = _mm256_mul_ps(a2, b2);        // ac/|c,d|^2  bd/|c,d|^2
+  auto mask = _mm256_set1_ps(-0.f);
+  auto fabs_cd = _mm256_andnot_ps(mask, b);     // |c|    |d|
+  auto fabs_dc = _mm256_permute_ps(fabs_cd, 0xB1);   // |d|    |c|
+  auto scale = _mm256_rcp_ps(_mm256_max_ps(fabs_cd, fabs_dc));  // 1/sc     1/sc
+  auto a2 = _mm256_mul_ps(a, scale);         // a/sc     b/sc
+  auto b2 = _mm256_mul_ps(b, scale);         // c/sc     d/sc
+  auto acbd2 = _mm256_mul_ps(a2, b2);
 
   const __m256 sign_mask = _mm256_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto dc2 = _mm256_permute_ps(b2, 0xB1);    // d/|c,d|         c/|c,d|
-  dc2 = _mm256_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/|c,d|
-  auto adbc2 = _mm256_mul_ps(a2, dc2);       //-ad/|c,d|^2      bc/|c,d|^2
-  auto res2 = _mm256_hadd_ps(acbd2, adbc2);  //(ac+bd)/|c,d|^2  (bc-ad)/|c,d|^2
-  // res2 above is not interleaved, needs permute_ps to make real and imag interleaved
+  auto dc2 = _mm256_permute_ps(b2, 0xB1);    // d/sc         c/sc
+  dc2 = _mm256_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/sc
+  auto adbc2 = _mm256_mul_ps(a2, dc2);       //-ad/sc^2      bc/sc^2
+  auto res2 = _mm256_hadd_ps(acbd2, adbc2);  //(ac+bd)/sc^2  (bc-ad)/sc^2
   res2 = _mm256_permute_ps(res2, 0xD8);
+
+  // get the denominator
+  auto denom2 = Vectorized<c10::complex<float>>(b2).abs_2_();  // (c^2+d^2)/sc^2   (c^2+d^2)/sc^2
+  res2 = _mm256_div_ps(res2, denom2);
   return res2;
 }
 
