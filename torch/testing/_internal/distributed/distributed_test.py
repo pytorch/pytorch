@@ -20,7 +20,6 @@ import torch.distributed.algorithms.model_averaging.hierarchical_model_averager 
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
@@ -9128,7 +9127,7 @@ class DistributedTest:
             prev_weight = module.module.l1.weight.clone()
             prev_buffer = module.module.buffer.clone()
 
-            res = _stateless.functional_call(module, parameters, x)
+            res = torch.func.functional_call(module, parameters, x)
             self.assertEqual(x, res)
             # check that the weight remain unmodified
             cur_weight = module.module.l1.weight

@@ -50,7 +50,7 @@ FunctionSchema PythonValue::getSchema(
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
-    if (param_names.size() == 0) {
+    if (param_names.empty()) {
       throw ErrorReport(loc)
           << "Non-static method does not have a self argument";
     }
@@ -418,7 +418,7 @@ void recurseThroughNestedModules(
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
     std::string submodule_prefix = prefix;
-    if (prefix != "") {
+    if (!prefix.empty()) {
       submodule_prefix = prefix + ".";
     }
     submodule_prefix += key_string;
@@ -746,9 +746,8 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
-  bool have_pre_hooks =
-      class_type && class_type->getForwardPreHooks().size() != 0;
-  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+  bool have_pre_hooks = class_type && !class_type->getForwardPreHooks().empty();
+  bool have_hooks = class_type && !class_type->getForwardHooks().empty();
 
   std::vector<Value*> arg_values;
   std::vector<NamedValue> pre_hook_result;
@@ -797,7 +796,7 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     for (auto& output_node : output_nodes) {
       pre_hook_result.emplace_back(output_node);
     }
-    if (args.size() != 0) { // only replace input if it existed
+    if (!args.empty()) { // only replace input if it existed
       args = pre_hook_result;
     }
   }
@@ -971,7 +970,7 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   Value* error_message = nullptr;
-  if (args.size() == 0) {
+  if (args.empty()) {
     error_message = insertConstant(*caller.graph(), "", loc);
   } else if (args.size() == 1) {
     error_message = args.at(0).value(*caller.graph());
@@ -1199,7 +1198,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
-    if (obj_name.compare("torch.cuda") == 0) {
+    if (obj_name == "torch.cuda") {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
     return std::make_shared<PythonModuleValue>(obj);
@@ -1207,6 +1206,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
       obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {
+    return SpecialFormValue::create(prim::awaitable);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
