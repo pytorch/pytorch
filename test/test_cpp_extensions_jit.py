@@ -40,7 +40,11 @@ def remove_build_path():
             shutil.rmtree(default_build_root)
 
 
-class TestCppExtensionJITBase(common.TestCase):
+# There's only one test that runs gracheck, run slow mode manually
+class TestCppExtensionJIT(TestCppExtensionJITBase):
+    """Tests just-in-time cpp extensions.
+    Don't confuse this with the PyTorch JIT (aka TorchScript).
+    """
 
     def setUp(self):
         super().setUp()
@@ -61,19 +65,6 @@ class TestCppExtensionJITBase(common.TestCase):
     @classmethod
     def tearDownClass(cls):
         remove_build_path()
-
-
-# There's only one test that runs gracheck, run slow mode manually
-class TestCppExtensionJIT(TestCppExtensionJITBase):
-    """Tests just-in-time cpp extensions.
-    Don't confuse this with the PyTorch JIT (aka TorchScript).
-    """
-
-    def setUp(self):
-        super().setUp()
-
-    def tearDown(self):
-        super().tearDown()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -108,8 +99,12 @@ class TestCppExtensionJIT(TestCppExtensionJITBase):
         module = torch.utils.cpp_extension.load(
             name="torch_test_cuda_extension",
             sources=[
-                "cpp_extensions/cuda_extension.cpp",
-                "cpp_extensions/cuda_extension.cu",
+                # Compile different source files than test_jit_cuda_extension
+                # to avoid register the same test function, i.e. sigmoid_add,
+                # which causes test_jit_cuda_extension to fail on Windows.
+                # See https://github.com/pytorch/pytorch/issues/61655
+                "cpp_extensions/cuda_extension2.cpp",
+                "cpp_extensions/cuda_extension2.cu",
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
@@ -119,10 +114,104 @@ class TestCppExtensionJIT(TestCppExtensionJITBase):
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
         y = torch.zeros(100, device="cuda", dtype=torch.float32)
 
-        z = module.sigmoid_add(x, y).cpu()
+        z = module.sigmoid_add2(x, y).cpu()
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    def _run_jit_cuda_archflags(self, flags, expected):
+        # Compile an extension with given `flags`
+        def _check_cuobjdump_output(expected_values, is_ptx=False):
+            elf_or_ptx = '--list-ptx' if is_ptx else '--list-elf'
+            lib_ext = '.pyd' if IS_WINDOWS else '.so'
+            # Note, .extension name may include _v1, _v2, so first find exact name
+            ext_filename = glob.glob(os.path.join(temp_dir,
+                                                  'cudaext_archflag*' + lib_ext))[0]
+            command = ['cuobjdump', elf_or_ptx, ext_filename]
+            p = subprocess.Popen(command,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output, err = p.communicate()
+            output = output.decode("ascii")
+            err = err.decode("ascii")
+
+            if not p.returncode == 0 or not err == '':
+                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
+                                     "Output: {} ".format(flags, p.returncode,
+                                                          err, output))
+
+            actual_arches = sorted(re.findall(r'sm_\d\d', output))
+            expected_arches = sorted(['sm_' + xx for xx in expected_values])
+            self.assertEqual(actual_arches, expected_arches,
+                             msg="Flags: {},  Actual: {},  Expected: {}\n"
+                                 "Stderr: {}\nOutput: {}".format(
+                                     flags, actual_arches, expected_arches,
+                                     err, output))
+
+        temp_dir = tempfile.mkdtemp()
+        old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+        try:
+            os.environ['TORCH_CUDA_ARCH_LIST'] = flags
+            torch.utils.cpp_extension.load(
+                name="cudaext_archflags",
+                sources=[
+                    "cpp_extensions/cuda_extension.cpp",
+                    "cpp_extensions/cuda_extension.cu",
+                ],
+                extra_cuda_cflags=["-O2"],
+                verbose=True,
+                build_directory=temp_dir,
+            )
+
+            # Expected output for --list-elf:
+            #   ELF file    1: cudaext_archflags.1.sm_61.cubin
+            #   ELF file    2: cudaext_archflags.2.sm_52.cubin
+            _check_cuobjdump_output(expected[0])
+            if expected[1] is not None:
+                # Expected output for --list-ptx:
+                #   PTX file    1: cudaext_archflags.1.sm_61.ptx
+                _check_cuobjdump_output(expected[1], is_ptx=True)
+        finally:
+            if IS_WINDOWS:
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a word-around
+                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
+            else:
+                shutil.rmtree(temp_dir)
+
+            if old_envvar is None:
+                os.environ.pop('TORCH_CUDA_ARCH_LIST')
+            else:
+                os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "disabled on rocm")
+    def test_jit_cuda_archflags(self):
+        # Test a number of combinations:
+        #   - the default for the machine we're testing on
+        #   - Separators, can be ';' (most common) or ' '
+        #   - Architecture names
+        #   - With/without '+PTX'
+
+        n = torch.cuda.device_count()
+        capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
+        # expected values is length-2 tuple: (list of ELF, list of PTX)
+        # note: there should not be more than one PTX value
+        archflags = {
+            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
+            "Maxwell+Tegra;6.1": (['53', '61'], None),
+            "Volta": (['70'], ['70']),
+        }
+        if int(torch.version.cuda.split('.')[0]) >= 10:
+            # CUDA 9 only supports compute capability <= 7.2
+            archflags["7.5+PTX"] = (['75'], ['75'])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        if int(torch.version.cuda.split('.')[0]) < 12:
+            # CUDA 12 drops compute capability < 5.0
+            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
+
+        for flags, expected in archflags.items():
+            self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
@@ -788,118 +877,6 @@ class TestCppExtensionJIT(TestCppExtensionJITBase):
 
         for fast_mode in (True, False):
             gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
-
-
-class TestCppExtensionJITArchs(TestCppExtensionJITBase):
-    """
-    This class is used exclusively to run test_jit_cuda_archflags. This test
-    is troublesome to run together with other tests because it builds the cpp
-    extensions with different CUDA arch flags causes subsequent tests to fail
-    somehow.
-
-    See https://github.com/pytorch/pytorch/issues/61655 for more details
-    """
-
-    def setUp(self):
-        super().setUp()
-
-    def tearDown(self):
-        super().tearDown()
-
-    def _run_jit_cuda_archflags(self, flags, expected):
-        # Compile an extension with given `flags`
-        def _check_cuobjdump_output(expected_values, is_ptx=False):
-            elf_or_ptx = '--list-ptx' if is_ptx else '--list-elf'
-            lib_ext = '.pyd' if IS_WINDOWS else '.so'
-            # Note, .extension name may include _v1, _v2, so first find exact name
-            ext_filename = glob.glob(os.path.join(temp_dir,
-                                                  'cudaext_archflag*' + lib_ext))[0]
-            command = ['cuobjdump', elf_or_ptx, ext_filename]
-            p = subprocess.Popen(command,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            output, err = p.communicate()
-            output = output.decode("ascii")
-            err = err.decode("ascii")
-
-            if not p.returncode == 0 or not err == '':
-                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
-                                     "Output: {} ".format(flags, p.returncode,
-                                                          err, output))
-
-            actual_arches = sorted(re.findall(r'sm_\d\d', output))
-            expected_arches = sorted(['sm_' + xx for xx in expected_values])
-            self.assertEqual(actual_arches, expected_arches,
-                             msg="Flags: {},  Actual: {},  Expected: {}\n"
-                                 "Stderr: {}\nOutput: {}".format(
-                                     flags, actual_arches, expected_arches,
-                                     err, output))
-
-        temp_dir = tempfile.mkdtemp()
-        old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
-        try:
-            os.environ['TORCH_CUDA_ARCH_LIST'] = flags
-            torch.utils.cpp_extension.load(
-                name="cudaext_archflags",
-                sources=[
-                    "cpp_extensions/cuda_extension.cpp",
-                    "cpp_extensions/cuda_extension.cu",
-                ],
-                extra_cuda_cflags=["-O2"],
-                verbose=True,
-                build_directory=temp_dir,
-            )
-
-            # Expected output for --list-elf:
-            #   ELF file    1: cudaext_archflags.1.sm_61.cubin
-            #   ELF file    2: cudaext_archflags.2.sm_52.cubin
-            _check_cuobjdump_output(expected[0])
-            if expected[1] is not None:
-                # Expected output for --list-ptx:
-                #   PTX file    1: cudaext_archflags.1.sm_61.ptx
-                _check_cuobjdump_output(expected[1], is_ptx=True)
-        finally:
-            if IS_WINDOWS:
-                # rmtree returns permission error: [WinError 5] Access is denied
-                # on Windows, this is a word-around
-                subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
-            else:
-                shutil.rmtree(temp_dir)
-
-            if old_envvar is None:
-                os.environ.pop('TORCH_CUDA_ARCH_LIST')
-            else:
-                os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(TEST_ROCM, "disabled on rocm")
-    def test_jit_cuda_archflags(self):
-        # Test a number of combinations:
-        #   - Separators, can be ';' (most common) or ' '
-        #   - Architecture names
-        #   - With/without '+PTX'
-        #   - The default for the machine we're testing on, always test this last to avoid breaking other tests
-        #     with an unexpected CUDA arch
-
-        n = torch.cuda.device_count()
-        capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
-        # expected values is length-2 tuple: (list of ELF, list of PTX)
-        # note: there should not be more than one PTX value
-        archflags = {
-            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
-            "Maxwell+Tegra;6.1": (['53', '61'], None),
-            "Volta": (['70'], ['70']),
-        }
-        if int(torch.version.cuda.split('.')[0]) >= 10:
-            # CUDA 9 only supports compute capability <= 7.2
-            archflags["7.5+PTX"] = (['75'], ['75'])
-            archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
-        if int(torch.version.cuda.split('.')[0]) < 12:
-            # CUDA 12 drops compute capability < 5.0
-            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
-
-        for flags, expected in archflags.items():
-            self._run_jit_cuda_archflags(flags, expected)
 
 
 if __name__ == "__main__":
