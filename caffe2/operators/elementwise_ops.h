@@ -175,16 +175,13 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(
-          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
-      std::copy(
-          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
+      A_dims = std::vector<int>(A.sizes().cbegin(), A.sizes().cend());
+      B_dims = std::vector<int>(B.sizes().cbegin(), B.sizes().cend());
       // TODO: change the types to vector<int64_t>
       auto C_dims_int =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
-      std::copy(
-          C_dims_int.cbegin(), C_dims_int.cend(), std::back_inserter(C_dims));
+      C_dims = std::vector<int64_t>(C_dims_int.cbegin(), C_dims_int.cend());
       if (IsInputOutputAlias(0, 0)) {
         CAFFE_ENFORCE_EQ(C_dims_int, A_dims);
       } else if (IsInputOutputAlias(1, 0)) {
