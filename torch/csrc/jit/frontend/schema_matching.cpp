@@ -578,7 +578,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self,
     bool render_errors) {
-  TORCH_INTERNAL_ASSERT(schemas.size() > 0);
+  TORCH_INTERNAL_ASSERT(!schemas.empty());
   // if there is only one schema, we do not need to try without conversions
   // first. this is faster and puts less dead code in the graph.
   if (schemas.size() == 1) {
@@ -667,7 +667,7 @@ static Value* emitBuiltinNode(
 }
 
 std::string getFullSchemaName(const ::c10::FunctionSchema& schema) {
-  if (schema.overload_name() != "") {
+  if (!schema.overload_name().empty()) {
     return schema.operator_name().name + "." + schema.overload_name();
   }
   return schema.operator_name().name;
@@ -743,12 +743,12 @@ Value* emitBuiltinCall(
   }
 
   // no operators found with the same name, print out similarly named operators
-  if (schemas.size() == 0) {
+  if (schemas.empty()) {
     const auto close_symbols = findSimilarOperators(name);
     auto error = ErrorReport(loc);
     const auto& user_function_name = name.toQualString();
     error << "Unknown builtin op: " << user_function_name << ".\n";
-    if (close_symbols.size() == 0) {
+    if (close_symbols.empty()) {
       error
           << "Could not find any similar ops to " << user_function_name
           << ". This op may not exist or may not be currently supported in TorchScript.\n";
