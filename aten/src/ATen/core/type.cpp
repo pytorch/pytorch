@@ -534,6 +534,19 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a future to " << actual->repr_str();
       return ss.str();
     }
+  } else if (auto lt_formal = formal->castRaw<AwaitType>()) {
+    if (auto lt_actual = actual->castRaw<AwaitType>()) {
+      auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match an await to " << actual->repr_str();
+      return ss.str();
+    }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
     if (auto lt_actual = actual->castRaw<RRefType>()) {
       auto innerMatch = matchTypeVariables(
