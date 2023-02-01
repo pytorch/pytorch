@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Tuple, Type, Optional, cast, Union
+from typing import Callable, Set, Dict, List, Type, Tuple, Optional, Union, cast
 import sys
 import builtins
 import itertools
@@ -20,7 +20,6 @@ from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_mi
 from torch._guards import ShapeGuard, Source
 
 SymTypes = (SymInt, SymFloat, SymBool)
-SymbolicShapesExpr = collections.namedtuple("SymbolicShapeExpr", ["guard_expr", "call_expr", "fn"])
 
 log = logging.getLogger(__name__)
 
@@ -932,6 +931,167 @@ if HAS_SYMPY:
 
 TLS = threading.local()
 
+class GuardCompiler:
+    SourceInfo = collections.namedtuple("SourceInfo", ["name", "source", "type"])
+    SymbolicShapesExpr = collections.namedtuple("SymbolicShapeExpr", ["guard_expr", "call_expr", "fn"])
+
+    def __init__(self, source_ref: Callable[[Source], str]) -> None:
+        self._source_ref = source_ref
+
+        # Used when generating a new name for a given source.
+        # Avoids dupplicated parameter names.
+        self._unique_names = set()
+
+        # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
+        # SourceInfo holds the mapped unique name, original source, and type.
+        self._source_expr_to_info = {}
+
+        # Keeps track of the SourceInfo that are the actual parameters.
+        self._parameter_source_infos = []
+
+    def _flat_name(self, var_name: str) -> str:
+        var_name = var_name.replace(" ", "_")
+        var_name = var_name.replace("-", "_Neg_")
+        var_name = var_name.replace("[", "_LBr_").replace("]", "_RBr_")
+        var_name = var_name.replace("(", "_LPar_").replace(")", "_RPar_")
+        var_name = var_name.replace("'", "_Q_")
+        var_name = var_name.replace(".", "_D_").replace(",", "_C_")
+        return var_name
+
+    def _type_to_cpp_argtype(self, type: Type) -> str:
+        if type == SymInt:
+            return "int64_t"
+        elif type == torch.Tensor:
+            return "void*"
+        else:
+            raise TypeError(f"unexpected type: {type}")
+
+    def is_source_registered(self, source: Source) -> bool:
+        return source.name() in self._source_expr_to_info
+
+    def get_source_info(self, source: Source) -> "GuardCompiler.SourceInfo":
+        return self._source_expr_to_info[source.name()]
+
+    def register_source(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
+        assert not self.is_source_registered(source)
+        if name is None:
+            name = self.register_unique_name(source)
+        self._source_expr_to_info[source.name()] = self.SourceInfo(name, source, type)
+
+    def register_parameter(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
+        assert not self.is_source_registered(source)
+        self.register_source(source, name=name, type=type)
+        self._parameter_source_infos.append(self.get_source_info(source))
+
+    def register_unique_name(self, source: Union[str, Source]) -> str:
+        from torch._dynamo.source import TensorPropertySource
+
+        if isinstance(source, TensorPropertySource):
+            source_name = f"{self._source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
+        elif isinstance(source, Source):
+            source_name = self._flat_name(source.name())
+        else:
+            source_name = source
+
+        # Makes sure there are no repeated names.
+        # It's very unlikely the loop-body will be executed more than once.
+        counter = 1
+        unique_source_name = source_name
+        while unique_source_name in self._unique_names:
+            unique_source_name = source_name + str(counter)
+            counter += 1
+
+        self._unique_names.add(unique_source_name)
+        return unique_source_name
+
+    def flat_source_ref(self, source: Source) -> str:
+        from torch._dynamo.source import TensorPropertySource
+
+        # We need to call 'source_ref' here due to its side effects.
+        ref = self._source_ref(source)
+
+        info = self.get_source_info(source)
+        index_expr = ""
+        if isinstance(source, TensorPropertySource) and source.idx is not None:
+            index_expr = f"[{source.idx}]"
+        return f"{info.name}{index_expr}"
+
+    def compile(self, exprs: List[str]) -> "GuardCompiler.SymbolicShapesExpr":
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
+
+        if len(exprs) == 0:
+            return self.SymbolicShapesExpr("True", "True", None)
+
+        fn_name = "___symbolic_shape_fn"
+
+        call_arguments = ", ".join([info.source.name() for info in self._parameter_source_infos])
+        call_expression = f"{fn_name}({call_arguments})"
+
+        guard_parameters = ", ".join([
+            f"{self._type_to_cpp_argtype(info.type)} {info.name}"
+            for info in self._parameter_source_infos
+        ])
+        guard_expression = " && ".join(exprs)
+
+        source_creation = []
+        for info in self._parameter_source_infos:
+            if info.type != torch.Tensor:
+                continue
+
+            variable_name = self.register_unique_name(f"{info.name}_variable")
+            source_creation.append(f"auto {variable_name} = reinterpret_cast<THPVariable*>({info.name});")
+
+            for tensor_property in TensorProperty:
+                if tensor_property == TensorProperty.STORAGE_OFFSET:
+                    tensor_property_str = "storage_offset"
+                    tensor_property_source = TensorPropertySource(info.source, tensor_property)
+                else:
+                    tensor_property_str = f"{tensor_property.name.lower()}s"
+                    tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
+
+                if not self.is_source_registered(tensor_property_source):
+                    # Skip if there are no SymInts tracked for this property.
+                    # Usually true for scalar tensors.
+                    continue
+
+                tensor_property_info = self.get_source_info(tensor_property_source)
+                source_creation.append(
+                    f"auto {tensor_property_info.name} = {variable_name}->cdata->{tensor_property_str}();"
+                )
+
+        source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
+
+        cpp_code = f"""\
+#include <torch/python.h>
+#include <cmath>
+#include <iostream>
+extern "C" int guard({guard_parameters}) {{
+{source_creation_str}
+    return {guard_expression};
+}}
+"""
+        try:
+             from torch._inductor.codecache import CppCodeCache
+             fn = CppCodeCache.load(cpp_code).guard
+        except Exception:
+             print(f"Code: \n{cpp_code}")
+             raise
+
+        # Before actually executing the compiled function, we need to
+        # preprocess the tensor variables to what numba is actually expecting
+        # (according to the signature we gave above).
+        # In other words, we need to get a pointer to the actual tensor. In
+        # cpython, that can be done by calling the id function.
+        def wrapper_fn(*args):
+            args = [
+                ctypes.cast(id(a), ctypes.c_void_p)
+                for a in args
+            ]
+            return bool(fn(*args))
+
+        return self.SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
+
+
 
 class ShapeEnv:
     def __init__(self):
@@ -1104,7 +1264,7 @@ class ShapeEnv:
     # output to print them too).  It's private because it's not
     # intended for normal use
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name(), *, _simplified=False) -> SymbolicShapesExpr:
+                       source_ref=lambda n: n.name(), *, _simplified=False) -> "GuardCompiler.SymbolicShapesExpr":
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1166,63 +1326,7 @@ class ShapeEnv:
 
         from torch._dynamo.source import NegateSource, TensorPropertySource, TensorProperty
 
-        SourceInfo = collections.namedtuple("SourceInfo", ["base", "sources"])
-        source_name_to_types = {}
-        source_name_to_infos = collections.defaultdict(lambda: SourceInfo(base=None, sources=[]))
-
-        # Used when generating a new name for a given source.
-        # Avoids dupplicated parameter names.
-        unique_names = set()
-
-        # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
-        # SourceInfo holds the mapped unique name, original source, and type.
-        source_expr_to_info = {}
-
-        # Keeps track of the SourceInfo that are the actual parameters.
-        parameter_source_infos = []
-
-        def flat_name(var_name: str) -> str:
-            var_name = var_name.replace(" ", "_")
-            var_name = var_name.replace("-", "_Neg_")
-            var_name = var_name.replace("[", "_LBr_").replace("]", "_RBr_")
-            var_name = var_name.replace("(", "_LPar_").replace(")", "_RPar_")
-            var_name = var_name.replace("'", "_Q_")
-            var_name = var_name.replace(".", "_D_").replace(",", "_C_")
-            return var_name
-
-        def flat_source_ref(source: Source) -> str:
-            # We need to call 'source_ref' here due to its side effects.
-            ref = source_ref(source)
-            info = source_expr_to_info[source.name()]
-            index_expr = ""
-            if isinstance(source, TensorPropertySource) and source.idx is not None:
-                index_expr = f"[{source.idx}]"
-            return f"{info.name}{index_expr}"
-
-        def register_unique_name(source: Union[str, Source]) -> str:
-            if isinstance(source, TensorPropertySource):
-                source_name = f"{source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
-            elif isinstance(source, Source):
-                source_name = flat_name(source.name())
-            else:
-                source_name = source
-
-            # Makes sure there are no repeated names.
-            # It's very unlikely the loop-body will be executed more than once.
-            counter = 1
-            unique_source_name = source_name
-            while unique_source_name in unique_names:
-                unique_source_name = source_name + str(counter)
-                counter += 1
-
-            unique_names.add(unique_source_name)
-            return unique_source_name
-
-        def type_to_cpp_argtype(type: Type) -> str:
-            if type == SymInt:
-                return "int64_t"
-            assert type == torch.Tensor
-            return "void*"
+        guard_compiler = GuardCompiler(source_ref)
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1255,7 +1359,7 @@ class ShapeEnv:
                 input_guards.append((source, sympy.Integer(val)))
 
         def track_tensor_property(source, val, name):
-            source_expr_to_info[source.name()] = SourceInfo(name, source, None)
+            guard_compiler.register_source(source, name=name)
             track_symint(source, val)
 
         for t, source in zip(placeholders, sources):
@@ -1266,30 +1370,26 @@ class ShapeEnv:
 
             if t is None:
                 continue
-            if source.name() in source_expr_to_info:
+            if guard_compiler.is_source_registered(source):
                 continue
 
             if isinstance(t, SymInt):
-                symint_name = register_unique_name(source)
-                source_expr_to_info[source.name()] = SourceInfo(symint_name, source, SymInt)
-                parameter_source_infos.append(source_expr_to_info[source.name()])
+                guard_compiler.register_parameter(source, type=SymInt)
                 track_symint(source, t)
                 continue
 
             assert isinstance(t, torch.Tensor)
-            tensor_name = register_unique_name(source)
-            source_expr_to_info[source.name()] = SourceInfo(tensor_name, source, torch.Tensor)
-            parameter_source_infos.append(source_expr_to_info[source.name()])
+            guard_compiler.register_parameter(source, type=torch.Tensor)
 
-            tensor_size_name = register_unique_name(TensorPropertySource(source, TensorProperty.SIZE, 0))
+            tensor_size_name = guard_compiler.register_unique_name(TensorPropertySource(source, TensorProperty.SIZE, 0))
             for i, s in enumerate(t.size()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.SIZE, i), s, tensor_size_name)
 
-            tensor_stride_name = register_unique_name(TensorPropertySource(source, TensorProperty.STRIDE, 0))
+            tensor_stride_name = guard_compiler.register_unique_name(TensorPropertySource(source, TensorProperty.STRIDE, 0))
             for i, s in enumerate(t.stride()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.STRIDE, i), s, tensor_stride_name)
 
-            tensor_storage_name = register_unique_name(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+            tensor_storage_name = guard_compiler.register_unique_name(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
             track_tensor_property(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset(), tensor_storage_name)
 
         exprs = []
@@ -1307,8 +1407,8 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, flat_source_ref).doprint(expr)
-                exprs.append(f"{flat_source_ref(source)} == {sexpr}")
+                sexpr = ShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(expr)
+                exprs.append(f"{guard_compiler.flat_source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -1317,7 +1417,7 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source, flat_source_ref).doprint(g))
+                exprs.append(ShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(g))
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
@@ -1328,80 +1428,10 @@ class ShapeEnv:
                 assert sources
                 # We must assert that each symbol is not zero or one, as we make
                 # negative inferences on shape variables
-                exprs.append(f"{flat_source_ref(sources[0])} != 0")
-                exprs.append(f"{flat_source_ref(sources[0])} != 1")
+                exprs.append(f"{guard_compiler.flat_source_ref(sources[0])} != 0")
+                exprs.append(f"{guard_compiler.flat_source_ref(sources[0])} != 1")
 
-        if exprs:
-            fn_name = "___symbolic_shape_fn"
-
-            call_arguments = ", ".join([info.source.name() for info in parameter_source_infos])
-            call_expression = f"{fn_name}({call_arguments})"
-
-            guard_parameters = ", ".join([
-                f"{type_to_cpp_argtype(info.type)} {info.name}"
-                for info in parameter_source_infos
-            ])
-            guard_expression = " && ".join(exprs)
-
-            source_creation = []
-            for info in parameter_source_infos:
-                if info.type != torch.Tensor:
-                    continue
-
-                variable_name = register_unique_name(f"{info.name}_variable")
-                source_creation.append(f"auto {variable_name} = reinterpret_cast<THPVariable*>({info.name});")
-
-                for tensor_property in TensorProperty:
-                    if tensor_property == TensorProperty.STORAGE_OFFSET:
-                        tensor_property_str = "storage_offset"
-                        tensor_property_source = TensorPropertySource(info.source, tensor_property)
-                    else:
-                        tensor_property_str = f"{tensor_property.name.lower()}s"
-                        tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
-
-                    if tensor_property_source.name() not in source_expr_to_info:
-                        # Skip if there are no SymInts tracked for this property.
-                        # Usually true for scalar tensors.
-                        continue
-
-                    tensor_property_info = source_expr_to_info[tensor_property_source.name()]
-                    source_creation.append(
-                        f"auto {tensor_property_info.name} = {variable_name}->cdata->{tensor_property_str}();"
-                    )
-
-            source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
-
-            cpp_code = f"""\
-#include <torch/python.h>
-#include <cmath>
-#include <iostream>
-extern "C" int guard({guard_parameters}) {{
-{source_creation_str}
-    return {guard_expression};
-}}
-"""
-            try:
-                from torch._inductor.codecache import CppCodeCache
-                fn = CppCodeCache.load(cpp_code).guard
-            except Exception:
-                print(f"Code: \n{cpp_code}")
-                raise
-
-            # Before actually executing the compiled function, we need to
-            # preprocess the tensor variables to what numba is actually expecting
-            # (according to the signature we gave above).
-            # In other words, we need to get a pointer to the actual tensor. In
-            # cpython, that can be done by calling the id function.
-            def wrapper_fn(*args):
-                args = [
-                    ctypes.cast(id(a), ctypes.c_void_p)
-                    for a in args
-                ]
-                return bool(fn(*args))
-
-            return SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
-        else:
-            return SymbolicShapesExpr("True", "True", None)
+        return guard_compiler.compile(exprs)
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
