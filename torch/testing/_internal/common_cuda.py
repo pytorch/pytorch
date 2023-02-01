@@ -24,6 +24,7 @@ if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
     dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+    # check if the cuda device name matches jetson naming
     check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
     IS_JETSON = False
     for name in check_names:
