@@ -22,7 +22,7 @@ from .utils import clone_inputs, get_debug_dir
 log = logging.getLogger(__name__)
 
 
-inductor_config = import_module(f"{config.inductor_import}.config")
+inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
 
@@ -224,10 +224,10 @@ def generate_config_string():
 
     return textwrap.dedent(
         f"""\
-import {config.dynamo_import}.config
-import {config.inductor_import}.config
-{config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
-{config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+import torch._dynamo.config
+import torch._inductor.config
+torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
+torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
         """
     )
 
@@ -241,7 +241,7 @@ def generate_compiler_repro_string(gm, args):
 import torch
 from torch import tensor, device
 import torch.fx as fx
-from {config.dynamo_import}.testing import rand_strided
+from torch._dynamo.testing import rand_strided
 from math import inf
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -273,9 +273,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
     return model_str
 
 
-INDUCTOR_IMPORT = f"""
-from {config.inductor_import}.compile_fx import compile_fx_inner
-from {config.dynamo_import}.debug_utils import same_two_models
+INDUCTOR_IMPORT = """
+from torch._inductor.compile_fx import compile_fx_inner
+from torch._dynamo.debug_utils import same_two_models
 """
 
 COMPILER_REPRO_OPTIONS = {
@@ -316,7 +316,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
             break
 
     if "inductor" in compiler_name:
-        fd.write(f"import {config.inductor_import}.overrides\n")
+        fd.write("import torch._inductor.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
@@ -757,10 +757,10 @@ from math import inf
 import torch
 from torch import tensor, device
 import torch.fx as fx
-import {config.dynamo_import}
-from {config.dynamo_import}.testing import rand_strided
-from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
-from {config.dynamo_import}.debug_utils import same_two_models
+import torch._dynamo
+from torch._dynamo.testing import rand_strided
+from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+from torch._dynamo.debug_utils import same_two_models
 
 {generate_config_string()}
 
@@ -773,7 +773,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 {model_str}
 
 mod = Repro()
-opt_mod = {config.dynamo_import}.optimize("{compiler_name}")(mod)
+opt_mod = torch._dynamo.optimize("{compiler_name}")(mod)
 
 {run_code}
         """
@@ -954,10 +954,10 @@ import torch
 from torch import tensor, device
 import torch.fx as fx
 import functools
-import {config.dynamo_import}
-from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
-from {config.dynamo_import}.optimizations.backends import BACKENDS
-from {config.dynamo_import}.testing import rand_strided
+import torch._dynamo
+from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+from torch._dynamo.optimizations.backends import BACKENDS
+from torch._dynamo.testing import rand_strided
 
 {generate_config_string()}
 
@@ -978,7 +978,7 @@ dynamo_minifier_backend = functools.partial(
     compiler_fn,
     compiler_name="{compiler_name}",
 )
-opt_mod = {config.dynamo_import}.optimize(dynamo_minifier_backend)(mod)
+opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
 with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     opt_mod(*args)
