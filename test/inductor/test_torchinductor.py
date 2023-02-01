@@ -280,6 +280,19 @@ def clone_preserve_strides(x):
     return out
 
 
+@patch.object(config, "debug", True)
+def run_and_get_cpp_code(fn, args):
+    torch._dynamo.reset()
+    import io
+    from contextlib import redirect_stdout
+
+    f = io.StringIO()
+    with redirect_stdout(f):
+        fn(*args)
+    s = f.getvalue()
+    return s
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -1984,8 +1997,23 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d unary test")
+    def test_conv_transpose2d_packed(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv_transpose2d packed test")
+
+        x_shape = (1, 3, 28, 28)
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_conv_transpose2d_unary(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -5247,6 +5275,18 @@ class CommonTemplate:
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
         )
+
+    @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
+    def test_in_out_buffer(self):
+        def fn(x, y):
+            z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
+            return z
+
+        inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        code = run_and_get_cpp_code(fn_opt, inps)
+        self.assertTrue("in_out_ptr" in code)
+        self.assertEqual(fn_opt(*inps), fn(*inps))
 
     @patch.object(config, "profiler_mark_wrapper_call", True)
     def test_profiler_mark_wrapper_call(self):
