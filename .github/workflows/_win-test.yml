@@ -70,9 +70,9 @@ jobs:
           # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process
           # This needs to be run before checking out PyTorch to avoid locking the working directory
           try {
-              Get-Process -Name "python" | Stop-Process -Force
+              Get-Process -Name "python" -ErrorAction Stop | Stop-Process -Force
           }
-          catch [Microsoft.PowerShell.Commands.GetProcessCommand] {
+          catch {
               Write-Output "No leftover process, continuing"
           }
 
