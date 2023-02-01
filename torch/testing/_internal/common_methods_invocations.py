@@ -12748,7 +12748,11 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 'TestUnaryUfuncs',), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                         dtypes=(torch.int, torch.int8)), ),
+                         dtypes=(torch.int, torch.int8)),
+            # pytorch computes (0+nanj), numpy computes (-5e-18-1j) for input (-501.-1.0000e+20j)
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         "test_reference_numerics_large", dtypes=(torch.complex64,), device_type='cpu',
+                         active_if=not IS_MACOS and not IS_WINDOWS),),
     ),
     UnaryUfuncInfo(
         'nn.functional.tanhshrink',
