@@ -35,6 +35,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 
 import torch
+import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1152,14 +1153,15 @@ def get_fake_value(node, tx):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            if config.capture_scalar_outputs and node.target == "item":
-                return torch.zeros(size=(), dtype=args[0].dtype).item()
-            else:
-                unimplemented(f"data dependent operator: {cause.func}")
+            unimplemented(f"data dependent operator: {cause.func}")
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        ):
+            unimplemented("guard on data-dependent symbolic int/float")
         raise TorchRuntimeError() from e
 
 
@@ -1276,3 +1278,10 @@ def fqn(obj: Any):
     Returns the fully qualified name of the object.
     """
     return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def ifdyn(count1, count2):
+    if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2

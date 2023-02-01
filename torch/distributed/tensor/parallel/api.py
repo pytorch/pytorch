@@ -5,11 +5,13 @@ import torch
 import torch.nn as nn
 from torch.distributed._tensor import (
     DeviceMesh,
+    DTensor,
     distribute_module,
     distribute_tensor,
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.sharding_prop import _CachingPropagator
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.multihead_attention_tp import (
     TensorParallelMultiheadAttention,
@@ -26,6 +28,9 @@ __all__ = [
     "parallelize_module",
 ]
 
+# switch the DTensor propagator to use the caching propagator to speed up
+# the TP eager execution time.
+DTensor._propagator = _CachingPropagator(DTensor._propagator.op_to_rules)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
