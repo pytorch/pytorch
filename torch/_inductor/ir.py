@@ -4053,4 +4053,3 @@ class LoopBodyBlock:
             "",
             code.strip().replace("def forward(", f"def {name}("),
         )
-
