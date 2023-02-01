@@ -119,8 +119,7 @@ Reducer::Reducer(
       param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
-  TORCH_INTERNAL_ASSERT(
-      params_.size() >= 1, "Expected at least one parameter.");
+  TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
   if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
@@ -515,7 +514,7 @@ void Reducer::set_divide_factor() {
       auto results = extractTensors(workHandle->getFuture()->value());
 
       // Guard against the results being empty
-      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      TORCH_INTERNAL_ASSERT(!results.empty());
       at::Tensor& res = results.front();
       div_factor_ = res.item().to<int>();
     }
@@ -574,7 +573,7 @@ void Reducer::delay_all_reduce() {
     }
 
     // Each rank prints out all the unused parameters detected
-    if (unused_parameters_.size() > 0) {
+    if (!unused_parameters_.empty()) {
       LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
                 << "Parameter(s) (in the format of {param_name, index}): "
                 << unused_params_stream.str()
@@ -1016,7 +1015,7 @@ void Reducer::initialize_buckets(
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
     REDUCER_CHECK(
-        bucket_indices[bucket_index].size() > 0,
+        !bucket_indices[bucket_index].empty(),
         logger_,
         "Empty bucket specified.");
 
@@ -1804,7 +1803,7 @@ void Reducer::ensure_prior_reduction_finished() {
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
-    TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
+    TORCH_INTERNAL_ASSERT(!unmarked_param_indices.empty());
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
@@ -1870,7 +1869,7 @@ void Reducer::ensure_prior_reduction_finished() {
     } else {
       // Retrieve set of parameter names that did not receive gradient.
       auto unmarkedParams = getUnmarkedParamsForIteration();
-      TORCH_INTERNAL_ASSERT(unmarkedParams.size() > 0);
+      TORCH_INTERNAL_ASSERT(!unmarkedParams.empty());
       for (const auto& s : unmarkedParams) {
         LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
                   << "Parameter: " << s
@@ -1986,7 +1985,7 @@ compute_bucket_assignment_by_size(
   TORCH_INTERNAL_ASSERT(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
-  TORCH_INTERNAL_ASSERT(tensors.size() > 0);
+  TORCH_INTERNAL_ASSERT(!tensors.empty());
   // Store bucket indices and their sizes together, because we later sort the
   // resulting indices by minimum tensor index and want to keep sizes
   // consistent.

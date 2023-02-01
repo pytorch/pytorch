@@ -55,7 +55,7 @@ from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import ConstantVariable, EnumVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
@@ -857,11 +857,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
-        if sys.version_info < (3, 8):
-            assert exc.is_python_constant()
-            assert exc.as_python_constant() is None
-        else:
-            assert exc is None
+        assert exc is None
         self.push(exc)
         self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
 
@@ -871,13 +867,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def END_FINALLY(self, inst):
         tos = self.pop()
-        if sys.version_info < (3, 8):
-            # python3.7 and 3.8 can have END_FINALLY without BEGIN_FINALLY
-            assert tos is None or (
-                tos.is_python_constant() and tos.as_python_constant() is None
-            )
-        else:
-            assert tos is None
+        assert tos is None
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1161,8 +1151,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.specialized_value is not None
+            assert (
+                isinstance(k, ConstantVariable)
+                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
+                or isinstance(k, EnumVariable)
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1189,11 +1181,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def MAP_ADD(self, inst):
-        if sys.version_info < (3, 8):
-            v, k = self.popn(2)
-        else:
-            k, v = self.popn(2)
-
+        k, v = self.popn(2)
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
