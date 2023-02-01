@@ -942,10 +942,11 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TEST_WITH_TORCHINDUCTOR = False
+# This used to be set with the flags below, but it is disabled for now
 # os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = False
 # os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+TEST_WITH_TORCHINDUCTOR = False
+TEST_WITH_TORCHDYNAMO = False
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
