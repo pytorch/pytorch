@@ -16,6 +16,7 @@ import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 from torch.testing._internal.common_utils import gradcheck
+import torch.multiprocessing as mp
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -41,7 +42,7 @@ def remove_build_path():
 
 
 # There's only one test that runs gracheck, run slow mode manually
-class TestCppExtensionJIT(TestCppExtensionJITBase):
+class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
     """
@@ -99,12 +100,8 @@ class TestCppExtensionJIT(TestCppExtensionJITBase):
         module = torch.utils.cpp_extension.load(
             name="torch_test_cuda_extension",
             sources=[
-                # Compile different source files than test_jit_cuda_extension
-                # to avoid register the same test function, i.e. sigmoid_add,
-                # which causes test_jit_cuda_extension to fail on Windows.
-                # See https://github.com/pytorch/pytorch/issues/61655
-                "cpp_extensions/cuda_extension2.cpp",
-                "cpp_extensions/cuda_extension2.cu",
+                "cpp_extensions/cuda_extension.cpp",
+                "cpp_extensions/cuda_extension.cu",
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
@@ -114,7 +111,7 @@ class TestCppExtensionJIT(TestCppExtensionJITBase):
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
         y = torch.zeros(100, device="cuda", dtype=torch.float32)
 
-        z = module.sigmoid_add2(x, y).cpu()
+        z = module.sigmoid_add(x, y).cpu()
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
@@ -152,16 +149,26 @@ class TestCppExtensionJIT(TestCppExtensionJITBase):
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
         try:
             os.environ['TORCH_CUDA_ARCH_LIST'] = flags
-            torch.utils.cpp_extension.load(
-                name="cudaext_archflags",
-                sources=[
+
+            params = {
+                "name": "cudaext_archflags",
+                "sources": [
                     "cpp_extensions/cuda_extension.cpp",
                     "cpp_extensions/cuda_extension.cu",
                 ],
-                extra_cuda_cflags=["-O2"],
-                verbose=True,
-                build_directory=temp_dir,
-            )
+                "extra_cuda_cflags": ["-O2"],
+                "verbose": True,
+                "build_directory": temp_dir,
+            }
+            p = mp.Process(target=torch.utils.cpp_extension.load, kwargs=params)
+
+            # Compile and load the test CUDA arch in a different Python process to avoid
+            # polluting the current one and causes test_jit_cuda_extension to fail on
+            # Windows. There is no clear way to unload a module after it has been imported
+            # and torch.utils.cpp_extension.load builds and loads the module in one go.
+            # See https://github.com/pytorch/pytorch/issues/61655 for more details
+            p.start()
+            p.join()
 
             # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
