@@ -633,6 +633,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             '''
             #include <dlfcn.h>
             #include <assert.h>
+
+            template <typename KernelFunc>
+            KernelFunc load_cpp_kernel(const char* so_filename) {
+                KernelFunc kernel_cpp;
+                auto kernel_cpp_lib = dlopen(so_filename, RTLD_NOW);
+                assert(kernel_cpp_lib != nullptr);
+                *(void **) (&kernel_cpp) = dlsym(kernel_cpp_lib, "kernel");
+                return kernel_cpp;
+            }
+
             """
         )
         with self.wrapper_call.indent():
@@ -704,11 +714,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         kernel_path = self.get_kernel_path(kernel)
-
-        self.writeline(f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);')
-        self.writeline(f"assert({name}_lib != nullptr);")
-        self.writeline(f"void (*{name})({arg_types});")
-        self.writeline(f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");')
+        self.writeline(
+            f'static auto {name} = load_cpp_kernel<void (*)({arg_types})>("{kernel_path}");'
+        )
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))

@@ -2,6 +2,7 @@
 import functools
 import random
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -20,7 +21,7 @@ except ImportError:
 def make_unspec_fn(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        with torch._dynamo.config.patch("specialize_int_float", False):
+        with patch.object(torch._dynamo.config, "specialize_int_float", False):
             return fn(*args, **kwargs)
 
     return _fn
@@ -50,7 +51,7 @@ UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
 
-@torch._dynamo.config.patch("specialize_int_float", False)
+@patch.object(torch._dynamo.config, "specialize_int_float", False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -137,7 +138,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    @torch._dynamo.config.patch("dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
