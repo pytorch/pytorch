@@ -10,7 +10,6 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
-from torch._dynamo.optimizations.normalize import Inplacifier, normalize
 from torch._dynamo.testing import same
 
 
@@ -64,15 +63,6 @@ class Conv_Bn_Relu(torch.nn.Module):
 
 
 class TestOptimizations(torch._dynamo.test_case.TestCase):
-    def test_inplacifier(self):
-        gm = torch.fx.symbolic_trace(Seq())
-        normalize(gm)
-        Inplacifier(gm).inplacify()
-        gm.recompile()
-        code = gm.code.replace(" ", "")
-        self.assertIn("inplace=True", code)
-        self.assertIn("out=linear_1", code)
-
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
