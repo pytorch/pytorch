@@ -543,10 +543,10 @@ class SweepInputs2:
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
-        r3 = sympy.Symbol("r3")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
+        r3 = sympy.Symbol("r3", integer=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -627,9 +627,9 @@ class TestIndexingSimplification(TorchTestCase):
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
 
         # join two ModularIndexing calls into one larger one when possible
         expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
@@ -1984,8 +1984,23 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d unary test")
+    def test_conv_transpose2d_packed(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv_transpose2d packed test")
+
+        x_shape = (1, 3, 28, 28)
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_conv_transpose2d_unary(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
