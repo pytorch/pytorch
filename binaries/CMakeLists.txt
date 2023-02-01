@@ -52,6 +52,9 @@ if(BUILD_TEST)
   # Core overhead benchmark
   caffe2_binary_target("core_overhead_benchmark.cc")
   target_link_libraries(core_overhead_benchmark benchmark)
+  if(USE_CUDA)
+    target_link_libraries(core_overhead_benchmark caffe2_nvrtc)
+  endif()
 endif()
 
 if(USE_CUDA)
