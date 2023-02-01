@@ -13,7 +13,7 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
 }
 
 static Dtype dtypeOfIndices(const std::vector<ExprPtr>& indices) {
-  if (!indices.size()) {
+  if (indices.empty()) {
     // Return something so we can handle scalar buffers.
     return kInt;
   }
@@ -127,7 +127,7 @@ Dtype Intrinsics::IntrinsicsDtype(
     const std::vector<ExprPtr>& params) {
   // TODO: check the op_type and make a real decision
   // Doesnt this fail with kRand?
-  if (params.size() == 0) {
+  if (params.empty()) {
     throw malformed_input("invalid params in Intrinsics");
   } else if (params.size() == 1) {
     return IntrinsicsDtype(op_type, params[0]->dtype());
