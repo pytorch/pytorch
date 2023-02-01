@@ -8252,6 +8252,53 @@ class TestNoRegression(TestCase):
             self.assertEqual(x2.device.type, "cpu")
 
 
+class TestNanSum(TestCase):
+
+    def helper(self, dtype, noncontiguous, dim):
+        zero_cpu = torch.zeros((), dtype=dtype)
+
+        # Randomly scale the values
+        scale = random.randint(10, 100)
+        x_cpu: torch.Tensor = make_tensor(
+            (5, 5), dtype=dtype, device='cpu',
+            low=-scale, high=scale, noncontiguous=noncontiguous)
+
+        if dtype.is_floating_point:
+            nan_mask_cpu = x_cpu < (0.2 * scale)
+            x_no_nan_cpu = torch.where(nan_mask_cpu, zero_cpu, x_cpu)
+            x_cpu[nan_mask_cpu] = np.nan
+        else:
+            x_no_nan_cpu = x_cpu
+
+        x_mps = x_cpu.to('mps')
+        actual_out_mps = torch.empty(0, dtype=dtype, device='mps')
+        expect_out_cpu = torch.empty(0, dtype=dtype)
+        dim_kwargs = {"dim": dim} if dim is not None else {}
+        expect = torch.sum(x_no_nan_cpu, **dim_kwargs)
+
+        actual_cpu = torch.nansum(x_cpu, **dim_kwargs)
+        # Sanity check on CPU
+        self.assertEqual(expect, actual_cpu)
+
+        # Test MPS
+        actual_mps = torch.nansum(x_mps, **dim_kwargs)
+        # Test out= variant
+        torch.nansum(x_mps, out=actual_out_mps, **dim_kwargs)
+        torch.nansum(x_cpu, out=expect_out_cpu, **dim_kwargs)
+        self.assertEqual(expect, actual_mps)
+        self.assertEqual(expect_out_cpu, actual_out_mps)
+
+    def test_nansum(self):
+        args = itertools.product(
+            (torch.float16, torch.float32, torch.int32, torch.int64),   # dtype
+            (True, False),                                              # noncontiguous
+            (0, 1, None),                                               # dim
+        )
+
+        for dtype, noncontiguous, dim in args:
+            with self.subTest(dtype=dtype, noncontiguous=noncontiguous, dim=dim):
+                self.helper(dtype, noncontiguous, dim)
+
 MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.int8, torch.bfloat16]:
     del MPS_DTYPES[MPS_DTYPES.index(t)]
