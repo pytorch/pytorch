@@ -559,7 +559,6 @@ aten::addmv.out
 aten::addr_
 aten::affine_grid_generator
 aten::affine_grid_generator.out
-aten::alias
 aten::alias_copy
 aten::alias_copy.out
 aten::allclose
