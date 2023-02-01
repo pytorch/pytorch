@@ -1692,6 +1692,7 @@ class TestPythonDispatcher(TestCase):
         x = torch.randn(2, requires_grad=True)
         r = torch._C._EnablePythonDispatcher()
         torch.add(x, x)
+
     @unittest.skipIf(IS_JETSON, "PyTorch for Jetson is not compiled w/ Lapack")
     def test_lstsq(self):
         a = torch.randn(4, 3)
