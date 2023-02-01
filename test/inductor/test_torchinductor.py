@@ -1720,6 +1720,9 @@ class CommonTemplate:
             )
 
     def test_upsample_cat_conv(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu upsample_cat_conv test")
+
         class M(torch.nn.Module):
             def __init__(
                 self,
