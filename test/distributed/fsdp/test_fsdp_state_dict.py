@@ -124,16 +124,20 @@ class TestFSDPStateDict(FSDPTest):
         assert_fn(state_base, state_new)
 
     def _compare_models(
-        self, model, model_new, assert_fn, check_fp16=False, check_buffers=False
+        self, model, model_new, assert_fn, check_fp16=False, check_buffers=True
     ):
         assert assert_fn in (self.assertEqual, self.assertNotEqual)
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_new):
                 self._state_compare(model, model_new, assert_fn)
                 if check_buffers:
-                    self._state_compare(
-                        model, model_new, assert_fn, state_generator="buffers"
+                    has_buffers = any(
+                        [len(list(m.buffers())) for m in (model, model_new)]
                     )
+                    if has_buffers:
+                        self._state_compare(
+                            model, model_new, assert_fn, state_generator="buffers"
+                        )
                 if check_fp16:
                     for tensor in model_new.parameters():
                         self.assertEqual(tensor.dtype, torch.float16)
@@ -544,7 +548,7 @@ class TestFSDPStateDict(FSDPTest):
                 model_new.half()
 
             # zero the model to ensure parameters are different.
-            _zero_model(model_new)
+            _zero_model(model_new, zero_buffers=True)
             self._compare_models(model, model_new, self.assertNotEqual)
 
             # Verify parameters are the same in the new model.
@@ -563,18 +567,22 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
+    @parametrize("use_orig_params", [True, False])
     def test_buffers_save_and_load_state_dict(
         self,
         state_dict_type: StateDictType,
         cpu_offload: bool,
         mixed_precision: bool,
         state_dict_rank0_and_offload: bool,
+        use_orig_params: bool,
     ):
         """
         Tests that we can save a state_dict and load it for modules with persistent buffers, including
         in the context of non-default mixed precision, different ``state_dict_type`` s and CPU offloading.
         """
-        if state_dict_rank0_and_offload and state_dict_type != "state_dict":
+        if (state_dict_rank0_and_offload and state_dict_type != "state_dict") or (
+            use_orig_params and state_dict_type not in _UNFLATTENED_STATE_DICT_IMPLS
+        ):
             return  # not supported
         mixed_precision = (
             MixedPrecision(
@@ -588,7 +596,7 @@ class TestFSDPStateDict(FSDPTest):
         model_call = partial(
             self._get_multibuffer_nested_model,
             cpu_offload=cpu_offload,
-            use_orig_params=False,
+            use_orig_params=use_orig_params,
             mixed_precision=mixed_precision,
         )
         model = model_call()
@@ -616,7 +624,7 @@ class TestFSDPStateDict(FSDPTest):
         with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
             model_new.load_state_dict(fsdp_state_dict, strict=True)
 
-        self._compare_models(model, model_new, self.assertEqual, check_buffers=True)
+        self._compare_models(model, model_new, self.assertEqual)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
