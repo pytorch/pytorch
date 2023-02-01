@@ -1,7 +1,7 @@
 import inspect
 import itertools
 import operator
-from typing import Any, Callable, Dict, List
+from typing import Dict, List
 
 import torch.fx
 import torch.random
@@ -24,44 +24,6 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
-from .misc import GetAttrVariable
-
-
-class GetTensorAttrVariable(GetAttrVariable):
-    """
-    Represents an attribute on a tensor, e.g. x.T for the transpose.
-
-    This needs to be handled slightly differently, because for most attrs that return
-    tensors, we expect the returned tensor to have an example_value attached to it.
-
-    This will be represented as a call_function getattr(tensor_obj, "H") in the fx graph.
-    """
-
-    def __init__(
-        self,
-        obj,
-        name,
-        get_example_value: Callable[[torch.fx.Proxy], Any],
-        proxy=None,
-        **kwargs,
-    ):
-        super(GetTensorAttrVariable, self).__init__(obj, name, **kwargs)
-        self.get_example_value = get_example_value
-        self.proxy = proxy
-
-    # Cache the result of calling as_proxy() on a generic GetAttrVariable
-    # The GetAttrVariable implementation calls getattr on the self.obj proxy,
-    # which adds a call_function getattr(...) call into the graph.
-    # To avoid creating multiple such call nodes (or adding unnecessary nodes
-    # if the object is never used), we construct the proxy object on the first
-    # as_proxy() call and cache the result.
-    # That's why we pass in get_example_value as a callback - so it can generate
-    # the example_value only when it is needed.
-    def as_proxy(self):
-        if self.proxy is None:
-            self.proxy = super().as_proxy()
-            self.proxy.node.meta["example_value"] = self.get_example_value(self.proxy)
-        return self.proxy
 
 
 class TensorVariable(VariableTracker):
@@ -194,41 +156,6 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
-        # TODO: reimplement the T/H/mT/mH by generating a function call
-        # to torch.Tensor.{T/H/mT/mH}.__get__
-        elif name in ("T", "H"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "H"
-                else self
-            )
-            args_list = [
-                variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
-            ]
-            args = [variables.TupleVariable(args_list)]
-            result = out.call_method(tx, "permute", args, {})
-        elif name in ("mT", "mH"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "mH"
-                else self
-            )
-            if self.ndim > 0:
-                args = [
-                    variables.ConstantVariable(-2),
-                    variables.ConstantVariable(-1),
-                ]
-                result = out.call_method(tx, "transpose", args, {})
-            else:
-                result = out.call_method(tx, "t", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
@@ -244,6 +171,8 @@ class TensorVariable(VariableTracker):
         if result is None:
 
             def try_generic_attr_handling():
+                from .builder import wrap_fx_proxy
+
                 try:
                     static_attr = inspect.getattr_static(torch.Tensor, name)
                 except NameError:
@@ -258,8 +187,8 @@ class TensorVariable(VariableTracker):
                 ):
                     return None
 
-                return GetTensorAttrVariable(
-                    self, name, lambda proxy: get_fake_value(proxy.node, tx)
+                return wrap_fx_proxy(
+                    tx=tx, proxy=getattr(self.as_proxy(), name), **options
                 )
 
             result = try_generic_attr_handling()
