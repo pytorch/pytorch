@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
+    FloatWithoutSymFloat,
     IntLike,
     is_weakly_lesser_type,
     Number,
@@ -4274,6 +4275,10 @@ def arange(
     utils.check_pin_memory(pin_memory)
     device = torch.device(utils.device_or_default(device))
 
+    assert not isinstance(start, complex)
+    assert not isinstance(end, complex)
+    assert not isinstance(step, complex)
+
     # Case: torch.arange(5)
     if end is None:
         end = start
@@ -4283,14 +4288,17 @@ def arange(
         (step > 0 and end >= start) or (step < 0 and end <= start),
         lambda: "upper bound and lower bound inconsistent with step sign",
     )
+
+    def is_finite(x):
+        return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
+
     utils.check(
-        (not isinstance(start, float) or math.isfinite(start)) and
-        (not isinstance(end, float) or math.isfinite(end)),
+        is_finite(start) and is_finite(end),
         lambda: f"unsupported range: {start} -> {end}",
     )
     utils.check(
-        not isinstance(step, float) or math.isfinite(step),
-        lambda: f"step must be finite but got {step}"
+        is_finite(step),
+        lambda: f"step must be finite but got {step}",
     )
 
     if dtype is None:

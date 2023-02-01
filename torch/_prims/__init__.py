@@ -2329,10 +2329,10 @@ _iota_doc = """
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
 def _iota_meta(
-    length: IntLike,
+    length: int,
     *,
-    start: IntLike,
-    step: IntLike,
+    start: int,
+    step: int,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
@@ -2351,10 +2351,10 @@ def _iota_meta(
 
 
 def _iota_aten(
-    length: IntLike,
+    length: int,
     *,
-    start: IntLike,
-    step: IntLike,
+    start: int,
+    step: int,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
@@ -2366,7 +2366,7 @@ def _iota_aten(
 
 
 iota = _make_prim(
-    schema="iota(int length, *, int start, int step, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
+    schema="iota(SymInt length, *, SymInt start, SymInt step, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
     return_type=RETURN_TYPE.NEW,
     meta=_iota_meta,
     impl_aten=_iota_aten,
