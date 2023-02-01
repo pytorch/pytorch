@@ -492,7 +492,7 @@ class AccuracyError(Exception):
     pass
 
 
-def wrap_compiler_debug(compiler_fn, compiler_name: str):
+def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -501,9 +501,11 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
     to save the graph as a string.
     """
 
-    @functools.wraps(compiler_fn)
+    @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
         from torch._subclasses import FakeTensorMode
+
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
@@ -538,7 +540,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                         "Accuracy minification is supported for inductor only"
                     )
                 if inner_compiled_fn is None:
-                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    inner_compiled_fn = compiler_fn(gm, example_inputs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
@@ -560,7 +562,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
                     if inner_compiled_fn is None:
-                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                        inner_compiled_fn = compiler_fn(gm, example_inputs)
                     # Call the compiled function with real inputs
                     return inner_compiled_fn(real_inputs)
                 except Exception as e:
@@ -583,7 +585,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True
         else:
-            compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_fn = compiler_fn(gm, example_inputs)
 
         return compiled_fn
 
@@ -981,7 +983,7 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     helper_for_dump_minify(contents)
 
 
-def wrap_backend_debug(compiler_fn, compiler_name: str):
+def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
     As opposed to wrap_compiler_debug, this wrapper intercepts at the
@@ -991,8 +993,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     repro.tar.gz.
     """
 
-    @functools.wraps(compiler_fn)
+    @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
             if config.repro_level == 3:
@@ -1001,7 +1004,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -1018,9 +1021,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(
-                        copy.deepcopy(gm), example_inputs, **kwargs
-                    )
+                    compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
@@ -1044,11 +1045,11 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     )
                     raise
         else:
-            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_gm = compiler_fn(gm, example_inputs)
 
         return compiled_gm
 
-    debug_wrapper._torchdynamo_orig_callable = compiler_fn
+    debug_wrapper._torchdynamo_orig_callable = unconfigured_compiler_fn
 
     return debug_wrapper
 
