@@ -1325,7 +1325,7 @@ def arange(
     else:
         computation_dtype = get_computation_dtype(dtype)
 
-        if device.type == "cpu" and dtype == torch.float32:
+        if device.type == "cpu" and computation_dtype == torch.float32:
             # ATen kernel uses acc_type
             computation_dtype = torch.float64
 
