@@ -76,7 +76,7 @@ TensorView* view(TensorView* x, DataType dtype) {
   TORCH_INTERNAL_ASSERT(false, "Unsupported reinterpret casting view");
 }
 
-TensorView* view(
+TensorView* reshape(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {

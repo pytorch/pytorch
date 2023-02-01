@@ -152,7 +152,7 @@ TEST_F(NVFuserTest, FusionViewAsRealOutput_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_out}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionViewRfactorExtentReplacement_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeRfactorExtentReplacement_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -161,7 +161,7 @@ TEST_F(NVFuserTest, FusionViewRfactorExtentReplacement_CUDA) {
   auto tv1 = makeContigTensor(2);
   fusion->addInput(tv1);
 
-  auto tv2 = view(tv0, {12, 8}, {4, 3, 8});
+  auto tv2 = reshape(tv0, {12, 8}, {4, 3, 8});
   auto tv3 = sum(tv2, {-1});
   auto tv4 = add(tv3, IrBuilder::create<Double>(1));
   auto tv5 = add(tv1, tv4);
@@ -181,7 +181,7 @@ TEST_F(NVFuserTest, FusionViewRfactorExtentReplacement_CUDA) {
       executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -194,8 +194,8 @@ TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
   fusion.addInput(bias);
 
   auto x_add_bias = add(x, bias);
-  auto x_view = view(x_add_bias, input_shape, output_shape);
-  fusion.addOutput(x_view);
+  auto x_reshape = reshape(x_add_bias, input_shape, output_shape);
+  fusion.addOutput(x_reshape);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
@@ -209,17 +209,18 @@ TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
   auto outputs = fe.runFusion(aten_inputs, lparams);
 
   auto at_x_add_bias = at_x + at_bias;
-  auto at_x_view = at::native::view(at_x_add_bias, output_shape);
+  auto at_x_reshape = at::native::view(at_x_add_bias, output_shape);
 
-  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+  testValidate(
+      &fusion, outputs, aten_inputs, {at_x_reshape}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeFailMismatchSize_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   // The number of elements in input and output shapes do not match,
-  // so this view transformation is invalid.
+  // so this reshape transformation is invalid.
   // 2 * 10 * 40 != 2 * 50 * 4 * 10
 
   std::vector<int64_t> input_shape{2, 10, 40};
@@ -232,10 +233,10 @@ TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
 
   auto x_add_bias = add(x, bias);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
+  ASSERT_ANY_THROW(reshape(x_add_bias, input_shape, output_shape));
 }
 
-TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeFailMulitDimInference_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -251,29 +252,29 @@ TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
 
   auto x_add_bias = add(x, bias);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
+  ASSERT_ANY_THROW(reshape(x_add_bias, input_shape, output_shape));
 }
 
 void reductionViewAddFusion(
     std::vector<int64_t>& input_shape,
     std::vector<int64_t>& output_shape,
-    bool view_before_reduction) {
+    bool reshape_before_reduction) {
   constexpr int kReductionAxis = -1;
 
-  // Drop size for reduction axis from view_shape
-  std::vector<int64_t> view_shape;
+  // Drop size for reduction axis from reshape_shape
+  std::vector<int64_t> reshape_shape;
   {
     const auto kAxis = (kReductionAxis < 0)
         ? (kReductionAxis + input_shape.size())
         : kReductionAxis;
     for (auto i : c10::irange(input_shape.size())) {
-      if (view_before_reduction || i != kAxis) {
-        view_shape.push_back(input_shape[i]);
+      if (reshape_before_reduction || i != kAxis) {
+        reshape_shape.push_back(input_shape[i]);
       }
     }
   }
 
-  auto bias_shape = (view_before_reduction) ? input_shape : output_shape;
+  auto bias_shape = (reshape_before_reduction) ? input_shape : output_shape;
   for (auto has_implicit_broadcast : {false, true}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
     Fusion& fusion = *fusion_ptr.get();
@@ -289,10 +290,10 @@ void reductionViewAddFusion(
     fusion.addInput(bias);
 
     auto tv1 =
-        (view_before_reduction) ? add(x, bias) : sum(x, {kReductionAxis});
-    auto x_view = view(tv1, view_shape, output_shape);
-    auto y = (view_before_reduction) ? sum(x_view, {kReductionAxis})
-                                     : add(x_view, bias);
+        (reshape_before_reduction) ? add(x, bias) : sum(x, {kReductionAxis});
+    auto x_reshape = reshape(tv1, reshape_shape, output_shape);
+    auto y = (reshape_before_reduction) ? sum(x_reshape, {kReductionAxis})
+                                        : add(x_reshape, bias);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -303,18 +304,19 @@ void reductionViewAddFusion(
     FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
     auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
 
-    auto at_tv1 = (view_before_reduction) ? (at_x + at_bias)
-                                          : at::sum(at_x, kReductionAxis);
-    auto at_x_view = at::native::view(at_tv1, output_shape);
-    auto at_y = (view_before_reduction) ? at::sum(at_x_view, kReductionAxis)
-                                        : at::add(at_x_view, at_bias);
+    auto at_tv1 = (reshape_before_reduction) ? (at_x + at_bias)
+                                             : at::sum(at_x, kReductionAxis);
+    auto at_x_reshape = at::native::view(at_tv1, output_shape);
+    auto at_y = (reshape_before_reduction)
+        ? at::sum(at_x_reshape, kReductionAxis)
+        : at::add(at_x_reshape, at_bias);
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
   }
 }
 
 typedef std::vector<int64_t> shape;
-typedef std::pair<shape, shape> view_example;
+typedef std::pair<shape, shape> reshape_example;
 
 // TODO: View examples with just 333 elements are failing validation in
 // normalization. This might just be because our tolerances aren't tuned well
@@ -322,7 +324,7 @@ typedef std::pair<shape, shape> view_example;
 // detected as a validation issue, though it might not actually be a correctness
 // issue. Using 3333 instead of 333 in those cases but should validate what's
 // going on in the 333 case.
-std::vector<view_example> all_view_examples = {
+std::vector<reshape_example> all_reshape_examples = {
     {{1, 19, 1, 3 * 4, 7, 1, 99}, {1, 19, -1, 3, 4 * 7 * 99}},
     {{1, 19, 1, 3 * 4, 7, 1, 99}, {1, 19, 1, 3, 4 * 7 * 99}},
     {{19, 3 * 4, 7, 99}, {19, 3, 4 * 7 * 99}},
@@ -368,11 +370,12 @@ std::vector<view_example> all_view_examples = {
     {{2, 3, 2 * 2, 5}, {1, 6, 1, 2, 2, 5, 1}},
 };
 
-TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
-  for (auto e : all_view_examples) {
-    reductionViewAddFusion(e.first, e.second, true /* view_before_reduction */);
+TEST_F(NVFuserTest, FusionReshapeReductionShmoo_CUDA) {
+  for (auto e : all_reshape_examples) {
+    reductionViewAddFusion(
+        e.first, e.second, true /* reshape_before_reduction */);
   }
-  std::vector<view_example> view_after_reduce_examples = {
+  std::vector<reshape_example> reshape_after_reduce_examples = {
       {{19, 12, 7, 99}, {19, 3, 28}},
       {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 28}},
       {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
@@ -388,16 +391,16 @@ TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
       {{1, 27454, 1, 2}, {1, 3922, 1, 7}},
       {{1, 7844, 1, 7}, {1, 1961, 4}}};
 
-  for (auto e : view_after_reduce_examples) {
+  for (auto e : reshape_after_reduce_examples) {
     reductionViewAddFusion(
-        e.first, e.second, false /* view_before_reduction */);
+        e.first, e.second, false /* reshape_before_reduction */);
   }
 }
 
 void persistentViewAddFusion(
     std::vector<int64_t>& input_shape,
     std::vector<int64_t>& output_shape,
-    bool view_before_persistent) {
+    bool reshape_before_persistent) {
   constexpr int kAxis = -1;
 
   // Support -1 sizes in the inputs
@@ -405,7 +408,8 @@ void persistentViewAddFusion(
   auto inferred_input = inferred_shapes.first;
   auto inferred_output = inferred_shapes.second;
 
-  auto bias_shape = view_before_persistent ? inferred_input : inferred_output;
+  auto bias_shape =
+      reshape_before_persistent ? inferred_input : inferred_output;
   for (auto has_implicit_broadcast : {false, true}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
     Fusion& fusion = *fusion_ptr.get();
@@ -420,10 +424,10 @@ void persistentViewAddFusion(
     fusion.addInput(x);
     fusion.addInput(bias);
 
-    auto tv1 = (view_before_persistent) ? add(x, bias) : softmax(x, kAxis);
-    auto x_view = view(tv1, inferred_input, inferred_output);
-    auto y =
-        (view_before_persistent) ? softmax(x_view, kAxis) : add(x_view, bias);
+    auto tv1 = (reshape_before_persistent) ? add(x, bias) : softmax(x, kAxis);
+    auto x_reshape = reshape(tv1, inferred_input, inferred_output);
+    auto y = (reshape_before_persistent) ? softmax(x_reshape, kAxis)
+                                         : add(x_reshape, bias);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -434,27 +438,27 @@ void persistentViewAddFusion(
     FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
     auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
 
-    auto at_tv1 = (view_before_persistent)
+    auto at_tv1 = (reshape_before_persistent)
         ? (at_x + at_bias)
         : at::_softmax(at_x, kAxis, false /* half_to_float */);
-    auto at_x_view = at::native::view(at_tv1, inferred_output);
-    auto at_y = (view_before_persistent)
-        ? at::_softmax(at_x_view, kAxis, false /* half_to_float */)
-        : at::add(at_x_view, at_bias);
+    auto at_x_reshape = at::native::view(at_tv1, inferred_output);
+    auto at_y = (reshape_before_persistent)
+        ? at::_softmax(at_x_reshape, kAxis, false /* half_to_float */)
+        : at::add(at_x_reshape, at_bias);
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
   }
 }
 
-TEST_F(NVFuserTest, FusionViewPersistentShmoo_CUDA) {
-  for (auto e : all_view_examples) {
+TEST_F(NVFuserTest, FusionReshapePersistentShmoo_CUDA) {
+  for (auto e : all_reshape_examples) {
     persistentViewAddFusion(
-        e.first, e.second, true /* view_before_persistent */);
+        e.first, e.second, true /* reshape_before_persistent */);
   }
 
-  for (auto e : all_view_examples) {
+  for (auto e : all_reshape_examples) {
     persistentViewAddFusion(
-        e.first, e.second, false /* view_before_persistent */);
+        e.first, e.second, false /* reshape_before_persistent */);
   }
 }
 
@@ -475,8 +479,8 @@ void addViewGeluFusion(
     fusion.addInput(bias);
 
     auto x_add_bias = add(x, bias);
-    auto x_view = view(x_add_bias, input_shape, output_shape);
-    auto y = gelu(x_view);
+    auto x_reshape = reshape(x_add_bias, input_shape, output_shape);
+    auto y = gelu(x_reshape);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -491,33 +495,33 @@ void addViewGeluFusion(
     auto outputs = fe.runFusion(aten_inputs, lparams);
 
     auto at_x_add_bias = at_x + at_bias;
-    auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-    auto at_y = at::gelu(at_x_view);
+    auto at_x_reshape = at::native::view(at_x_add_bias, output_shape);
+    auto at_y = at::gelu(at_x_reshape);
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
   }
 }
 
-TEST_F(NVFuserTest, FusionViewSplit_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeSplit_CUDA) {
   std::vector<int64_t> input_shape{80};
   std::vector<int64_t> output_shape{2, 4, 10};
   addViewGeluFusion(input_shape, output_shape);
 }
 
-TEST_F(NVFuserTest, FusionViewBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeBroadcast_CUDA) {
   std::vector<int64_t> input_shape{80};
   std::vector<int64_t> output_shape{1, 80};
   addViewGeluFusion(input_shape, output_shape);
 }
 
-TEST_F(NVFuserTest, FusionViewMerge_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMerge_CUDA) {
   std::vector<int64_t> input_shape{2, 40, 7};
   std::vector<int64_t> output_shape{560};
   addViewGeluFusion(input_shape, output_shape);
 }
 
-TEST_F(NVFuserTest, FusionViewAllShmoo_CUDA) {
-  for (auto e : all_view_examples) {
+TEST_F(NVFuserTest, FusionReshapeAllShmoo_CUDA) {
+  for (auto e : all_reshape_examples) {
     addViewGeluFusion(e.first, e.second);
   }
 }
@@ -544,8 +548,8 @@ void geluViewAddFusion(
     fusion.addInput(bias);
 
     auto x_gelu = gelu(x);
-    auto x_view = view(x_gelu, inferred_input, inferred_output);
-    auto y = add(x_view, bias);
+    auto x_reshape = reshape(x_gelu, inferred_input, inferred_output);
+    auto y = add(x_reshape, bias);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -560,15 +564,15 @@ void geluViewAddFusion(
     auto outputs = fe.runFusion(aten_inputs, lparams);
 
     auto at_x_gelu = at::gelu(at_x);
-    auto at_x_view = at::native::view(at_x_gelu, inferred_output);
-    auto at_y = at_x_view + at_bias;
+    auto at_x_reshape = at::native::view(at_x_gelu, inferred_output);
+    auto at_y = at_x_reshape + at_bias;
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
   }
 }
 
-TEST_F(NVFuserTest, FusionViewStride_CUDA) {
-  for (const auto& e : all_view_examples) {
+TEST_F(NVFuserTest, FusionReshapeStride_CUDA) {
+  for (const auto& e : all_reshape_examples) {
     geluViewAddFusion(e.first, e.second);
   }
 }
@@ -591,9 +595,9 @@ void geluViewBinaryAddFusion(
     fusion.addInput(bias);
 
     auto x_gelu = gelu(x);
-    auto x_view = view(x_gelu, input_shape1, output_shape);
-    auto bias_view = view(bias, input_shape2, output_shape);
-    auto y = add(x_view, bias_view);
+    auto x_reshape = reshape(x_gelu, input_shape1, output_shape);
+    auto bias_reshape = reshape(bias, input_shape2, output_shape);
+    auto y = add(x_reshape, bias_reshape);
     fusion.addOutput(y);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -608,20 +612,20 @@ void geluViewBinaryAddFusion(
     auto outputs = fe.runFusion(aten_inputs, lparams);
 
     auto at_x_gelu = at::gelu(at_x);
-    auto at_x_view = at::native::view(at_x_gelu, output_shape);
-    auto at_bias_view = at::native::view(at_bias, output_shape);
-    auto at_y = at_x_view + at_bias_view;
+    auto at_x_reshape = at::native::view(at_x_gelu, output_shape);
+    auto at_bias_reshape = at::native::view(at_bias, output_shape);
+    auto at_y = at_x_reshape + at_bias_reshape;
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
   }
 }
 
-TEST_F(NVFuserTest, FusionViewBinary_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeBinary_CUDA) {
   geluViewBinaryAddFusion({27454, 2}, {54908}, {7844, 7});
 }
 
 // Repro of issue #1493
-TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeConcreteDomain_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -630,7 +634,7 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
   auto tv1 = makeContigTensor(2);
   fusion.addInput(tv1);
 
-  auto tv2 = view(tv0, {2, 3}, {6});
+  auto tv2 = reshape(tv0, {2, 3}, {6});
   auto tv3 = add(tv2, IrBuilder::create<Double>(1));
   auto tv4 = broadcast(tv3, {true, false});
   auto tv5 = add(tv4, tv1);
@@ -655,7 +659,7 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionViewConcreteDomain2_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeConcreteDomain2_CUDA) {
   constexpr int kAxis = -1;
   std::vector<int64_t> input_shape = {19, 12, 7, 99};
   std::vector<int64_t> output_shape = {19, 3, 2772};
@@ -670,8 +674,8 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain2_CUDA) {
   fusion.addInput(bias);
 
   auto tv1 = softmax(x, kAxis);
-  auto x_view = view(tv1, input_shape, output_shape);
-  auto y = add(x_view, bias);
+  auto x_reshape = reshape(tv1, input_shape, output_shape);
+  auto y = add(x_reshape, bias);
   fusion.addOutput(y);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -683,14 +687,14 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain2_CUDA) {
   auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
 
   auto at_tv1 = at::_softmax(at_x, kAxis, false /* half_to_float */);
-  auto at_x_view = at::native::view(at_tv1, output_shape);
-  auto at_y = at::add(at_x_view, at_bias);
+  auto at_x_reshape = at::native::view(at_tv1, output_shape);
+  auto at_y = at::add(at_x_reshape, at_bias);
 
   testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
 }
 
 // Repro of issue #1608
-TEST_F(NVFuserTest, FusionViewConcreteDomain3_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeConcreteDomain3_CUDA) {
   std::vector<int64_t> input_shape = {14, 12, 8, 100};
   std::vector<int64_t> bcast_shape = {14, 12, 8, 1};
   std::vector<int64_t> other_shape = {14, 100, 96};
@@ -708,8 +712,8 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain3_CUDA) {
   fusion.addInput(z);
 
   auto tv1 = add(x, y);
-  auto tv2 = view(tv1, input_shape, output_shape);
-  auto tv3 = view(z, other_shape, output_shape);
+  auto tv2 = reshape(tv1, input_shape, output_shape);
+  auto tv3 = reshape(z, other_shape, output_shape);
   auto output = add(tv2, tv3);
   fusion.addOutput(output);
 
@@ -730,7 +734,7 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain3_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_output}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionViewConcreteDomain4_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeConcreteDomain4_CUDA) {
   std::vector<int64_t> shape1 = {3, 4, 5};
   std::vector<int64_t> shape2 = {3 * 4 * 5};
 
@@ -746,7 +750,7 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain4_CUDA) {
 
   auto tv2 = broadcast(tv0, {true, false, false});
   auto tv3 = add(tv1, tv2);
-  auto tv4 = view(tv3, shape1, shape2);
+  auto tv4 = reshape(tv3, shape1, shape2);
   auto tv5 = set(tv4);
   fusion.addOutput(tv5);
 
@@ -772,7 +776,7 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain4_CUDA) {
       concrete_id->toString());
 }
 
-TEST_F(NVFuserTest, FusionViewConcreteDomain5_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeConcreteDomain5_CUDA) {
   const std::vector<int64_t> shape1 = {12};
   const std::vector<int64_t> shape2 = {4, 3};
   const std::vector<int64_t> shape3 = {12, 5};
@@ -792,19 +796,19 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain5_CUDA) {
     auto tv0_cache = set(tv0);
 
     auto path1 = [&]() {
-      auto view_2d = view(tv0_cache, shape1, shape2);
-      auto view_2d_copy = set(view_2d);
-      fusion.addOutput(view_2d_copy);
-      return view_2d_copy;
+      auto reshape_2d = reshape(tv0_cache, shape1, shape2);
+      auto reshape_2d_copy = set(reshape_2d);
+      fusion.addOutput(reshape_2d_copy);
+      return reshape_2d_copy;
     };
 
     auto path2 = [&]() {
       auto tv0_bc = broadcast(tv0_cache, {false, true});
       auto tv0_bc_plus_tv1 = add(tv0_bc, tv1);
-      auto view_3d = view(tv0_bc_plus_tv1, shape3, shape4);
-      auto view_3d_copy = set(view_3d);
-      fusion.addOutput(view_3d_copy);
-      return view_3d_copy;
+      auto reshape_3d = reshape(tv0_bc_plus_tv1, shape3, shape4);
+      auto reshape_3d_copy = set(reshape_3d);
+      fusion.addOutput(reshape_3d_copy);
+      return reshape_3d_copy;
     };
 
     TensorView* path1_out = nullptr;
@@ -858,26 +862,27 @@ TEST_F(NVFuserTest, FusionFlattenAfterUnsqueezeOutput_CUDA) {
 
   auto x_add_bias = add(x, bias);
   auto x_unsqueeze = unsqueeze(x_add_bias, -1);
-  auto x_view = flatten(x_unsqueeze);
-  fusion.addOutput(x_view);
+  auto x_reshape = flatten(x_unsqueeze);
+  fusion.addOutput(x_reshape);
 
   auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_bias = at::randn(input_shape, options);
   std::vector<IValue> aten_inputs = {at_x, at_bias};
 
-  x_view->split(0, 4);
-  x_add_bias->computeAt(x_view, 1);
-  x_view->axis(0)->parallelize(ParallelType::TIDx);
+  x_reshape->split(0, 4);
+  x_add_bias->computeAt(x_reshape, 1);
+  x_reshape->axis(0)->parallelize(ParallelType::TIDx);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
   auto outputs = fe.runFusion(aten_inputs);
 
   auto at_x_add_bias = at_x + at_bias;
-  auto at_x_view = at_x_add_bias.unsqueeze(-1).flatten();
+  auto at_x_reshape = at_x_add_bias.unsqueeze(-1).flatten();
 
-  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+  testValidate(
+      &fusion, outputs, aten_inputs, {at_x_reshape}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionComputeAtRootDomainMapWithView_CUDA) {
@@ -896,10 +901,10 @@ TEST_F(NVFuserTest, FusionComputeAtRootDomainMapWithView_CUDA) {
   auto tv2 = sum(tv1, {1});
   auto tv3 = broadcast(tv2, {false, true, true});
 
-  // Path with a view
-  auto tv4 = view(tv1, input_shape1, input_shape2);
+  // Path with a reshape
+  auto tv4 = reshape(tv1, input_shape1, input_shape2);
 
-  // Join the reduciton+broadcast and view paths together
+  // Join the reduciton+broadcast and reshape paths together
   auto tv5 = add(tv3, tv4);
   fusion.addOutput(tv5);
 
@@ -967,7 +972,7 @@ TEST_F(NVFuserTest, FusionExpandView1_CUDA) {
        IrBuilder::create<Int>(3),
        IrBuilder::create<Int>(8)});
 
-  auto tv3 = view(tv2, {4, 3, 8}, {12, 8});
+  auto tv3 = reshape(tv2, {4, 3, 8}, {12, 8});
   auto tv4 = add(tv3, tv1);
   fusion->addOutput(tv4);
 
@@ -998,7 +1003,7 @@ TEST_F(NVFuserTest, FusionExpandView2_CUDA) {
   auto tv2 =
       expand(tv0, {IrBuilder::create<Int>(12), IrBuilder::create<Int>(8)});
 
-  auto tv3 = view(tv2, {12, 8}, {3, 4, 8});
+  auto tv3 = reshape(tv2, {12, 8}, {3, 4, 8});
   auto tv4 = add(tv3, tv1);
   fusion->addOutput(tv4);
 
@@ -1016,8 +1021,9 @@ TEST_F(NVFuserTest, FusionExpandView2_CUDA) {
       executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
-  auto assert_matches = [](view_example example_0, view_example example_1) {
+TEST_F(NVFuserTest, FusionReshapeTransformCache_CUDA) {
+  auto assert_matches = [](reshape_example example_0,
+                           reshape_example example_1) {
     TORCH_INTERNAL_ASSERT(
         analyzeViewConstraint(example_0.first, example_0.second) ==
             analyzeViewConstraint(example_1.first, example_1.second),
@@ -1031,8 +1037,8 @@ TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
         example_1.second);
   };
 
-  auto assert_does_not_match = [](view_example example_0,
-                                  view_example example_1) {
+  auto assert_does_not_match = [](reshape_example example_0,
+                                  reshape_example example_1) {
     TORCH_INTERNAL_ASSERT(
         !(analyzeViewConstraint(example_0.first, example_0.second) ==
           analyzeViewConstraint(example_1.first, example_1.second)),
@@ -1047,12 +1053,12 @@ TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
   };
 
   // Splits are done as splitting out left hand side, so left hand side
-  // split changes can't reuse view, but right hand side split changes can.
+  // split changes can't reuse reshape, but right hand side split changes can.
   // Merges, since they don't bury hard values in can always be reshared.
-  // Need to make sure squeeze and broadcast changes don't try to reuse view.
+  // Need to make sure squeeze and broadcast changes don't try to reuse reshape.
   // What matches and what doesn't is very specific to the implementation of how
   // the splits/merges are generated. This could be changed over time as there
-  // isn't a single set of transformations to potentially make a view. For
+  // isn't a single set of transformations to potentially make a reshape. For
   // example we could always merge all dimensions, then split out all
   // dimensions. This would always be valid but would not be efficient for
   // indexing.
@@ -1163,7 +1169,7 @@ TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
       {{19, 3 * 4, 7, 99}, {19, -1, 3}}, {{19, 3 * 5, 7, 99}, {19, -1, 3}});
 }
 
-TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeIdGraph_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1174,17 +1180,17 @@ TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {w, x, y, z}, {w, y, x * z});
+  auto tv2 = reshape(tv1, {w, x, y, z}, {w, y, x * z});
   fusion.addOutput(tv2);
 
   auto tv3 = makeConcreteTensor({w, x, y, z});
   fusion.addInput(tv3);
 
-  auto tv4 = view(tv3, {w, x, y, z}, {w, y, x * z});
+  auto tv4 = reshape(tv3, {w, x, y, z}, {w, y, x * z});
   fusion.addOutput(tv4);
 
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
+  // Link 0 and 3 together for reshape analysis done based on before the
+  // reshapes actually happened.
   auto tv5 = add(tv0, tv3);
   fusion.addOutput(tv5);
 
@@ -1198,19 +1204,19 @@ TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
   auto tv10 = add(tv8, tv9);
   fusion.addOutput(tv10);
 
-  auto tv12 = view(tv8, {w, 1, x, 1, y, z}, {w, y, x * z});
+  auto tv12 = reshape(tv8, {w, 1, x, 1, y, z}, {w, y, x * z});
   fusion.addOutput(tv12);
 
-  // Link the views after the views happen
+  // Link the reshapes after the reshapes happen
   auto t13 = add(tv12, tv4);
   fusion.addOutput(t13);
 
-  // Grab the trivial reduced tensor from t12's view.
+  // Grab the trivial reduced tensor from t12's reshape.
   ir_utils::producerTvsOf(tv12)[0];
 
   // Start from the exact iter domain graph of the fusion
   IterDomainGraph id_graph(&fusion);
-  auto disjoint_view_ids = id_graph.exactNodes();
+  auto disjoint_reshape_ids = id_graph.exactNodes();
 
   TORCH_CHECK(
       id_graph.exactNodes().strictAreMapped(tv2->axis(1), tv4->axis(1)));
@@ -1225,7 +1231,7 @@ TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
       tv2->getRootDomain()[3], tv12->getRootDomain()[3]));
 }
 
-TEST_F(NVFuserTest, FusionViewVectorize_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeVectorize_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1356,17 +1362,17 @@ TEST_F(NVFuserTest, FusionPwiseViewSchedule_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {x, y, z}, {x, y * z});
+  auto tv2 = reshape(tv1, {x, y, z}, {x, y * z});
   fusion.addOutput(tv2);
 
   auto tv3 = makeConcreteTensor({x, y, z});
   fusion.addInput(tv3);
 
-  auto tv4 = view(tv3, {x, y, z}, {x, y * z});
+  auto tv4 = reshape(tv3, {x, y, z}, {x, y * z});
   fusion.addOutput(tv4);
 
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
+  // Link 0 and 3 together for reshape analysis done based on before the
+  // reshapes actually happened.
   auto tv5 = add(tv0, tv3);
   fusion.addOutput(tv5);
 
@@ -1422,18 +1428,18 @@ TEST_F(NVFuserTest, FusionSumViewSchedule_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {x, y, z}, {x, y * z});
+  auto tv2 = reshape(tv1, {x, y, z}, {x, y * z});
   fusion.addOutput(tv2);
 
   auto tv3 = makeConcreteTensor({x, y, z});
   fusion.addInput(tv3);
 
-  auto tv4 = view(tv3, {x, y, z}, {x, y * z});
+  auto tv4 = reshape(tv3, {x, y, z}, {x, y * z});
   auto tv5 = sum(tv4, {1});
   fusion.addOutput(tv5);
 
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
+  // Link 0 and 3 together for reshape analysis done based on before the
+  // reshapes actually happened.
   auto tv6 = add(tv0, tv3);
   fusion.addOutput(tv6);
 
@@ -1477,8 +1483,8 @@ TEST_F(NVFuserTest, FusionSumViewSchedule_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t3}, {t2, t5, t6}, __LINE__, __FILE__);
 }
 
-// Make sure matching views are segmented into the same kernel
-TEST_F(NVFuserTest, FusionViewMagicSchedule1_CUDA) {
+// Make sure matching reshapes are segmented into the same kernel
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule1_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1490,17 +1496,17 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule1_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {x, y, z}, {x, y * z});
+  auto tv2 = reshape(tv1, {x, y, z}, {x, y * z});
   fusion.addOutput(tv2);
 
   auto tv3 = makeConcreteTensor({x, y, z});
   fusion.addInput(tv3);
 
-  auto tv4 = view(tv3, {x, y, z}, {x, y * z});
+  auto tv4 = reshape(tv3, {x, y, z}, {x, y * z});
   fusion.addOutput(tv4);
 
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
+  // Link 0 and 3 together for reshape analysis done based on before the
+  // reshapes actually happened.
   auto tv5 = add(tv0, tv3);
   fusion.addOutput(tv5);
 
@@ -1520,8 +1526,8 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule1_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t3}, {t2, t4, t5}, __LINE__, __FILE__);
 }
 
-// Make sure views of views are correct
-TEST_F(NVFuserTest, FusionViewMagicSchedule2_CUDA) {
+// Make sure reshapes of reshapes are correct
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule2_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1533,10 +1539,10 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule2_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {x, y, z}, {x, y * z});
-  auto tv3 = view(tv2, {x, y * z}, {x * y, z});
-  auto tv4 = view(tv3, {x * y, z}, {y, x * z});
-  auto tv5 = view(tv4, {y, x * z}, {x, y, z});
+  auto tv2 = reshape(tv1, {x, y, z}, {x, y * z});
+  auto tv3 = reshape(tv2, {x, y * z}, {x * y, z});
+  auto tv4 = reshape(tv3, {x * y, z}, {y, x * z});
+  auto tv5 = reshape(tv4, {y, x * z}, {x, y, z});
   fusion.addOutput(tv5);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -1544,9 +1550,9 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule2_CUDA) {
   at::Tensor t0 = at::randn({x, y, z}, options);
   auto aten_out = sin(t0);
 
-  // For now pointwise scheduler only accepts a single view at a time, so this
-  // will be broken up into multiple kernels. This is due to the reference check
-  // looking for all mappings to all input IDs.
+  // For now pointwise scheduler only accepts a single reshape at a time, so
+  // this will be broken up into multiple kernels. This is due to the reference
+  // check looking for all mappings to all input IDs.
   // TODO: Fix the reference check for this case
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0});
@@ -1554,9 +1560,10 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {aten_out}, __LINE__, __FILE__);
 }
 
-// Make sure broadcasts not on the view path that don't interfere with view are
-// segmented in one kernel and correctly trigger 2D pointwise scheduling
-TEST_F(NVFuserTest, FusionViewMagicSchedule3_CUDA) {
+// Make sure broadcasts not on the reshape path that don't interfere with
+// reshape are segmented in one kernel and correctly trigger 2D pointwise
+// scheduling
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule3_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1568,30 +1575,30 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule3_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {x, y, z}, {x, y * z});
+  auto tv2 = reshape(tv1, {x, y, z}, {x, y * z});
   fusion.addOutput(tv2);
 
   auto tv3 = makeConcreteTensor({x, y, z});
   fusion.addInput(tv3);
 
-  auto tv4 = view(tv3, {x, y, z}, {x, y * z});
+  auto tv4 = reshape(tv3, {x, y, z}, {x, y * z});
   fusion.addOutput(tv4);
 
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
+  // Link 0 and 3 together for reshape analysis done based on before the
+  // reshapes actually happened.
   auto tv5 = add(tv0, tv3);
   fusion.addOutput(tv5);
 
   // Broadcast on another branch to drive the pointwise reference to not be on
-  // the view paths.
+  // the reshape paths.
 
   auto tv6 = makeConcreteTensor({w, x, y, z});
   fusion.addInput(tv6);
   auto tv7 = broadcast(tv0, {true, false, false, false});
   auto tv8 = add(tv6, tv7);
   // tv8 should be the reference for the pointwise fusion. This broadcast
-  // pattern doesn't interfere with the views, so this should also be scheduled
-  // as 2D.
+  // pattern doesn't interfere with the reshapes, so this should also be
+  // scheduled as 2D.
   fusion.addOutput(tv8);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -1621,9 +1628,9 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule3_CUDA) {
       &fusion, cg_outputs, {t0, t3, t6}, {t2, t4, t5, t8}, __LINE__, __FILE__);
 }
 
-// Make sure broadcasts through views when not conflicting with view are
+// Make sure broadcasts through reshapes when not conflicting with reshape are
 // segmented into one kernel and trigger 2D pointwise scheduler.
-TEST_F(NVFuserTest, FusionViewMagicSchedule4_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule4_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1635,7 +1642,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule4_CUDA) {
 
   auto tv1 = sin(tv0);
 
-  auto tv2 = view(tv1, {x, y, z}, {x, y * z});
+  auto tv2 = reshape(tv1, {x, y, z}, {x, y * z});
   fusion.addOutput(tv2);
 
   auto tv3 = makeConcreteTensor({x, y, z});
@@ -1646,11 +1653,11 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule4_CUDA) {
 
   auto tv5 = add(tv4, tv3);
 
-  auto tv6 = view(tv5, {x, y, z}, {x, y * z});
+  auto tv6 = reshape(tv5, {x, y, z}, {x, y * z});
   fusion.addOutput(tv6);
 
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
+  // Link 0 and 3 together for reshape analysis done based on before the
+  // reshapes actually happened.
   auto tv7 = add(tv0, tv3);
   fusion.addOutput(tv7);
 
@@ -1681,9 +1688,9 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule4_CUDA) {
       &fusion, cg_outputs, {t0, t3, t4}, {t2, t6, t7}, __LINE__, __FILE__);
 }
 
-// Make sure different views that are consumed by the reference are segmented
+// Make sure different reshapes that are consumed by the reference are segmented
 // into a single kernel.
-TEST_F(NVFuserTest, FusionViewMagicSchedule5_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule5_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1693,12 +1700,12 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule5_CUDA) {
   auto tv0 = makeConcreteTensor({w, x, y * z});
   fusion.addInput(tv0);
   auto tv1 = sin(tv0);
-  auto tv2 = view(tv1, {w, x, y * z}, {z, y, x, w});
+  auto tv2 = reshape(tv1, {w, x, y * z}, {z, y, x, w});
 
   auto tv3 = makeConcreteTensor({w, x * y, z});
   fusion.addInput(tv3);
   auto tv4 = cos(tv3);
-  auto tv5 = view(tv4, {w, x * y, z}, {z, y, x, w});
+  auto tv5 = reshape(tv4, {w, x * y, z}, {z, y, x, w});
 
   auto tv6 = add(tv2, tv5);
   fusion.addOutput(tv6);
@@ -1725,8 +1732,8 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule5_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t3}, {t6}, __LINE__, __FILE__);
 }
 
-// Test view/transpose and its impact on vectorization
-TEST_F(NVFuserTest, FusionViewMagicSchedule6_CUDA) {
+// Test reshape/transpose and its impact on vectorization
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule6_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1735,7 +1742,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule6_CUDA) {
 
   auto tv0 = makeContigTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {x, y}, {x, y / 2, 2});
+  auto tv1 = reshape(tv0, {x, y}, {x, y / 2, 2});
   auto tv2 = transpose(tv1, 0, 1);
 
   auto tv3 = makeContigTensor(3);
@@ -1772,7 +1779,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule6_CUDA) {
 }
 
 // View with 3D reduction scheduling
-TEST_F(NVFuserTest, FusionViewMagicSchedule7_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule7_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1782,12 +1789,12 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule7_CUDA) {
   auto tv0 = makeConcreteTensor({w, v, x, y, z});
   fusion.addInput(tv0);
   auto tv1 = sin(tv0);
-  auto tv2 = view(tv1, {w, v, x, y, z}, {v * w, x, y * z});
+  auto tv2 = reshape(tv1, {w, v, x, y, z}, {v * w, x, y * z});
 
   auto tv3 = makeConcreteTensor({v, w, x, z, y});
   fusion.addInput(tv3);
   auto tv4 = cos(tv3);
-  auto tv5 = view(tv4, {v, w, x, z, y}, {v * w, x, y * z});
+  auto tv5 = reshape(tv4, {v, w, x, z, y}, {v * w, x, y * z});
 
   auto tv6 = add(tv2, tv5);
   auto tv7 = sum(tv6, {0, 2});
@@ -1816,7 +1823,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule7_CUDA) {
 }
 
 // View with 3D normalization scheduling
-TEST_F(NVFuserTest, FusionViewMagicSchedule8_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule8_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1826,12 +1833,12 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule8_CUDA) {
   auto tv0 = makeConcreteTensor({w, v, x, y, z});
   fusion.addInput(tv0);
   auto tv1 = sin(tv0);
-  auto tv2 = view(tv1, {w, v, x, y, z}, {v * w, x, y * z});
+  auto tv2 = reshape(tv1, {w, v, x, y, z}, {v * w, x, y * z});
 
   auto tv3 = makeConcreteTensor({v, w, x, z, y});
   fusion.addInput(tv3);
   auto tv4 = cos(tv3);
-  auto tv5 = view(tv4, {v, w, x, z, y}, {v * w, x, y * z});
+  auto tv5 = reshape(tv4, {v, w, x, z, y}, {v * w, x, y * z});
 
   auto tv6 = add(tv2, tv5);
   auto tv7 = sum(tv6, {0, 2});
@@ -1866,7 +1873,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule8_CUDA) {
 }
 
 // AlbertForMaskedLM repro https://github.com/csarofeen/pytorch/issues/2066
-TEST_F(NVFuserTest, FusionViewMagicSchedule9_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule9_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1900,7 +1907,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule9_CUDA) {
   auto tv16 = mul(tv15, tv5);
   auto tv17 = add(tv16, tv7);
   auto tv18 = castOp(DataType::Float, tv17);
-  auto tv19 = view(tv18, {x, y, z}, {x * y, z});
+  auto tv19 = reshape(tv18, {x, y, z}, {x * y, z});
   fusion.addOutput(tv6);
   fusion.addOutput(tv13);
   fusion.addOutput(tv19);
@@ -1940,8 +1947,8 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule9_CUDA) {
       __FILE__);
 }
 
-// Simpler version of FusionViewMagicSchedule9_CUDA
-TEST_F(NVFuserTest, FusionViewMagicSchedule10_CUDA) {
+// Simpler version of FusionReshapeMagicSchedule9_CUDA
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule10_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1960,7 +1967,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule10_CUDA) {
 
   auto tv5 = add(tv2, tv4);
   auto tv6 = add(tv5, tv3);
-  auto tv7 = view(tv6, {x, y, z}, {x * y, z});
+  auto tv7 = reshape(tv6, {x, y, z}, {x * y, z});
   fusion.addOutput(tv4);
   fusion.addOutput(tv7);
 
@@ -1973,7 +1980,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule10_CUDA) {
 }
 
 // CamemBert repro
-TEST_F(NVFuserTest, FusionViewMagicSchedule11_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMagicSchedule11_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -1983,8 +1990,8 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule11_CUDA) {
   auto tv0 = makeContigConcreteTensor({1, -1, -1, -1});
   fusion.addInput(tv0);
   auto tv1 = set(tv0);
-  auto tv2 = view(tv1, {1, x, y, z}, {1, x, y * z});
-  auto tv3 = view(tv2, {1, x, y * z}, {x, y * z});
+  auto tv2 = reshape(tv1, {1, x, y, z}, {1, x, y * z});
+  auto tv3 = reshape(tv2, {1, x, y * z}, {x, y * z});
   fusion.addOutput(tv3);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -1998,9 +2005,9 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule11_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {t3}, __LINE__, __FILE__);
 }
 
-// Make sure different views that are consumed by the reference are segmented
+// Make sure different reshapes that are consumed by the reference are segmented
 // into a single kernel.
-TEST_F(NVFuserTest, FusionViewMapping_CUDA) {
+TEST_F(NVFuserTest, FusionReshapeMapping_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -2010,12 +2017,12 @@ TEST_F(NVFuserTest, FusionViewMapping_CUDA) {
   auto tv0 = makeConcreteTensor({w, x, y * z});
   fusion.addInput(tv0);
   auto tv1 = sin(tv0);
-  auto tv2 = view(tv1, {w, x, y * z}, {z, y, x, w});
+  auto tv2 = reshape(tv1, {w, x, y * z}, {z, y, x, w});
 
   auto tv3 = makeConcreteTensor({w, x * y, z});
   fusion.addInput(tv3);
   auto tv4 = cos(tv3);
-  auto tv5 = view(tv4, {w, x * y, z}, {z, y, x, w});
+  auto tv5 = reshape(tv4, {w, x * y, z}, {z, y, x, w});
 
   auto tv6 = add(tv2, tv5);
   fusion.addOutput(tv6);
@@ -2064,7 +2071,7 @@ TEST_F(NVFuserTest, FusionLowerDivisibleSplits_CUDA) {
   auto tv0 = makeContigTensor(4);
   fusion.addInput(tv0);
   auto tv1 = sin(tv0);
-  auto tv2 = view(tv1, {w, x, y, z}, {z, y, x, w});
+  auto tv2 = reshape(tv1, {w, x, y, z}, {z, y, x, w});
 
   fusion.addOutput(tv2);
 
@@ -2152,7 +2159,7 @@ TEST_F(NVFuserTest, FusionIssue2076_CUDA) {
   fusion.addInput(tv2);
 
   auto tv3 = castOp(DataType::Float, tv0);
-  auto tv4 = view(tv1, {48, 128, 128}, {4, 12, 128, 128});
+  auto tv4 = reshape(tv1, {48, 128, 128}, {4, 12, 128, 128});
 
   auto tv5 = mul(tv3, IrBuilder::create<Double>(1));
   auto tv6 = sub(IrBuilder::create<Double>(1), tv5);
@@ -2169,7 +2176,7 @@ TEST_F(NVFuserTest, FusionIssue2076_CUDA) {
        tv10->axis(3)->extent()});
 
   auto tv12 = add(tv4, tv11);
-  auto tv13 = view(tv12, {4, 12, 128, 128}, {48, 128, 128});
+  auto tv13 = reshape(tv12, {4, 12, 128, 128}, {48, 128, 128});
   auto tv14 = max(tv13, {2});
   auto tv15 = broadcast(tv14, {false, false, true});
   auto tv16 = set(tv15);
@@ -2201,7 +2208,7 @@ TEST_F(NVFuserTest, FusionIssue2076_CUDA) {
   at::Tensor t2 = at::randn({4, 1, 128, 128}, options);
 
   auto t3 = t0.to(at::kFloat);
-  auto t4 = t1.view({4, 12, 128, 128});
+  auto t4 = t1.reshape({4, 12, 128, 128});
 
   // [4, 1, 128, 128]
   auto t5 = t3 * 1;
@@ -2214,7 +2221,7 @@ TEST_F(NVFuserTest, FusionIssue2076_CUDA) {
   auto t11 = t10.expand({4, 12, 128, 128});
 
   auto t12 = t4 + t11;
-  auto t13 = t12.view({48, 128, 128});
+  auto t13 = t12.reshape({48, 128, 128});
   // 48, 128, 128
   auto t14 = std::get<0>(t13.max(2));
   auto t15 = t14.unsqueeze(-1);
@@ -2258,11 +2265,11 @@ TEST_F(NVFuserTest, FusionIssue2076_v2_CUDA) {
   auto tv2 = makeContigConcreteTensor({-1, 1, -1});
   fusion.addInput(tv2);
 
-  auto tv3 = view(tv1, {48, 128}, {4, 12, 128});
+  auto tv3 = reshape(tv1, {48, 128}, {4, 12, 128});
   auto tv4 = add(tv0, tv2);
 
   auto tv5 = add(tv3, tv4);
-  auto tv6 = view(tv5, {4, 12, 128}, {48, 128});
+  auto tv6 = reshape(tv5, {4, 12, 128}, {48, 128});
 
   fusion.addOutput(tv4);
   fusion.addOutput(tv6);
@@ -2273,12 +2280,12 @@ TEST_F(NVFuserTest, FusionIssue2076_v2_CUDA) {
   at::Tensor t1 = at::randn({48, 128}, options);
   at::Tensor t2 = at::randn({4, 1, 128}, options);
 
-  auto t3 = t1.view({4, 12, 128});
+  auto t3 = t1.reshape({4, 12, 128});
 
   // [4, 1, 128]
   auto t4 = t0.add(t2);
   auto t5 = t3.add(t4);
-  auto t6 = t5.view({48, 128});
+  auto t6 = t5.reshape({48, 128});
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1, t2});

@@ -1154,7 +1154,7 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization3_CUDA) {
   auto tv2 = sum(tv0, {0});
   auto tv3 = set(tv2);
   auto tv4 =
-      view(tv3, {input_shape.begin() + 1, input_shape.end()}, output_shape);
+      reshape(tv3, {input_shape.begin() + 1, input_shape.end()}, output_shape);
   auto tv5 = add(tv4, IrBuilder::create<Double>(1));
   fusion.addOutput(tv5);
 
@@ -1162,7 +1162,7 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization3_CUDA) {
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
 
-  // The view op adds a broadcast domain in tv4, which is
+  // The reshape op adds a broadcast domain in tv4, which is
   // parallelized. Howver, it is never materialized, so there should
   // be no parallel broadcast.
 
@@ -6142,7 +6142,7 @@ TEST_F(NVFuserTest, FusionRepro2094_CUDA) {
         {IrBuilder::create<Int>(1),
          IrBuilder::create<Int>(1024),
          IrBuilder::create<Int>(768)});
-    auto tv5 = view(tv2, {1024, 768}, {1, 1024, 768});
+    auto tv5 = reshape(tv2, {1024, 768}, {1, 1024, 768});
     auto tv6 = castOp(DataType::Float, tv5);
     auto s7 = IrBuilder::create<Double>(0.5);
     auto tv8 = mul(tv6, s7);
@@ -6186,7 +6186,7 @@ TEST_F(NVFuserTest, FusionRepro2094_CUDA) {
     auto tv29 = add(tv28, tv4);
     auto tv30 = castOp(DataType::Float, tv29);
     auto tv31 = castOp(DataType::Half, tv30);
-    auto tv32 = view(tv31, {1, 1024, 768}, {1024, 768});
+    auto tv32 = reshape(tv31, {1, 1024, 768}, {1024, 768});
     fusion->addOutput(tv5);
     fusion->addOutput(tv16);
     fusion->addOutput(tv20);

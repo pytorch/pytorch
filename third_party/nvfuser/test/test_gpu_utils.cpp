@@ -93,7 +93,7 @@ TEST_F(NVFuserTest, FusionDisjointViewSet_CUDA) {
   auto tv0 = makeConcreteTensor({2, 3, 4});
   fusion->addInput(tv0);
 
-  auto tv1 = view(tv0, {2, 3, 4}, {2, 12});
+  auto tv1 = reshape(tv0, {2, 3, 4}, {2, 12});
 
   auto tv2 = makeConcreteTensor({2, 12});
   fusion->addInput(tv2);
@@ -117,14 +117,14 @@ TEST_F(NVFuserTest, FusionBroadcastViewMultiples_CUDA) {
   fusion.addInput(tv0);
 
   // tie e and f together (swapping values next to eachother enforces they'll be
-  // merged then split by view)
-  auto tv1 = view(tv0, {a, b, c, d, e, f}, {a, b, c, d, f, e});
+  // merged then split by reshape)
+  auto tv1 = reshape(tv0, {a, b, c, d, e, f}, {a, b, c, d, f, e});
   fusion.addOutput(tv1);
 
   // swap d and e
   auto tv2 = transpose(tv1, 3, 4);
   // tie c and e together
-  auto tv3 = view(tv2, {a, b, c, e, d, f}, {a, b, e, c, d, f});
+  auto tv3 = reshape(tv2, {a, b, c, e, d, f}, {a, b, e, c, d, f});
 
   fusion.addOutput(tv3);
 
@@ -182,7 +182,8 @@ TEST_F(NVFuserTest, FusionBroadcastViewMultiples_CUDA) {
   // tv3  [a, b, c, d, e, f]
   // tv4  [a, b, c, d, e, f]
   // tv5  [1, 1, c, 1, e, f] -> Left bcasts should show up in some multiples
-  // tv6  [a, b, c, 1, 1, 1] -> view interferes with bcasts, non of these should
+  // tv6  [a, b, c, 1, 1, 1] -> reshape interferes with bcasts, non of these
+  // should
   //                            show up
   // tv7  [a, b, 1, 1, 1, 1] -> These broadcasts could be recognized
   // tv10 [a, b, c, d, e, f]
@@ -302,7 +303,7 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper1_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2 * 3});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3}, {2, 3});
+  auto tv1 = reshape(tv0, {2 * 3}, {2, 3});
   fusion.addOutput(tv1);
 
   {
@@ -359,8 +360,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper2_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2 * 3 * 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3 * 4}, {2 * 3, 4});
-  auto tv2 = view(tv1, {2 * 3, 4}, {2, 3, 4});
+  auto tv1 = reshape(tv0, {2 * 3 * 4}, {2 * 3, 4});
+  auto tv2 = reshape(tv1, {2 * 3, 4}, {2, 3, 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -406,8 +407,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper3_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2 * 3 * 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3 * 4}, {2, 3 * 4});
-  auto tv2 = view(tv1, {2, 3 * 4}, {2, 3, 4});
+  auto tv1 = reshape(tv0, {2 * 3 * 4}, {2, 3 * 4});
+  auto tv2 = reshape(tv1, {2, 3 * 4}, {2, 3, 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -441,7 +442,7 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper4_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3}, {2 * 3});
+  auto tv1 = reshape(tv0, {2, 3}, {2 * 3});
   fusion.addOutput(tv1);
 
   {
@@ -484,8 +485,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper5_CUDA) {
 
   auto tv0 = makeContigTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3, 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2, 3 * 4});
+  auto tv1 = reshape(tv0, {2 * 3, 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2, 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -533,8 +534,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper6_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2 * 3, 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3, 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2, 3 * 4});
+  auto tv1 = reshape(tv0, {2 * 3, 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2, 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -571,8 +572,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper7_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3 * 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3 * 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2, 3 * 4});
+  auto tv1 = reshape(tv0, {2, 3 * 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2, 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -608,8 +609,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper8_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3 * 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3 * 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2 * 3, 4});
+  auto tv1 = reshape(tv0, {2, 3 * 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2 * 3, 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -645,8 +646,8 @@ TEST_F(NVFuserTest, FusionVectorizeBackwardMapper9_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({3, 5, 7});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {3, 5, 7}, {7, 5 * 3});
-  auto tv2 = view(tv1, {7, 5 * 3}, {3, 5, 7});
+  auto tv1 = reshape(tv0, {3, 5, 7}, {7, 5 * 3});
+  auto tv2 = reshape(tv1, {7, 5 * 3}, {3, 5, 7});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -694,7 +695,7 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper1_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3}, {2 * 3});
+  auto tv1 = reshape(tv0, {2, 3}, {2 * 3});
   fusion.addOutput(tv1);
   {
     // No mappings
@@ -750,8 +751,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper2_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3, 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3, 4}, {2 * 3, 4});
-  auto tv2 = view(tv1, {2 * 3, 4}, {2 * 3 * 4});
+  auto tv1 = reshape(tv0, {2, 3, 4}, {2 * 3, 4});
+  auto tv2 = reshape(tv1, {2 * 3, 4}, {2 * 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -797,8 +798,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper3_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3, 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3, 4}, {2, 3 * 4});
-  auto tv2 = view(tv1, {2, 3 * 4}, {2 * 3 * 4});
+  auto tv1 = reshape(tv0, {2, 3, 4}, {2, 3 * 4});
+  auto tv2 = reshape(tv1, {2, 3 * 4}, {2 * 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -832,7 +833,7 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper4_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2 * 3});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3}, {2, 3});
+  auto tv1 = reshape(tv0, {2 * 3}, {2, 3});
   fusion.addOutput(tv1);
 
   {
@@ -875,8 +876,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper5_CUDA) {
 
   auto tv0 = makeContigTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3 * 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2 * 3, 4});
+  auto tv1 = reshape(tv0, {2, 3 * 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2 * 3, 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -924,8 +925,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper6_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3 * 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3 * 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {{2 * 3, 4}});
+  auto tv1 = reshape(tv0, {2, 3 * 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {{2 * 3, 4}});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -962,8 +963,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper7_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2, 3 * 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2, 3 * 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2, 3 * 4});
+  auto tv1 = reshape(tv0, {2, 3 * 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2, 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -999,8 +1000,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper8_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({2 * 3, 4});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {2 * 3, 4}, {2 * 3 * 4});
-  auto tv2 = view(tv1, {2 * 3 * 4}, {2, 3 * 4});
+  auto tv1 = reshape(tv0, {2 * 3, 4}, {2 * 3 * 4});
+  auto tv2 = reshape(tv1, {2 * 3 * 4}, {2, 3 * 4});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -1036,8 +1037,8 @@ TEST_F(NVFuserTest, FusionVectorizeForwardMapper9_CUDA) {
 
   auto tv0 = makeContigConcreteTensor({3, 5, 7});
   fusion.addInput(tv0);
-  auto tv1 = view(tv0, {3, 5, 7}, {7, 5 * 3});
-  auto tv2 = view(tv1, {7, 5 * 3}, {3, 5, 7});
+  auto tv1 = reshape(tv0, {3, 5, 7}, {7, 5 * 3});
+  auto tv2 = reshape(tv1, {7, 5 * 3}, {3, 5, 7});
   fusion.addOutput(tv2);
 
   auto mapper = vectorize_helper::ContiguousInnerDimensionsMapper::map(
@@ -1091,21 +1092,21 @@ TEST_F(NVFuserTest, FusionVectorizeMapperAdvanced_CUDA) {
   auto tv0 = makeContigConcreteTensor({3, 4 * 6});
   fusion.addInput(tv0);
 
-  auto tv1 = view(tv0, {3, 4 * 6}, {3, 4, 6});
+  auto tv1 = reshape(tv0, {3, 4 * 6}, {3, 4, 6});
   auto tv2 = broadcast(tv1, {false, false, true, false});
 
   auto tv3 = makeContigConcreteTensor({3, 4, 5, 6});
   fusion.addInput(tv3);
   auto tv4 = add(tv3, tv2);
 
-  auto tv5 = view(tv4, {3, 4, 5, 6}, {3 * 4 * 5, 6});
+  auto tv5 = reshape(tv4, {3, 4, 5, 6}, {3 * 4 * 5, 6});
 
   // Broadcast path from tv0->tv5
   fusion.addOutput(tv5);
 
   // Sum path from tv3->tv6
   auto tv6 = sum(tv3, {2});
-  auto tv7 = view(tv6, {3, 4, 6}, {3, 4 * 6});
+  auto tv7 = reshape(tv6, {3, 4, 6}, {3, 4 * 6});
   fusion.addOutput(tv7);
   {
     // tv5[3*4*5, 6]

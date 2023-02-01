@@ -2113,7 +2113,7 @@ TEST_F(NVFuserTest, FusionAmpereStridedBatchedMatmulTN_CUDA) {
   TORCH_CHECK(cg_outputs[0].allclose(ref, 0.0001, 0.0001));
 }
 
-// Matmul test on Ampere with a view on prolog
+// Matmul test on Ampere with a reshape on prolog
 TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
 
@@ -2129,10 +2129,10 @@ TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  auto tv0_view = view(tv0, {M, Ko, Ki}, {M, K});
+  auto tv0_reshape = reshape(tv0, {M, Ko, Ki}, {M, K});
 
   // [M,N,K]
-  auto tv0b = broadcast(tv0_view, {false, true, false});
+  auto tv0b = broadcast(tv0_reshape, {false, true, false});
   auto tv1b = broadcast(tv1, {true, false, false});
 
   // Leaving both sets of mma inputs for volta outside
@@ -2154,7 +2154,7 @@ TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
 
   auto tv0r = tv0->cacheAfter();
   auto tv1r = tv1->cacheAfter();
-  auto tv0cw = tv0_view->cacheAfter();
+  auto tv0cw = tv0_reshape->cacheAfter();
   auto tv0cr =
       tv0cw->cacheAfter(mma_builder.operand(MmaOptions::Operand::A).ldMatrix());
   auto tv1cw = tv1r->cacheAfter();
@@ -2204,7 +2204,7 @@ TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   // [Mo,Ko,M,K]
   tv0cw->merge(-2);
   tv0r->merge(-2);
-  tv0_view->merge(-2);
+  tv0_reshape->merge(-2);
   scheduler_utils::matmul_utils::scheduleContiguousVectorLoad(
       tv0cw, gemm_tile, 8);
   scheduler_utils::matmul_utils::scheduleContiguousVectorLoad(
@@ -2239,9 +2239,9 @@ TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   tv2->applyMmaSwizzle(
       mma_builder.operand(MmaOptions::Operand::Accumulator).build());
 
-  // Inline the view op with the shared mem write minus
+  // Inline the reshape op with the shared mem write minus
   //  the vectorization axes for now.
-  tv0_view->computeAt(tv0cw, -2);
+  tv0_reshape->computeAt(tv0cw, -2);
 
   // Parallelize
   //  0   1  2  3    4   5  6  7  8  9  10

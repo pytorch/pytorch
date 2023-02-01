@@ -3234,7 +3234,7 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(
                   view_sizes.has_value(), "The size parameter is required.");
 
-              auto output = view(self, self_sizes, view_sizes->vec());
+              auto output = reshape(self, self_sizes, view_sizes->vec());
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {

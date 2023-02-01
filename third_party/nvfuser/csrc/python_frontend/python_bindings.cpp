@@ -1421,14 +1421,14 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("arg"),
       py::return_value_policy::reference);
   nvf_ops.def(
-      "view",
+      "reshape",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,
          std::vector<int64_t>& original_shape,
          std::vector<int64_t>& new_shape) -> nvfuser::Tensor {
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor(new_shape.size());
-        self.fusion_definition->defineRecord(new nvfuser::ViewOpRecord(
+        self.fusion_definition->defineRecord(new nvfuser::ReshapeOpRecord(
             {fd->recordingState(arg())},
             {fd->recordingState(output())},
             original_shape,

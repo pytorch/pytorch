@@ -270,13 +270,13 @@ def _view_of_nvfuser(fd, a):
     return fd.ops.set(a)
 
 
-def _view_nvfuser(
+def _reshape_nvfuser(
     fd,
     a,
     a_shape,
     new_shape,
 ):
-    return fd.ops.view(a, a_shape, new_shape)
+    return fd.ops.reshape(a, a_shape, new_shape)
 
 
 def _sum_nvfuser(
@@ -372,7 +372,7 @@ _nvfuser_impls["clone"] = _clone_nvfuser
 _nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
-_nvfuser_impls["view"] = _view_nvfuser
+_nvfuser_impls["reshape"] = _reshape_nvfuser
 _nvfuser_impls["rand_like"] = _rand_like_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
@@ -516,7 +516,7 @@ _nvfuser_is_recomputable: Dict[str, bool] = {
     "tanh": True,
     "transpose": True,
     "trunc": True,
-    "view": True,
+    "reshape": True,
     "view_of": True,
     "where": True,
 }
@@ -792,8 +792,8 @@ def register_view():
 
     for p in (prim_packet, prim):
         p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
-        p.impl_nvfuser = _nvfuser_impls["view"]
-        p.is_recomputable = _nvfuser_is_recomputable["view"]
+        p.impl_nvfuser = _nvfuser_impls["reshape"]
+        p.is_recomputable = _nvfuser_is_recomputable["reshape"]
         p.return_type = torch._prims_common.RETURN_TYPE.VIEW  # type: ignore[attr-defined]
         p.impl_aten = _nvprims_view_impl_aten
 

@@ -38,7 +38,7 @@ enum class RecordType {
   TensorSizes,
   VarianceOp,
   VarianceMeanOp,
-  ViewOp
+  ReshapeOp
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -272,8 +272,8 @@ struct OpRecord : RecordFunctor {
   std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
-struct ViewOpRecord : RecordFunctor {
-  ViewOpRecord(
+struct ReshapeOpRecord : RecordFunctor {
+  ReshapeOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::vector<int64_t>& original_shape,
@@ -281,13 +281,13 @@ struct ViewOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "ops.view",
-            RecordType::ViewOp),
+            "ops.reshape",
+            RecordType::ReshapeOp),
         original_shape_(std::move(original_shape)),
         new_shape_(std::move(new_shape)) {}
-  virtual ~ViewOpRecord() = default;
+  virtual ~ReshapeOpRecord() = default;
   virtual RecordFunctor* clone() final {
-    return new ViewOpRecord(*this);
+    return new ReshapeOpRecord(*this);
   }
 
   //! Child specific hash function in lower 32 bits.
@@ -309,7 +309,7 @@ struct ViewOpRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const ViewOpRecord*>(&other)) {
+    if (auto child_ptr = dynamic_cast<const ReshapeOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       result &= std::equal(
           original_shape_.begin(),
@@ -324,8 +324,7 @@ struct ViewOpRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto arg =
         fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output =
-        torch::jit::fuser::cuda::view(arg, original_shape_, new_shape_);
+    auto output = Nvf::reshape(arg, original_shape_, new_shape_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 

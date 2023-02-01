@@ -18,7 +18,7 @@ namespace cuda {
 
 TORCH_CUDA_CU_API TensorView* view(TensorView* x, DataType dtype);
 
-TORCH_CUDA_CU_API TensorView* view(
+TORCH_CUDA_CU_API TensorView* reshape(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes);
