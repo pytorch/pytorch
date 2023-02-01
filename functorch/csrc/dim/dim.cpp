@@ -22,6 +22,11 @@
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
+// On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
+// So they need to be redefined within _functorch
+#if defined(_WIN32)
+#define NEED_OPCODE_TABLES
+#endif
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE
