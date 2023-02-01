@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import operator
+from enum import Enum
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -100,6 +101,28 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
 
         self.assertTrue(hit)
+
+    def test_export_control_flow_with_getattr(self):
+        class Animal(Enum):
+            COW = "moo"
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, a):
+                super().__init__()
+                self.a = a
+
+            def forward(self, x):
+                if self.a == Animal.COW.value:
+                    return x * x
+                else:
+                    raise ValueError("bad")
+
+        module = MyModule("moo")
+        input = (torch.ones(4, 3),)
+        resA = module(*input)
+        graph, _ = torch._dynamo.export(module, *input)
+        resB = graph(*input)
+        self.assertTrue(torch._dynamo.utils.same(resA, resB))
 
     def test_export_graph_bypass(self):
         inp = [
