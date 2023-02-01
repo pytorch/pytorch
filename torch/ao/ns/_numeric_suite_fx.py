@@ -387,11 +387,11 @@ def extract_weights(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    if hasattr(model_a, 'meta') and '_observed_graph_module_attrs' in model_a.meta:
-        gm_a._node_name_to_scope = model_a.meta['_observed_graph_module_attrs'].node_name_to_scope
+    if hasattr(model_a, 'meta') and '_observed_graph_module_attrs' in model_a.meta:  # type: ignore[operator, index]
+        gm_a._node_name_to_scope = model_a.meta['_observed_graph_module_attrs'].node_name_to_scope  # type: ignore[union-attr, index]
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    if hasattr(model_b, 'meta') and '_observed_graph_module_attrs' in model_b.meta:
-        gm_b._node_name_to_scope = model_b.meta['_observed_graph_module_attrs'].node_name_to_scope
+    if hasattr(model_b, 'meta') and '_observed_graph_module_attrs' in model_b.meta:  # type: ignore[operator, index]
+        gm_b._node_name_to_scope = model_b.meta['_observed_graph_module_attrs'].node_name_to_scope  # type: ignore[union-attr, index]
     return _extract_weights_impl(
         model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops,
         unmatchable_types_map, op_to_type_to_weight_extraction_fn)
@@ -498,11 +498,11 @@ def add_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    if hasattr(model_a, 'meta') and '_observed_graph_module_attrs' in model_a.meta:
-        gm_a._node_name_to_scope = model_a.meta['_observed_graph_module_attrs'].node_name_to_scope
+    if hasattr(model_a, 'meta') and '_observed_graph_module_attrs' in model_a.meta:  # type: ignore[operator, index]
+        gm_a._node_name_to_scope = model_a.meta['_observed_graph_module_attrs'].node_name_to_scope  # type: ignore[union-attr, index]
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    if hasattr(model_b, 'meta') and '_observed_graph_module_attrs' in model_b.meta:
-        gm_b._node_name_to_scope = model_b.meta['_observed_graph_module_attrs'].node_name_to_scope
+    if hasattr(model_b, 'meta') and '_observed_graph_module_attrs' in model_b.meta:  # type: ignore[operator, index]
+        gm_b._node_name_to_scope = model_b.meta['_observed_graph_module_attrs'].node_name_to_scope  # type: ignore[union-attr, index]
     return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -651,11 +651,11 @@ def add_shadow_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    if hasattr(model_a, 'meta') and '_observed_graph_module_attrs' in model_a.meta:
-        gm_a._node_name_to_scope = model_a.meta['_observed_graph_module_attrs'].node_name_to_scope
+    if hasattr(model_a, 'meta') and '_observed_graph_module_attrs' in model_a.meta:  # type: ignore[operator, index]
+        gm_a._node_name_to_scope = model_a.meta['_observed_graph_module_attrs'].node_name_to_scope  # type: ignore[union-attr, index]
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    if hasattr(model_b, 'meta') and '_observed_graph_module_attrs' in model_b.meta:
-        gm_b._node_name_to_scope = model_b.meta['_observed_graph_module_attrs'].node_name_to_scope
+    if hasattr(model_b, 'meta') and '_observed_graph_module_attrs' in model_b.meta:  # type: ignore[operator, index]
+        gm_b._node_name_to_scope = model_b.meta['_observed_graph_module_attrs'].node_name_to_scope  # type: ignore[union-attr, index]
     return _add_shadow_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
