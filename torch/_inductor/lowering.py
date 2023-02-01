@@ -1719,6 +1719,20 @@ def new_empty_strided(
     )
 
 
+@register_lowering(prims.copy_strided.default)
+def copy_strided(x, stride):
+    output = empty_strided(
+        x.get_size(),
+        stride,
+        dtype=x.get_dtype(),
+        layout=torch.strided,
+        device=x.get_device(),
+        pin_memory=False,
+    )
+    copy_(output, x)
+    return output
+
+
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
     return tensor_constructor(fill_value)(size, **kwargs)
