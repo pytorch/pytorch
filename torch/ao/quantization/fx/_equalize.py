@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
+from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 
 from torch.ao.quantization.backend_config import get_native_backend_config
 
@@ -297,7 +298,9 @@ def get_op_node_and_weight_eq_obs(
     if op_node.op == 'call_module':
         # If the op_node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
-        equalization_node_name_to_qconfig: Dict[str, Any] = model._equalization_node_name_to_qconfig  # type: ignore[assignment]
+        maybe_equalization_node_name_to_config = _get_observed_graph_module_attr(model, "equalization_node_name_to_qconfig")
+        assert maybe_equalization_node_name_to_config is not None
+        equalization_node_name_to_qconfig: Dict[str, Any] = maybe_equalization_node_name_to_config  # type: ignore[assignment]
         assert(equalization_node_name_to_qconfig.get(op_node.name, None) is not None)
         weight_eq_obs = equalization_node_name_to_qconfig.get(op_node.name, None).weight()
 

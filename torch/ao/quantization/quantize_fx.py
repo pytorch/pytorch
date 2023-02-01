@@ -15,6 +15,7 @@ from .backend_config import (  # noqa: F401
     BackendConfig,
     get_tensorrt_backend_config,
 )
+from .fx.graph_module import ObservedGraphModule  # noqa: F401
 from .fx.custom_config import (
     ConvertCustomConfig,
     FuseCustomConfig,
