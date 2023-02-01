@@ -207,7 +207,11 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr,
+        static_cast<int64_t>(nbytes),
+        static_cast<int64_t>(allocated),
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -242,7 +246,11 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr,
+        -static_cast<int64_t>(nbytes),
+        static_cast<int64_t>(allocated),
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 
