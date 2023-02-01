@@ -138,6 +138,16 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
+# By default, we try to detect accuracy failure by running both forward
+# and backward of a torchdynamo produced graph (if you are using repro_after
+# 'dynamo').  This setting forces us to only test the forward graph and
+# not the backward graph.  This can be helpful if you're trying to debug
+# an inference only problem, but the minifier seems to be choking on the
+# backwards step
+# TODO: Detect this situation automatically so the user doesn't need
+# to manually configure this
+repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
+
 # The tolerance we should use when testing if a compiled graph
 # has diverged so that we should treat it as an accuracy failure
 repro_tolerance = 1e-3
