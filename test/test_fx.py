@@ -516,7 +516,6 @@ class TestFX(JitTestCase):
             expected_code
         )
 
-
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
