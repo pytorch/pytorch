@@ -101,7 +101,12 @@ def parallelize_module(  # type: ignore[return]
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
             sub_module = module.get_submodule(module_path)
-            module.register_module(  # type: ignore[call-arg] # pyre-ignore[20]
+            parent_module = module
+            if "." in module_path:
+                parent_module_path = ".".join(module_path.split(".")[:-1])
+                parent_module = module.get_submodule(parent_module_path)
+                module_path = module_path.split(".")[-1]
+            parent_module.register_module(  # type: ignore[call-arg] # pyre-ignore[20]
                 module_path,
                 parallelize_module(  # type: ignore[arg-type]
                     sub_module, device_mesh, parallelize_style  # type: ignore[arg-type] # pyre-ignore[6]
