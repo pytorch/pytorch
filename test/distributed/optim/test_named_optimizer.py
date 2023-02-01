@@ -411,5 +411,17 @@ class NamedOptimizerTest(unittest.TestCase):
         named_sd = named_optim.state_dict()
         self.assertTrue(m.net1[0].weight.grad is not None)
         self.assertTrue("momentum_buffer" in named_sd["state"]["net1.0.weight"])
+        self.assertFalse(
+            torch.all(named_sd["state"]["net1.0.weight"]["momentum_buffer"]).item()
+        )
+        self.assertFalse(
+            torch.all(named_sd["state"]["net1.0.bias"]["momentum_buffer"]).item()
+        )
         self.assertTrue(m.net3.bias.grad is not None)
         self.assertTrue("momentum_buffer" in named_sd["state"]["net3.bias"])
+        self.assertFalse(
+            torch.all(named_sd["state"]["net3.bias"]["momentum_buffer"]).item()
+        )
+        self.assertFalse(
+            torch.all(named_sd["state"]["net3.weight"]["momentum_buffer"]).item()
+        )

@@ -295,6 +295,7 @@ class _NamedOptimizer(optim.Optimizer):
             if param.requires_grad:
                 t = torch.zeros_like(param)
                 param.grad = torch.autograd.Variable(t)
+        # Calling ``step`` will load the initial state for optimizer states.
         self.step(closure=None)
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
