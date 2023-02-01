@@ -168,6 +168,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         }
       }
     }
+  } else if (auto awaitType = value_->type()->cast<AwaitType>()) {
+    auto elType = awaitType->getElementType();
+    auto& g = *m.graph();
+    auto v = g.insert(prim::awaitable_wait, {value_}, {}, loc);
+    auto sv = std::make_shared<SimpleValue>(v);
+    return sv->attr(loc, m, field);
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (classType->findMethod(field)) {
