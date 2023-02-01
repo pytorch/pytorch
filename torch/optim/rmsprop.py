@@ -1,7 +1,9 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc
+from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["RMSprop", "rmsprop"]
 
@@ -187,12 +189,11 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {maximize}
         {differentiable}
 
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
 
 
 def rmsprop(
@@ -203,7 +204,7 @@ def rmsprop(
     momentum_buffer_list: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
     *,
@@ -219,8 +220,8 @@ def rmsprop(
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        _, foreach = _default_to_fused_or_foreach([params, grads, square_avgs, grad_avgs, momentum_buffer_list],
+                                                  differentiable, has_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -326,39 +327,42 @@ def _multi_tensor_rmsprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    if maximize:
-        grads = torch._foreach_neg(grads)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
+    for (grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
+         grouped_momentum_buffer_list) in grouped_tensors.values():
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)
 
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        if weight_decay != 0:
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-    def _view_complex_as_real(tensor_list):
-        return [
-            torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-        ]
+        def _view_complex_as_real(tensor_list):
+            return [
+                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
+            ]
 
-    grads = _view_complex_as_real(grads)
-    params = _view_complex_as_real(params)
-    square_avgs = _view_complex_as_real(square_avgs)
+        grouped_grads = _view_complex_as_real(grouped_grads)
+        grouped_params = _view_complex_as_real(grouped_params)
+        grouped_square_avgs = _view_complex_as_real(grouped_square_avgs)
 
-    torch._foreach_mul_(square_avgs, alpha)
-    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - alpha)
+        torch._foreach_mul_(grouped_square_avgs, alpha)
+        torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)
 
-    if centered:
-        grad_avgs = _view_complex_as_real(grad_avgs)
-        torch._foreach_mul_(grad_avgs, alpha)
-        torch._foreach_add_(grad_avgs, grads, alpha=1 - alpha)
-        avg = torch._foreach_addcmul(square_avgs, grad_avgs, grad_avgs, value=-1)
-        torch._foreach_sqrt_(avg)
-        torch._foreach_add_(avg, eps)
-    else:
-        avg = torch._foreach_sqrt(square_avgs)
-        torch._foreach_add_(avg, eps)
+        if centered:
+            grouped_grad_avgs = _view_complex_as_real(grouped_grad_avgs)
+            torch._foreach_mul_(grouped_grad_avgs, alpha)
+            torch._foreach_add_(grouped_grad_avgs, grouped_grads, alpha=1 - alpha)
+            avg = torch._foreach_addcmul(grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1)
+            torch._foreach_sqrt_(avg)
+            torch._foreach_add_(avg, eps)
+        else:
+            avg = torch._foreach_sqrt(grouped_square_avgs)
+            torch._foreach_add_(avg, eps)
 
-    if momentum > 0:
-        momentum_buffer_list = _view_complex_as_real(momentum_buffer_list)
-        torch._foreach_mul_(momentum_buffer_list, momentum)
-        torch._foreach_addcdiv_(momentum_buffer_list, grads, avg)
-        torch._foreach_add_(params, momentum_buffer_list, alpha=-lr)
-    else:
-        torch._foreach_addcdiv_(params, grads, avg, value=-lr)
+        if momentum > 0:
+            grouped_momentum_buffer_list = _view_complex_as_real(grouped_momentum_buffer_list)
+            torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
+            torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
+            torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)
+        else:
+            torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)

@@ -4,7 +4,7 @@
 import torch
 from torch._C import parse_schema
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.dispatch import OpSchema
+from torch.distributed._tensor.op_schema import OpSchema
 
 from torch.distributed._tensor.ops.common_rules import (
     einop_rule,
