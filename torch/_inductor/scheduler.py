@@ -166,13 +166,10 @@ class BaseSchedulerNode:
         return False
 
     def allocate(self):
-        if (
-            isinstance(self.node, (SchedulerNode,))
-            and (
-                not self.node.should_allocate()
-                or self.node.get_alias_names()
-                or self.node.get_mutation_names()
-            )
+        if isinstance(self.node, (SchedulerNode,)) and (
+            not self.node.should_allocate()
+            or self.node.get_alias_names()
+            or self.node.get_mutation_names()
         ):
             if self.node.should_allocate():
                 # if self.node should allocate or
