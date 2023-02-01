@@ -206,7 +206,7 @@ void spmm_reduce_backward_input_kernel_impl(
   auto crow_data = crow_indices.accessor<index_t, 1>();
   auto col_data = col_indices.accessor<index_t, 1>();
   scalar_t* other_data = other.data_ptr<scalar_t>();
-  index_t* row_data = row_indices.data_ptr<index_t>();
+  auto row_data = row_indices.accessor<index_t, 1>();
 
   int64_t K = grad_out.size(1);
 

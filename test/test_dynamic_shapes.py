@@ -18,7 +18,8 @@ import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, \
+    sym_sqrt, sym_int, to_node, GuardOnDataDependentSymNode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymInt
 
@@ -387,6 +388,12 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
+
+    @skipIfNoSympy
+    def test_data_dependent_guard(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
 
     @skipIfNoSympy
     def test_non_overlapping_and_dense(self):

@@ -27,8 +27,6 @@
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
-#include <ATen/ops/_spmm_reduce.h>
-#include <ATen/ops/_spmm_reduce_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -1231,7 +1229,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t>
     TORCH_INTERNAL_ASSERT(((dims[0] == 0 && dims[1] == 1) || (dims[0] == 1 && dims[1] == 0)));
     return reduce_sparse_csr_dim01_cpu_template<scalar_t>(sparse, rop);
   }
-  TORCH_INTERNAL_ASSERT(dims.size() == 0);
+  TORCH_INTERNAL_ASSERT(dims.empty());
   // effective after gh-29137 has been resolved
   return sparse.clone();
 }
@@ -1246,7 +1244,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
   TORCH_INTERNAL_ASSERT(input_dim == 2);
   auto dims = dims_to_sum.vec();
   maybe_wrap_dims(dims, input_dim);
-  if (dims.size() == 0) {
+  if (dims.empty()) {
     // after gh-29137 is resolved, delete this if-block
     dims.emplace_back(0);
     dims.emplace_back(1);
@@ -1296,7 +1294,7 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
   return result;
 }
 
-std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
+std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
     const c10::string_view reduce,
@@ -1310,17 +1308,17 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
   const Tensor& ccol_indices = c10::value_or_else(ccol_indices_opt, [] {return Tensor();});
   const Tensor& csr2csc = c10::value_or_else(csr2csc_opt, [] {return Tensor();});
 
-  sparse::impl::check_spmm_reduce_inputs</*train*/false>(
+  sparse::impl::check_sparse_mm_reduce_impl_inputs</*train*/false>(
       self, Tensor(), other, row_indices, ccol_indices, csr2csc);
 
   auto op = get_reduction_enum(reduce);
-  TORCH_CHECK(op != ReductionType::PROD, "spmm_reduce: reduce type of prod has not been enabled.")
+  TORCH_CHECK(op != ReductionType::PROD, "sparse_mm_reduce: reduce type of prod has not been enabled.")
 
   auto crow = self.crow_indices();
   auto col = self.col_indices();
   auto val = self.values();
 
-  TORCH_CHECK(val.ndimension() == 1, "spmm_reduce: expect self.values() to be 1-dimensional.")
+  TORCH_CHECK(val.ndimension() == 1, "sparse_mm_reduce: expect self.values() to be 1-dimensional.")
 
   // init output to be all zeros, for `rows` that has no nonzero elements,
   // the corresponding rows in the output will be zero.
@@ -1350,7 +1348,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
   return std::make_tuple(std::move(out), std::move(arg_out));
 }
 
-std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
+std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
@@ -1361,7 +1359,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
     const Tensor& csr2csc,
     std::array<bool, 2> output_mask) {
 
-  sparse::impl::check_spmm_reduce_inputs</*train*/true>(
+  sparse::impl::check_sparse_mm_reduce_impl_inputs</*train*/true>(
       self, grad_out, other, row_indices, ccol_indices, csr2csc);
 
   auto op = get_reduction_enum(reduce);
@@ -1375,6 +1373,9 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
       && ccol_indices.defined()
       && csr2csc.defined();
 
+  // `row`: row indices of COO format
+  // `ccol`: ccol indices of CSC format (with permute)
+  // `permute`: permute pattern from CSR to CSC
   Tensor row, ccol, permute;
   if (has_csc_indices) {
     row = row_indices;
@@ -1421,19 +1422,6 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
   }
 
   return std::make_tuple(std::move(grad_self), std::move(grad_other));
-}
-
-Tensor spmm_reduce(
-    const Tensor& self,
-    const Tensor& other,
-    const c10::string_view reduce,
-    const c10::optional<Tensor>& row_indices_opt,
-    const c10::optional<Tensor>& ccol_indices_opt,
-    const c10::optional<Tensor>& csr2csc_opt) {
-
-  // result: out, arg_out
-  auto result = at::_spmm_reduce(self, other, reduce, row_indices_opt, ccol_indices_opt, csr2csc_opt);
-  return std::get<0>(result);
 }
 
 DEFINE_DISPATCH(spmm_reduce_stub);

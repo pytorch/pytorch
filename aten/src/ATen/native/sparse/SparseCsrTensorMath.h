@@ -63,7 +63,7 @@ inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view 
 }
 
 template <bool train>
-inline void check_spmm_reduce_inputs(
+inline void check_sparse_mm_reduce_impl_inputs(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
@@ -77,7 +77,7 @@ inline void check_spmm_reduce_inputs(
   const auto index_scalar_type = self.col_indices().scalar_type();
   int64_t nnz = self._nnz();
 
-  CheckedFrom c = train ? "spmm_reduce_backward" : "spmm_reduce";
+  CheckedFrom c = train ? "sparse_mm_reduce_backward" : "sparse_mm_reduce";
   if (train) {
     checkLayout(c, grad_out, kStrided);
     checkScalarType(c, {grad_out, "grad_out", 1}, input_scalar_type);

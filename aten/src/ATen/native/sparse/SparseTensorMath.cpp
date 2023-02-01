@@ -31,6 +31,8 @@
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
+#include <ATen/ops/_sparse_mm_reduce_impl.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -375,7 +377,7 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 
 Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.size() > 0) {
+  if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
     bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
@@ -1393,6 +1395,12 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }
 
+Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const c10::string_view reduce) {
+  // result: out, arg_out
+  auto result = at::_sparse_mm_reduce_impl(mat1, mat2, reduce);
+  return std::get<0>(result);
+}
+
 // --------------------------------------------------------------------
 // hspmm(SparseTensor mat1, Tensor mat2)
 // --------------------------------------------------------------------
@@ -1658,7 +1666,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
   const int64_t sparse_dims_to_sum_size = dims_to_sum_v.size() - dense_dims_to_sum_v.size();
   const bool sum_all_sparse_dim = (sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
 
   // new values
   Tensor new_values;
@@ -1780,7 +1788,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {

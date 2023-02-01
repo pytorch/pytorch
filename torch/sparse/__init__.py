@@ -61,41 +61,63 @@ mm = _add_docstr(_sparse._sparse_mm, r"""
 .. note::
     This function doesn't support computing derivaties with respect to CSR matrices.
 
-    Args:
-        mat1 (Tensor): the first sparse matrix to be multiplied
-        mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
+    This function also additionally accepts an optional :attr:`reduce` argument that allows
+    specification of an optional reduction operation, implemented only for CSR storage format
+    on CPU device.
 
-    Shape:
-        The format of the output tensor of this function follows:
-        - sparse x sparse -> sparse
-        - sparse x dense -> dense
+Args:
+    mat1 (Tensor): the first sparse matrix to be multiplied
+    mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
+    reduce (str): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
 
-    Example::
+Shape:
+    The format of the output tensor of this function follows:
+    - sparse x sparse -> sparse
+    - sparse x dense -> dense
 
-        >>> a = torch.randn(2, 3).to_sparse().requires_grad_(True)
-        >>> a
-        tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
-                               [0, 1, 2, 0, 1, 2]]),
-               values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
-               size=(2, 3), nnz=6, layout=torch.sparse_coo, requires_grad=True)
+Example::
 
-        >>> b = torch.randn(3, 2, requires_grad=True)
-        >>> b
-        tensor([[-0.6479,  0.7874],
-                [-1.2056,  0.5641],
-                [-1.1716, -0.9923]], requires_grad=True)
+    >>> a = torch.randn(2, 3).to_sparse().requires_grad_(True)
+    >>> a
+    tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
+                           [0, 1, 2, 0, 1, 2]]),
+           values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
+           size=(2, 3), nnz=6, layout=torch.sparse_coo, requires_grad=True)
 
-        >>> y = torch.sparse.mm(a, b)
-        >>> y
-        tensor([[-0.3323,  1.8723],
-                [-1.8951,  0.7904]], grad_fn=<SparseAddmmBackward>)
-        >>> y.sum().backward()
-        >>> a.grad
-        tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
-                               [0, 1, 2, 0, 1, 2]]),
-               values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
-               size=(2, 3), nnz=6, layout=torch.sparse_coo)
-    """)
+    >>> b = torch.randn(3, 2, requires_grad=True)
+    >>> b
+    tensor([[-0.6479,  0.7874],
+            [-1.2056,  0.5641],
+            [-1.1716, -0.9923]], requires_grad=True)
+
+    >>> y = torch.sparse.mm(a, b)
+    >>> y
+    tensor([[-0.3323,  1.8723],
+            [-1.8951,  0.7904]], grad_fn=<SparseAddmmBackward>)
+    >>> y.sum().backward()
+    >>> a.grad
+    tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
+                           [0, 1, 2, 0, 1, 2]]),
+           values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
+           size=(2, 3), nnz=6, layout=torch.sparse_coo)
+
+    >>> c = a.to_sparse_csr().requires_grad_(True)
+    >>> c
+    tensor(crow_indices=tensor([0, 3, 6]),
+           col_indices=tensor([0, 1, 2, 0, 1, 2]),
+           values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
+           size=(2, 3), nnz=6, layout=torch.sparse_csr, requires_grad=True)
+
+    >>> y1 = torch.sparse.mm(c, b, 'sum')
+    >>> y1
+    tensor([[-0.3322,  1.8722],
+            [-1.8950,  0.7905]], grad_fn=<SparseMmReduceImplBackward0>)
+
+    >>> y2 = torch.sparse.mm(c, b, 'max')
+    tensor([[0.7201, 1.2520],
+            [0.0135, 1.4221]], grad_fn=<SparseMmReduceImplBackward0>)
+""")
 
 
 sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
@@ -147,49 +169,6 @@ Examples::
         col_indices=tensor([0, 1, 2]),
         values=tensor([ 0.1423, -0.3903, -0.0950]), device='cuda:0',
         size=(3, 3), nnz=3, layout=torch.sparse_csr)
-""")
-
-
-spmm_reduce = _add_docstr(_sparse.spmm_reduce, r"""
-sparse.spmm_reduce(self, other, reduce, *, row_indices=None, ccol_indices=None, csr2csc=None) -> Tensor
-
-Reduce rows from dense matrices :attr:`other` at the locations specified by the sparsity pattern of :attr:`self`.
-The matrix :attr:`self` is not added to the final result.
-
-For each element in :attr:`self` at index [i, j], pick the rows from :attr:`other` specified by j,
-and reduce to :attr:`output` at row i.
-
-.. note::
-    :attr:`self` must be a sparse CSR tensor. :attr:`other` must be a dense tensors.
-    This function is implemented only for tensors on CPU device.
-
-Args:
-    self (Tensor): a sparse CSR matrix of shape `(m, n)`.
-    other (Tensor): a dense matrix of shape `(n, k)` to be reduced.
-    reduce (str): the reduction operation to apply for non-unique indices
-        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
-
-Keyword args:
-    row_indices (Tensor, optional): row indices for each element in :attr:`input`, 1-D tensor of size `nse`.
-    ccol_indices (Tensor, optional): compressed col indices for each element in :attr:`input`, 1-D tensor of size `n + 1`.
-    csr2csc (Tensor, optional): permute pattern to convert :attr:`input` from CSR to CSC.
-
-Examples::
-
-    >>> crow_indices = torch.tensor([0, 1, 3, 4])
-    >>> col_indices = torch.tensor([2, 0, 1, 3])
-    >>> values = torch.tensor([1, 2, 3, 4])
-    >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.float)
-    >>> csr
-    tensor(crow_indices=tensor([0, 1, 3, 4]),
-       col_indices=tensor([2, 0, 1, 3]),
-       values=tensor([1., 2., 3., 4.]), size=(3, 4), nnz=4,
-       layout=torch.sparse_csr)
-    >>> dense = torch.ones(4, 3)
-    >>> torch.sparse.spmm_reduce(csr, dense, "sum")
-    tensor([[1., 1., 1.],
-        [5., 5., 5.],
-        [4., 4., 4.]])
 """)
 
 def sum(input: Tensor, dim: DimOrDims = None,

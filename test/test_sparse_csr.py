@@ -1315,8 +1315,6 @@ class TestSparseCSR(TestCase):
             nnz = 15
             t = self.genSparseCSRTensor((16, 16), nnz, dtype=dtype,
                                         device=device, index_dtype=index_dtype)
-            with self.assertRaisesRegex(RuntimeError, "must be square."):
-                block_t = t.to_sparse_bsr((2, 3))
 
             with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
                 block_t = t.to_sparse_bsr((5, 5))
@@ -2383,7 +2381,7 @@ class TestSparseCSR(TestCase):
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64)
-    def test_spmm_reduce(self, device, dtype):
+    def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
             mat = torch.randn(n, k, dtype=dtype)
@@ -2414,7 +2412,7 @@ class TestSparseCSR(TestCase):
                 ref_mat.requires_grad_()
 
             ref_out = ref(row, col, ref_values, ref_mat)
-            out = torch.sparse.spmm_reduce(csr, mat, reduce_type)
+            out = torch.sparse.mm(csr, mat, reduce_type)
             self.assertEqual(out, ref_out)
 
             if train:
@@ -2915,10 +2913,11 @@ class TestSparseCSR(TestCase):
             frozenset({torch.sparse_csc}),
             frozenset({torch.sparse_csr}),
             frozenset({torch.sparse_csc, torch.sparse_csr}),
+            frozenset({torch.sparse_csc, torch.sparse_bsc}),
+            frozenset({torch.sparse_csr, torch.sparse_bsr}),
             frozenset({torch.sparse_bsc}),
             frozenset({torch.sparse_bsr}),
             frozenset({torch.sparse_bsc, torch.sparse_bsr}),
-            frozenset({torch.sparse_csr, torch.sparse_bsr}),
         }
         block_layouts = (torch.sparse_bsr, torch.sparse_bsc)
 
@@ -2930,8 +2929,15 @@ class TestSparseCSR(TestCase):
             # BSR -> CSR is not yet supported
             if (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr):
                 expect_error = True
+            # BSC -> CSC is not yet supported
+            if (layout_a, layout_b) == (torch.sparse_bsc, torch.sparse_csc):
+                expect_error = True
             # CSR -> BSR only works for non-batched inputs
             if (layout_a, layout_b) == (torch.sparse_csr, torch.sparse_bsr):
+                if a.dim() > 2:
+                    expect_error = True
+            # CSC -> BSC only works for non-batched inputs
+            if (layout_a, layout_b) == (torch.sparse_csc, torch.sparse_bsc):
                 if a.dim() > 2:
                     expect_error = True
 
