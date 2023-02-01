@@ -8,8 +8,7 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static const std::string kExportSuffix = "py";
 
@@ -53,5 +52,4 @@ std::shared_ptr<Source> findSourceInArchiveFromQualifier(
       gen_ranges);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

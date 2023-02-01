@@ -16,10 +16,11 @@ import functools
 import itertools
 import warnings
 import unittest
+import random
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, OpDTypes
+    OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -49,6 +50,7 @@ from common_utils import (
 )
 import types
 from collections import namedtuple
+import contextlib
 
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
@@ -56,7 +58,6 @@ from functorch.experimental import chunk_vmap
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
-from torch.autograd.function import _set_autograd_function_extension_enabled
 from torch._functorch.vmap import restore_vmap
 
 FALLBACK_REGEX = 'There is a performance drop'
@@ -73,13 +74,13 @@ class EnableVmapFallbackWarnings:
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(ValueError, "got type <class 'float'> as a return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
             vmap(lambda x: 3.14)(torch.ones(3))
 
         def multiple_outputs(x):
             return x, 3
 
-        with self.assertRaisesRegex(ValueError, "got type <class 'int'> as a return"):
+        with self.assertRaisesRegex(ValueError, "got type <class 'int'>"):
             vmap(multiple_outputs)(torch.ones(3))
 
     def test_different_map_dim_size_raises(self):
@@ -317,6 +318,49 @@ class TestVmapAPI(TestCase):
         result = vmap(foo, out_dims=(1,))(tensor)
         self.assertEqual(result, expected)
 
+    def test_out_dims_none_tuple(self):
+        def foo(x):
+            return x, 'hello world'
+
+        tensor = torch.randn(2, 3)
+        result = vmap(foo, out_dims=(0, None))(tensor)
+        self.assertEqual(result[1], 'hello world')
+        self.assertEqual(result[0], tensor)
+
+        def foo(x):
+            x.add_(1)
+            return None, 'hello world'
+        result = vmap(foo, out_dims=(None, None))(tensor)
+        self.assertEqual(result, (None, 'hello world'))
+
+
+    def test_out_dims_none(self):
+        def foo(x):
+            return x
+
+        tensor = torch.randn(2, 3)
+        with self.assertRaisesRegex(ValueError, 'can not return a BatchedTensor when out_dim is None'):
+            vmap(foo, out_dims=None)(tensor)
+
+        def foo(x):
+            x.add_(1)
+            return 'hello world'
+        result = vmap(foo, out_dims=None)(tensor)
+        self.assertEqual(result, 'hello world')
+
+    def test_out_dims_normal_tensor(self):
+
+        def foo(x):
+            return torch.arange(3)
+
+        tensor = torch.randn(2, 3)
+        result = vmap(foo)(tensor)
+        self.assertEqual(result.shape, [2, 3])
+
+        result = vmap(foo, out_dims=None)(tensor)
+        self.assertEqual(result, torch.arange(3))
+
+
     def test_pytree_returns(self):
         x = torch.randn(2, 3)
 
@@ -382,16 +426,12 @@ class TestVmapAPI(TestCase):
         self.assertEqual(y2, y0.t())
 
     def test_out_dims_must_be_int_or_collection_of_int_err_msg(self):
-        msg = 'must be an int or a python collection of ints'
+        msg = 'must be an int, None or a python collection of ints'
         tensor = torch.randn(2, 3)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims='lol')(tensor)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims=('lol',))(tensor)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=None)(tensor)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=(None,))(tensor)
 
     def test_out_dims_and_num_outputs_mismatch_err_msg(self):
         msg = 'not compatible'
@@ -619,7 +659,7 @@ class TestVmapAPI(TestCase):
         x = torch.randn(11)
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
-            vmap(op)(x, y)
+            torch.vmap(op)(x, y)
             # The single warning here is the "vmap is experimental"
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
@@ -634,7 +674,7 @@ class TestVmapAPI(TestCase):
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
             with EnableVmapFallbackWarnings():
-                vmap(op)(x, y)
+                torch.vmap(op)(x, y)
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
@@ -2625,7 +2665,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
         test(op, (torch.rand(B0, 2, 3, 5),))
-        test(op, (torch.rand(B0),))
         test(op, (torch.rand(2, B0, 3, 5),), in_dims=1)
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
@@ -3222,16 +3261,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to vmap over aten::where"):
             vmap(f)(x)
 
-    @skipCUDAIfNoMagma
-    @allowVmapFallbackUsage
-    def test_symeig(self, device):
-        def op(x):
-            return torch.symeig(x, eigenvectors=True)[0]
-
-        x = torch.randn(3, 3, device=device, requires_grad=True)
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
-
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
@@ -3323,7 +3352,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
                            postprocess_fn=None):
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
                 vmap_out = postprocess_fn(vmap_out)
@@ -3344,7 +3373,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                         func, args, kwargs, in_dims, compute_loop_out=False, clone_inputs=True):
                     pass
             return
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(
                 func, args, kwargs, in_dims, clone_inputs=True):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
@@ -3418,7 +3447,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('unique', ''),  # dynamic op
@@ -3512,7 +3541,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('ne', device_type='cuda'),
     }
 
-    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
@@ -3558,7 +3586,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
 
-    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
@@ -3576,7 +3603,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
-        xfail('index_fill'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'amax'),
@@ -3598,13 +3624,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
-        xfail('vdot'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3687,7 +3712,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_binary', device_type='cuda'),
         xfail('special.modified_bessel_i0'),
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
-        xfail('linalg.vander', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
@@ -3696,7 +3720,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('special.scaled_modified_bessel_k1'),
         xfail('special.modified_bessel_k0'),
-        xfail('linalg.vecdot', ''),
         xfail('linalg.ldl_factor', ''),
         xfail('special.modified_bessel_i1'),
         xfail('special.chebyshev_polynomial_t'),
@@ -3705,14 +3728,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # AssertionError: Tensor-likes are not equal!
+        # Issue: https://github.com/pytorch/pytorch/issues/70904
+        xfail('bitwise_left_shift', device_type='cpu'),
+        decorate('bitwise_right_shift', device_type='cpu',
+                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
@@ -3824,10 +3850,82 @@ class TestVmapOperatorsOpInfo(TestCase):
         # There's no OpInfo for this
         def test():
             B = 2
-            x = torch.randn(2, 5, 5, device=device)
+            x = torch.randn(B, 5, 5, device=device)
             self.vmap_outplace_test(torch.slogdet, (x,), {}, (0,))
 
         check_vmap_fallback(self, test, torch.slogdet)
+
+    def test_index_fill(self, device):
+        # There's no OpInfo for these tests
+
+        B = 2
+
+        def test1():
+            # negative dim
+            x = torch.randn(B, 5, 5, device=device)
+            dim = -2
+            index = torch.tensor([[2, 3], [0, 4]], device=device)
+            value = 5.0
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test2():
+            # self batched, self logical rank 1, index logical rank 1
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test3():
+            # self batched, self logical rank 1, index logical rank 0
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test4():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([[0], [0]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test5():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([0, 0], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test6():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test7():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test8():
+            # self batched, self logical rank > 1, index logical rank 0
+            x = torch.zeros(B, 3, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        for test in (test1, test2, test3, test4, test5, test6, test7, test8):
+            check_vmap_fallback(self, test, torch.index_fill)
 
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
@@ -4151,8 +4249,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.vector_norm'),  # can accept vector inputs
         xfail('linalg.norm'),  # can accept vector inputs
         xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
+        xfail('linalg.vander'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
-        xfail('linalg.vander'),
         xfail('linalg.vecdot'),
         # throws in vmap on CUDA
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
@@ -4229,6 +4327,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
             torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
+
+    def test_vmap_with_anomaly_detection(self):
+        with torch.autograd.set_detect_anomaly(True):
+            x = torch.zeros(3) - 1
+
+            def fn(x):
+                return x.sum()
+
+            per_sample_grad = vmap(grad(fn))(x)
+            self.assertEqual(per_sample_grad, torch.ones_like(x))
+
+            def bad_fn(x):
+                return x.sqrt().sum()
+
+            err_msg = "Function 'SqrtBackward0' returned nan values in its 0th output."
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                vmap(grad(bad_fn))(x)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
@@ -4873,6 +4988,21 @@ class TestRandomness(TestCase):
         jacfwd(torch.bernoulli, randomness="same")(x)
         jacfwd(torch.bernoulli, randomness="different")(x)
 
+    @parametrize('randomness', ['error', 'same', 'different'])
+    def test_dropout_unbatched(self, device, randomness):
+        x = torch.randn(3, device=device)
+        y = torch.randn(1, 3, device=device)
+
+        def fn(x, y):
+            # output from dropout should be a Tensor[B, 1, 3] (B=3)
+            return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
+
+        # We just verify that this doesn't raise an error for
+        # `same` and `different` randomness.
+        # Ref: https://github.com/pytorch/pytorch/issues/92283
+        context = self.assertRaises(RuntimeError) if randomness == 'error' else contextlib.nullcontext()
+        with context:
+            vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
 
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
@@ -4907,6 +5037,102 @@ class TestTransformFailure(TestCase):
         with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
             transform(input)
 
+class TestVmapDeviceType(Namespace.TestVmapBase):
+    def _vmap_test(self, *args, **kwargs):
+        return _vmap_test(self, *args, **kwargs)
+
+    def test__is_all_true(self, device):
+        def test():
+            def f(x, *, expected_result):
+                result = torch.ops.aten._is_all_true(x)
+                self.assertFalse(torch._C._functorch.is_batchedtensor(result))
+                self.assertEqual(result.shape, torch.Size([]))
+                self.assertEqual(result.item(), expected_result)
+                return result
+
+            x = torch.rand(10, device=device)
+            vmap(f)(x >= 0, expected_result=True)
+            vmap(f)(x < 0, expected_result=False)
+
+            x[random.choice(range(10))] *= -1
+            vmap(f)(x >= 0, expected_result=False)
+            vmap(f)(x < 0, expected_result=False)
+
+            x = -torch.rand(10, device=device)
+            vmap(f)(x > 0, expected_result=False)
+            vmap(f)(x <= 0, expected_result=True)
+
+        check_vmap_fallback(self, test, torch._is_all_true)
+
+    def test__is_any_true(self, device):
+        def test():
+            def f(x, *, expected_result):
+                result = torch.ops.aten._is_any_true(x)
+                self.assertFalse(torch._C._functorch.is_batchedtensor(result))
+                self.assertEqual(result.shape, torch.Size([]))
+                self.assertEqual(result.item(), expected_result)
+                return result
+
+            x = torch.zeros(10, device=device, dtype=torch.bool)
+            vmap(f)(x > 0, expected_result=False)
+
+            x[5] = True
+            vmap(f)(x > 0, expected_result=True)
+            vmap(f)(x[1::2], expected_result=True)
+            vmap(f)(x[0::2], expected_result=False)
+
+        check_vmap_fallback(self, test, torch._is_any_true)
+
+    def test_check_tensor(self, device):
+        def test():
+            test_sizes = [
+                (1,),
+                (10,),
+                (1, 1),
+                (1, 10),
+                (10, 1),
+                (10, 10),
+                (1, 1, 1),
+                (10, 1, 1),
+                (1, 10, 1),
+                (10, 10, 10),
+            ]
+
+            def check_gte_0(t):
+                return torch._test_check_tensor(t >= 0)
+
+            error_message = "Test message for TORCH_CHECK_TENSOR_ALL"
+
+            for size in test_sizes:
+                t_all_gte_0 = torch.rand(size, device=device)
+                t_all_lt_0 = t_all_gte_0 - 1
+
+                vmap(check_gte_0)(t_all_gte_0)
+
+                if len(size) >= 2:
+                    vmap(vmap(check_gte_0))(t_all_gte_0)
+
+                with self.assertRaisesRegex(RuntimeError, error_message):
+                    vmap(check_gte_0)(t_all_lt_0)
+
+                if len(size) >= 2:
+                    with self.assertRaisesRegex(RuntimeError, error_message):
+                        vmap(vmap(check_gte_0))(t_all_lt_0)
+
+                if t_all_gte_0.numel() > 1:
+                    t_all_gte_0_but_one = t_all_gte_0.clone()
+                    idx = (random.choice(range(dim_size)) for dim_size in size)
+                    t_all_gte_0_but_one[(..., *idx)] = -1
+
+                    with self.assertRaisesRegex(RuntimeError, error_message):
+                        vmap(check_gte_0)(t_all_gte_0_but_one)
+
+                    if len(size) >= 2:
+                        with self.assertRaisesRegex(RuntimeError, error_message):
+                            vmap(vmap(check_gte_0))(t_all_gte_0_but_one)
+
+        check_vmap_fallback(self, test, torch._test_check_tensor)
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
@@ -4917,6 +5143,7 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
+instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
