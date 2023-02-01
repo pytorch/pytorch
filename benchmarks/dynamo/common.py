@@ -2032,7 +2032,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.speedup_dynamo_ts:
-        optimize_ctx = torch._dynamo.optimize(backends.ts, nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedup_dynamo_ts.csv"
     elif args.speedup_fx2trt:
