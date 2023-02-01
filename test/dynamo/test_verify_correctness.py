@@ -105,11 +105,11 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         self.assertEqual(r1.device, r2.device)
         self.assertEqual(r1.device, r3.device)
 
-    def test_nnc(self):
+    def test_torchscript(self):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        opt_s = torch._dynamo.optimize("nnc")(s)
+        opt_s = torch._dynamo.optimize("ts")(s)
         r2 = opt_s(i)
         self.assertTrue(same(r1, r2))
 
