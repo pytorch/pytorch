@@ -2967,3 +2967,13 @@
 - name: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
+
+- name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
+  other: div_tensor_other_backward(grads[i], self[i], other[i])
+
+- name: _foreach_div.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
+  self: div_tensor_self_backward(grads[i], at::lift_fresh(at::scalar_to_tensor(scalar)), self[i].scalar_type())
+
+- name: _foreach_div.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
+  self: div_tensor_self_backward(grads[i], at::lift_fresh(at::scalar_to_tensor(scalars[i])), self[i].scalar_type())

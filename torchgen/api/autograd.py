@@ -389,10 +389,13 @@ Attempted to convert a derivative formula for a mutable operator
         base_op_name = f.func.name.name
         if is_foreach_func(f):
             # TODO(crcrpar): Support non-unary foreach functions
-            _is_foreach_add = (
-                base_op_name.base == "_foreach_add"
-                and f.func.name.overload_name in ("List",)
-            )
+            _is_foreach_add = base_op_name.base in (
+                "_foreach_add",
+                "_foreach_sub",
+                "_foreach_mul",
+                "_foreach_div",
+            ) and f.func.name.overload_name in ("List", "Scalar", "ScalarList")
+            _is_scalarlist_overload = f.func.name.overload_name == "ScalarList"
             if len(f.func.arguments.post_self_positional) > 0:
                 if not _is_foreach_add:
                     return None, False
@@ -434,8 +437,8 @@ Attempted to convert a derivative formula for a mutable operator
                     ).replace("result", "result[i]")
                     assert len(f.func.returns) == len(function_schema.returns)
                     assert f.func.arguments.self_arg is not None
-                    if isinstance(f.func.arguments.self_arg.argument.type, ListType):
-                        modified_formula = modified_formula.replace("self", "self[i]")
+                    # if isinstance(f.func.arguments.self_arg.argument.type, ListType):
+                    #     modified_formula = modified_formula.replace("self", "self[i]")
 
                     saved_inputs, saved_outputs = [], []
                     with local.parametrize(
@@ -467,6 +470,8 @@ Attempted to convert a derivative formula for a mutable operator
                                     nctype=canonical_nctype, expr=mapped_name
                                 )
                             )
+                        if _is_scalarlist_overload:
+                            print(f"{saved_inputs = }")
                         for ref_output in derivative.saved_outputs:
                             if ref_output.nctype.name == "result":
                                 saved_outputs.append(
@@ -518,7 +523,7 @@ Attempted to convert a derivative formula for a mutable operator
                 diff_info = DifferentiabilityInfo(
                     name=base_op_name.base,
                     func=f,
-                    op=f"Foreach{ref_diff_info.op}",
+                    op=f"Foreach{ref_diff_info.op}{f.func.name.overload_name}",
                     derivatives=modified_derivative_formulas,
                     forward_derivatives=[],
                     all_saved_inputs=tuple(set(all_saved_inputs)),
