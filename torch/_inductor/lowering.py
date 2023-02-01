@@ -1297,11 +1297,12 @@ def arange(
         end = start
         start = 0
 
-    args = (start, end, step)
-
     if dtype is None:
+        args = (start, end, step)
         integer_args = all(isinstance(arg, (int, sympy.Expr)) for arg in args)
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
+
+    device = decode_device(device)
 
     is_integer = is_integer_dtype(dtype)
     if is_integer:
@@ -1324,6 +1325,10 @@ def arange(
     else:
         computation_dtype = get_computation_dtype(dtype)
 
+        if device.type == "cpu" and dtype == torch.float32:
+            # ATen kernel uses acc_type
+            computation_dtype = torch.float64
+
         def get_param(x):
             if isinstance(x, sympy.Expr):
                 return ops.index_expr(x, dtype=computation_dtype)
@@ -1332,14 +1337,12 @@ def arange(
 
         def fn(index):
             ind = ops.index_expr(index[0], dtype=computation_dtype)
-            pstep = get_param(step)
-            pstart = get_param(start)
-            inc = ops.mul(pstep, ind)
-            val = ops.add(pstart, inc)
+            inc = ops.mul(ind, get_param(step))
+            val = ops.add(inc, get_param(start))
             return ops.to_dtype(val, dtype)
 
     return Pointwise.create(
-        device=decode_device(device),
+        device=device,
         dtype=dtype,
         inner_fn=fn,
         ranges=[length],
