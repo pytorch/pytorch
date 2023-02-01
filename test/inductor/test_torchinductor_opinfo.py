@@ -250,6 +250,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
@@ -321,6 +323,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "uniform": {f16, f32},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
