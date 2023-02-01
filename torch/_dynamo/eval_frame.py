@@ -15,10 +15,10 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch._decomp import core_aten_decompositions
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
-from torch._decomp import core_aten_decompositions
 
 from .hooks import Hooks
 
@@ -522,18 +522,21 @@ def explain(f, *args, **kwargs):
         explanation_verbose,
     )
 
+CORE_ATEN_DECOMPS = core_aten_decompositions()
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f,
+    *args,
+    aten_graph=False,
+    decomposition_table=CORE_ATEN_DECOMPS,
+    tracing_mode="real",
+    **kwargs,
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None or tracing_mode != "real":
+    if decomposition_table is not CORE_ATEN_DECOMPS or tracing_mode != "real":
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-
-    if aten_graph and decomposition_table is None:
-        decomposition_table = core_aten_decompositions
 
     f = innermost_fn(f)
 
@@ -654,7 +657,7 @@ def export(
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.override_stack_trace():
+            with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
         graph = make_fx(

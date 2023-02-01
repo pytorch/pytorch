@@ -571,16 +571,10 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = sympy_product(x.get_size())
-    try:
-        if x_size_product > 0:
-            x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product)
-            )
-    except TypeError:
-        # Certain sympy products cannot be compared, fails with
-        # cannot determine truth value of Relational
-        pass
+    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+    if x_size_product > 0:
+        # maybe realize input before broadcasting it
+        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -632,16 +626,12 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = sympy_product(old_size)
-    try:
-        if old_size_product > 0:
-            x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
-            )
-    except TypeError:
-        # Certain sympy products cannot be compared, fails with
-        # cannot determine truth value of Relational
-        pass
+    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+    if old_size_product > 0:
+        # maybe realize the input
+        x.mark_reuse(
+            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+        )
 
     x_loader = x.make_loader()
     return Pointwise.create(
@@ -739,9 +729,9 @@ def as_strided(x, size, stride, storage_offset=None):
         # as_strided ignores views
         x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_contiguous_storage_and_layout(x):
+    if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
-    storage, old_layout = ir.as_contiguous_storage_and_layout(x)
+    storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
         old_layout.device,
         old_layout.dtype,
@@ -762,7 +752,7 @@ def as_strided_(x, size, stride, storage_offset=None):
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
-        return inputs[0]
+        return clone(inputs[0])
 
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
@@ -953,6 +943,36 @@ def register_onednn_fusion_ops():
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        def convolution_transpose_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionTransposeUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
 
         if torch._C.has_mkl:
 
@@ -3405,7 +3425,9 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
+    if isinstance(changed_data, ir.StorageBox) and not (
+        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+    ):
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data

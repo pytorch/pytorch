@@ -36,7 +36,7 @@ def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
 def _maybe_convert_to_dtype(a, dtype):
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
-            return torch.ops.aten._to_copy(a, dtype=dtype)
+            return a.to(dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type_ctor(dtype)(a)  # type: ignore[arg-type]
