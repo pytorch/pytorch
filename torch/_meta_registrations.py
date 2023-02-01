@@ -2052,6 +2052,13 @@ def meta__scaled_dot_product_flash(
     is_causal: bool = False,
     return_debug_mask: bool = False,
 ):
+    # [Note] Wrong return values for Philox seed and offset:
+    # We have added logic to torch/_dynamo/variables/torch.py
+    # to ensure that if dropout_p is non zero then we will graph break on this operation
+    check(
+        dropout_p == 0.0,
+        lambda: f"Can only trace _scaled_dot_product_flash_attention when dropout is set to 0 but got a dropout_p of {dropout_p}.",
+    )
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
@@ -2068,7 +2075,7 @@ def meta__scaled_dot_product_flash(
     output = torch.empty(
         (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
     )
-    ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
+    output = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
         1, 2
     )
     max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
@@ -2100,14 +2107,14 @@ def meta__scaled_dot_product_flash(
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
     return (
-        ouput,
+        output,
         logsumexp,
         cumulative_sequence_length_q,
         cumulative_sequence_length_k,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        1,  # what do I put here
-        1,  # what do I put here
+        1,  # Philox Seed will not be used, see note at top.
+        1,  # Philox Offset will not be used, see note at top.
         debug_mask,
     )
 

@@ -458,6 +458,29 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
+            if self.value == torch._C._nn.scaled_dot_product_attention:
+                # We need to check if flash_attention will run and if dropout is != 0.0
+                # if that is the case then we want dynamo to graph break because this is
+                # not function correctly with cuda graphs and fake_tensor()
+                # TODO `get_fake_value(args[0].as_proxy().node, tx)[0]` was stripping the
+                # first dim from size from the fake tensor.. why?
+                fake_query = args[0].as_proxy().node.meta["example_value"]
+                fake_key = args[1].as_proxy().node.meta["example_value"]
+                fake_value = args[2].as_proxy().node.meta["example_value"]
+                backend_choice = torch._fused_sdp_choice(
+                    fake_query, fake_key, fake_value
+                )
+                if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
+                    dropout_p = kwargs.get("dropout_p")
+                    # Lets see if they passed it in as not an arg
+                    if len(args) >= 5:
+                        dropout_p = args[4]
+
+                    if dropout_p is not None and dropout_p.value != 0.0:
+                        unimplemented(
+                            "FlashAttention with dropout is not supported in cuda graphs"
+                        )
+
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.

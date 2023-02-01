@@ -15,6 +15,8 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -662,6 +664,29 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
+int64_t _fused_sdp_choice_meta(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool is_causal) {
+  auto query_key_set = query_.key_set();
+  bool has_cuda = query_key_set.has(c10::DispatchKey::CUDA);
+  if (has_cuda) {
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kCUDA,
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal);
+    return choice_int;
+  }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
