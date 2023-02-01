@@ -47,7 +47,12 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
     """
 
     @_beartype.beartype
-    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
+    def is_leaf_module(
+        self, module: torch.nn.Module, module_qualified_name: str
+    ) -> bool:
+        # This returns False so that all sub-modules are considered as not leaves
+        # and therefore expanded into operators in
+        # torch.fx._symbolic_trace.Tracer.call_module.
         return False
 
     @_beartype.beartype
@@ -57,45 +62,76 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         return False
 
 
+# Functions directly wrapped to produce torch.fx.Proxy so that symbolic
+# data can flow through those functions. Python functions (e.g., `torch.arange`)
+# not defined by pybind11 in C++ do not go though Python dispatcher, so
+# they are not automatically patched by FX's Python dispatcher.
+# The list below means `torch.arange`, `torch.tensor`, and so on will be
+# patched.
+_TORCH_METHODS_TO_PATCH: Tuple[str, ...] = (
+    "arange",
+    "tensor",
+    "finfo",
+    "full",
+    "empty",
+)
+
+
+def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
+    """This function wraps ```target`` for symbolic tracing.
+
+    This function wraps ```target``` so that its wrapper produces
+    torch.fx.Proxy in symbolic computation. The returned values are
+    the wrapper and then the original function. Per `_TORCH_METHODS_TO_PATCH`,
+    this function shall receive `torch.arange`, `torch.tensor`, etc. as inputs.
+    """
+
+    @functools.wraps(target)
+    def wrapper(*args, **kwargs):
+        proxy = None
+
+        def check_has_proxy(v):
+            if isinstance(v, torch.fx.Proxy):
+                nonlocal proxy
+                proxy = v
+
+        torch.fx.node.map_aggregate(args, check_has_proxy)
+        torch.fx.node.map_aggregate(kwargs, check_has_proxy)
+
+        if proxy is not None:
+            return proxy.tracer.create_proxy("call_function", target, args, kwargs)
+        else:
+            return target(*args, **kwargs)
+
+    return wrapper, target
+
+
 @_beartype.beartype
-def module_expansion_symbolic_trace(
+def _module_expansion_symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
     concrete_args: Optional[Dict[str, Any]] = None,
 ) -> "torch.fx.GraphModule":
-    _TORCH_METHODS_TO_PATCH = ["arange", "tensor", "finfo", "full", "empty"]
-
-    def gen_constructor_wrapper(target):
-        @functools.wraps(target)
-        def wrapper(*args, **kwargs):
-            proxy = None
-
-            def check_has_proxy(v):
-                if isinstance(v, torch.fx.Proxy):
-                    nonlocal proxy
-                    proxy = v
-
-            torch.fx.node.map_aggregate(args, check_has_proxy)
-            torch.fx.node.map_aggregate(kwargs, check_has_proxy)
-
-            if proxy is not None:
-                return proxy.tracer.create_proxy("call_function", target, args, kwargs)
-            else:
-                return target(*args, **kwargs)
-
-        return wrapper, target
-
+    """Trace a callable into FX graph.
+    When "root" is torch.nn.Module, calls to its submodule (type: torch.nn.Module) will be
+    expanded into operators (e.g., torch.matmul, torch.add, +, and -) to simplify graph
+    structure.
+    """
+    # For functions doesn't support symbolic tracing, create wrappers
+    # which produce symbolic results during tracing.
     patched_torch_methods = {
-        target: gen_constructor_wrapper(getattr(torch, target))
-        for target in _TORCH_METHODS_TO_PATCH
+        target_name: _wrap_for_symbolic_trace(getattr(torch, target_name))
+        for target_name in _TORCH_METHODS_TO_PATCH
     }
-    orig_fns = set()
 
-    for name, (wrapper, orig) in patched_torch_methods.items():
+    # Set the symbolic-tracing friendly functions so that `tracer.trace` below
+    # can work.
+    for name, (wrapper, _) in patched_torch_methods.items():
         setattr(torch, name, wrapper)
-        orig_fns.add(orig)
 
     try:
+        # Set up a tracer.
         tracer = ModuleExpansionTracer()
+        # Trace the model.
         graph = tracer.trace(root, concrete_args)
         name = (
             root.__class__.__name__
@@ -104,8 +140,10 @@ def module_expansion_symbolic_trace(
         )
         return torch.fx.GraphModule(tracer.root, graph, name)
     finally:
-        for name, (_, orig) in patched_torch_methods.items():
-            setattr(torch, name, orig)
+        # Revert the patches for symbolic tracing.
+        for name, (_, wrapped) in patched_torch_methods.items():
+            # wrapped is the original version of `torch.name`.
+            setattr(torch, name, wrapped)
 
 
 @_beartype.beartype
@@ -171,7 +209,10 @@ _ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
 
 @_beartype.beartype
 def _retrieve_or_wrap_scalar_as_constant(
-    g, fx_node_arg, fx_name_to_ts_value, example_output
+    g: "torch.onnx._internal.jit_utils.GraphContext",
+    fx_node_arg: Any,
+    fx_name_to_ts_value: Dict[str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]],
+    example_output: Any,
 ):
     """Map FX value to TorchScript value.
 
@@ -229,16 +270,21 @@ def _retrieve_or_wrap_scalar_as_constant(
 
 
 @_beartype.beartype
-def _wrap_fx_args_as_ts_args(g, root, node, fx_name_to_ts_value):
+def _wrap_fx_args_as_ts_args(
+    g: "torch.onnx._internal.jit_utils.GraphContext",
+    root: torch.nn.Module,
+    node: torch.fx.Node,
+    fx_name_to_ts_value: Dict[str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]],
+):
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
-    complete_args = []
+    complete_args: List[Any] = []
     if inspect.isbuiltin(node.target):
-        complete_args = node.args
+        complete_args = list(node.args)
     else:
-        for i, expected_arg in enumerate(node.target._schema.arguments):
+        for i, expected_arg in enumerate(node.target._schema.arguments):  # type: ignore[union-attr]
             if i < len(node.args):
                 complete_args.append(node.args[i])
             else:
@@ -257,7 +303,10 @@ def _wrap_fx_args_as_ts_args(g, root, node, fx_name_to_ts_value):
 
 
 @_beartype.beartype
-def _fill_tensor_types(ts_values, expected_values):
+def _fill_tensor_types(
+    ts_values: Union[torch._C.Value, Tuple[torch._C.Value, ...]],
+    expected_values: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+):
     flat_ts_values, _ = _pytree.tree_flatten(ts_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
     for ts_value, expected_value in zip(flat_ts_values, flat_expected_values):
@@ -462,9 +511,11 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
 
 @_beartype.beartype
 def _ts_graph_to_onnx_model_in_protobuf(
-    ts_graph, ts_name_to_real_tensor, opset_version
+    ts_graph: torch._C.Graph,
+    ts_name_to_real_tensor: Dict[str, torch.Tensor],
+    opset_version: int,
 ) -> Union["onnx.ModelProto", bytes]:
-    proto, _, _, _ = ts_graph._export_onnx(
+    proto, _, _, _ = ts_graph._export_onnx(  # type: ignore[attr-defined]
         initializers=ts_name_to_real_tensor,
         onnx_opset_version=opset_version,
         dynamic_axes={},
@@ -482,7 +533,7 @@ def _ts_graph_to_onnx_model_in_protobuf(
 
 
 @_beartype.beartype
-def _shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
+def _shape_inference_with_fake_tensor(decomposed_module: "torch.fx.GraphModule", *args):
     # Use this FakeTensorMode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor
     # 2. run FakeTensorProp
@@ -521,15 +572,15 @@ def _shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *
 
 @_beartype.beartype
 def _rename_placeholder_targets(
-    module: torch.fx.GraphModule, reference_module: torch.fx.GraphModule
+    module: "torch.fx.GraphModule", reference_module: "torch.fx.GraphModule"
 ):
     """Align the argument names in module with those in reference_module.
     After calling this function, the two forward(...) in module and reference_module should have
     the same signature.
     """
-    placeholders = [n for n in module.graph.nodes if n.op == "placeholder"]
+    placeholders = [node for node in module.graph.nodes if node.op == "placeholder"]
     reference_placeholders = [
-        n for n in reference_module.graph.nodes if n.op == "placeholder"
+        node for node in reference_module.graph.nodes if node.op == "placeholder"
     ]
 
     for placeholder, reference_placeholder in zip(placeholders, reference_placeholders):
@@ -656,11 +707,11 @@ def export_without_kwargs(
             self.captured_graph: Optional["torch.fx.GraphModule"] = None
             self.captured_graph_count = 0
 
-        def compile(self, gm: "torch.fx.GraphModule", _):
+        def compile(self, graph_module: "torch.fx.GraphModule", _):
             assert self.captured_graph_count == 0
             self.captured_graph = gm
             self.captured_graph_count += 1
-            return gm
+            return graph_module
 
     compiler = GraphCaptureCompiler()
     torch._dynamo.optimize(compiler.compile, nopython=True)(Wrapper(fn))(*bound_args)
@@ -782,7 +833,7 @@ def _trace_into_fx_graph_via_fx_symbolic_trace(
             concrete_args[param_name] = param_value
 
     return (
-        module_expansion_symbolic_trace(module, concrete_args=concrete_args),
+        _module_expansion_symbolic_trace(module, concrete_args=concrete_args),
         bound.args,
     )
 
