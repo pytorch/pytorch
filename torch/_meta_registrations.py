@@ -2052,9 +2052,15 @@ def meta__scaled_dot_product_flash(
     is_causal: bool = False,
     return_debug_mask: bool = False,
 ):
-    # [Note] Wrong return values for Philox seed and offset:
+    # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
     # We have added logic to torch/_dynamo/variables/torch.py
-    # to ensure that if dropout_p is non zero then we will graph break on this operation
+    # We need to check if scaled_dot_product_attention will run the flash attention
+    # kernel and if dropout is != 0.0. If that is the case then we want dynamo
+    # to graph break. The derivative calculation for _scaled_dot_product_flash_attention
+    # does not function correctly with cuda graphs because the full philox state is not captured
+    # the forward's return values. Another reason to graph break is that the the meta function
+    # returns the wrong outputs for philox seed and offset and these values get baked into the
+    # inductor fallback calls to the eager kernels.
     check(
         dropout_p == 0.0,
         lambda: f"Can only trace _scaled_dot_product_flash_attention when dropout is set to 0 but got a dropout_p of {dropout_p}.",
