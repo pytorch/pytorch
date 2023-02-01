@@ -3,8 +3,8 @@ name: Cleans up diskspace
 description: Cleans up diskspace if the root directory has used more than seventy percent of your diskspace. 
 
 inputs:
-    github-token:
-        description: GITHUB_TOKEN
+    diskspace-cutoff:
+        description: The percent amount after which docker prune is run. 
         required: true  
 
 runs:
@@ -13,7 +13,7 @@ runs:
     - name: Cleans up diskspace 
       shell: bash
       run: |
-        diskspace_cutoff=70
+        diskspace_cutoff=${{ inputs.diskspace-cutoff }}
         diskspace=$(df -H / --output=pcent | sed -n 2p | sed 's/%//' | sed 's/ //')
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
         if [[ "$diskspace" -ge "diskspace_cutoff" ]] ; then

@@ -14,3 +14,10 @@ runs:
         docker stop $(docker ps -q) || true
         # Prune all stopped containers.
         docker container prune -f
+    - name: Runner diskspace health check
+      uses: actions/diskspace-cleanup
+      if: always()
+      env:
+          DISKSPACE-CUTOFF: 70
+      with:
+          diskspace-cutoff: "$DISKSPACE-CUTOFF"
