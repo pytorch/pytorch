@@ -565,26 +565,29 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
-        var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
-        elif other == float("inf"):
-            code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
-        elif isinstance(other, bool):
-            if other:
-                code.writeline(f"auto {var} = true;")
-            else:
-                code.writeline(f"auto {var} = false;")
-        elif isinstance(other, float):
-            code.writeline(f"float {var} = {other};")
-        else:
-            code.writeline(f"auto {var} = {other!r};")
-        code.writeline(f"if({mask})")
+
+        # Write masked operation into a lambda
+        body_var = V.kernel.cse.newvar()
+        code.writeline(f"auto {body_var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            code.writeline(f"{var} = {result};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        # Use the lambda's return type as the type of other
+        type = f"decltype({body_var}())"
+
+        if other == float("-inf"):
+            other_code = f"-std::numeric_limits<{type}>::infinity()"
+        elif other == float("inf"):
+            other_code = "std::numeric_limits<{type}>::infinity()"
+        elif isinstance(other, bool):
+            other_code = f"static_cast<{type}>({str(other).lower()})"
+        else:
+            other_code = f"static_cast<{type}>({repr(other)})"
+
+        return f"{mask} ? {body_var}() : {other_code}"
 
     @staticmethod
     def logical_and(a, b):
