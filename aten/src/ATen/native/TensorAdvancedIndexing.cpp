@@ -1474,7 +1474,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   auto result = grad.new_zeros_symint(self.sym_sizes());
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if index tensor is a Tensor Subclass.
-  if (isTensorSubclassLike(index)) {
+  if (isTensorSubclassLike(index) || isTensorSubclassLike(grad)) {
     return result.scatter_add(dim, index, grad);
   }
   result.scatter_add_(dim, index, grad);
