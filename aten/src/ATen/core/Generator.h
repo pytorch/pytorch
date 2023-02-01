@@ -134,7 +134,7 @@ struct TORCH_API Generator {
 };
 
 template<class Impl, class... Args>
-Generator make_generator(Args&&... args) {
+TORCH_API Generator make_generator(Args&&... args) {
   return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
 
