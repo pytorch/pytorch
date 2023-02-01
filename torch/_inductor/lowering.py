@@ -2568,7 +2568,6 @@ def max_pool2d_with_indices(
     if not stride:
         stride = kernel_size
 
-    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
