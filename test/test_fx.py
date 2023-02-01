@@ -481,20 +481,41 @@ class TestFX(JitTestCase):
     def test_wrap_with_make_fx(self):
         def to_trace(y):
             return a_lifted_leaf((4, y), 3) * a_lifted_leaf((3, 4), 5) * a_lifted_leaf((y, y), y)
+        
+        expected_code = """def forward(self, y_1):
+    a_lifted_leaf = __main___a_lifted_leaf((4, y_1), 3)
+    a_lifted_leaf_1 = __main___a_lifted_leaf((3, 4), 5)
+    mul = torch.ops.aten.mul.Tensor(a_lifted_leaf, 12);  a_lifted_leaf = None
+    a_lifted_leaf_2 = __main___a_lifted_leaf((y_1, y_1), y_1);  y_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(mul, a_lifted_leaf_2);  mul = a_lifted_leaf_2 = None
+    return mul_1"""
 
         m = make_fx(to_trace, tracing_mode="real")(torch.tensor([10]))
         self.assertIn('a_lifted_leaf', m.code)
         # aten.add.Tensor should be internal to `a_lifted_leaf` when some of the parameters are tensors.
         # However, it should not be traced as the function is marked as opaque.
         self.assertNotIn('aten.add.Tensor', m.code)
+        assert(m.code.strip(), expected_code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
 
-        m = make_fx(to_trace, tracing_mode="fake")(torch.tensor([12]))
+        m = make_fx(to_trace, tracing_mode="fake")(torch.tensor([10]))
         self.assertIn('a_lifted_leaf', m.code)
         self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
 
-        m = make_fx(to_trace, tracing_mode="symbolic")(torch.tensor([15]))
+        m = make_fx(to_trace, tracing_mode="symbolic")(torch.tensor([10]))
         self.assertIn('a_lifted_leaf', m.code)
         self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
 
 
     def test_graph_edit_with_proxy(self):
