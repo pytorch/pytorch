@@ -1,16 +1,16 @@
-name: Cleans up diskspace 
+name: Cleans up diskspace
 
-description: Cleans up diskspace if the root directory has used more than seventy percent of your diskspace. 
+description: Cleans up diskspace if the root directory has used more than seventy percent of your diskspace.
 
 inputs:
     diskspace-cutoff:
-        description: The percent amount after which docker prune is run. 
-        required: true  
+        description: The percent amount after which docker prune is run.
+        required: true
 
 runs:
   using: composite
   steps:
-    - name: Cleans up diskspace 
+    - name: Cleans up diskspace
       shell: bash
       run: |
         diskspace_cutoff=${{ inputs.diskspace-cutoff }}
