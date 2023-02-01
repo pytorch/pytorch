@@ -1567,11 +1567,6 @@ def _all_gather_optim_state(
         if empty_ranks:
             assert empty_ranks == _empty_ranks
         empty_ranks = _empty_ranks
-        local_state = (
-            optim_state[name]
-            if name in optim_state
-            else torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
-        )
         local_state = optim_state.get(name, empty_func(0))
         local_state = local_state.to(fsdp_state.compute_device)
         tensors = [
