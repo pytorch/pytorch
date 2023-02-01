@@ -2492,7 +2492,7 @@ class TestExperimentalUtils(TestCase):
 0 [CPU (After GPU)]
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]""")
-    @unittest.skipIf(IS_JETSON, "Kineto and JSON not behaving as expected on Jetson")
+    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
     def test_utils_get_optimizable_events(self):
         basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
         optimizable_events = basic_evaluation.get_optimizable_events(
