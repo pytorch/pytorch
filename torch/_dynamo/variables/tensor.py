@@ -179,12 +179,15 @@ class TensorVariable(VariableTracker):
                 except NameError:
                     return None
 
-                # make sure this is an attribute, not a method.
-                # type(torch.Tensor.H) is "getset_descriptor", a CPython implementation detail.
+                # Make sure this is an attribute, not a method.
+                # type(torch.Tensor.H) should be "getset_descriptor"
+                # This is a because of CPython implementation, see THPVariableType:
+                # these attributes are implemented under tp_getset, which appear
+                # as `getset_descriptor`s, (compared to, say, methods which appear
+                # as `method_descriptor`s)
                 if not (
                     str(getattr(type(static_attr), "__name__", None))
                     == "getset_descriptor"
-                    and "<attribute" in str(static_attr)
                 ):
                     return None
 
