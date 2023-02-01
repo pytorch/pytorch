@@ -2358,31 +2358,31 @@ class TestExperimentalUtils(TestCase):
             with open(json_file_path, "w") as f:
                 json.dump([kineto_events, profiler_events], f)
 
-            assert (os.path.exists(json_file_path))
-            with open(json_file_path, "r") as f:
-                kineto_events, profiler_events = json.load(f)
+        assert (os.path.exists(json_file_path))
+        with open(json_file_path, "r") as f:
+            kineto_events, profiler_events = json.load(f)
 
-            cuda_events = [
-                MockKinetoEvent(*event.values()) for event in kineto_events
-            ]
-            cpu_events = []
-            id_map = {}
-            for e in profiler_events:
-                event = MockProfilerEvent(**e)
-                id_map[event.id] = event
-                cpu_events.append(event)
-            for event in cpu_events:
-                parent = None if event.parent is None else id_map[event.parent]
-                children = [id_map[child] for child in event.children]
-                event.__post__init__(parent, children)
-            cpu_events = [event for event in cpu_events if event.parent is None]
-            profiler = unittest.mock.Mock()
-            profiler.kineto_results = unittest.mock.Mock()
-            profiler.kineto_results.events = unittest.mock.Mock(
-                return_value=cuda_events)
-            profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-                return_value=cpu_events)
-            return profiler
+        cuda_events = [
+            MockKinetoEvent(*event.values()) for event in kineto_events
+        ]
+        cpu_events = []
+        id_map = {}
+        for e in profiler_events:
+            event = MockProfilerEvent(**e)
+            id_map[event.id] = event
+            cpu_events.append(event)
+        for event in cpu_events:
+            parent = None if event.parent is None else id_map[event.parent]
+            children = [id_map[child] for child in event.children]
+            event.__post__init__(parent, children)
+        cpu_events = [event for event in cpu_events if event.parent is None]
+        profiler = unittest.mock.Mock()
+        profiler.kineto_results = unittest.mock.Mock()
+        profiler.kineto_results.events = unittest.mock.Mock(
+            return_value=cuda_events)
+        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
+            return_value=cpu_events)
+        return profiler
 
     def test_utils_compute_self_time(self):
         with profile() as prof:
@@ -2492,13 +2492,9 @@ class TestExperimentalUtils(TestCase):
 0 [CPU (After GPU)]
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]""")
-
+    @unittest.skipIf(IS_JETSON, "Kineto and JSON not behaving as expected on Jetson")
     def test_utils_get_optimizable_events(self):
-        # prof is None if !(accept and torch.cuda.is_available())
-        prof = self.load_mock_profile()
-        if prof is None:
-            return
-        basic_evaluation = _utils.BasicEvaluation(prof)
+        basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
         optimizable_events = basic_evaluation.get_optimizable_events(
             2, print_enable=False)
         expected_output = "\n".join(
