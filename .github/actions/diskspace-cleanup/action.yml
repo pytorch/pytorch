@@ -6,6 +6,7 @@ inputs:
     diskspace-cutoff:
         description: The percent amount after which docker prune is run.
         required: true
+        default: 70
 
 runs:
   using: composite
