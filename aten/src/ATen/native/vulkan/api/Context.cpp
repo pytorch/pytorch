@@ -23,7 +23,7 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
-      cmd_(VK_NULL_HANDLE),
+      cmd_(VK_NULL_HANDLE, 0u),
       submit_count_{0u},
       // Memory Management
       buffer_clearlist_mutex_{},

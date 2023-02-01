@@ -3602,6 +3602,12 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         copy_m = copy.deepcopy(m)
         self.assertEqual(copy_m.meta['hello'], 'world')
 
+    def test_deepcopy_no_recursion(self):
+        m = symbolic_trace(SimpleTest())
+        m.meta['hello'] = m  # circular reference
+        copy_m = copy.deepcopy(m)  # finishes
+        self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
