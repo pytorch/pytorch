@@ -125,36 +125,23 @@ which should work with any model you throw at it.
 Existing Backends
 ~~~~~~~~~~~~~~~~~
 
-TorchDynamo has a growing list of backends, which can be found in
-`backends.py <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/backends.py>`__
-or ``torchdynamo.list_backends()`` each of which with its optional dependencies.
+TorchDynamo has a growing list of backends, which can be found in the
+`backends <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/backends/>`__ folder
+or ``torch._dynamo.list_backends()`` each of which with its optional dependencies.
 
 Some of the most commonly used backends include:
 
-* **Debugging backends**:
-  * ``dynamo.optimize("eager")`` - Uses PyTorch
-  to run the extracted GraphModule. This is quite useful in debugging
-  TorchDynamo issues.
-  * ``dynamo.optimize("aot_eager")`` - Uses
-  AotAutograd with no compiler, for example, just using PyTorch eager for the
-  AotAutograd’s extracted forward and backward graphs. This is useful for
-  debugging, and unlikely to give speedups.
-
-* **Training & inference backends**:
-  * ``dynamo.optimize("inductor")`` - Uses ``TorchInductor`` backend
-  with AotAutograd and cudagraphs by leveraging
-  codegened Triton kernels `Read
-  more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
-  * ``dynamo.optimize("nvfuser")`` - nvFuser with TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-  * ``dynamo.optimize("aot_nvfuser")`` - nvFuser with AotAutograd. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+**Training & inference backends**:
+  * ``dynamo.optimize("inductor")`` - Uses ``TorchInductor`` backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
+  * ``dynamo.optimize("aot_ts_nvfuser")`` - nvFuser with AotAutograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+  * ``dynamo.optimize("nvprims_nvfuser")`` - nvFuser with PrimTorch. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
   * ``dynamo.optimize("cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
 
-* **Inference-only backends**:
-  * ``dynamo.optimize("ofi")`` - Uses
-  Torchscript ``optimize_for_inference``. `Read
-  more <https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html>`__
-  * ``dynamo.optimize("fx2trt")`` - Uses Nvidia TensorRT for inference optimizations. `Read more <https://github.com/pytorch/TensorRT/blob/master/docsrc/tutorials/getting_started_with_fx_path.rst>`__
-  * ``dynamo.optimize("onnxrt")`` - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__ \* ``dynamo.optimize("ipex")`` - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
+**Inference-only backends**:
+  * ``dynamo.optimize("onnxrt")`` - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__
+  * ``dynamo.optimize("tensorrt")`` - Uses ONNXRT to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
+  * ``dynamo.optimize("ipex")`` - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
+  * ``dynamo.optimize("tvm")`` - Uses Apach TVM for inference optimizations. `Read more <https://tvm.apache.org/>`__
 
 Why do you need another way of optimizing PyTorch code?
 -------------------------------------------------------

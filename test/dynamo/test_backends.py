@@ -161,6 +161,13 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_tvm(self):
         self._check_backend_works("tvm")
 
+    def test_list_backends(self):
+        self.assertIn("inductor", torch._dynamo.list_backends())
+        self.assertIn("inductor", torch._dynamo.list_backends(exclude_tags=None))
+        self.assertNotIn("eager", torch._dynamo.list_backends())
+        self.assertNotIn("eager", torch._dynamo.list_backends(exclude_tags=["debug"]))
+        self.assertIn("eager", torch._dynamo.list_backends(exclude_tags=[]))
+
 
 class NormalizeIRTests(torch._dynamo.test_case.TestCase):
     def test_inplace_normalize(self):

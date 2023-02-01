@@ -1,7 +1,10 @@
 import logging
 
 from ..backends.common import aot_autograd
-from ..backends.registry import lookup_backend, register_backend
+from ..backends.registry import (
+    lookup_backend,
+    register_experimental_backend as register_backend,
+)
 
 log = logging.getLogger(__name__)
 
