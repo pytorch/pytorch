@@ -167,6 +167,10 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_nvprims_aten(self):
         self._check_backend_works("nvprims_aten")
 
+    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
+    def test_onnxrt(self):
+        self._check_backend_works("onnxrt")
+
 
 class NormalizeIRTests(torch._dynamo.test_case.TestCase):
     def test_inplace_normalize(self):

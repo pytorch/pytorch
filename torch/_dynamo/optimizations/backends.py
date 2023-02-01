@@ -37,116 +37,6 @@ def create_backend(fn):
     return register_backend(inner)
 
 
-def onnxrt_common(subgraph, provider, onnx_filename=None):
-    import numpy as np  # type: ignore[import]
-    import onnxruntime  # type: ignore[import]
-
-    _np_dtype = {
-        torch.float16: np.float16,
-        torch.float32: np.float32,
-        torch.float64: np.float64,
-        torch.uint8: np.uint8,
-        torch.int8: np.int8,
-        torch.int16: np.int16,
-        torch.int32: np.int32,
-        torch.int64: np.longlong,
-        torch.bool: np.bool_,
-    }
-
-    assert provider in onnxruntime.get_available_providers()
-    session = onnxruntime.InferenceSession(
-        onnx_filename or subgraph.onnx_filename, providers=[provider]
-    )
-    input_names = subgraph.input_names
-    output_names = subgraph.output_names
-    create_outputs = subgraph.empty_outputs_factory()
-    is_cpu = subgraph.is_cpu
-
-    def _call(*initial_args):
-        binding = session.io_binding()
-        args = [a.contiguous() for a in initial_args]
-        for name, value in zip(input_names, args):
-            dev = value.device
-            binding.bind_input(
-                name,
-                dev.type,
-                dev.index or 0,
-                _np_dtype[value.dtype],
-                value.size(),
-                value.data_ptr(),
-            )
-        outputs = create_outputs()
-        for name, value in zip(output_names, outputs):
-            dev = value.device
-            binding.bind_output(
-                name,
-                dev.type,
-                dev.index or 0,
-                _np_dtype[value.dtype],
-                value.size(),
-                value.data_ptr(),
-            )
-        session.run_with_iobinding(binding)
-        if is_cpu:
-            binding.copy_outputs_to_cpu()
-        return outputs
-
-    return subgraph.wrap_returns(_call)
-
-
-@create_backend
-def onnxrt_cpu(subgraph):
-    return onnxrt_common(subgraph, provider="CPUExecutionProvider")
-
-
-@create_backend
-def onnxrt_cuda(subgraph):
-    return onnxrt_common(subgraph, provider="CUDAExecutionProvider")
-
-
-@create_backend
-def onnx2tensorrt(subgraph):
-    if subgraph.will_tensorrt_barf():
-        # TensorRT fails violently with an abort() on this
-        return None
-
-    return onnxrt_common(subgraph, provider="TensorrtExecutionProvider")
-
-
-@create_backend
-def onnxrt_cpu_numpy(subgraph, provider="CPUExecutionProvider"):
-    """Alternate version that integrates via numpy"""
-    import onnxruntime
-
-    assert provider in onnxruntime.get_available_providers()
-    ort_session = onnxruntime.InferenceSession(
-        subgraph.onnx_filename, providers=[provider]
-    )
-
-    def to_numpy(x):
-        try:
-            return x.numpy()
-        except RuntimeError:
-            return x.detach().numpy()
-
-    def _call(*args):
-        res = ort_session.run(
-            None, {f"i{i}": to_numpy(arg) for i, arg in enumerate(args)}
-        )
-        res = [torch.from_numpy(x) for x in res]
-        return res
-
-    return subgraph.wrap_returns(_call)
-
-
-@create_backend
-def onnxrt(subgraph):
-    if subgraph.is_cuda:
-        return onnxrt_cuda(subgraph)
-    else:
-        return onnxrt_cpu(subgraph)
-
-
 @create_backend
 def ipex(subgraph, **kwargs):
     import intel_extension_for_pytorch as ipex  # type: ignore[import]
@@ -293,7 +183,7 @@ def tensorrt(subgraph):
         # TensorRT fails violently with an abort() on this
         return None
 
-    model = onnx2tensorrt(subgraph)
+    model = fx2trt(subgraph)
     if model is None:
         model = torch2trt(subgraph)
     return model
