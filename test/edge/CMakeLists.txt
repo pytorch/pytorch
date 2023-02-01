@@ -62,7 +62,7 @@ target_link_libraries(test_edge_op_registration PRIVATE
   ${TEST_DEPENDENCIES}
 )
 if(USE_CUDA)
-  target_link_libraries(test_edge_op_registration caffe2_nvrtc)
+  target_link_libraries(test_edge_op_registration PRIVATE caffe2_nvrtc)
 endif()
 if((CMAKE_CXX_COMPILER_ID MATCHES "AppleClang") OR (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
   target_link_options(test_edge_op_registration PRIVATE
