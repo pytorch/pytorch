@@ -73,11 +73,9 @@ REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
 SKIP = {
     # Unusual training setup
     "levit_128",
-    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
+SKIP
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
