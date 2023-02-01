@@ -235,10 +235,10 @@ def fetch_tensor_proxy(tracer):
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
 def proxy_call(proxy_mode, func, args, kwargs):
-    # `__torch_dispatch__` is only called on torch ops, which must have `overloadpacket` attr
-    # hence, the lack of such an attribute indicates an `external_call`, perhaps a function
-    # decorated with `@torch.tx.wrap`
-    external_call = not hasattr(func, "overloadpacket")
+    # `__torch_dispatch__` is only called on torch ops, which must subclass `OpOverload`
+    # We treat all other functions as an `external_call`, for instance, a function decorated
+    # with `@torch.tx.wrap`
+    external_call = not isinstance(func, torch._ops.OpOverload)
 
     def can_handle_tensor(x):
         return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
@@ -489,15 +489,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
-
-    @contextmanager
-    def enable(self, b):
-        old = self.enable_tracing
-        self.enable_tracing = b
-        try:
-            yield
-        finally:
-            self.enable_tracing = old
 
     def __enter__(self):
         # sym mode first, then us...

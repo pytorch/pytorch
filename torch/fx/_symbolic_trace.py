@@ -853,7 +853,7 @@ def _create_wrapped_func(orig_fn):
         # import here to avoid circular imports
         from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
 
-        # If there is no input with proxy, see if we are proxying fake tensors
+        # If there is no input with proxy, see if we are tracing with proxy tensors
         proxy_mode = get_innermost_proxy_mode()
         if proxy_mode is not None:
             # Disable tracing of the interior of the wrapped fn while evaluating
@@ -961,6 +961,7 @@ class _Patcher(object):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
         setattr(cls, name, new_fn)
+        assert(getattr(getattr(cls, name), "__fx_already_patched", False))
 
     def visit_once(self, thing: Any):
         """Return True on the first call to with thing, otherwise false"""
