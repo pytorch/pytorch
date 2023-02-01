@@ -8,7 +8,7 @@ import tabulate
 import torch
 
 import torch._inductor
-from torch._dynamo.optimizations.backends import cudagraphs_inner
+from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import timed
