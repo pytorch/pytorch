@@ -158,7 +158,15 @@ uint8_t getAlignment(const Tensor &t) {
   return alignment;
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
+Tensor& addmm_out_cuda_impl(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Activation activation = Activation::None,
+    bool allow_extended = false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -324,9 +332,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   } else
 #endif
   {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
+        at::ScalarType::Char,
         scalar_type,
         "addmm_cuda",
         [&] {
