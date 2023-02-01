@@ -241,7 +241,7 @@ class TestGenericProxyTensor(TestCase):
         self.assertFalse(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
 
-        # Verify that the `forward`` function of a graph module produced as a 
+        # Verify that the `forward`` function of a graph module produced as a
         # side effect of an interior `make_fx` is still traced
         def f3(x):
             gm = make_fx(f1)(x)
