@@ -332,8 +332,13 @@ void pushPackingPastRnn(Block* b) {
         shape->addInput(rnn_input);
         shape->copyMetadata(n);
         batch_sizes->replaceFirstUseWith(shape->output());
-        user->inputs().at(1)->node()->t_(
-            attr::value, at::native::ones_like(const_val_t));
+        // New Constant node is needed, as it might be shared
+        // with a Constant node 0 from others.
+        Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
+        gather_indices->t_(attr::value, at::native::ones_like(const_val_t));
+        gather_indices->copyMetadata(n);
+        gather_indices->insertBefore(user);
+        user->replaceInput(1, gather_indices->output());
       }
       // Make RNN not depend on batch_sizes.
       else if (user == rnn) {
