@@ -117,14 +117,13 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True, dynamic_args = None):
+def enable_dynamic(enable: bool = True):
     if not enable:
         yield
         return
-    with patch("torch._dynamo.config.dynamic_shapes", True),        \
-         patch("torch._functorch.config.use_dynamic_shapes", True), \
-         patch("torch._dynamo.config.specialize_int_float", False), \
-         patch("torch._dynamo.config.dynamic_args", dynamic_args):
+    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
+        "torch._functorch.config.use_dynamic_shapes", True
+    ), patch("torch._dynamo.config.specialize_int_float", False):
         yield
 
 
@@ -138,7 +137,6 @@ class _TorchDynamoContext:
         first_ctx=False,
         *,
         dynamic=False,
-        dynamic_args=None,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -148,7 +146,6 @@ class _TorchDynamoContext:
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
         self.dynamic = dynamic
-        self.dynamic_args = dynamic_args
         patch_fn()
 
     def __enter__(self):
@@ -162,7 +159,7 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic, self.dynamic_args)
+        self.dynamic_ctx = enable_dynamic(self.dynamic)
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -208,7 +205,7 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic, self.dynamic_args)
+            dynamic_ctx = enable_dynamic(self.dynamic)
             dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
@@ -270,7 +267,7 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False, dynamic_args=None):
+    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
             if (
@@ -289,7 +286,6 @@ class OptimizeContext(_TorchDynamoContext):
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
             dynamic=dynamic,
-            dynamic_args=dynamic_args,
         )
 
 
@@ -340,14 +336,16 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False, dynamic_args=None,
+    compile_fn,
+    hooks: Hooks,
+    backend_ctx_ctor=null_context,
+    dynamic=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
         dynamic=dynamic,
-        dynamic_args=dynamic_args,
     )
 
 
@@ -444,11 +442,10 @@ def optimize(
             hooks=hooks,
         )
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks=hooks, dynamic_args=dynamic_args),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        dynamic_args=dynamic_args,
     )
 
 
@@ -529,13 +526,18 @@ def explain(f, *args, **kwargs):
         explanation_verbose,
     )
 
+
 # Sample
 # dynamic_args = [('batch', 'seq', None), ('batch', None)]
 # dynamic_kwargs = {x : ('batch', 'seq', None)}
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real",
+    f,
+    *args,
+    aten_graph=False,
+    decomposition_table=None,
+    tracing_mode="real",
     dynamic_args=None,
-    **kwargs
+    **kwargs,
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
@@ -698,7 +700,9 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False, dynamic_args=None):
+def optimize_assert(
+    backend, *, hooks=Hooks(None, None), export=False, dynamic=False, dynamic_args=None
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -708,11 +712,12 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, export=export),
+        convert_frame.convert_frame_assert(
+            backend, export=export, dynamic_args=dynamic_args
+        ),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        dynamic_args=dynamic_args,
     )
 
 

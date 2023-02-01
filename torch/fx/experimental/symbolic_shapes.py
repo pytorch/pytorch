@@ -684,7 +684,7 @@ class ShapeEnv(object):
         if isinstance(source, LocalInputSource) and source.dynamic_spec:
             assert len(source.dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
 
-            size: List[Optional[sympy.Expr]] = [None] * rank
+            size = [None] * rank
             for i, val in enumerate(ex.size()):
                 if source.dynamic_spec[i]:
                     size[i] = self.create_symbol(
@@ -701,14 +701,14 @@ class ShapeEnv(object):
 
         # breakpoint()
 
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        stride: List[Optional[sympy.Expr]] = [None] * rank
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
+                for i in range(rank)
                 if stride[i] is not None and ex.stride()[i] >= 0
             }
             # iterate over unbound strides in sorted order
@@ -778,7 +778,9 @@ class ShapeEnv(object):
 
         # Create a duck sized int if necessary
         if val not in self.val_to_var:
-            sympy_expr = Symbol(name or f"s{len(self.var_to_val)}", positive=True, integer=True)
+            symbol_name = name or f"{len(self.var_to_val)}"
+            # NB: inductor relies on the name being prefixed with 's'
+            sympy_expr = Symbol(f"s_{symbol_name}", positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             self.val_to_var[val] = sympy_expr
 

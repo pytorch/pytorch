@@ -1631,6 +1631,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         mutated_closure_cell_contents: Set[str],
+        dynamic_args=None,
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1656,14 +1657,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
 
-        dynamic_args = torch._dynamo.config.dynamic_args or {}
+        self.dynamic_args = dynamic_args or {}
 
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(k, code_options["co_varnames"].index(k), dynamic_args.get(k, None))
+                    LocalInputSource(k, code_options["co_varnames"].index(k), self.dynamic_args.get(k, None))
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
                 )(f_locals[k]),
