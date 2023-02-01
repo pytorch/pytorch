@@ -47,6 +47,12 @@ def is_bfloat16_module(m):
     return weight_is_bf16 and bias_is_bf16
 
 
+def is_group_depthwise_conv_transpose(m):
+    return (
+        type(m) in [nn.ConvTranspose2d] and m.groups > 1 and m.groups == m.in_channels
+    )
+
+
 def check_node_kind(current_node, modules, node_kind):
     if not isinstance(current_node, torch.fx.Node):
         return False
@@ -682,6 +688,9 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     computation_node
                 ):
                     continue
+                # TODO: remove this when group depthwise ConvTranspose is supported
+                if is_group_depthwise_conv_transpose(computation_node):
+                    continue
                 computation_node_input_size = (
                     node.args[0].args[0].meta.get("tensor_meta").shape
                 )
@@ -834,6 +843,9 @@ def pack_module(gm: torch.fx.GraphModule):
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
                 ):
+                    continue
+                # TODO: remove this when group depthwise ConvTranspose is supported
+                if is_group_depthwise_conv_transpose(cur_module):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
