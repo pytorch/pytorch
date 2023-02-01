@@ -683,7 +683,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TensorVariable,
+            TorchVariable,
             UserFunctionVariable,
         )
         from .builder import VariableBuilder
