@@ -3791,7 +3791,8 @@ def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
     return pg
 
 def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
-    """This is NOT a replacement for new_group.
+    """
+    This is NOT a replacement for new_group.
     We don't expect it to work when ``get_rank() not in ranks``.
     """
     pg = _try_find_pg_by_ranks_and_tag(tag, ranks)
@@ -3801,4 +3802,7 @@ def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGr
     return new_group(ranks, pg_tag=tag)
 
 def _get_group_tag(pg: ProcessGroup) -> str:
+    """
+    Returns the tag associated with ``pg``.
+    """
     return _world.pg_to_tag[pg]

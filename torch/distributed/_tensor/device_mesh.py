@@ -433,21 +433,21 @@ class DeviceMesh(object):
             op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
             mesh_dim: int = 0,
     ) -> Optional[torch.Tensor]:
-            """
-            all_reduce the tensor on each rank on a device mesh dimension, and
-            return an output tensor on each rank after all_reduce.
+        """
+        all_reduce the tensor on each rank on a device mesh dimension, and
+        return an output tensor on each rank after all_reduce.
 
-            Args:
-                tensor (torch.Tensor): tensor to be all_reduced on each rank.
-                op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
-                    the reduction op of all_reduce (i.e. ReduceOp.SUM)
-                mesh_dim (int, optional): indicate which mesh dimension we want
-                    to reduce on.
+        Args:
+            tensor (torch.Tensor): tensor to be all_reduced on each rank.
+            op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
+                the reduction op of all_reduce (i.e. ReduceOp.SUM)
+            mesh_dim (int, optional): indicate which mesh dimension we want
+                to reduce on.
 
-            Returns:
-                A :class:`Work` object
-            """
-            return tr_c.all_reduce(self=tensor, reduceOp="sum", group=(self, mesh_dim))
+        Returns:
+            A :class:`Work` object
+        """
+        return tr_c.all_reduce(self=tensor, reduceOp="sum", group=(self, mesh_dim))
 
     def reduce_scatter(
         self,

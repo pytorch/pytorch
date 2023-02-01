@@ -3,16 +3,13 @@ import weakref
 import torch
 import torch.distributed as dist
 
-from torch._C import DispatchKey
-
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
-from typing import Any, Tuple, Union
+from typing import Any, Tuple, Union, List, cast
 
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
-from typing import List
 """
 New traceable, functional collectives.
   compiler: trace these ops with plain-old-data schemas, then choose how to lower them.
@@ -30,8 +27,8 @@ Issues:
 FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
 """
 
-#FIXME we do this way cuz we can't use tensor __eq__, we want id()
-#TODO use a weakref callback
+# FIXME we do this way cuz we can't use tensor __eq__, we want id()
+# TODO use a weakref callback and switch from tensor->work to tensor->cuda event
 class IdKeyWeakDict:
     def __init__(self):
         self.kvs = []
@@ -44,7 +41,7 @@ class IdKeyWeakDict:
         val = None
         for k, v in self.kvs:
             this_k = k()
-            if this_k == None:
+            if this_k is None:
                 continue
             if id(this_k) == id(key):
                 val = v
@@ -58,7 +55,8 @@ tensor_to_work = IdKeyWeakDict()
 lib = torch.library.Library("tr_c10d", "DEF")
 lib.define("wait(Tensor self) -> Tensor")
 
-impl_lib = torch.library.Library("tr_c10d", "IMPL",  "CPU")
+impl_lib_cpu = torch.library.Library("tr_c10d", "IMPL", "CPU")
+impl_lib_cuda = torch.library.Library("tr_c10d", "IMPL", "CUDA")
 
 def _wait_tensor(tensor: torch.Tensor):
     w = tensor_to_work.get_and_remove(tensor)
@@ -66,7 +64,8 @@ def _wait_tensor(tensor: torch.Tensor):
         w.wait()
     return tensor
 
-impl_lib.impl("wait", _wait_tensor)
+impl_lib_cpu.impl("wait", _wait_tensor)
+impl_lib_cuda.impl("wait", _wait_tensor)
 
 def wait_tensor(tensor):
     return torch._ops.ops.tr_c10d.wait(tensor)
@@ -113,7 +112,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
 
 # TODO assert if ranks has duplicated entries
-def _all_reduce_cpu(self, reduceOp, tag, ranks, stride):
+def _all_reduce(self, reduceOp, tag, ranks, stride):
     reduceOp = reduceOp.lower()
     assert reduceOp == "sum", "Unable to convert str to ReduceOp, so only default sum works"
     assert tag == "", "No support for non-empty comms tag"
@@ -142,20 +141,25 @@ def _all_reduce_cpu(self, reduceOp, tag, ranks, stride):
     tensor_to_work.add(inplace_tensor, work)
     return inplace_tensor
 
-c10_lib = torch.library.Library("aten", "IMPL",  "CPU")
-c10_lib.impl("all_reduce", _all_reduce_cpu)
+c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
+c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 
-RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh]
+c10_lib_cpu.impl("all_reduce", _all_reduce)
+c10_lib_cuda.impl("all_reduce", _all_reduce)
+
+RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh, Tuple[dt.DeviceMesh, int]]
 
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
+    rankset: List[int]
     if isinstance(group, list):
         if isinstance(group[0], list):
+            nested_list = cast(List[List[int]], group)
             rankset = []
-            for rs in group:
+            for rs in nested_list:
                 rankset.extend(rs)
                 stride = len(rs)
         else:
-            rankset = group
+            rankset = cast(List[int], group)
             stride = len(rankset)
     elif isinstance(group, dist.ProcessGroup):
         rankset = dist.get_process_group_ranks(group)
@@ -164,13 +168,13 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, dt.DeviceMesh):
         rankset = group.mesh.flatten().tolist()
         stride = len(rankset)
-        tag = tag or c10d._get_group_tag(group.get_dim_groups()[0]) 
-    elif isinstance(group, Tuple) and len(group) == 2:
-        dmesh = group[0]
-        dim = group[1]
-        if isinstance(dmesh, dt.DeviceMesh) and isinstance(dim, int):
+        tag = tag or c10d._get_group_tag(group.get_dim_groups()[0])
+    elif isinstance(group, tuple):
+        if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
+            dmesh = group[0]
+            dim = group[1]
             stride = dmesh.mesh.size(dim)
-            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, stride).flatten()
+            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, stride).flatten().tolist()
             tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
         else:
             raise ValueError("Invalid type for group")
