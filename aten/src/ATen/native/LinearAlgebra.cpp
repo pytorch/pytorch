@@ -17,6 +17,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -734,6 +735,11 @@ Tensor& matrix_rank_impl(
   }
 
   Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
+
+  if (isTensorSubclassLike(input)) {
+     result = at::sum(S > tol, /*dim=*/-1);
+     return result;
+  }
 
   result = at::sum_out(result, S > tol, /*dim=*/-1);
   return result;
