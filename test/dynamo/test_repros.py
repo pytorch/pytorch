@@ -30,6 +30,7 @@ except ImportError:
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.utils import ifdyn
 from torch.nn import functional as F
 
 
@@ -41,13 +42,6 @@ def is_fx_tracing_test() -> bool:
     Copied from the hpc trainer codebase
     """
     return torch.nn.Module.__call__ is not _orig_module_call
-
-
-def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
 
 
 def has_detectron2():
@@ -949,7 +943,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # uncomment/adjust the assertEqual below
     @unittest.expectedFailure
     @torch._dynamo.config.patch(
-        {"fake_tensor_propagation": True, "capture_scalar_outputs": True}
+        fake_tensor_propagation=True, capture_scalar_outputs=True, dynamic_shapes=True
     )
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -968,7 +962,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @torch._dynamo.config.patch("capture_scalar_outputs", False)
+    @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
@@ -981,7 +975,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(5, 4))
+        self.assertEqual(cnt.frame_count, 5)
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (31, 36, 35, 34, 29, 28))
 

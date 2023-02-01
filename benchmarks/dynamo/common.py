@@ -23,7 +23,6 @@ import psutil
 import torch
 
 import torch._dynamo
-import torch._dynamo.backends.inductor
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
@@ -550,6 +549,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     # Use higher tolerance for XLA since XLA cause numerical unstability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
+    torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -1842,17 +1842,12 @@ def run(runner, args, original_dir=None):
     args.exclude = args.exclude or [r"^$"]
     args.exclude_exact = args.exclude_exact or []
 
-    if torch._dynamo.backends.inductor.inductor:
+    if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
-        # We only have a CI skip list for aot_eager right now.  When inductor
-        # comes online, add that skip list too.
-        assert (
-            args.backend == "aot_eager"
-        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
@@ -1998,7 +1993,7 @@ def run(runner, args, original_dir=None):
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
 
-    if torch._dynamo.backends.inductor.inductor or args.inductor_settings:
+    if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
         if args.float16:
             # TODO(jansel): check if correctness issue is real
@@ -2028,7 +2023,7 @@ def run(runner, args, original_dir=None):
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
-    elif torch._dynamo.backends.inductor.inductor:
+    elif args.inductor:
         inductor_config.debug = args.verbose
         if args.threads:
             inductor_config.cpp.threads = args.threads
@@ -2105,7 +2100,7 @@ def run(runner, args, original_dir=None):
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 
-    if torch._dynamo.backends.inductor.inductor or args.backend == "inductor":
+    if args.inductor or args.backend == "inductor":
         if args.disable_cudagraphs:
             inductor_config.triton.cudagraphs = False
 
@@ -2133,7 +2128,7 @@ def run(runner, args, original_dir=None):
         if args.profiler_trace_name is None:
             if args.backend:
                 args.profiler_trace_name = args.backend
-            elif torch._dynamo.backends.inductor.inductor:
+            elif args.inductor:
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
