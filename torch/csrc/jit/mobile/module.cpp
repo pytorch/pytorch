@@ -141,8 +141,7 @@ void slot_named_params_recurse(
   size_t nslots = slots.size();
   for (const auto i : c10::irange(nslots)) {
     auto slot = slots[i];
-    std::string name =
-        parent_name.size() == 0 ? parent_name : parent_name + ".";
+    std::string name = parent_name.empty() ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
     // TODO: Fix this filter. Requires_grad is not the appropriate
     // filter of a parameter, but is a temporary hack to help probable
