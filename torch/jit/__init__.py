@@ -11,6 +11,7 @@ from torch._jit_internal import (
     Final,
     Future,
     _Await,
+    _drop,
     _IgnoreContextManager,
     _overload,
     _overload_method,
