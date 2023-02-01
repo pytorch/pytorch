@@ -477,11 +477,11 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('wrapped_decorated_fn', m.code)
         self.assertEqual(m(1), 1)
-    
+
     def test_wrap_with_make_fx(self):
         def to_trace(y):
             return a_lifted_leaf((4, y), 3) * a_lifted_leaf((3, 4), 5) * a_lifted_leaf((y, y), y)
-        
+
         expected_code = """def forward(self, y_1):
     a_lifted_leaf = __main___a_lifted_leaf((4, y_1), 3)
     a_lifted_leaf_1 = __main___a_lifted_leaf((3, 4), 5)
@@ -495,7 +495,6 @@ class TestFX(JitTestCase):
         # aten.add.Tensor should be internal to `a_lifted_leaf` when some of the parameters are tensors.
         # However, it should not be traced as the function is marked as opaque.
         self.assertNotIn('aten.add.Tensor', m.code)
-        assert(m.code.strip(), expected_code)
         self.assertExpectedInline(
             m.code.strip(),
             expected_code
