@@ -10,6 +10,7 @@ import uuid
 from collections import Counter
 from importlib import import_module
 from tempfile import TemporaryFile
+from typing import Any, List, Optional
 
 import torch
 import torch.fx as fx
@@ -545,7 +546,8 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     )
                 if inner_compiled_fn is None:
                     inner_compiled_fn = compiler_fn(gm, example_inputs)
-                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                out = []
+                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn, out=out):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
@@ -560,7 +562,19 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)
+                    real_output = inner_compiled_fn(real_inputs)
+                    # Check that when we recompiled the module, the outputs
+                    # agree
+                    assert len(out) == 1
+                    tested_output = out[0]
+                    if not same(real_output, tested_output, tol=config.repro_tolerance):
+                        log.error(
+                            "Accuracy didn't fail, but when we reran the optimized module "
+                            "we got different results!  This indicates a bug in the accuracy "
+                            "minifier, please file a bug, esp. if we ended up not discovering "
+                            "the accuracy failure in minifier."
+                        )
+                    return real_output
             else:
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
@@ -636,9 +650,16 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
+def same_two_models(
+    gm, opt_gm, example_inputs, only_fwd=False, opt_out: Optional[List[Any]] = None
+):
     """
     Check two models have same accuracy.
+
+    Args:
+        opt_out: if an empty list, we will append the (usually tuple) module
+            outputs to it from opt_gm.  This is helpful if you want to do
+            something with the outputs later.
     """
     from .eval_frame import OptimizedModule
     from .testing import (
@@ -646,6 +667,8 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         named_parameters_for_optimized_module,
     )
     from .utils import same
+
+    assert opt_out is None or len(opt_out) == 0
 
     if isinstance(gm, OptimizedModule):
         gm.named_parameters = named_parameters_for_optimized_module(gm)
@@ -668,6 +691,8 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+        if opt_out is not None:
+            opt_out.append(res)
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
@@ -875,7 +900,17 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
     # return dump_backend_repro_as_tarfile(gm, args, compiler_name)
 
 
-def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
+def backend_accuracy_fails(
+    gm, example_inputs, compiler_fn, only_fwd=False, out: Optional[List[Any]] = None
+):
+    """
+    Args:
+        out: if an empty list, we will append the (usually tuple) module outputs
+        to it from the compiled graph module.
+    """
+
+    assert out is None or len(out) == 0
+
     try:
         compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
     except Exception as e:
@@ -890,7 +925,7 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
         )
         return False
 
-    return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
+    return not same_two_models(gm, compiled_gm, example_inputs, only_fwd, opt_out=out)
 
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
