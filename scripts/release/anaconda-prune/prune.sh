@@ -47,7 +47,7 @@ for platform in ${PLATFORMS}; do
                 set -x
                 echo "Removing ${CHANNEL}/${PKG}/${version}/${platform}/${PKG}-${version}-${spec}.tar.bz2"
                 #anaconda remove --force "${CHANNEL}/${PKG}/${version}/${platform}/${PKG}-${version}-${spec}.tar.bz2"
-		anaconda remove --force "pytorch-nightly/torchauido/win-64/torchaudio-0.11.0.dev20211229-py36_cu115.tar.bz2"
+		anaconda remove --force "pytorch-nightly/torchaudio/win-64/torchaudio-0.11.0.dev20211229-py36_cu115.tar.bz2"
             )
         fi
         done
