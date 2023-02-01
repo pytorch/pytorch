@@ -599,11 +599,9 @@ def _update_schema_suggestion_for_cat(
     ]
     return output_sharding
 
-@register_prop_rule("aten.split.Tensor")
+
+@register_prop_rule(aten.split.Tensor)
 def split_rule(op_schema: OpSchema) -> OutputSharding:
-    """
-    The OutputSpecType of tensor split should be Sequence[DTensorSpec]
-    """
     output_spec_list: List[DTensorSpec] = []
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
     ndim = input_spec.ndim
