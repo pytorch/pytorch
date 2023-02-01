@@ -332,8 +332,8 @@ optional_variable_list _process_backward_mode_ad(
       var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
-        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-        grad_acc->variable.reset();
+        auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
+        grad_acc.variable.reset();
       }
       if (cdata) {
         impl::rebase_history(var, {cdata, output_nr});

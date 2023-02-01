@@ -63,7 +63,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
 
       auto epsilon = bnNode->f(attr::epsilon);
       auto convInputVals = getValues(oldConv, valsToParamsMap);
-      if (convInputVals.size() < 1 ||
+      if (convInputVals.empty() ||
           (oldConv->inputs().size() == 3 && convInputVals.size() != 2)) {
         continue;
       }

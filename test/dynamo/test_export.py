@@ -320,6 +320,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_dupes_and_bypass_with_non_tensor_output(self):
         inp = torch.tensor([0.1, 0.1])
@@ -366,6 +367,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_zeroes_in_new_shape_scalar_out(self):
         inp = torch.zeros(10)
@@ -390,6 +392,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_zeroes_in_new_shape_scalar_out_permute(self):
         inp = torch.zeros(10)
@@ -414,6 +417,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass(self):
         inp = torch.zeros(10)
@@ -771,6 +775,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_dupes_and_bypass_with_non_tensor_output_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
@@ -1421,6 +1426,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
             )
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_with_module_layer(self):
         from functorch.experimental.control_flow import cond
@@ -1634,6 +1640,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_dynamic_slicing_simple(self):
         def f(x):
             return x[slice(None, None, None)]
@@ -1645,6 +1652,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
             def __init__(self):
