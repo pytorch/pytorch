@@ -58,7 +58,7 @@ class skipDtypeForJetsonCPU(object):
         def dep_fn(slf, *args, **kwargs):
             if IS_JETSON and kwargs['device'] == 'cpu' and \
                 kwargs['dtypes' if 'dtypes' in kwargs.keys() else 'dtype'] == self.dtypes:
-                raise unittest.SkipTest('Faulty on ARM CPU')
+                    raise unittest.SkipTest('Faulty on ARM CPU')
             return fn(slf, *args, **kwargs)
         return dep_fn
 
