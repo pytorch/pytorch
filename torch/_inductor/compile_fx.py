@@ -4,7 +4,7 @@ import itertools
 import logging
 import sys
 import warnings
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
@@ -370,8 +370,18 @@ def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
+    config_patches: Optional[Dict[str, Any]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+            )
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True

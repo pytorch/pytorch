@@ -315,12 +315,12 @@ class MinifierTests(MinifierTestBase):
         run_code = textwrap.dedent(
             """\
             import torch._dynamo.config
-            torch._dynamo.config.log_level = 5
+            torch._dynamo.config.cache_size_limit = 55
             data = torch._dynamo.config.save_config()
-            torch._dynamo.config.log_level = 3
+            torch._dynamo.config.cache_size_limit = 3
             torch._dynamo.config.repro_after = "dynamo"
             torch._dynamo.config.load_config(data)
-            assert torch._dynamo.logging.get_loggers()[0].level == 5
+            assert torch._dynamo.config.cache_size_limit == 55
             assert torch._dynamo.config.repro_after == "dynamo"
         """
         )
@@ -338,11 +338,13 @@ class MinifierTests(MinifierTestBase):
                 break
         else:
             self.assertTrue(False)
-        lines.insert(def_idx + 1, "    assert torch._dynamo.config.log_level == 5")
+        lines.insert(
+            def_idx + 1, "    assert torch._dynamo.config.cache_size_limit == 5"
+        )
         backend_code = "\n".join(lines)
         run_code = textwrap.dedent(
             f"""\
-            torch._dynamo.config.log_level = 5
+            torch._dynamo.config.cache_size_limit = 5
             @torch._dynamo.optimize("{self._get_fn_name(backend_code)}")
             def inner(x):
                 for _ in range(10):

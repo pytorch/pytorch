@@ -121,9 +121,7 @@ def enable_dynamic(enable: bool = True):
     if not enable:
         yield
         return
-    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
-    ), patch("torch._dynamo.config.specialize_int_float", False):
+    with config.patch(dynamic_shapes=True, specialize_int_float=False):
         yield
 
 
