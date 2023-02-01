@@ -441,7 +441,7 @@ template <> Vectorized<c10::complex<double>> inline operator/(const Vectorized<c
   auto mask = _mm512_set1_pd(-0.f);
   auto fabs_cd = _mm512_andnot_pd(mask, b);     // |c|    |d|
   auto fabs_dc = _mm512_permute_pd(fabs_cd, 0x55);   // |d|    |c|
-  auto scale = _mm256_max_pd(fabs_cd, fabs_dc);  // sc     sc
+  auto scale = _mm512_max_pd(fabs_cd, fabs_dc);  // sc     sc
   auto a2 = _mm512_div_pd(a, scale);         // a/sc     b/sc
   auto b2 = _mm512_div_pd(b, scale);         // c/sc     d/sc
   auto acbd2 = _mm512_mul_pd(a2, b2);
