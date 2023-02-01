@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -84,6 +85,7 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
+slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 
 torch._inductor.config.triton.autotune_pointwise = False  # too slow
 
@@ -1577,6 +1579,7 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
+    @slow()
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
@@ -1732,6 +1735,7 @@ class CommonTemplate:
                 (v,),
             )
 
+    @slow()
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -1805,6 +1809,7 @@ class CommonTemplate:
                     (v,),
                 )
 
+    @slow()
     def test_conv2d_binary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -5135,8 +5140,10 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
-    @requires_cuda()
     def test_unspec_inputs(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("segfault with CPU backend")
+
         def fn(x, y):
             return x + y, x * y, x / y
 
@@ -5863,6 +5870,7 @@ if HAS_CPU:
                     if simdlen != 1:
                         assert metrics.generated_cpp_vec_kernel_count == 1
 
+        @slow()
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
