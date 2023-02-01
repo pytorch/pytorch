@@ -34,12 +34,9 @@ def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(a, dtype):
-    import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
-            # NOTE: this is incorrect on the CPU
-            # See https://github.com/pytorch/pytorch/issues/77553
-            return prims.convert_element_type(a, dtype)
+            return a.to(dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type_ctor(dtype)(a)  # type: ignore[arg-type]
