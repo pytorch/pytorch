@@ -2594,6 +2594,10 @@ def max_pool2d_with_indices(
         return fallback_max_pool2d_with_indices(
             x, kernel_size, stride, padding, dilation, ceil_mode
         )
+    if dilation != 1:
+        return fallback_max_pool2d_with_indices(
+            x, kernel_size, stride, padding, dilation, ceil_mode
+        )
 
     def fn(idx, return_index):
         *prefix, bh, bw = idx
