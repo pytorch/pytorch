@@ -105,14 +105,6 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
-# if [[ "$TEST_CONFIG" == *dynamo* ]]; then
-#   export PYTORCH_TEST_WITH_DYNAMO=1
-# fi
-
-# if [[ "$TEST_CONFIG" == *inductor* ]]; then
-#   export PYTORCH_TEST_WITH_INDUCTOR=1
-# fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
