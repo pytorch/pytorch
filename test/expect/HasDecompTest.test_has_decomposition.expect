@@ -569,8 +569,6 @@ aten::aminmax
 aten::aminmax.out
 aten::angle
 aten::angle.out
-aten::arange.out
-aten::arange.start_out
 aten::argmax
 aten::argmax.out
 aten::argmin
