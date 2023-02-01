@@ -104,9 +104,7 @@ def augment_exc_message(exc, msg="\n"):
  torch._dynamo.replay('{exc.record_filename}').\n"
 
     if not config.verbose:
-        msg += (
-            f"\nSet torch._dynamo.config.verbose=True for more information\n"
-        )
+        msg += "\nSet torch._dynamo.config.verbose=True for more information\n"
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -143,10 +141,7 @@ def filter_stack(stack):
     for frame in stack:
         if "convert_frame" in frame.filename:
             break
-        if (
-            "eval_frame" in frame.filename
-            or f"torch._dynamo.optimize(" in frame.line
-        ):
+        if "eval_frame" in frame.filename or "torch._dynamo.optimize(" in frame.line:
             continue
         user_stack.append(frame)
 

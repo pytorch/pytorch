@@ -286,7 +286,7 @@ class WrapperCodeGen(CodeGen):
 
         if has_triton():
             self.header.splice(
-                f"""
+                """
                 import triton
                 import triton.language as tl
                 from torch._inductor.triton_ops.autotune import grid
@@ -296,7 +296,7 @@ class WrapperCodeGen(CodeGen):
 
             if config.triton.convolution != "aten":
                 self.header.splice(
-                    f"""
+                    """
                     from torch._inductor.triton_ops.conv_perf_model import early_config_prune
                     from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
                     from torch._inductor.triton_ops.autotune import conv_heuristics

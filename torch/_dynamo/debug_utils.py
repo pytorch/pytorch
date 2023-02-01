@@ -22,7 +22,7 @@ from .utils import clone_inputs, get_debug_dir
 log = logging.getLogger(__name__)
 
 
-inductor_config = import_module(f"torch._inductor.config")
+inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
 
@@ -273,7 +273,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
     return model_str
 
 
-INDUCTOR_IMPORT = f"""
+INDUCTOR_IMPORT = """
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._dynamo.debug_utils import same_two_models
 """
@@ -316,7 +316,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
             break
 
     if "inductor" in compiler_name:
-        fd.write(f"import torch._inductor.overrides\n")
+        fd.write("import torch._inductor.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
