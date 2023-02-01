@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -84,6 +85,7 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
+slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 
 torch._inductor.config.triton.autotune_pointwise = False  # too slow
 
@@ -1577,6 +1579,7 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
+    @slow()
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
@@ -1732,6 +1735,7 @@ class CommonTemplate:
                 (v,),
             )
 
+    @slow()
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -1805,6 +1809,7 @@ class CommonTemplate:
                     (v,),
                 )
 
+    @slow()
     def test_conv2d_binary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -1978,6 +1983,71 @@ class CommonTemplate:
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
+
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d unary test")
+    def test_conv_transpose2d_unary(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                in_channels,
+                out_channels,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.conv_transpose2d = torch.nn.ConvTranspose2d(
+                    in_channels,
+                    out_channels,
+                    **kwargs,
+                )
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.conv_transpose2d(x)
+                return self.unary_fn(x)
+
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            unary_list,
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            [0, 1],
+            test_memory_format,
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            padding,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 28, 28)
+            mod = M(
+                unary_fn,
+                iC,
+                oC,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                bias=bias,
+            ).eval()
+
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_gather1(self):
         def fn(a, b):
@@ -2962,6 +3032,19 @@ class CommonTemplate:
         opt_y = opt_mod(*inputs)
         self.assertEqual(y, opt_y)
         self.assertEqual(y.stride(), opt_y.stride())
+
+    def test_cat_inplace(self):
+        def fn(x):
+            rt = torch.cat([x])
+            v = x.sin_()
+            return rt
+
+        # can't use self.common because input is modified inplace
+        inp = torch.ones(2)
+        opt_fn = torch.compile(fn)
+        res = opt_fn(inp.clone())
+        expected = fn(inp.clone())
+        self.assertEqual(res, expected)
 
     def test_stack(self):
         def fn(a, b):
@@ -5057,8 +5140,10 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
-    @requires_cuda()
     def test_unspec_inputs(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("segfault with CPU backend")
+
         def fn(x, y):
             return x + y, x * y, x / y
 
@@ -5785,6 +5870,7 @@ if HAS_CPU:
                     if simdlen != 1:
                         assert metrics.generated_cpp_vec_kernel_count == 1
 
+        @slow()
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )

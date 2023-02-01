@@ -4,6 +4,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 
 #include <c10/core/ScalarType.h>
@@ -13,6 +14,14 @@
 #include <ATen/mkl/SparseBlas.h>
 #include <ATen/mkl/SparseDescriptors.h>
 #include <ATen/mkl/Utils.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/sparse_coo_tensor.h>
 #endif
 
 namespace at {
@@ -588,7 +597,7 @@ void add_out_sparse_csr(
 }
 
 void triangular_solve_out_sparse_csr(
-    const Tensor& A,
+    const Tensor& A_,
     const Tensor& B,
     const Tensor& X,
     bool upper,
@@ -600,11 +609,30 @@ void triangular_solve_out_sparse_csr(
       "Calling triangular_solve on a sparse CPU tensor requires Linux platform. ",
       "Please use PyTorch built with MKL on Linux.");
 #else
-  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+  if (B.numel() == 0 || X.numel() == 0 || A_._nnz() == 0) {
     // If A has no nnz, then A is singular and we can't solve.
     X.fill_(NAN);
     return;
   }
+
+  const auto materialize_diagonal_indices = [](const Tensor& t) -> Tensor {
+    const auto n = t.size(-1);
+    const auto compressed_indices = std::get<0>(at::sparse_csr::getCompressedPlainIndices(t));
+    const auto diag_indices = at::arange(n, compressed_indices.options()).unsqueeze(0).expand({2, n});
+    const auto diag_values = at::zeros({1}, t.values().options()).expand({n});
+
+    const auto t_coo = t.to_sparse();
+    const auto expanded_indices = at::cat({t_coo._indices(), diag_indices}, /*dim=*/-1);
+    const auto expanded_values = at::cat({t_coo._values(), diag_values}, /*dim=*/0);
+
+    const auto t_expanded_coo = at::sparse_coo_tensor(expanded_indices, expanded_values, t_coo.sizes(), t_coo.options());
+    return t_expanded_coo.to_sparse(t.layout());
+  };
+
+  // MKL has a bug for inputs with unmaterialized diagonal indices.
+  // See https://github.com/pytorch/pytorch/issues/88890 and
+  // the comments within.
+  const auto A = unitriangular ? materialize_diagonal_indices(A_) : A_;
 
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_mkl(X);
   IntArrayRef X_strides = X_->strides();

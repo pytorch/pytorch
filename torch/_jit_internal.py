@@ -39,7 +39,8 @@ import torch
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
 import torch.package._mangling as package_mangling
-from torch._C import Future as CFuture
+from torch._awaits import _Await
+from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
@@ -525,6 +526,7 @@ class FunctionModifiers(object):
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
+    _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
 def export(fn):
@@ -739,6 +741,11 @@ def ignore(drop=False, **kwargs):
     return decorator
 
 
+def _drop(fn):
+    fn._torchscript_modifier = FunctionModifiers._DROP
+    return fn
+
+
 def _copy_to_script_wrapper(fn):
     fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
     return fn
@@ -761,12 +768,21 @@ def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
-    return attr is FunctionModifiers.UNUSED
+    return attr is FunctionModifiers.UNUSED or attr is FunctionModifiers._DROP
 
 
 def is_ignored_fn(fn) -> bool:
     mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
+    return (
+        mod is FunctionModifiers.UNUSED
+        or mod is FunctionModifiers.IGNORE
+        or mod is FunctionModifiers._DROP
+    )
+
+
+def _is_drop_fn(fn) -> bool:
+    mod = get_torchscript_modifier(fn)
+    return mod is FunctionModifiers._DROP
 
 
 def is_static_fn(cls, fn) -> bool:
@@ -1035,6 +1051,12 @@ def is_future(ann) -> bool:
             "Future[int]"
         )
     return getattr(ann, "__origin__", None) is Future
+
+
+def is_await(ann) -> bool:
+    if ann is _Await:
+        return True
+    return getattr(ann, "__origin__", None) is _Await
 
 
 if torch.distributed.rpc.is_available():
@@ -1392,6 +1414,8 @@ class _TensorExtractor(pickle.Pickler):
         # Futures and RRefs don't technically contain a value, they just offer
         # the means to access a value.
         if isinstance(obj, CFuture) or is_rref_instance(obj):
+            return ""
+        if isinstance(obj, CAwait):
             return ""
         if isinstance(obj, torch.cuda.Event):
             return ""
