@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import enum
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Tuple
 
 from torch._guards import GuardSource, Source
 
@@ -62,6 +62,8 @@ class LocalSource(Source):
 @dataclasses.dataclass
 class LocalInputSource(LocalSource):
     pos: int
+
+    dynamic_spec: Optional[Tuple[Optional[str], ...]]   # e.g. ['batch', 'seq', None]
 
 
 @dataclasses.dataclass

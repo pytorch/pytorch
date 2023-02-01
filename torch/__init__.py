@@ -1328,6 +1328,7 @@ class _TorchCompileInductorWrapper:
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
             dynamic: builtins.bool = False,
+            dynamic_args = None,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
@@ -1368,6 +1369,7 @@ def compile(model: Optional[Callable] = None, *,
             return compile(model,
                            fullgraph=fullgraph,
                            dynamic=dynamic,
+                           dynamic_args=dynamic_args,
                            backend=backend,
                            mode=mode,
                            passes=passes,
@@ -1381,7 +1383,7 @@ def compile(model: Optional[Callable] = None, *,
         mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, passes)
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, dynamic_args=dynamic_args, **kwargs)(model)
 
 
 def _register_device_module(device_type, module):

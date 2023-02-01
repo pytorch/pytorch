@@ -677,13 +677,30 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        from torch._dynamo.source import TensorPropertySource, TensorProperty, LocalInputSource
 
-        size = [
-            self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i)
-            ) for i, val in enumerate(ex.size())
-        ]
+        rank = len(ex.size())
+
+        if isinstance(source, LocalInputSource) and source.dynamic_spec:
+            assert len(source.dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
+
+            size: List[Optional[sympy.Expr]] = [None] * rank
+            for i, val in enumerate(ex.size()):
+                if source.dynamic_spec[i]:
+                    size[i] = self.create_symbol(
+                        val, TensorPropertySource(source, TensorProperty.SIZE, i), name=source.dynamic_spec[i]
+                    )
+                else:
+                    size[i] = sympy.Integer(val)
+        else:
+            size = [
+                self.create_symbol(
+                    val, TensorPropertySource(source, TensorProperty.SIZE, i)
+                ) for i, val in enumerate(ex.size())
+            ]
+
+        # breakpoint()
+
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -745,7 +762,7 @@ class ShapeEnv(object):
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, source: Source) -> "sympy.Expr":
+    def create_symbol(self, val: int, source: Source, name: Optional[str] = None) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
 
         if not HAS_SYMPY:
@@ -761,7 +778,7 @@ class ShapeEnv(object):
 
         # Create a duck sized int if necessary
         if val not in self.val_to_var:
-            sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            sympy_expr = Symbol(name or f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             self.val_to_var[val] = sympy_expr
 

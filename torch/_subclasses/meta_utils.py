@@ -207,9 +207,11 @@ class MetaConverter:
             maybe_suppress = shape_env.suppress_guards
 
         make_symbolic = shape_env is not None
+        # breakpoint()
 
         def sym_sizes_strides_storage_offset(t):
             if make_symbolic:
+                # breakpoint()
                 return shape_env.create_symbolic_sizes_strides_storage_offset(t, source)
             return (t.size(), t.stride(), t.storage_offset())
 
