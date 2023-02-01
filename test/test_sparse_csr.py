@@ -20,7 +20,6 @@ from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and
 )
-from torch._inductor.utils import has_triton
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
@@ -1141,13 +1140,13 @@ class TestSparseCSR(TestCase):
             # error on a strided
             a_strided = a.to_dense()
             with self.assertRaisesRegex(
-                    RuntimeError, r'"resize_as_sparse_compressed_: src " expected sparse compressed tensor layout'):
+                    RuntimeError, r'resize_as_sparse_compressed_: src  expected sparse compressed tensor layout'):
                 b.resize_as_sparse_(a_strided)
 
             # error on b strided
             b_strided = b.to_dense()
             with self.assertRaisesRegex(
-                    RuntimeError, r'"resize_as_sparse_compressed_: self " expected sparse compressed tensor layout'):
+                    RuntimeError, r'resize_as_sparse_compressed_: self  expected sparse compressed tensor layout'):
                 b_strided.resize_as_sparse_(a)
 
             # error if layout does not match, transpose induces layout flip
@@ -1316,8 +1315,6 @@ class TestSparseCSR(TestCase):
             nnz = 15
             t = self.genSparseCSRTensor((16, 16), nnz, dtype=dtype,
                                         device=device, index_dtype=index_dtype)
-            with self.assertRaisesRegex(RuntimeError, "must be square."):
-                block_t = t.to_sparse_bsr((2, 3))
 
             with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
                 block_t = t.to_sparse_bsr((5, 5))
@@ -1464,71 +1461,6 @@ class TestSparseCSR(TestCase):
 
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
-
-    @parametrize("block_size", [16, 32, 64])
-    @parametrize("index_dtype", [torch.int32, torch.int64])
-    @unittest.skipIf(not has_triton(), "Triton is not available")
-    @unittest.skipIf(torch.version.cuda == '11.6', "Triton segfaults with CUDA 11.6")
-    @skipCUDAIfRocm
-    @onlyCUDA
-    @dtypes(torch.half, torch.bfloat16)
-    @dtypesIfCUDA(*[torch.half] if SM53OrLater else [],
-                  *[torch.bfloat16] if SM80OrLater else [])
-    def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
-        from functools import partial
-
-        from torch.sparse._triton_ops import bsr_dense_mm
-
-        if bsr_dense_mm is not None:
-            lib = torch.library.Library("aten", "IMPL")
-            lib.impl("aten::_triton_bsr_dense_mm",
-                     lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs), "SparseCsrCUDA")
-
-        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
-        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
-
-        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
-        batches = [(), (2,)]
-        size = [128, 256, 0]
-
-        # Whether to make inputs orthogonal so that the product is zero
-        make_orthogonal = [True, False]
-
-        for bd, bs, m, n, k, is_ortho in itertools.product(batches, batches, size, size, size, make_orthogonal):
-            bsr = tensor(bs + (m, k))
-            # NOTE: do not get confused, it will be transposed
-            dense = tensor(bd + (n, k))
-
-            if is_ortho:
-                bsr = torch.cat((bsr, torch.zeros_like(bsr)), dim=-1)
-                dense = torch.cat((torch.zeros_like(dense), dense), dim=-1)
-
-            bsr = bsr.to_sparse_bsr(block_size)
-
-            if bsr.dim() == 2:
-                # Test against linear to check dispatch.
-                res_tri = torch.nn.functional.linear(dense, bsr)
-                res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
-            else:
-                # Otherwise check correctness against bmm
-                # since nn.linear does not support bsr.dim() > 2.
-                res_tri = torch._triton_bsr_dense_mm(bsr, dense.transpose(-2, -1))
-                res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
-            self.assertEqual(res_tri, res_dense)
-
-            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
-            # check whether bsr_dense_mm handles different grid sizes
-            # None means max possible grid size which is CUDA-dependent.
-            grid_size = (None, 2, 4)
-            grid_gen = itertools.product(grid_size, repeat=3)
-            for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
-                res_tri = torch.sparse._triton_ops.bsr_dense_mm(
-                    bsr,
-                    dense.transpose(-2, -1),
-                    max_grid=grid,
-                    is_sparse_rowspace_mode=is_sparse_rowspace
-                )
-                self.assertEqual(res_tri, res_dense)
 
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
@@ -2242,7 +2174,22 @@ class TestSparseCSR(TestCase):
     def test_sparse_triangular_solve(self, device, dtype):
 
         def run_test(n, k, upper, unitriangular, transpose, zero):
-            triangle_function = torch.triu if upper else torch.tril
+            if not unitriangular:
+                triangle_function = torch.triu if upper else torch.tril
+            else:
+                # Make sure diagonal elements are not materialized.
+                # This is to exercise `unitriangular=True` not relying on
+                # explicit presence of these indices.
+                if upper:
+                    def remove_diagonal(t):
+                        return t.triu(-1)
+
+                else:
+                    def remove_diagonal(t):
+                        return t.tril(-1)
+
+                triangle_function = remove_diagonal
+
             make_A = torch.zeros if zero else make_tensor
             A = make_A((n, n), dtype=dtype, device=device)
             A = triangle_function(A)
@@ -2923,10 +2870,11 @@ class TestSparseCSR(TestCase):
             frozenset({torch.sparse_csc}),
             frozenset({torch.sparse_csr}),
             frozenset({torch.sparse_csc, torch.sparse_csr}),
+            frozenset({torch.sparse_csc, torch.sparse_bsc}),
+            frozenset({torch.sparse_csr, torch.sparse_bsr}),
             frozenset({torch.sparse_bsc}),
             frozenset({torch.sparse_bsr}),
             frozenset({torch.sparse_bsc, torch.sparse_bsr}),
-            frozenset({torch.sparse_csr, torch.sparse_bsr}),
         }
         block_layouts = (torch.sparse_bsr, torch.sparse_bsc)
 
@@ -2938,8 +2886,15 @@ class TestSparseCSR(TestCase):
             # BSR -> CSR is not yet supported
             if (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr):
                 expect_error = True
+            # BSC -> CSC is not yet supported
+            if (layout_a, layout_b) == (torch.sparse_bsc, torch.sparse_csc):
+                expect_error = True
             # CSR -> BSR only works for non-batched inputs
             if (layout_a, layout_b) == (torch.sparse_csr, torch.sparse_bsr):
+                if a.dim() > 2:
+                    expect_error = True
+            # CSC -> BSC only works for non-batched inputs
+            if (layout_a, layout_b) == (torch.sparse_csc, torch.sparse_bsc):
                 if a.dim() > 2:
                     expect_error = True
 

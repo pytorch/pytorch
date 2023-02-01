@@ -22,6 +22,8 @@ decompositions = get_decompositions(
         aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
+        aten.addcmul_,
+        aten.addcdiv_,
         aten.avg_pool2d_backward,
         aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
@@ -191,7 +193,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
         n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
         if m_padded_length != 0 or k_padded_length != 0 or n_padded_length != 0:
             return pad_addmm(
-                input, mat1, mat2, m_padded_length, n_padded_length, k_padded_length
+                input, mat1, mat2, m_padded_length, k_padded_length, n_padded_length
             )
 
     return NotImplemented  # go directly to lowering
