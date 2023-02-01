@@ -22,7 +22,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     FusionDefinition fd(c10::nullopt, 0);
 
     try {
-      fd.enter();
+      fd.setupDefinition();
       FAIL() << "You should trigger an assert with 0 Records allowed!";
     } catch (...) {
       SUCCEED();
@@ -34,7 +34,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     FusionDefinition fd(c10::nullopt, 4);
 
     try {
-      fd.enter();
+      fd.setupDefinition();
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert while entering FusionDefinition context! "
@@ -89,7 +89,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     }
 
     try {
-      fd.exit();
+      fd.finalizeDefinition();
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during creation of a new Fusion! "
@@ -102,7 +102,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     FusionDefinition fd(1);
 
     try {
-      fd.enter();
+      fd.setupDefinition();
       FAIL() << "You should trigger an assert with a defined fusion!";
     } catch (const std::exception& e) {
       SUCCEED();
@@ -114,7 +114,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     FusionDefinition fd(c10::nullopt, 4);
 
     try {
-      fd.enter();
+      fd.setupDefinition();
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert while entering FusionDefinition context! "
@@ -162,7 +162,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     }
 
     try {
-      fd.exit();
+      fd.finalizeDefinition();
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during creation of a new Fusion! "

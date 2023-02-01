@@ -87,15 +87,15 @@ FusionCache* FusionDefinition::fusionCache() const {
   return fusion_cache_;
 }
 
-FusionDefinition* FusionDefinition::enter() {
+FusionDefinition* FusionDefinition::setupDefinition() {
   TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
   TORCH_CHECK(!fusion_id_.has_value(), "Fusion Schedule is already found!");
   fusionCache()->resetTriePtr();
   return this;
 }
 
-void FusionDefinition::exit() {
-  FUSER_PERF_SCOPE("FusionDefinition::exit");
+void FusionDefinition::finalizeDefinition() {
+  FUSER_PERF_SCOPE("FusionDefinition::finalizeDefinition");
   auto cache_entry = fusionCache()->queryChildren(end_record_.get());
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {

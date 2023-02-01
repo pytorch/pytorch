@@ -65,8 +65,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(3)
-            t1 = fd.define_tensor(3)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
             c0 = fd.define_constant(3.0)
 
             t2 = fd.ops.add(t0, t1)
@@ -97,8 +97,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(3, DataType.Half)
-            t1 = fd.define_tensor(3, DataType.Half)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
             c0 = fd.define_constant(3.0)
 
             t2 = fd.ops.add(t0, t1)
@@ -120,8 +120,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(2, DataType.Double)
-            t1 = fd.define_tensor(2, DataType.Double)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t0h = fd.ops.cast(t0, DataType.Half)
             t1h = fd.ops.cast(t1, DataType.Half)
@@ -142,8 +142,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(2, DataType.Half)
-            t1 = fd.define_tensor(2, DataType.Double)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t2 = fd.ops.add(t0, t1)
             t5 = fd.ops.relu(t2)
@@ -161,8 +161,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(1)
-            t1 = fd.define_tensor(3)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t0_b = fd.ops.broadcast_in_dim(t0, [2, 3, 4], [1])
             t2 = fd.ops.add(t0_b, t1)
@@ -180,8 +180,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(sizes=inputs[0].size(), strides=inputs[0].stride())
-            t1 = fd.define_tensor(sizes=inputs[1].size(), strides=inputs[1].stride())
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t0_b = fd.ops.broadcast_in_dim(t0, inputs[1].size(), [0, 1, 2])
             t2 = fd.ops.add(t0_b, t1)
@@ -199,8 +199,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor([3, 1], [1, 1])
-            t1 = fd.define_tensor(1)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t1_b = fd.ops.broadcast_in_dim(t1, [3, 3], [0])
             t2 = fd.ops.add(t0, t1_b)
@@ -218,8 +218,8 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(1)
-            t1 = fd.define_tensor(3)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t0_b = fd.ops.broadcast(t0, [True, False, True])
             t2 = fd.ops.add(t0_b, t1)
@@ -388,31 +388,36 @@ class TestNvFuserFrontend(TestCase):
 
     # Testing a scenario where a broadcast requires a symbolic output shape
     def test_tensor_sizes(self) :
-        def fusion_func(fd : FusionDefinition) :
-            t0 = fd.define_tensor(3)
-            t1 = fd.define_tensor(1)
-
-            t0_sizes = fd.ops.tensor_sizes(t0)
-
-            t1_b = fd.ops.broadcast_in_dim(t1, t0_sizes, [2])
-            t2 = fd.ops.add(t0, t1_b)
-
-            fd.add_output(t2)
-
         inputs = [
             torch.randn(2, 3, 4, device='cuda'),
             torch.randn(4, device='cuda'),
         ]
 
+        def fusion_func(fd : FusionDefinition) :
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
+
+            t0_sizes = fd.ops.tensor_sizes(t0)
+
+            t1_b = fd.ops.broadcast_in_dim(t1, t0_sizes, [2])
+            t2 = fd.ops.sub(t0, t1_b)
+
+            fd.add_output(t2)
+
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
-        eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
+        eager_out = refs.sub(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
         self.assertEqual(eager_out, nvf_out[0])
 
     # Testing a scenario where no broadcast is needed
     def test_tensor_sizes_nobcast(self) :
+        inputs = [
+            torch.randn(2, 3, device='cuda'),
+            torch.randn(2, 3, device='cuda'),
+        ]
+
         def fusion_func(fd : FusionDefinition) :
-            t0 = fd.define_tensor(symbolic_sizes=[-1, -1], contiguous=[True, True])
-            t1 = fd.define_tensor(symbolic_sizes=[-1, -1], contiguous=[True, True])
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t0_sizes = fd.ops.tensor_sizes(t0)
 
@@ -421,20 +426,20 @@ class TestNvFuserFrontend(TestCase):
 
             fd.add_output(t2)
 
-        inputs = [
-            torch.randn(2, 3, device='cuda'),
-            torch.randn(2, 3, device='cuda'),
-        ]
-
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [0, 1]))
         self.assertEqual(eager_out, nvf_out[0])
 
     # Testing a scenario where each arg of a binary op has broadcast.
     def test_tensor_sizes_both_args_bcast(self) :
+        inputs = [
+            torch.randn(1, 3, device='cuda'),
+            torch.randn(2, 1, device='cuda'),
+        ]
+
         def fusion_func(fd : FusionDefinition) :
-            t0 = fd.define_tensor(symbolic_sizes=[1, -1], contiguous=[True, True])
-            t1 = fd.define_tensor(symbolic_sizes=[-1, 1], contiguous=[True, True])
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
 
             t0_sizes = fd.ops.tensor_sizes(t0)
             t1_sizes = fd.ops.tensor_sizes(t1)
@@ -444,11 +449,6 @@ class TestNvFuserFrontend(TestCase):
             t2 = fd.ops.add(t0_b, t1_b)
 
             fd.add_output(t2)
-
-        inputs = [
-            torch.randn(1, 3, device='cuda'),
-            torch.randn(2, 1, device='cuda'),
-        ]
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(prims.broadcast_in_dim(inputs[0], [inputs[1].size()[0], inputs[0].size()[1]], [0, 1]),
@@ -583,8 +583,12 @@ class TestNvFuserFrontend(TestCase):
         self.assertEqual(eager_out2, nvf_out[0])
 
     def test_alias_output_to_input(self) :
+        inputs = [
+            torch.ones(4, 4, device='cuda'),
+        ]
+
         def fusion_func(fd : FusionDefinition) :
-            t0 = fd.define_tensor(2)
+            t0 = fd.from_pytorch(inputs[0])
             s0 = fd.define_constant(1.0)
             s1 = fd.define_constant(2.0)
             s2 = fd.define_constant(3.0)
@@ -594,10 +598,6 @@ class TestNvFuserFrontend(TestCase):
             fd.add_output(t1)
             fd.add_output(t2, alias_input=t0)
             fd.add_output(t3)
-
-        inputs = [
-            torch.ones(4, 4, device='cuda'),
-        ]
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
 
@@ -616,9 +616,9 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(2)
-            t1 = fd.define_tensor(2)
-            t2 = fd.define_tensor(2, DataType.Int)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
+            t2 = fd.from_pytorch(inputs[2])
             t3 = fd.ops.add(t0, t1)
             t4 = fd.ops.gather(t3, t2, 0)
             fd.add_output(t4)
@@ -636,9 +636,9 @@ class TestNvFuserFrontend(TestCase):
         ]
 
         def fusion_func(fd: FusionDefinition) :
-            t0 = fd.define_tensor(2)
-            t1 = fd.define_tensor(2)
-            t2 = fd.define_tensor(1, DataType.Int)
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
+            t2 = fd.from_pytorch(inputs[2])
             t3 = fd.ops.add(t0, t1)
             t4 = fd.ops.index_select(t3, t2, 0)
             fd.add_output(t4)
@@ -646,6 +646,52 @@ class TestNvFuserFrontend(TestCase):
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
 
         eager_out = torch.index_select(inputs[0] + inputs[1], 0, inputs[2])
+        self.assertEqual(eager_out, nvf_out[0])
+
+    def test_from_pytorch_fails_on_cpu_tensor(self):
+        inputs = [
+            torch.randn(4, 4, device='cpu'),
+        ]
+
+        def fusion_func(fd: FusionDefinition) :
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.ops.relu(t0)
+            fd.add_output(t1)
+
+        try:
+            with FusionDefinition() as fd:
+                fusion_func(fd)
+            raise RuntimeError("FusionDefinition.from_pytorch should have raised an error for a CPU Tensor!")
+        except ValueError:
+            pass
+
+    def test_no_definition(self):
+        inputs = [
+            torch.randn(4, 4, device='cpu'),
+        ]
+
+        # A FusionDefinition object is constructed but not defined, should trip an error
+        try:
+            fd = FusionDefinition()
+            out = fd.execute(inputs)
+            raise RuntimeError("Expecting an error for a lack of a child class defining a definition!")
+        except NotImplementedError:
+            pass
+
+    def test_func_definition(self) :
+        inputs = [
+            torch.randn(4, 4, device='cuda'),
+        ]
+
+        class MyFusion(FusionDefinition):
+            def definition(self) :
+                t0 = self.from_pytorch(inputs[0])
+                t1 = self.ops.sigmoid(t0)
+                self.add_output(t1)
+
+        fd = MyFusion()
+        nvf_out = fd.execute(inputs)
+        eager_out = torch.sigmoid(inputs[0])
         self.assertEqual(eager_out, nvf_out[0])
 
     def test_python_version_API(self):

@@ -100,10 +100,11 @@ class TORCH_CUDA_CU_API FusionDefinition {
   FusionDefinition& operator=(const FusionDefinition& fd) = delete;
   FusionDefinition& operator=(FusionDefinition&& fd) = delete;
 
-  //! Enter Python Context Manager
-  FusionDefinition* enter();
-  //! Exit Python Context Manager -- Triggers cache lookup
-  void exit();
+  //! Enter Python Context Manager -- Reset trie for new cache lookup
+  FusionDefinition* setupDefinition();
+  //! Exit Python Context Manager -- Triggers Fusion IR build if it is not
+  //! cached
+  void finalizeDefinition();
   //! Prints a python function representing the definition
   void print(std::ostream& os) const;
   //! Prints the Fusion IR representation of an unscheduled fusion

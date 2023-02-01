@@ -1,5 +1,39 @@
 from ._C import *
 
+class FusionDefinition(_C._FusionDefinition):
+    def __enter__(self):
+        return self._setup_definition()
+
+    def __exit__(self, type, value, traceback):
+        self._finalize_definition()
+
+    def definition(self):
+        raise NotImplementedError("definition() should be implemented by child class!")
+
+    def execute(self, inputs):
+        # if definition is not previously defined by a context manager try a child class
+        if self.id() is None:
+            self._setup_definition()
+            self.definition()
+            self._finalize_definition()
+
+        return self._execute(inputs)
+
+    def from_pytorch(self, tensor) :
+        """
+        Defines an nvfuser input tensor from a pytorch tensor
+        """
+        try:
+            from .pytorch_utils import torch_dtype_to_nvfuser_dtype
+        except ImportError:
+            raise ImportError("Unable to import pytorch_utils!")
+
+        if not tensor.is_cuda:
+            raise ValueError("Tensor should be on a cuda device!")
+
+        return self.define_tensor(sizes=tensor.size(), strides=tensor.stride(),
+            dtype=torch_dtype_to_nvfuser_dtype(tensor.dtype))
+
 from .nvfuser_version import __version__
 
 def version():

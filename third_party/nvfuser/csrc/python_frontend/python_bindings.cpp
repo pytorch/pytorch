@@ -87,7 +87,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   //! The FusionDefinition is a context manager in Python where the user will
   //! define the set the operations and connections between operations for
   //! nvFuser to create.
-  py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
+  py::class_<nvfuser::FusionDefinition> fusion_def(
+      nvfuser, "_FusionDefinition");
   fusion_def
       .def(
           py::init<c10::optional<size_t>, size_t>(),
@@ -95,20 +96,17 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("max_length") = int(1024))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
-          "__enter__",
+          "_setup_definition",
           [](nvfuser::FusionDefinition& self) -> nvfuser::FusionDefinition* {
             // Instrumentation to mark the beginning of a FusionDefinition
             Nvf::inst::Trace::instance()->beginEvent(
-                "FusionDefinition Context Manager");
-            return self.enter();
+                "FusionDefinition setupDefinition");
+            return self.setupDefinition();
           })
       .def(
-          "__exit__",
-          [](nvfuser::FusionDefinition& self,
-             void* exc_type,
-             void* exc_value,
-             void* traceback) {
-            self.exit();
+          "_finalize_definition",
+          [](nvfuser::FusionDefinition& self) {
+            self.finalizeDefinition();
             // Mark the end of a FusionDefinition Context Manager
             Nvf::inst::Trace::instance()->endEvent(nullptr);
           })
@@ -124,7 +122,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self) { self.print(std::cout); })
       .def("print_ir", [](nvfuser::FusionDefinition& self) { self.printIr(); })
       .def(
-          "execute",
+          "_execute",
           [](nvfuser::FusionDefinition& self, const py::iterable& iter) {
             std::vector<IValue> inputs;
             for (py::handle obj : iter) {
@@ -163,31 +161,6 @@ void initNvFuserPythonBindings(PyObject* module) {
           },
           py::arg("output"),
           py::arg("alias_input") = py::none())
-      .def(
-          "define_tensor",
-          [](nvfuser::FusionDefinition& self,
-             size_t ndims,
-             Nvf::DataType dtype = Nvf::DataType::Float,
-             bool is_cpu = false) -> nvfuser::Tensor {
-            FUSER_PERF_SCOPE("FusionDefinition.define_tensor (simple)");
-            std::vector<int64_t> maybe_symbolic_sizes(ndims, -1);
-            ;
-            std::vector<bool> contig_info(ndims, false);
-
-            nvfuser::Tensor out = self.defineTensor(ndims);
-            self.defineRecord(new nvfuser::TensorRecord(
-                {self.recordingState(out())},
-                std::move(maybe_symbolic_sizes),
-                std::move(contig_info),
-                dtype,
-                is_cpu));
-
-            return out;
-          },
-          py::arg("ndims"),
-          py::arg("dtype") = Nvf::DataType::Float,
-          py::arg("is_cpu") = false,
-          py::return_value_policy::reference)
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
