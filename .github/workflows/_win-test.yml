@@ -72,7 +72,7 @@ jobs:
           try {
               Get-Process -Name "python" | Stop-Process -Force
           }
-          catch [NoProcessFoundForGivenName,Microsoft.PowerShell.Commands.GetProcessCommand] {
+          catch [Microsoft.PowerShell.Commands.GetProcessCommand] {
               Write-Output "No leftover process, continuing"
           }
 
