@@ -763,7 +763,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
-    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared") 
+    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared")
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
