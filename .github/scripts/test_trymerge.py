@@ -26,7 +26,6 @@ from trymerge import (
     FlakyRule,
     categorize_checks,
     get_combined_checks_from_pr_and_land_validation,
-    _fetch_json_any,
     get_rockset_results,
     main as trymerge_main,
 )
@@ -93,27 +92,6 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
         return gh_graphql(query, **kwargs)
     return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
-
-
-def mocked_fetch_json(
-    url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None
-) -> Any:
-    def key_function(
-        url: str,
-        params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None
-    ) -> str:
-        params_key = (
-            [f"{k}={params[k]}" for k in sorted(params.keys())] if params else "None"
-        )
-        data_key = [f"{k}={data[k]}" for k in sorted(data.keys())] if data else "None"
-        return f"query_sha={url} {params_key} {data_key}"
-
-    return mock_query(
-        _fetch_json_any, "json_mocks.json", key_function, url, params, data
-    )
 
 def mocked_rockset_results(head_sha: str, merge_base: str) -> Any:
     return mock_query(
@@ -440,7 +418,6 @@ class TestGitHubPR(TestCase):
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
 
-@mock.patch("trymerge._fetch_json_any", side_effect=mocked_fetch_json)
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestBypassFailures(TestCase):

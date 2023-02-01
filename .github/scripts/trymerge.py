@@ -734,9 +734,8 @@ class GitHubPR:
     def get_merge_base(self) -> str:
         if self.merge_base is not None:
             return self.merge_base
-        url = f"https://api.github.com/repos/{self.org}/{self.project}/compare/master...{self.last_commit()['oid']}"
-        res = fetch_json_dict(url)
-        self.merge_base = res["merge_base_commit"]['sha']
+        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.merge_base = gitrepo.get_merge_base("master", self.last_commit()['oid'])
         return self.merge_base
 
     def get_changed_files(self) -> List[str]:
@@ -1293,16 +1292,17 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
 
-def get_flaky_rules() -> List[FlakyRule]:
+def get_flaky_rules(num_retries: int = 3) -> List[FlakyRule]:
     url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
-    for _ in range(3):
-        try:
-            return [FlakyRule(**rule) for rule in fetch_json_list(url)]
-        except Exception as e:
-            print(f"Could not download {url} because: {e}.")
-    return []
+    try:
+        return [FlakyRule(**rule) for rule in fetch_json_list(url)]
+    except Exception as e:
+        print(f"Could not download {url} because: {e}.")
+        if num_retries > 0:
+            return get_flaky_rules(num_retries=num_retries - 1)
+        return []
 
-def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
+def get_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> List[Dict[str, Any]]:
     query = f"""
 SELECT
     w.name as workflow_name,
@@ -1319,16 +1319,17 @@ FROM
 where
     j.head_sha in ('{head_sha}','{merge_base}')
 """
-    for _ in range(3):
-        try:
-            import rockset  # type: ignore[import]
-            res = rockset.RocksetClient(
-                host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-            ).sql(query)
-            return cast(List[Dict[str, Any]], res.results)
-        except Exception as e:
-            print(f"Could not download rockset data because: {e}.")
-    return []
+    try:
+        import rockset  # type: ignore[import]
+        res = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        ).sql(query)
+        return cast(List[Dict[str, Any]], res.results)
+    except Exception as e:
+        print(f"Could not download rockset data because: {e}.")
+        if num_retries > 0:
+            return get_rockset_results(head_sha, merge_base, num_retries=num_retries - 1)
+        return []
 
 def get_classifications(
     head_sha: str,
