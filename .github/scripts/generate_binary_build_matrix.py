@@ -89,7 +89,11 @@ def list_without(in_list: List[str], without: List[str]) -> List[str]:
 def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
-    python_versions = FULL_PYTHON_VERSIONS
+    python_versions = list(FULL_PYTHON_VERSIONS)
+    if os == "linux":
+        # NOTE: We only build 3.11 on linux right now as many dependencies
+        # are yet not available on conda
+        python_versions.append("3.11")
     if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
     for python_version in python_versions:

@@ -1918,11 +1918,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
-        # We only have a CI skip list for aot_eager right now.  When inductor
-        # comes online, add that skip list too.
-        assert (
-            args.backend == "aot_eager"
-        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
