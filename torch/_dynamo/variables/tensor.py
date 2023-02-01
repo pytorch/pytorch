@@ -172,6 +172,7 @@ class TensorVariable(VariableTracker):
 
             def try_generic_attr_handling():
                 from .builder import wrap_fx_proxy
+                from .misc import GetAttrVariable
 
                 try:
                     static_attr = inspect.getattr_static(torch.Tensor, name)
@@ -188,7 +189,9 @@ class TensorVariable(VariableTracker):
                     return None
 
                 return wrap_fx_proxy(
-                    tx=tx, proxy=getattr(self.as_proxy(), name), **options
+                    tx=tx,
+                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                    **options,
                 )
 
             result = try_generic_attr_handling()
