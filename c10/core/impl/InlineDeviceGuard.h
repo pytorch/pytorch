@@ -116,6 +116,9 @@ class InlineDeviceGuard {
         impl_.uncheckedSetDevice(original_device_);
       }
     }
+    else {
+      impl_.uncheckedSetDevice(original_device_);
+    }
 #else
     impl_.uncheckedSetDevice(original_device_);
 #endif
