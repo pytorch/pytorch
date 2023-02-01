@@ -28,5 +28,6 @@ jobs:
           PACKAGES: ${{ inputs.packages }}
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
         run: |
-            set -ex
+            set -euxo pipefail
+            conda install -yq anaconda-client
             bash ./scripts/release/anaconda-prune/run.sh
