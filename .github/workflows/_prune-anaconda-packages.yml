@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: The channel to prune packages
+    secrets:
+      conda-pytorchbot-token:
+        required: true
+        description: Conda PyTorchBot token
 jobs:
   build:
     runs-on: ubuntu-22.04
