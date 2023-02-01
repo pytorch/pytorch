@@ -6,9 +6,9 @@
 #endif
 
 #ifndef _WIN32
-#include <chrono>
 #include <fcntl.h>
 #include <unistd.h>
+#include <chrono>
 #endif
 
 namespace c10 {
