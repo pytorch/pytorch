@@ -723,9 +723,15 @@ AnalyzeViewResult analyzeView(
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
   FUSER_PERF_SCOPE("analyzeView");
-  TORCH_INTERNAL_ASSERT(
-      original_sizes.size() > 0,
-      "Empty original size not supported for view operation.");
+  if (original_sizes.size() == 0) {
+    TORCH_INTERNAL_ASSERT(
+        std::all_of(
+            new_sizes.begin(),
+            new_sizes.end(),
+            [](int64_t s) { return s == 1; }),
+        "Zero-dim tensors may only be reshaped to tensors with a single element (no expansion).");
+    return {std::vector<bool>(new_sizes.size(), true), {}, {}};
+  }
 
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(original_view_tv->getMaybeRFactorDomain())

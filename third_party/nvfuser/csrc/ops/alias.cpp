@@ -84,8 +84,6 @@ TensorView* reshape(
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size() ==
       original_sizes.size());
-  TORCH_INTERNAL_ASSERT(
-      !original_sizes.empty(), "No support for 0-dim tensors in view support.");
 
   auto view_analysis = analyzeView(x, original_sizes, new_sizes);
 

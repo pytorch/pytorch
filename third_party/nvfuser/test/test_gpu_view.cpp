@@ -2292,5 +2292,118 @@ TEST_F(NVFuserTest, FusionIssue2076_v2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1, t2}, {t4, t6}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionReshapeZeroDimInput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* x = makeSymbolicTensor({}, DataType::Float);
+  fusion.addInput(x);
+  TensorView* y = makeSymbolicTensor(3, DataType::Float);
+  fusion.addInput(y);
+
+  auto x_rsh = reshape(x, {}, {1, 1, 1});
+
+  auto prod = mul(x_rsh, y);
+  fusion.addOutput(prod);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x =
+      at::randn({1}).to(options)[0]; // indexing to get zero-dim tensor
+  TORCH_INTERNAL_ASSERT(at_x.ndimension() == 0);
+
+  at::Tensor at_y = at::randn({2, 3, 4}).to(options);
+
+  std::vector<IValue> aten_inputs = {at_x, at_y};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs, lparams);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_prod = at_x * at_y;
+
+  testValidate(&fusion, outputs, aten_inputs, {at_prod}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionReshapeZeroDimOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Make a concrete tensor so that all dims are set as broadcast
+  TensorView* x = makeContigConcreteTensor({1, 1, 1}, DataType::Float);
+  TensorView* y = makeContigConcreteTensor({1, 1}, DataType::Float);
+  TensorView* z = makeSymbolicTensor(0, DataType::Float);
+  fusion.addInput(x);
+  fusion.addInput(y);
+  fusion.addInput(z);
+
+  auto x_rsh = reshape(x, {1, 1, 1}, {});
+  // test mixed broadcast and concrete 1-dimensional iter-domains
+  auto y_mixed = reshape(y, {1, 1}, {1, 1, 1});
+  auto y_rsh = reshape(y_mixed, {1, 1, 1}, {});
+
+  auto prod = mul(add(x_rsh, y_rsh), z);
+  fusion.addOutput(prod);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x = at::randn({1, 1, 1}).to(options);
+  at::Tensor at_y = at::randn({1, 1}).to(options);
+  at::Tensor at_z =
+      at::randn({1}).to(options)[0]; // indexing to get zero-dim tensor
+  TORCH_INTERNAL_ASSERT(at_z.ndimension() == 0);
+
+  std::vector<IValue> aten_inputs = {at_x, at_y, at_z};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs, lparams);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_prod = (at_x.squeeze() + at_y.squeeze()) * at_z;
+
+  testValidate(&fusion, outputs, aten_inputs, {at_prod}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionReshapeZeroDimInputOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* x = makeSymbolicTensor({}, DataType::Float);
+  fusion.addInput(x);
+  TensorView* y = makeSymbolicTensor({}, DataType::Float);
+  fusion.addInput(y);
+
+  auto x_rsh = reshape(x, {}, {});
+  // test broadcasting then squeezing
+  x_rsh = reshape(x, {}, {1, 1, 1});
+  x_rsh = reshape(x_rsh, {1, 1, 1}, {});
+
+  auto prod = mul(x_rsh, y);
+  fusion.addOutput(prod);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x =
+      at::randn({1}).to(options)[0]; // indexing to get zero-dim tensor
+  at::Tensor at_y = at::randn({1}).to(options)[0];
+  TORCH_INTERNAL_ASSERT(at_x.ndimension() == 0 && at_y.ndimension() == 0);
+
+  std::vector<IValue> aten_inputs = {at_x, at_y};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs, lparams);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_prod = at_x * at_y;
+
+  testValidate(&fusion, outputs, aten_inputs, {at_prod}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
