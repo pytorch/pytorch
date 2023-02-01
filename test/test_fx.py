@@ -3646,6 +3646,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         m = symbolic_trace(SimpleTest())
         m.meta['hello'] = m  # circular reference
         copy_m = copy.deepcopy(m)  # finishes
+        self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
 
 
 def run_getitem_target():

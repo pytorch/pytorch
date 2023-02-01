@@ -379,6 +379,12 @@ class DebugFormatter:
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
 
+    def fx_graph_transformed(
+        self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]
+    ):
+        with self.fopen("fx_graph_transformed.py") as fd:
+            fd.write(gm.print_readable(print_output=False))
+
     def ir_pre_fusion(self, nodes: SchedulerNodeList):
         self._write_ir("ir_pre_fusion.txt", nodes)
 

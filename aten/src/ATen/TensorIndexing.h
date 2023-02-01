@@ -237,7 +237,7 @@ static inline Tensor applySelect(
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     TORCH_CHECK_INDEX(
-        !(index == 0 && dim == 0 && self_sizes->size() == 0),
+        !(index == 0 && dim == 0 && self_sizes->empty()),
         "invalid index of a 0-dim tensor. ",
         "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 

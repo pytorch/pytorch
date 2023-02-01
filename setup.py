@@ -214,7 +214,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 7, 0)
+python_min_version = (3, 8, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -1013,6 +1013,7 @@ def print_box(msg):
 def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
+        'filelock',
         'typing_extensions',
         'sympy',
         'networkx',
