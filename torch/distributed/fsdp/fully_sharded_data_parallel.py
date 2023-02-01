@@ -316,9 +316,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             parameters will not be managed by this FSDP instance,
             that means these parameters will not be flattened and sharded by FSDP,
             their gradients will not be synchronized as well. With this newly added
-            argument, `ignored_modules` could be deprecated soon. For back compatiablity,
-            both `ignored_parameters` and `ignored_modules` are kept for now,
-            but only one of them could not be None.
+            argument, ``ignored_modules`` could be deprecated soon. For backward compatibility,
+            both ``ignored_parameters`` and ``ignored_modules`` are kept for now,
+            but FSDP only allows one of them to be specified as not ``None``.
     """
 
     def __init__(
@@ -882,10 +882,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         remove all occurrences of the FSDP-specific flattened buffer prefix
         when inside the :meth:`summon_full_params` context manager.
         """
-        should_clean_name = (
-            self.training_state == TrainingState.SUMMON_FULL_PARAMS
-            or self._use_orig_params
-        )
+        should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
         for buffer_name, buffer in super().named_buffers(*args, **kwargs):
             if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can
@@ -903,10 +900,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         remove all occurrences of the FSDP-specific flattened parameter prefix
         when inside the :meth:`summon_full_params` context manager.
         """
-        should_clean_name = (
-            self.training_state == TrainingState.SUMMON_FULL_PARAMS
-            or self._use_orig_params
-        )
+        should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
         for param_name, param in super().named_parameters(*args, **kwargs):
             if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can

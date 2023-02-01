@@ -213,8 +213,20 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
-    for (const auto& hook : cdata->pre_hooks()) {
+    for (const auto& hook : cdata->tensor_pre_hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+    // See NOTE [retains_grad_hook PyObject traversal]
+    for (const auto& pair : cdata->retains_grad_hooks()) {
+      if (auto pyhook =
+              dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+    for (const auto& hook : cdata->pre_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -450,7 +462,7 @@ static void _wrap_outputs(
       dirty_inputs,
       raw_output_vars,
       cdata_if_executable,
-      jvp_user_function);
+      std::move(jvp_user_function));
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -698,7 +710,7 @@ static void _trace_post_record(
     auto tuple_type = at::TupleType::create(std::move(tuple_values));
     // Original type is tuple of tensors "without" element type and shape.
     // The missed parts will be added below.
-    node->output()->setType(tuple_type);
+    node->output()->setType(std::move(tuple_type));
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
@@ -719,7 +731,7 @@ static void _trace_post_record(
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
   if (py::cast<bool>(is_in_onnx_export)) {
-    _append_subgraph(old_node, graph, trace_outputs, unpack_output);
+    _append_subgraph(old_node, graph, std::move(trace_outputs), unpack_output);
   }
 
   // If TupleUnpack operator is created, we copy its output type back
@@ -733,7 +745,7 @@ static void _trace_post_record(
     auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and
     // shape.
-    old_node->output()->setType(tuple_type);
+    old_node->output()->setType(std::move(tuple_type));
   }
 }
 
@@ -1023,7 +1035,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
       "access pattern that is no longer supported. For examples on how to use new-style "
       "autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-  cdata->add_pre_hook(std::move(hook));
+  cdata->add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
