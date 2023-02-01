@@ -5,8 +5,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
-#include <array>
-
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
 

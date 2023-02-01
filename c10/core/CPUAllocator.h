@@ -2,10 +2,10 @@
 
 #include <cstring>
 #include <unordered_map>
+#include <mutex>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/alignment.h> // legacy, update dependents to include this directly
-#include <c10/util/Logging.h>
+#include <c10/util/Flags.h>
 
 // TODO: rename to c10
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
