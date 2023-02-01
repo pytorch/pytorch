@@ -1,3 +1,4 @@
+import importlib
 import os
 import tempfile
 
@@ -32,6 +33,14 @@ def default_provider(device_type):
         "cuda": "CUDAExecutionProvider",
         # "TensorrtExecutionProvider" is another option
     }[device_type]
+
+
+def has_onnxruntime():
+    try:
+        importlib.import_module("onnxruntime")
+        return True
+    except ImportError:
+        return False
 
 
 @register_backend

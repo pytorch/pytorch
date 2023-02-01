@@ -37,31 +37,6 @@ def create_backend(fn):
     return register_backend(inner)
 
 
-@create_backend
-def ipex(subgraph, **kwargs):
-    import intel_extension_for_pytorch as ipex  # type: ignore[import]
-
-    inputs = subgraph.example_inputs
-    model = subgraph.model
-    with torch.no_grad():
-        model.eval()
-        if kwargs["datatype"] == "bf16":
-            model = ipex.optimize(model, dtype=torch.bfloat16)
-        else:
-            model = ipex.optimize(model, dtype=torch.float32)
-        try:
-            traced_model = torch.jit.trace(model, inputs).eval()
-            traced_model = torch.jit.freeze(traced_model)
-            return traced_model
-        except Exception:
-            log.warning("JIT trace failed during the 'ipex' optimize process.")
-            return model
-
-
-def _raise_timeout(signum, frame):
-    raise TimeoutError()
-
-
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
     if jit_mod is None:
         return None
@@ -258,13 +233,3 @@ def tvm_compile_inner(
     except Exception:
         log.exception("tvm error")
         return jit_mod  # explicit fall back to eager
-
-
-def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": "fp32"}
-    return ipex(gm, example_inputs, **kwargs_ipex)
-
-
-def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": "bf16"}
-    return ipex(gm, example_inputs, **kwargs_ipex)
