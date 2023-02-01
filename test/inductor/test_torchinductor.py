@@ -1719,7 +1719,7 @@ class CommonTemplate:
                 (v,),
             )
 
-    def test_conv_sym_shape(self):
+    def test_upsample_conv(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -5270,7 +5270,7 @@ class CommonTemplate:
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
     "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
-    "test_conv_sym_shape_dynamic_shapes": ("cpu"),  # TODO： fix me
+    "test_upsample_conv_dynamic_shapes": ("cpu", "cuda"),  # upsample does not support dynamic shapes yet (#92667)
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
