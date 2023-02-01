@@ -393,16 +393,16 @@ class EmbeddingBag(Module):
                                self.padding_idx)
 
     def extra_repr(self) -> str:
-        s = '{num_embeddings}, {embedding_dim}'
+        s = '{repr(num_embeddings)}, {repr(embedding_dim)}'
         if self.max_norm is not None:
-            s += ', max_norm={max_norm}'
+            s += ', max_norm={repr(max_norm)}'
         if self.norm_type != 2:
-            s += ', norm_type={norm_type}'
+            s += ', norm_type={repr(norm_type)}'
         if self.scale_grad_by_freq is not False:
-            s += ', scale_grad_by_freq={scale_grad_by_freq}'
-        s += ', mode={mode}'
+            s += ', scale_grad_by_freq={repr(scale_grad_by_freq)}'
+        s += ', mode={repr(mode)}'
         if self.padding_idx is not None:
-            s += ', padding_idx={padding_idx}'
+            s += ', padding_idx={repr(padding_idx)}'
         return s.format(**self.__dict__)
 
     @classmethod
