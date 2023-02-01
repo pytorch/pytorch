@@ -314,6 +314,9 @@ class TorchVariable(VariableTracker):
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
+        elif self.value is torch.cuda.stream:
+            log.warning("torch.cuda.stream will be ignored")
+            return NullContextVariable(**options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
