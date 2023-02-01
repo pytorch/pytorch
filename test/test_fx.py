@@ -478,6 +478,7 @@ class TestFX(JitTestCase):
         self.assertIn('wrapped_decorated_fn', m.code)
         self.assertEqual(m(1), 1)
 
+    @unittest.skipIf(sys.version_info >= (3, 11, 0), "FX currently does not have 3.11 support")
     def test_wrap_with_make_fx(self):
         def to_trace(y):
             return a_lifted_leaf((4, y), 3) * a_lifted_leaf((3, 4), 5) * a_lifted_leaf((y, y), y)
