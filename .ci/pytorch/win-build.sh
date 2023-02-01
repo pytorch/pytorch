@@ -55,6 +55,7 @@ then
 else
   export CONDA_PARENT_DIR="C:\Jenkins"
 fi
+com
 
 export PATH="C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;"$PATH
 
@@ -72,10 +73,12 @@ export DISTUTILS_USE_SDK="1"
 
 export PATH=${TMP_DIR_WIN}"\bin;"$PATH
 
+<<'###'
 if [ $TORCH_CUDA_ARCH_LIST == "" ]
 then
   export TORCH_CUDA_ARCH_LIST="5.2"
 fi
+###
 
 export SCCACHE_IDLE_TIMEOUT="0"
 
@@ -86,7 +89,6 @@ export CC="sccache-cl"
 export CXX="sccache-cl"
 
 export CMAKE_GENERATOR="Ninja"
-com
 
 set +ex
 grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/
