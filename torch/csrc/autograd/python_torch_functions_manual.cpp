@@ -364,14 +364,16 @@ static PyObject* THPVariable__to_functional_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_to_functional_tensor(Tensor t, *, bool mirror_autograd_meta=False)"},
+      {"_to_functional_tensor(Tensor t, *, bool mirror_autograd_meta=False, bool mark_input=False)"},
       /*traceable=*/true);
 
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
   auto mirror_autograd_meta = r.toBool(1);
-  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  auto mark_input = r.toBool(2);
+  auto wrapped =
+      at::functionalization::impl::to_functional_tensor(self_, mark_input);
   if (mirror_autograd_meta) {
     // Here, we unsafely set the grad function on the wrapper to be the same as
     // the inner. We expect this grad_fn to NEVER be used. It's needed so that

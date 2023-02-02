@@ -43,13 +43,14 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   set_custom_device(true);
 }
 
-FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value, bool mark_input)
   : c10::TensorImpl(
       c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value)),
       c10::DispatchKeySet(DispatchKey::Functionalize) | value.key_set(),
       value.dtype()
     ),
-    value_(value)
+    value_(value),
+    mark_input_(mark_input)
 {
   set_constructor_metadata();
 }
@@ -361,13 +362,13 @@ c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
 namespace functionalization {
 namespace impl {
 
-Tensor to_functional_tensor(const Tensor& tensor) {
+Tensor to_functional_tensor(const Tensor& tensor, bool mark_input) {
   // Note [Wrapped Numbers <> Functionalization]
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       return tensor;
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
-  return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
+  return at::detail::make_tensor<FunctionalTensorWrapper>(tensor, mark_input);
 }
 c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
@@ -536,6 +537,53 @@ bool isFunctionalTensor(ITensorListRef list) {
   return isFunctionalTensorIListRef(list);
 }
 
+bool isProgramInput(const at::Tensor& tensor) {
+  if (!at::functionalization::impl::isFunctionalTensor(tensor)) {
+      std::cout << "false (not functional)" << std::endl;
+      return false;
+  }
+  auto impl = unsafeGetFunctionalWrapper(tensor);
+  std::cout << impl->is_input() << std::endl;
+  return impl->is_input();
+}
+
+bool isProgramInput(const c10::optional<Tensor>& t) {
+  if (t.has_value()) {
+    return isProgramInput(*t);
+  } else {
+    return false;
+  }
+}
+
+bool isProgramInput(const c10::List<c10::optional<Tensor>>& t_list) {
+  if (t_list.size() == 0) return false;
+  auto input_count = 0;
+  for (const auto i : c10::irange(t_list.size())) {
+    if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
+    if (isProgramInput(t_list[i])) {
+      ++input_count;
+    }
+  }
+  return input_count > 0;
+}
+
+template <typename T>
+bool isPrograminputIListRef(c10::IListRef<T> list) {
+  if (list.size() == 0) return false;
+  auto input_count = 0;
+  for (const auto& tensor : list) {
+    if (!tensor.defined()) continue;
+    if (isProgramInput(tensor)) {
+      ++input_count;
+    }
+  }
+  return input_count > 0;
+}
+
+bool isProgramInput(ITensorListRef list) {
+  return isPrograminputIListRef(list);
+}
+
 void freeze_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
   auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
@@ -587,12 +635,27 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
 }
 
 thread_local bool _functionalizationReapplyViews;
+thread_local bool _functionalizationKeepInputMutations;
+
+KeepInputMutationsGuard::KeepInputMutationsGuard() {
+  value_set_ = getFunctionalizationKeepInputMutationsTLS();
+  setFunctionalizationKeepInputMutationsTLS(true);
+}
+KeepInputMutationsGuard::~KeepInputMutationsGuard() {
+  setFunctionalizationKeepInputMutationsTLS(value_set_);
+}
 
 bool getFunctionalizationReapplyViewsTLS() {
   return _functionalizationReapplyViews;
 }
 void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
   _functionalizationReapplyViews = reapply_views;
+}
+bool getFunctionalizationKeepInputMutationsTLS() {
+  return _functionalizationKeepInputMutations;
+}
+void setFunctionalizationKeepInputMutationsTLS(bool keep_input_mutations) {
+  _functionalizationKeepInputMutations = keep_input_mutations;
 }
 
 } // namespace impl

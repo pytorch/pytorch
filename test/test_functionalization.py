@@ -12,6 +12,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._contextlib import _DecoratorContextManager
 
 import unittest
 
@@ -25,7 +26,7 @@ def are_aliased(x, y):
 # This is basically a crappy version of `functionalize()`.
 def _functionalize(f, *, reapply_views: bool, crossref: bool):
     def to_fun(t: torch.Tensor):
-        func_t = torch._to_functional_tensor(t)
+        func_t = torch._to_functional_tensor(t, mark_input=True)
         func_t.requires_grad = t.requires_grad
         return func_t
 
@@ -256,6 +257,42 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, view_1);  arg0_1 = view_1 = None
     return view_2
     """)
+
+    def test_simple_keep_input_mutations(self):
+        # TODO: eventually promote this to a real util, but I don't want to add
+        # more API surface for now if this will only be used by AOT Autograd
+        class KeepInputMutations(_DecoratorContextManager):
+            def __enter__(self) -> None:
+                self.guard = torch._C._functorch._FunctionalizationKeepInputMutationsGuard()
+
+            def __exit__(self, exc_type, exc_value, traceback) -> None:
+                del self.guard
+
+        def f(x):
+            # simple test: 1 view op, 1 inplace op
+            y = x.view(-1)
+            # input mutation should NOT be functionalized
+            y.add_(1)
+            z = torch.mul(x, 2)
+            # regular mutation should be functionalized
+            z.add_(1)
+            return z
+
+        with KeepInputMutations():
+            self.assert_functionalization(f, torch.ones(4, 2))
+            logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True)
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [-1])
+    add_ = torch.ops.aten.add_.Tensor(view, 1);  view = None
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(mul, 1);  mul = None
+    return add
+    """)
+
 
     def test_simple_out(self):
         def f(x):

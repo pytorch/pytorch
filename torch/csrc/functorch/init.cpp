@@ -526,6 +526,9 @@ void initFuncTorchBindings(PyObject* module) {
       .def(
           "functionalizeAddBackViews",
           &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
+  py::class_<at::functionalization::impl::KeepInputMutationsGuard>(
+      m, "_FunctionalizationKeepInputMutationsGuard")
+      .def(py::init<>());
 }
 
 } // namespace impl

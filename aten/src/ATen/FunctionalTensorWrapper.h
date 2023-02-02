@@ -48,7 +48,9 @@ namespace at {
 // machinery. See Note [Functionalization: Mutation Removal] for details on
 // mutation removal.
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
-  explicit FunctionalTensorWrapper(const Tensor& value);
+  explicit FunctionalTensorWrapper(
+      const Tensor& value,
+      bool mark_input = false);
   // Additional constructor to create a FunctionalTensorWrapper directly from an
   // underlying tensor that was created from a view. For example, the code b =
   // a.view1() will generate a constructor call to FunctionalTensorWrapper(b, a,
@@ -123,6 +125,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other);
 
+  bool is_input() {
+    return mark_input_;
+  }
+
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
 
@@ -169,6 +175,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
+  // See Note [Functionalization: Input Mutations Are Optional]
+  // TODO: add this note
+  // We generally think of functionalize as a function -> function transform.
+  // mark_input_ signifies whether or not the current FunctionalTensorWrapper
+  // holds a "program input"
+  bool mark_input_;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
@@ -193,7 +205,13 @@ TORCH_API bool isFunctionalTensor(
     const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API bool isFunctionalTensor(ITensorListRef list);
 
-TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
+TORCH_API bool isProgramInput(const at::Tensor& tensor);
+TORCH_API bool isProgramInput(const c10::optional<Tensor>& t);
+TORCH_API bool isProgramInput(const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API bool isProgramInput(ITensorListRef list);
+
+TORCH_API Tensor
+to_functional_tensor(const Tensor& tensor, bool mark_input = false);
 TORCH_API c10::optional<Tensor> to_functional_tensor(
     const c10::optional<Tensor>& tensor);
 TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
@@ -246,6 +264,10 @@ void set_sizes_strides_offset(
 TORCH_API bool getFunctionalizationReapplyViewsTLS();
 TORCH_API void setFunctionalizationReapplyViewsTLS(bool reapply_views);
 
+TORCH_API bool getFunctionalizationKeepInputMutationsTLS();
+TORCH_API void setFunctionalizationKeepInputMutationsTLS(
+    bool keep_input_mutations);
+
 class TORCH_API FunctionalizationReapplyViewsGuard {
  public:
   FunctionalizationReapplyViewsGuard(bool reapply_views)
@@ -268,6 +290,16 @@ class TORCH_API FunctionalizationReapplyViewsGuard {
 
  private:
   bool prev_;
+};
+
+// RAII guard
+class TORCH_API KeepInputMutationsGuard {
+ public:
+  KeepInputMutationsGuard();
+  ~KeepInputMutationsGuard();
+
+ private:
+  bool value_set_;
 };
 
 } // namespace impl

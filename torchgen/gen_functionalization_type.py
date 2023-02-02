@@ -322,6 +322,18 @@ def emit_view_functionalization_body(
         meta_call_args = [
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
+        aliased_names = [
+            a.name
+            for a in f.func.arguments.flat_all
+            if a.type.is_tensor_like() and a.annotation is not None
+        ]
+        check_any_args_are_program_inputs = " || ".join(
+            ["false"]
+            + [
+                f"at::functionalization::impl::isProgramInput({a})"
+                for a in aliased_names
+            ]
+        )
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
@@ -329,6 +341,12 @@ def emit_view_functionalization_body(
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
+        {unwrap_tensor_args_str}
+        at::AutoDispatchSkipFunctionalize guard;
+        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+      }}
+      if (({check_any_args_are_program_inputs}) && at::functionalization::impl::getFunctionalizationKeepInputMutationsTLS()) {{
+         // See Note [Functionalization: Input Mutations Are Optional]
         {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
@@ -378,6 +396,12 @@ def emit_view_functionalization_body(
       {unwrap_tensor_args_str}
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
+        at::AutoDispatchSkipFunctionalize guard;
+        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+      }}
+      if (({check_any_args_are_program_inputs}) && at::functionalization::impl::getFunctionalizationKeepInputMutationsTLS()) {{
+         // See Note [Functionalization: Input Mutations Are Optional]
+        {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
@@ -556,6 +580,10 @@ def emit_inplace_functionalization_body(
             for a in non_mutated_names
         ]
     )
+    check_any_args_are_program_inputs = " || ".join(
+        ["false"]
+        + [f"at::functionalization::impl::isProgramInput({a})" for a in mutated_names]
+    )
     # These are used in the cases where we don't functionalize and redispatch to the inplace op
     # case 1: we hit an inplace op that doesn't have an out-of-place equivalent
     # case 2: we hit an inplace ops but our inputs are not functional tensors (in which case our kernel just no-ops)
@@ -618,6 +646,12 @@ def emit_inplace_functionalization_body(
         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
+      if (({check_any_args_are_program_inputs}) && at::functionalization::impl::getFunctionalizationKeepInputMutationsTLS()) {{
+         // See Note [Functionalization: Input Mutations Are Optional]
+         at::AutoDispatchSkipFunctionalize guard;
+         {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
+         {return_from_mutable_noop_redispatch(f, 'tmp_output')};
+      }}
       if (!({check_all_mutated_args_are_functional})) {{
         if (({check_any_non_mutated_args_are_functional})) {{
          // case 1: trying to mutate a non functional tensor with a functional tensor is an error
