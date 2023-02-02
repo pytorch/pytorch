@@ -1111,7 +1111,8 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
-    def run_n_iterations(self, mod, inputs, n=2):
+    def run_n_iterations(self, mod, inputs):
+        n = self.args.iterations
         for _ in range(n - 1):
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
@@ -1543,6 +1544,9 @@ def parse_args(args=None):
         help="use channels last format",
     )
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--iterations", type=int, default=2, help="how many iterations to run"
+    )
     parser.add_argument(
         "--batch-size-file", type=str, help="String to load batch size from"
     )
