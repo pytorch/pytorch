@@ -9,8 +9,9 @@ import time
 from collections import defaultdict
 
 import torch
-
 from .. import config
+
+from ..allowed_functions import torch_get_name
 from ..utils import (
     check_is_cuda,
     checkpoint_params,
@@ -18,9 +19,41 @@ from ..utils import (
     count_calls,
     counters,
 )
-from .normalize import long_name, normalize_ir
 
 log = logging.getLogger(__name__)
+
+
+def short_name(gm, node: torch.fx.Node):
+    if node.op == "call_function":
+        return node.target.__name__
+    elif node.op == "call_method":
+        return node.target
+    elif node.op == "call_module":
+        return gm.get_submodule(node.target).__class__.__name__
+    elif node.op == "get_attr":
+        return node.target
+    elif node.op == "output":
+        return "output"
+    raise AssertionError(node.op)
+
+
+def long_name(gm, node: torch.fx.Node):
+    name = short_name(gm, node)
+    target = node.target
+    if node.op == "call_function":
+        return torch_get_name(
+            node.target, f"{getattr(target, '__module__', '')}.{name}"
+        )
+    elif node.op == "call_method":
+        return name
+    elif node.op == "call_module":
+        target = gm.get_submodule(target).__class__
+        return f"{getattr(target, '__module__', '')}.{getattr(target, '__name__', '')}"
+    elif node.op == "get_attr":
+        return name
+    elif node.op == "output":
+        return "output"
+    raise AssertionError("unreachable")
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -133,7 +166,7 @@ class TorchScriptStrategy(object):
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = example_inputs
         self.correct = gm.forward(*self.example_inputs)
-        self.gm = normalize_ir(gm, self.original_example_inputs)
+        self.gm = gm
         self.scripted = jit_trace(self.gm, self.example_inputs)
 
     @property
