@@ -48,6 +48,7 @@ ${py_forwards}
 
 static PyMethodDef nested_functions[] = {
   {NULL, NULL, 0, NULL},
+  {NULL, NULL, 0, NULL},
   ${py_method_defs}
   {NULL}
 };
@@ -55,7 +56,9 @@ static PyMethodDef nested_functions[] = {
 static PyObject* THPNestedVariableFunctionsModule = NULL;
 
 void initNestedFunctions(PyObject* module) {
+  // FIXME: this hack won't scale I want to fix this
   nested_functions[0] = get_nested_functions_manual()[0];
+  nested_functions[1] = get_nested_functions_manual()[1];
   static struct PyModuleDef def = {
      PyModuleDef_HEAD_INIT,
      "torch._C._nested",

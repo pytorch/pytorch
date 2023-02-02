@@ -28,12 +28,39 @@ static PyObject* THPVariable_nested_tensor(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__nested_view_from_buffer(
+    PyObject* /*self*/,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "_nested_view_from_buffer(Tensor data, PyObject* sizes, PyObject* strides, IntArrayRef offsets)",
+      "_nested_view_from_buffer(Tensor data, PyObject* sizes)"
+  });
+
+  constexpr int ctor_num_args = 4;
+  ParsedArgs<ctor_num_args> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  // FIXME: do I need to warn anythin here?
+  return THPVariable_Wrap(torch::utils::_nested_view_from_buffer_ctor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      r));
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef nested_functions_manual[] = {
     {"nested_tensor",
      castPyCFunctionWithKeywords(THPVariable_nested_tensor),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
+    {"_nested_view",
+     castPyCFunctionWithKeywords(THPVariable__nested_view_from_buffer),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+
 };
 
 PyMethodDef* get_nested_functions_manual() {

@@ -10,6 +10,7 @@ __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
     "nested_tensor",
+    "_nested_view_from_buffer"
 ]
 
 # Nested Tensor constructor functions
@@ -146,4 +147,9 @@ Example::
     >>> nt.is_leaf
     True
     """,
+)
+
+_nested_view = _add_docstr(
+    _nested._nested_view,
+    "",
 )

@@ -87,5 +87,38 @@ at::Tensor nested_tensor_ctor(
   return out;
 }
 
+at::Tensor _nested_view_from_buffer_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    torch::PythonArgs& r) {
+  TORCH_CHECK(r.idx == 0 || r.idx == 1, "_nested_view_from_buffer(): invalid arguments");
+  auto buffer = r.tensor(0);
+  PythonArgs elem_sizes(r);
+  std::array<PyObject*, 6> size_args = {
+      r.pyobject(1), // data
+      (PyObject*)&PyLong_Type, // dtype
+      nullptr, // device (cpu)
+      nullptr, // no pinned memory
+      Py_False, // requires grad
+      nullptr // names
+  };
+  elem_sizes.args = size_args.data();
+  Tensor sizes = tensor_ctor(dispatch_key, scalar_type, elem_sizes);
+  PythonArgs elem_strides(r);
+  std::array<PyObject*, 6> stride_args = {
+      r.pyobject(2), // data
+      (PyObject*)&PyLong_Type, // dtype
+      nullptr, // device (cpu)
+      nullptr, // no pinned memory
+      Py_False, // requires grad
+      nullptr // names
+  };
+  elem_strides.args = stride_args.data();
+  Tensor strides = tensor_ctor(dispatch_key, scalar_type, elem_strides);
+  auto offsets = r.intlist(3);
+  return at::_nested_view_from_buffer(buffer, sizes, strides, offsets);
+
+}
+
 } // namespace utils
 } // namespace torch

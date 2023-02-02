@@ -13,5 +13,10 @@ at::Tensor nested_tensor_ctor(
     at::ScalarType scalar_type,
     PythonArgs& r);
 
+at::Tensor _nested_view_from_buffer_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+
 } // namespace utils
 } // namespace torch
