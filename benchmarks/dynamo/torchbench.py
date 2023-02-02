@@ -183,6 +183,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_GPT2_large",
     "hf_T5_large",
     "timm_vision_transformer_large",
+    "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
 
