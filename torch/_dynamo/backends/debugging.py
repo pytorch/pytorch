@@ -5,7 +5,6 @@ from functorch.compile import min_cut_rematerialization_partition, nop
 
 import torch
 from torch._functorch.compilers import ts_compile
-from .. import config
 from .common import aot_autograd
 from .registry import register_backend
 
@@ -40,7 +39,7 @@ aot_eager_decomp_partition = aot_autograd(
     bw_compiler=nop,
     # NB: lambda here is to delay import of inductor
     decompositions=lambda: import_module(
-        f"{config.inductor_import}.compile_fx"
+        "torch._inductor.compile_fx"
     ).select_decomp_table(),
     partition_fn=functools.partial(
         min_cut_rematerialization_partition, compiler="inductor"
