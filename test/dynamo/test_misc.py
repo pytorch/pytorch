@@ -1505,6 +1505,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager(self):
         def fn(x):
             s = torch.cuda.Stream()
