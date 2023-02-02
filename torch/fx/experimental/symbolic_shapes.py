@@ -821,7 +821,7 @@ class ShapeEnv(object):
     # on if the guards evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources,
+    def produce_guards(self, placeholders, sources,
                        source_ref=lambda n: n.name()):
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
@@ -963,16 +963,16 @@ class ShapeEnv(object):
             # negative inferences on shape variables
             exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
-        if exprs:
-            return " and ".join(exprs)
-        else:
-            return "True"
+        return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
-        return eval(code, {}, dict(zip(arg_names, args)))
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        if guards:
+            code = " and ".join(guards)
+            return eval(code, {}, dict(zip(arg_names, args)))
+        return True
 
     def bind_symbols(self, placeholders, args):
         # Given a paired list of placeholders (fake tensors with
