@@ -26,7 +26,7 @@ from caffe2.python.core import BlobReference
 from collections import OrderedDict, namedtuple
 from past.builtins import basestring
 from itertools import islice
-from six import StringIO
+from io import StringIO
 from typing import Sequence
 
 logger = logging.getLogger(__name__)
