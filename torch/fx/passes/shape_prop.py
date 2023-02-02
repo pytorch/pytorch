@@ -182,6 +182,4 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
-        # clone inputs to avoid side effects caused by inplace ops during run_node
-        new_args = [torch._prims_common.clone_preserve_strides(x) for x in args]
-        return super().run(*new_args)
+        return super().run(*args)

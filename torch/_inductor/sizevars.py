@@ -448,8 +448,6 @@ class SizeVarAllocator(object):
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
 
         for name, value in graph_inputs.items():
-            if isinstance(value.data, ir.ReinterpretView):
-                value = value.data.data
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -460,8 +458,6 @@ class SizeVarAllocator(object):
                     )
 
         for name, value in graph_inputs.items():
-            if isinstance(value.data, ir.ReinterpretView):
-                value = value.data.data
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
