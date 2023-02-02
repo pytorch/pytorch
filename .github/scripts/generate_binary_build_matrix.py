@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple, Optional
 CUDA_ARCHES = ["11.7", "11.8"]
 ROCM_ARCHES = ["5.2", "5.3"]
 
+CPU_CXX11_ABI_ARCH = ['cpu-cxx11-abi']
 
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
