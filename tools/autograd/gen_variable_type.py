@@ -305,7 +305,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "reflection_pad1d_backward",
     "reflection_pad2d_backward",
     "reflection_pad3d_backward",
-    "symeig",
     "_sparse_sparse_matmul",
     "replication_pad1d",
     "replication_pad2d",

@@ -298,7 +298,10 @@ class SchedulerNode(BaseSchedulerNode):
         ):
             return super().allocate()
 
-        if config.inplace_buffers and getattr(V.kernel, "mutations", None) is not None:
+        if config.inplace_buffers and (
+            not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+            or getattr(V.kernel, "mutations", None) is not None
+        ):
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
