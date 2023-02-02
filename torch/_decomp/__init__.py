@@ -282,5 +282,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.bucketize,
             aten.zero_,
             aten.zero,
+            aten.lerp,
         ]
     )
