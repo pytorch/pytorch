@@ -1472,15 +1472,17 @@ py::object create_dimlist(py::object name, py::handle size) {
 struct PyInstDecoder {
     PyInstDecoder(PyCodeObject* code_object, int lasti)
     : code_object_(code_object), code_(_PyCode_CODE(code_object)), offset_(lasti / sizeof(_Py_CODEUNIT))  {}
+    // On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
+    // See https://github.com/pytorch/pytorch/issues/93854
     void next() {
-    #if IS_PYTHON_3_11_PLUS
+    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
         offset_ += _PyOpcode_Caches[opcode()];
     #endif
         offset_ += 1;
     }
     int opcode() {
         auto r = _Py_OPCODE(code_[offset_]);
-    #if IS_PYTHON_3_11_PLUS
+    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
         r = _PyOpcode_Deopt[r];
     #endif
         return r;
