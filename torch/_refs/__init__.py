@@ -83,6 +83,8 @@ __all__ = [
     "index_fill_",
     "isfinite",
     "isinf",
+    "isposinf",
+    "isneginf",
     "isnan",
     "isreal",
     "i0",
@@ -736,7 +738,7 @@ def nan_to_num(
     assert isinstance(a, TensorLike)
 
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
-        return clone(a)
+        return a.clone()
 
     if nan is None:
         nan = 0.0
@@ -747,14 +749,9 @@ def nan_to_num(
     if neginf is None:
         neginf = torch.finfo(a.dtype).min
 
-    result = where(isnan(a), nan, a)
-
-    is_neg = signbit(a)
-    is_neginf = bitwise_and(isinf(a), is_neg)
-    result = where(is_neginf, neginf, result)
-
-    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
-    result = where(is_posinf, posinf, result)
+    result = torch.where(torch.isnan(a), nan, a)  # type: ignore[call-overload]
+    result = torch.where(torch.isneginf(a), neginf, result)  # type: ignore[call-overload]
+    result = torch.where(torch.isposinf(a), posinf, result)  # type: ignore[call-overload]
     return result
 
 

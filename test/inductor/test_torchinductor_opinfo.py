@@ -420,6 +420,7 @@ inductor_all_samples = {
     "isinf",
     "isposinf",
     "isneginf",
+    "nan_to_num",
     "mT",
     "mH",
 }
