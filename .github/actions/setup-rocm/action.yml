@@ -58,7 +58,7 @@ runs:
         fi
 
     - name: Runner diskspace health check
-      uses: actions/diskspace-cleanup@rocm-diskspace-check
+      uses: ./.github/actions/diskspace-cleanup
       if: always()
 
     - name: Runner health check disconnect on failure

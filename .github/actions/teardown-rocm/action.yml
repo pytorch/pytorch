@@ -15,5 +15,5 @@ runs:
         # Prune all stopped containers.
         docker container prune -f
     - name: Runner diskspace health check
-      uses: actions/diskspace-cleanup@rocm-diskspace-check
+      uses: ./.github/actions/diskspace-cleanup
       if: always()
