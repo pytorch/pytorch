@@ -312,6 +312,10 @@ class WrapperCodeGen(CodeGen):
 
         self.allocated = set()
         self.freed = set()
+
+        # maps from reusing buffer to reused buffer
+        self.reuses = dict()
+
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
@@ -437,6 +441,14 @@ class WrapperCodeGen(CodeGen):
             return False
         return True
 
+    def did_reuse(self, buffer, reused_buffer):
+        # Check whether a given buffer was reused by a possible reuser in the wrapper codegen
+        # Can be consulted from inside ir codegen, e.g. to determine whether a copy is needed
+        return (
+            buffer.get_name() in self.reuses
+            and self.reuses[buffer.get_name()] == reused_buffer.get_name()
+        )
+
     def write_reuse_line(self, input_buffer, output_buffer):
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
@@ -445,6 +457,7 @@ class WrapperCodeGen(CodeGen):
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
+        self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.write_reuse_line(input_buffer, output_buffer)
 
     def codegen_cuda_device_guard_enter(self, device_idx):
