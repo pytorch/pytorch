@@ -103,9 +103,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def generic_list_compare(left, tx, op, right, **options):
-        from .builder import wrap_fx_proxy
         from .builtin import BuiltinVariable
-        from .tensor import DynamicShapeVariable
 
         assert not (
             left.is_python_constant() and right.is_python_constant()
@@ -125,42 +123,15 @@ class BaseListVariable(VariableTracker):
         # So, we iterate over the zipped list items.
         equal = True
         comps = []
-        for l_r in zip(left.items, right.items):
-            l = l_r[0]
-            r = l_r[1]
+        for l, r in zip(left.items, right.items):
             comp = BuiltinVariable(op).call_function(tx, [l, r], {})
             list_type = type(comp)
-            if isinstance(comp, variables.TensorVariable):
-                unimplemented("List Comparison for Tensors is not yet supported")
             comps.append(comp)
 
-        if len(comps) == 1:
-            return comps[0]
-
-        # Initial postiions
-        prev = comps[0]
-        for i in range(1, len(comps)):
-            # Target for comparison
-            curr = comps[i]
-            options = VariableTracker.propagate([prev, curr])
-
-            # Produces prev = operator.and_(prev, curr)
-            # This can be chained as needed, ex: operator.and_(operator.and_(comps[0], comps[1]), comps[2]) etc
-            if isinstance(prev, DynamicShapeVariable):
-                return DynamicShapeVariable.create(
-                    tx,
-                    (operator.and_)(prev.as_proxy(), curr.as_proxy()),
-                    dyn_shape=None,
-                    **options,
-                )
-            else:
-                prev = wrap_fx_proxy(
-                    tx,
-                    operator.and_(prev.as_proxy(), curr.as_proxy()),
-                    **options,
-                )
-
-        return prev
+        return functools.reduce(
+            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
+            comps,
+        )
 
 
 class RangeVariable(BaseListVariable):
