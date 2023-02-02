@@ -1987,6 +1987,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         and ("memory_format" not in kwargs)
         and ("device" not in kwargs)
         and ("layout" not in kwargs)
+        and not a.is_nested
         # is_pinned issue #84925
         # and ("pin_memory" not in kwargs)
     ):

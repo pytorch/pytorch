@@ -217,6 +217,7 @@ class VariableBuilder:
         return {"source": self.get_source()}
 
     def make_guards(self, *guards):
+        print(f"GUARDS={guards}\n\n\n")
         source = self.get_source()
         if (
             isinstance(source, ConstantSource)

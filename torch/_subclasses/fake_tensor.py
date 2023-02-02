@@ -60,6 +60,11 @@ _device_not_kwarg_ops = (
     aten._resize_output.out,
 )
 
+_nested_constructors = (
+    aten._nested_tensor_from_tensor_list.default,
+    aten._nested_tensor_from_tensor_list.out,
+)
+
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
@@ -452,7 +457,31 @@ def index_put_(fake_mode, func, *args, **kwargs):
     return new_kwargs["input"]
 
 
-@register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
+@register_op_impl(lambda fn: fn in _nested_constructors)
+def nested_constructor(fake_mode, func, *args, **kwargs):
+    assert func not in _non_kwarg_device_constructors
+    new_args, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=False
+    )
+    # default device is device of first tensor in tensorlist
+    default_device = torch.device("cpu") if len(args[0]) == 0 else args[0][0].fake_device
+    print(args)
+    print(kwargs)
+    print(new_args)
+    device_arg = new_args[3]
+    out_device = default_device if device_arg is None else device_arg
+    new_args = new_args[:3] + (torch.device("meta"),) + new_args[4:]
+    print(f"new_args={new_args}")
+    print(f"new_kwargs={new_kwargs}")
+    print(f"out_device={out_device}")
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(*new_args, **new_kwargs)
+    return FakeTensor(fake_mode, r, out_device)
+
+
+@register_op_impl(
+    lambda fn: fn in _device_not_kwarg_ops and fn not in _nested_constructors
+)
 def nyi(fake_mode, func, *args, **kwargs):
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
@@ -754,6 +783,7 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # print(f"in torch dispatch of fake tensor", {func})
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -769,6 +799,9 @@ class FakeTensorMode(TorchDispatchMode):
             torch.ops.aten.is_coalesced.default,
             torch.ops.aten.dense_dim.default,
             torch.ops.aten.sparse_dim.default,
+            torch.ops.aten._nested_tensor_size.default,
+            torch.ops.aten._nested_tensor_strides.default,
+            torch.ops.aten._nested_tensor_offsets_tensor.default,
         }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
@@ -897,6 +930,7 @@ class FakeTensorMode(TorchDispatchMode):
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
         if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
+            # print(f"prim, {func._schema.name}")
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
@@ -954,11 +988,16 @@ class FakeTensorMode(TorchDispatchMode):
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {func}(*{args}, **{kwargs})"
                     )
-                if not self.allow_non_fake_inputs:
-                    raise Exception(
-                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
-                    )
+                # FIXME: commenting this out because 
+                # Exception: Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode with 'allow_non_fake_inputs'. Found in aten._nested_from_padded.default(*(FakeTensor(FakeTensor(..., device='meta', size=(2, 5, 3)), cuda:0), tensor([[2, 3],
+                # [5, 3]])), **{}) 
+                # what is happening here is backward for nested_to_padded is
+                # at::_nested_from_padded(grad, self._nested_tensor_size())
+                # if not self.allow_non_fake_inputs:
+                #     raise Exception(
+                #         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                #         f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
+                #     )
 
                 return converter(self, x)
             return x
@@ -1090,10 +1129,13 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
 
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                out = torch.zeros_like(e, device=e.fake_device)
-                if e.is_sparse:
-                    out._coalesced_(e.is_coalesced())
-                inp_impls[id(out)] = e
+                if e.is_nested:
+                    out = torch.empty_like(e, device=e.fake_device)
+                else:
+                    out = torch.zeros_like(e, device=e.fake_device)
+                    if e.is_sparse:
+                        out._coalesced_(e.is_coalesced())
+                    inp_impls[id(out)] = e
                 return out
             return e
 

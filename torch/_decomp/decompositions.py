@@ -1539,8 +1539,12 @@ def _to_copy(
     non_blocking: bool = False,
     memory_format: Optional[torch.memory_format] = None,
 ):
+    breakpoint()
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
+    # if x.is_nested:
+    #     # trying to avoid all the errors :"(
+    #     return x.clone()
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
@@ -2221,6 +2225,9 @@ def upsample_bilinear2d(
 # We should be applying decompositions after all transformations
 @register_decomposition(aten.is_same_size.default)
 def is_same_size(a: Tensor, b: Tensor) -> bool:
+    if a.is_nested:
+        # FIXME: bad but just trying for now
+        return all([a1.shape == b1.shape for (a1, b1) in zip(a.unbind(), b.unbind())])
     return a.shape == b.shape
 
 

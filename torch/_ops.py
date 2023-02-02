@@ -281,6 +281,7 @@ class OpOverload(PyOperatorABC):
         )
 
     def __call__(self, *args, **kwargs):
+        # print("in op overload", self)
         return self._op(*args, **kwargs or {})
 
     def __hash__(self):
@@ -387,7 +388,7 @@ class OpOverload(PyOperatorABC):
                 self._dispatch_cache[key] = handler
                 return handler
 
-        # print(self, key, final_key)
+        print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         self._dispatch_cache[key] = r
         return r

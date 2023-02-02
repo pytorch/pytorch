@@ -56,7 +56,11 @@ def as_nested_tensor(
         raise TypeError(
             "nested_tensor(): Expected first argument to be a list of tensors "
         )
-    return torch._nested_tensor_from_tensor_list(tensor_list, dtype, None, device, None)
+    if dtype is None and tensor_list:
+        dtype = tensor_list[0].dtype
+    if device is None and tensor_list:
+        device = tensor_list[0].device
+    return torch._nested_tensor_from_tensor_list(tensor_list, dtype, None, device, False)
 
 
 # Note: This not only adds doc strings for the nested ops, but

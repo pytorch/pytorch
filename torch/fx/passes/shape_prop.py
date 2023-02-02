@@ -24,14 +24,18 @@ class TensorMetadata(NamedTuple):
     is_quantized : bool
     qparams: Dict[str, Any]
 
+    # Nested metadata
+    is_nested: bool
+    nparams: Dict[str, Any]
+
 def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
-    shape = result.shape
+    shape = result.shape if not result.is_nested else None
     dtype = result.dtype
     requires_grad = result.requires_grad
-    stride = result.stride()
+    stride = result.stride() if not result.is_nested else None
 
     memory_formats = {
         torch.contiguous_format,
@@ -62,8 +66,15 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
             qparams["zero_point"] = result.q_per_channel_zero_points().tolist()  # type: ignore[assignment]
             qparams["axis"] = result.q_per_channel_axis()  # type: ignore[assignment]
 
+    is_nested = result.is_nested
+    nparams: Dict[str, Any] = {}
+    if is_nested:
+        nparams['nested_size'] = result._nested_tensor_size()
+        nparams['nested_stride'] = result._nested_tensor_strides()
+        nparams['nested_offsets'] = result._nested_tensor_offsets_tensor()
+
     return TensorMetadata(
-        shape, dtype, requires_grad, stride, memory_format, is_quantized, qparams)
+        shape, dtype, requires_grad, stride, memory_format, is_quantized, qparams, is_nested, nparams)
 
 @compatibility(is_backward_compatible=True)
 class ShapeProp(torch.fx.Interpreter):

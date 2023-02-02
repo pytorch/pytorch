@@ -50,6 +50,12 @@ class MissingOperatorWithDecomp(OperatorIssue):
             )
         )
 
+class JaggedOperator(OperatorIssue):
+    def __init__(self, target, args, kwargs):
+        # FIXME: _record_missing_jagged_op?
+        super().__init__(f"need jagged lowering\n{self.operator_str(target, args, kwargs)}")
+
+
 
 class LoweringException(OperatorIssue):
     def __init__(self, exc, target, args, kwargs):

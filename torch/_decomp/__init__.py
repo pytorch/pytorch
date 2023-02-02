@@ -25,6 +25,7 @@ global_decomposition_table: Dict[str, Dict[OpOverload, Callable]] = defaultdict(
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
+meta_table_nested = global_decomposition_table["meta_nested"]
 
 
 def _add_op_to_registry(registry, op, fn):

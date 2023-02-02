@@ -254,6 +254,48 @@ def TensorMeta(
 
     return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
+def NestedTensorMeta(
+    tensorlike: torch.Tensor = None,
+    *,
+    shape: Optional[ShapeType] = None,
+    strides: Optional[StrideType] = None,
+    offsets: Optional[List[int]] = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[Union[torch.device, str]] = None,
+    numel: int = None,
+):
+    if tensorlike is not None:
+        assert isinstance(tensorlike, torch.Tensor)
+        print(f"tensorlike={tensorlike}")
+        inferred_shape = tensorlike._nested_tensor_size()
+        inferred_strides = tensorlike._nested_tensor_strides()
+        inferred_offsets = tensorlike._nested_tensor_offsets_tensor().tolist()
+        inferred_dtype = tensorlike.dtype
+        inferred_device = tensorlike.device
+        inferred_numel = tensorlike.numel()
+    else:
+        # If no tensorlike "example" is given then all metadata
+        # must be provided explicitly
+        assert shape is not None
+        assert strides is not None
+        assert offsets is not None
+        assert dtype is not None
+        assert device is not None
+        assert numel is not None
+
+    shape = inferred_shape if shape is None else shape
+    strides = inferred_strides if strides is None else strides
+    offsets = inferred_offsets if offsets is None else offsets
+    dtype = inferred_dtype if dtype is None else dtype
+    device = inferred_device if device is None else device
+    numel = inferred_numel if numel is None else numel
+
+    if isinstance(device, str):
+        device = torch.device(device)
+
+    buffer = torch.empty(numel, device=device, dtype=dtype)
+    return torch._nested_view_from_buffer(buffer, shape, strides, offsets)
+
 
 def _make_prim(
     *,
@@ -1981,6 +2023,11 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     # Type checks
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
+
+    # trying to avoid the following a.stride() call that will error for nested tensor
+    # RuntimeError: Internal error: NestedTensorImpl doesn't support strides...
+    if a.is_nested:
+        return NestedTensorMeta(a, dtype=dtype)
 
     # dtype conversion preserves dense strides
     if torch._prims_common.is_non_overlapping_and_dense(a):

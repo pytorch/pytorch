@@ -134,8 +134,34 @@ def ir_node_to_tensor(x, guard_shape=True):
     )
     size = [shape_fn(s) for s in x.get_size()]
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]
+        layout = x.get_layout()
+        if layout.is_jagged():
+            offsets = layout.get_jagged_offsets()
+            embedding_dim = size[-1]
+            ts = []
+            dtype = x.get_dtype()
+            device = x.get_device()
+            for i in range(len(offsets) - 1):
+                seq_len = offsets[i + 1] - offsets[i]
+                t = torch.empty((shape_fn(seq_len), shape_fn(embedding_dim))).zero_()
+                ts.append(t)
+            ts.append(torch.empty((shape_fn(size[0] - offsets[-1]), shape_fn(embedding_dim))).zero_())
+            output = torch.nested.nested_tensor(ts, dtype=dtype, device=device)
+            # FIXME: this won't work
+            # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet. Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data() to actually allocate memory.
+            # numel = size[0] * size[1]
+            # size = [[shape_fn(offsets[i + 1] - offsets[i]) for i in range(len(offsets) - 1)] + [size[0] - offsets[-1]]] + [[shape_fn(embedding_dim) for _ in range(len(offsets))]]
+            # stride = [[shape_fn(embedding_dim) for _ in range(len(offsets))]] + [[shape_fn(1) for _ in range(len(offsets))]]
+            # nested_offsets = [offset * embedding_dim for offset in offsets]
+            # dtype = x.get_dtype()
+            # device = x.get_device()
+            # buffer = torch.zeros((numel,), dtype=dtype, device=device)
+            # output = torch.nested._nested_view(buffer, size, stride, nested_offsets)
+            return output
+        else:
+            stride = [shape_fn(s) for s in layout.stride]
     else:
+        # this might be the Pointwise/Reduction case?
         stride = make_contiguous_strides_for(size)
     dtype = x.get_dtype()
     device = x.get_device()
@@ -340,6 +366,9 @@ class Loops(IRNode):
     def get_size(self):
         return self.ranges
 
+    def get_jagged_offsets(self):
+        return self.jagged_offsets
+
     def is_extern(self):
         return False
 
@@ -382,7 +411,10 @@ class Loops(IRNode):
                 ).reads
 
 
+@dataclasses.dataclass
 class Pointwise(Loops):
+    jagged_offsets: List[Expr]
+
     def make_loader(self):
         return self.inner_fn
 
@@ -798,6 +830,7 @@ class Reduction(Loops):
                 dtype=src_dtype,
                 inner_fn=const_fn,
                 ranges=list(ranges),
+                jagged_offsets=None,
             )
 
         if reduction_numel == 1:
@@ -813,7 +846,7 @@ class Reduction(Loops):
                     reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
                     return inner_fn(index, reduction_index)
 
-            return Pointwise.create(device, dst_dtype, fn, ranges)
+            return Pointwise.create(device, dst_dtype, fn, ranges, None)
 
         if (
             isinstance(reduction_numel, sympy.Integer)
@@ -826,6 +859,7 @@ class Reduction(Loops):
                 dst_dtype,
                 cls._unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type),
                 ranges,
+                None,
             )
 
         if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
@@ -1467,6 +1501,12 @@ class ReinterpretView(BaseView):
 
     def get_stride(self):
         return self.layout.stride
+    
+    def get_jagged_offsets(self):
+        try:
+            return self.layout.jagged_offsets
+        except AttributeError:
+            return None
 
     def make_loader(self):
         def loader(index):
@@ -1672,6 +1712,9 @@ class Layout(IRNode):
         order = [0] + list(reversed(range(1, len(self.stride) - 1)))
         order = [len(order)] + order
         return self.is_stride_ordered(order)
+    
+    def is_jagged(self):
+        return hasattr(self, 'jagged_offsets')
 
     def as_fixed(self):
         return FixedLayout(
@@ -1731,6 +1774,102 @@ class FixedLayout(Layout):
             return result
 
         return indexer
+
+@dataclasses.dataclass
+class JaggedLayout(IRNode):
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: List[Expr],
+        stride: List[Expr],
+        jagged_offsets: List[Expr],
+        offset: Expr = Integer(0),
+    ):
+        self.device = device
+        self.dtype = dtype
+        # size is [sum(*), D]
+        self.size = size
+        # stride is [D, 1], technically this metadata can be derived
+        self._stride = stride
+        self.offset = offset
+        self.jagged_offsets = jagged_offsets
+
+    @property
+    def stride(self):
+        return self._stride
+
+    def is_jagged(self):
+        return True
+    
+    def get_jagged_offsets(self):
+        return self.jagged_offsets
+
+    def __str__(self):
+        offset = ""
+        if self.offset != 0:
+            offset = f", offset={self.offset}"
+        return (
+            f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+            f"size={self.size}, stride={self.stride}, jagged_offsets={self.jagged_offsets}{offset})"
+        )
+
+    __repr__ = __str__
+
+    def make_indexer(self):
+        # do we need flexible layout for jaggedtensor?
+        # jagged tensors are always contiguous
+        return self.make_indexer()
+
+    def __eq__(self, other) -> bool:
+        return (
+            self.device == other.device
+            and self.dtype == other.dtype
+            and self.size == other.size
+            and self.stride == other.stride
+            and self.offset == other.offset
+            and self.jagged_offsets == other.jagged_offsets
+        )
+
+class FixedJaggedLayout(JaggedLayout):
+    """A JaggedTensor layout we cannot change"""
+
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: List[Expr],
+        stride: Expr,
+        jagged_offsets: List[Expr],
+        offset: Expr = Integer(0),
+    ):
+        super().__init__(
+            device,
+            dtype,
+            size,
+            stride,
+            jagged_offsets,
+            offset,
+        )
+
+    def make_indexer(self):
+        """A closure containing math to read a given element"""
+
+        # FIXME: need to ensure that this is only used for Pointwise
+        # and Reduction along regular dimensions?
+
+        def indexer(index):
+            assert len(index) == len(self.stride) == len(self.size)
+            result = self.offset
+            for idx, stride, sz in zip(index, self.stride, self.size):
+                if sz != 1:
+                    result = result + idx * stride
+            return result
+
+        return indexer
+
+    def as_fixed(self):
+        return self
 
 
 class FlexibleLayout(Layout):
@@ -1891,6 +2030,7 @@ class MutationLayout(Layout):
                     V.graph.sizevars.guard_equals(a, b)
                     for a, b in zip(src.get_size(), dst.get_size())
                 ],
+                jagged_offsets=None,
             ).data
             src.realize()
 
@@ -1928,6 +2068,12 @@ class Buffer(IRNode):
 
     def get_stride(self):
         return self.layout.stride
+
+    def get_jagged_offsets(self):
+        try:
+            return self.layout.jagged_offsets
+        except AttributeError:
+            return None
 
     def get_layout(self):
         return self.layout
@@ -2455,6 +2601,7 @@ class ConcatKernel(NopKernel):
                 V.graph.sizevars.guard_equals(a, b)
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
+            jagged_offsets=None,
         )
         return cls.realize_into(pw, dst)
 
@@ -2483,6 +2630,7 @@ class ExternKernel(InputsKernel):
             dtype=x.get_dtype(),
             inner_fn=x.make_loader(),
             ranges=x.get_size(),
+            jagged_offsets=None,
         )
         pw.realize()
         return pw
@@ -2957,6 +3105,23 @@ class FallbackKernel(ExternKernelAlloc):
         return list(map(repr, args)) + list(gen_kwarg(k, v) for k, v in kwargs.items())
 
     @classmethod
+    def check_nested_output_is_jagged_layout(cls, nt):
+        if nt.ndim != 3:
+            return False, ()
+        try:
+            embedding_dim = nt.size(-1)
+        except RuntimeError:
+            return False, ()
+        if not nt.is_contiguous():
+            return False, ()
+        sizes = nt._nested_tensor_size()
+        cum_seq_lens = sizes.select(1, 0).cumsum(0)
+        jagged_offsets = [sympy.Integer(0)] + [sympy.Integer(x) for x in cum_seq_lens[:-1]]
+        dense_size = [sympy.Integer(cum_seq_lens[-1]), sympy.Integer(embedding_dim)]
+        dense_stride = [sympy.Integer(embedding_dim), sympy.Integer(1)]
+        return True, (jagged_offsets, dense_size, dense_stride)     
+
+    @classmethod
     def create(cls, kernel, *args, **kwargs):
         fake_incorrect_kernels = (
             aten._fft_r2c.default,
@@ -2992,7 +3157,7 @@ class FallbackKernel(ExternKernelAlloc):
             unflatten_args,
             kwargs,
         )
-
+        print(f"\n\n\nexample_output={example_output}\n\n\n")
         def generate_output(output, index=""):
             if isinstance(output, (list, tuple)):
                 return type(output)(
@@ -3000,16 +3165,35 @@ class FallbackKernel(ExternKernelAlloc):
                     for i in range(len(output))
                 )
             elif isinstance(output, torch.Tensor):
-                return MultiOutput(
-                    FixedLayout(
-                        output.device,
-                        output.dtype,
-                        [sympy.Integer(s) for s in output.size()],
-                        [sympy.Integer(s) for s in output.stride()],
-                    ),
-                    packed,
-                    index,
-                )
+                if output.is_nested:
+                    is_jagged, metadata = cls.check_nested_output_is_jagged_layout(output)
+                    if is_jagged:
+                        jagged_offsets, dense_size, dense_stride = metadata  
+                        return MultiOutput(
+                            FixedJaggedLayout(
+                                output.device,
+                                output.dtype,
+                                dense_size,
+                                dense_stride,
+                                jagged_offsets
+                            ),
+                            packed,
+                            index,
+                        )
+                    else:
+                        # write something more verbose here
+                        raise Exception
+                else:
+                    return MultiOutput(
+                        FixedLayout(
+                            output.device,
+                            output.dtype,
+                            [sympy.Integer(s) for s in output.size()],
+                            [sympy.Integer(s) for s in output.stride()],
+                        ),
+                        packed,
+                        index,
+                    )
             else:
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
@@ -3765,15 +3949,28 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
-        self.data = ComputedBuffer(
-            name=None,
-            layout=FlexibleLayout(
-                device=self.data.get_device(),
-                dtype=self.data.get_dtype(),
-                size=self.data.get_size(),
-            ),
-            data=self.data,
-        )
+        if self.data.jagged_offsets is not None:
+            self.data = ComputedBuffer(
+                name=None,
+                layout=FixedJaggedLayout(
+                    device=self.data.get_device(),
+                    dtype=self.data.get_dtype(),
+                    size=self.data.get_size(),
+                    stride=FlexibleLayout.contiguous_strides(self.data.get_size()),
+                    jagged_offsets=self.data.get_jagged_offsets(),
+                ),
+                data=self.data,
+            )
+        else:
+            self.data = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=self.data.get_device(),
+                    dtype=self.data.get_dtype(),
+                    size=self.data.get_size(),
+                ),
+                data=self.data,
+            )
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         return self.data.name

@@ -34,6 +34,7 @@ class AutogradMonkeypatch(TorchFunctionMode):
             and replacements[func] in replacements_using_triton_random
         ):
             return replacements[func](*args, **kwargs)
+        print(f"monkey patching {func}")
         return func(*args, **kwargs)
 
 

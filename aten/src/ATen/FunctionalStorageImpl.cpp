@@ -75,6 +75,10 @@ c10::SymInt get_nbytes(const Tensor& value) {
   if (value.is_sparse()) {
     return 0;
   }
+  // FIXME: this is definitely wrong
+  if (value.is_nested()) {
+    return 0;
+  }
   if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     // Today, the two implementations of SymInt are in Python (proxy tensor),
     // and lazy tensor (LTC/XLA).

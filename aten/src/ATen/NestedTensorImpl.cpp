@@ -179,8 +179,8 @@ NestedTensorImpl::NestedTensorImpl(
       "in the near future.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda(),
-      "NestedTensorImpl storage must be either CUDA or CPU but got ",
+      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_meta(),
+      "NestedTensorImpl storage must be either CUDA, CPU or Meta but got ",
       storage_device);
   validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
   refresh_dim();

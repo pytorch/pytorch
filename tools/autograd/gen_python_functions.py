@@ -153,9 +153,9 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
-    "_nested_tensor_strides",  # don't want to expose this to python
+    # "_nested_tensor_strides",  # don't want to expose this to python
     "_nested_tensor_offsets",  # don't want to expose this to python
-    "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
+    # "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
     "_nested_view_from_buffer_copy",
 ]
 

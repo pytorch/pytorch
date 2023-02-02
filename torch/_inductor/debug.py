@@ -76,7 +76,7 @@ def draw_buffers(nodes, print_graph=False, fname=None):
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        metadata = TensorMetadata(group, dtype, None, None, None, None, None)
+        metadata = TensorMetadata(group, dtype, None, None, None, None, None, None, None)
         node.meta["tensor_meta"] = metadata
 
     if print_graph:

@@ -557,6 +557,7 @@ class Scheduler:
             *V.graph.constants.keys(),
         }
         for node in nodes:
+            # print(f"scheduling {node}, {node.__class__}")
             assert (
                 node.origins is not None
             ), "All nodes passed to scheduling must have an origin"

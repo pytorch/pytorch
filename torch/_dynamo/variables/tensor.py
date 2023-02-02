@@ -113,8 +113,8 @@ class TensorVariable(VariableTracker):
             "class_type": type(value),
         }
         if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
-            props["stride"] = tuple(value.stride())
+            props["size"] = tuple(value.size()) if not value.is_nested else None
+            props["stride"] = tuple(value.stride()) if not value.is_nested else None
             props["is_contiguous"] = tuple(
                 [
                     x
