@@ -1321,6 +1321,7 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
 
+
 def get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
     try:
         return [FlakyRule(**rule) for rule in fetch_json_list(url)]
@@ -1329,6 +1330,7 @@ def get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
         if num_retries > 0:
             return get_flaky_rules(url, num_retries=num_retries - 1)
         return []
+
 
 def get_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> List[Dict[str, Any]]:
     query = f"""
@@ -1353,11 +1355,15 @@ where
             host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
         ).sql(query)
         return cast(List[Dict[str, Any]], res.results)
+    except ModuleNotFoundError:
+        print("Could not use RockSet as rocket dependency is missing")
+        return []
     except Exception as e:
         print(f"Could not download rockset data because: {e}.")
         if num_retries > 0:
             return get_rockset_results(head_sha, merge_base, num_retries=num_retries - 1)
         return []
+
 
 def get_classifications(
     head_sha: str,
