@@ -1,5 +1,6 @@
+import ast
 import torch
-from typing import Callable, Set, Dict, List, Type, Tuple, Optional, Union, cast
+from typing import Any, Callable, Set, Dict, List, Type, Tuple, Optional, Union, cast
 import sys
 import builtins
 import itertools
@@ -931,9 +932,116 @@ if HAS_SYMPY:
 
 TLS = threading.local()
 
+# Common Sub-Expression Elimination for Python expressions.
+#
+# There are 2 steps to this pass:
+#     1. Count the frequency of each sub-expression (i.e. inner
+#        node in the AST tree)
+#
+#     2. Replace those that occur more than once by a fresh variable 'v'.
+#        'v' will be defined in the 'preface' list (output argument to
+#        'NodeTransformer')
+class PyExprCSEPass:
+    IGNORED_NODE_TYPES = (
+        # Expr Context
+        ast.Store, ast.Load, ast.Del, ast.AugLoad, ast.AugStore, ast.Param,
+        # Leaf
+        ast.Name, ast.Constant
+    )
+
+    PASSTHROUGH_NODE_TYPES = (
+        ast.Expression, ast.Index
+    )
+
+    class CSEVisitor(ast.NodeVisitor):
+        IGNORE = object()
+
+        def __init__(self) -> None:
+            self._expr_counter = collections.defaultdict(lambda: 0)
+
+        def visit(self, node: ast.AST) -> Any:
+            if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
+                return
+
+            # 'PASSTHROUGH_NODE_TYPES' have the same string representation
+            # as its child, so we must not count it.
+            if not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
+                self._expr_counter[PyExprCSEPass._ast_unparse(node)] += 1
+
+            super().visit(node)
+
+    class CSETransformer(ast.NodeTransformer):
+        def __init__(
+                self,
+                expr_counter: Dict[str, int],
+                preface: List[str],
+                gen_name_from_expr: Callable[[str], str],
+        ) -> None:
+            super().__init__()
+            self._expr_counter = expr_counter
+            self._preface = preface
+            self._gen_name_from_expr = gen_name_from_expr
+            self._expr_to_name = {}
+
+        def visit(self, node: ast.AST) -> Any:
+            if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
+                return node
+
+            if not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
+                expr = PyExprCSEPass._ast_unparse(node)
+
+                # Replacement only occurs if a given expression is used more
+                # than once.
+                if self._expr_counter[expr] > 1:
+                    if expr not in self._expr_to_name:
+                        # Parent 'visit' is called so that we CSE the inner expressions first.
+                        #
+                        # The resulting expression is used as right-hand-side of the variable
+                        # assignment. i.e. we are CSE-ing the children before the parents.
+                        #
+                        # Indexing still uses the old 'node', since that's what was counted
+                        # by the 'NodeVisitor'.
+                        node_ = super().visit(node)
+                        expr_ = PyExprCSEPass._ast_unparse(node_)
+                        var_name = self._gen_name_from_expr(expr)
+                        self._preface.append(f"{var_name} = {expr_}")
+                        self._expr_to_name[expr] = var_name
+                    else:
+                        var_name = self._expr_to_name[expr]
+                    return ast.Name(var_name, ast.Load())
+
+            return super().visit(node)
+
+    def __init__(self, gen_name_from_expr: Callable[[str], str]) -> None:
+        self._gen_name_from_expr = gen_name_from_expr
+
+    def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
+        preface = []
+        visitor = self.CSEVisitor()
+        transformer = self.CSETransformer(visitor._expr_counter, preface, self._gen_name_from_expr)
+
+        parsed_exprs = [ast.parse(e, mode="eval") for e in exprs]
+        for e in parsed_exprs:
+            visitor.visit(e)
+
+        new_exprs = []
+        for e in parsed_exprs:
+            new_exprs.append(PyExprCSEPass._ast_unparse(transformer.visit(e)))
+
+        return preface, new_exprs
+
+    @staticmethod
+    def _ast_unparse(node: ast.AST) -> str:
+        if sys.version_info.minor <= 8:
+            import astunparse
+            return astunparse.unparse(node)[:-1]
+        else:
+            return ast.unparse(node)[:-1]
+
+
 class GuardCompiler:
     SourceInfo = collections.namedtuple("SourceInfo", ["name", "source", "type"])
-    SymbolicShapesExpr = collections.namedtuple("SymbolicShapeExpr", ["guard_expr", "call_expr", "fn"])
+    SymbolicShapesExpr = collections.namedtuple("SymbolicShapeExpr", ["guard_expr", "call_expr", "preface", "fn"])
 
     def __init__(self, source_ref: Callable[[Source], str]) -> None:
         self._source_ref = source_ref
@@ -991,7 +1099,7 @@ class GuardCompiler:
         elif isinstance(source, Source):
             source_name = self._flat_name(source.name())
         else:
-            source_name = source
+            source_name = self._flat_name(source)
 
         # Makes sure there are no repeated names.
         # It's very unlikely the loop-body will be executed more than once.
@@ -1020,19 +1128,28 @@ class GuardCompiler:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         if len(exprs) == 0:
-            return self.SymbolicShapesExpr("True", "True", None)
+            return self.SymbolicShapesExpr("True", "True", [], None)
 
         fn_name = "___symbolic_shape_fn"
 
-        call_arguments = ", ".join([info.source.name() for info in self._parameter_source_infos])
-        call_expression = f"{fn_name}({call_arguments})"
+        # 1. Function call
+        #     a) Get all the argument expressions for each parameter
+        arguments = [info.source.name() for info in self._parameter_source_infos]
+        #     b) Run the CSE pass on them, so as to avoid member access overhead
+        call_preface, call_arguments = PyExprCSEPass(self.register_unique_name).run(arguments)
+        #     c) Generate the actual function call
+        call_expression = f"""{fn_name}({",".join(call_arguments)})"""
 
+        # 2. Function definition
+        #     a) Get all the parameters declaration
         guard_parameters = ", ".join([
             f"{self._type_to_cpp_argtype(info.type)} {info.name}"
             for info in self._parameter_source_infos
         ])
+        #     b) Generate the actual guard expression
         guard_expression = " && ".join(exprs)
-
+        #     c) Generate the extra temporary variables corresponding to Tensor
+        #        properties (e.g. sizes, strides, and storage_offset)
         source_creation = []
         for info in self._parameter_source_infos:
             if info.type != torch.Tensor:
@@ -1060,7 +1177,7 @@ class GuardCompiler:
                 )
 
         source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
-
+        #     d) Generate the C++ source corresponding to this guard.
         cpp_code = f"""\
 #include <torch/python.h>
 #include <cmath>
@@ -1070,6 +1187,7 @@ extern "C" int guard({guard_parameters}) {{
     return {guard_expression};
 }}
 """
+        #     e) Compile the generated C++ source and cache it
         try:
              from torch._inductor.codecache import CppCodeCache
              fn = CppCodeCache.load(cpp_code).guard
@@ -1083,13 +1201,10 @@ extern "C" int guard({guard_parameters}) {{
         # In other words, we need to get a pointer to the actual tensor. In
         # cpython, that can be done by calling the id function.
         def wrapper_fn(*args):
-            args = [
-                ctypes.cast(id(a), ctypes.c_void_p)
-                for a in args
-            ]
+            args = [ctypes.cast(id(a), ctypes.c_void_p) for a in args]
             return bool(fn(*args))
 
-        return self.SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
+        return self.SymbolicShapesExpr(guard_expression, call_expression, call_preface, wrapper_fn)
 
 
 
@@ -1440,7 +1555,7 @@ class ShapeEnv:
         if guards.fn is not None:
             kwargs = dict(zip(arg_names, args))
             kwargs["___symbolic_shape_fn"] = guards.fn
-            return eval(guards.call_expr, {}, kwargs)
+            return eval("\n".join([*guards.preface, guards.call_expr]), {}, kwargs)
         return True
 
     def bind_symbols(self, placeholders, args):
