@@ -16,7 +16,7 @@ import torch.fx as fx
 from torch._prims_common import is_float_dtype
 
 from . import config
-from .optimizations.backends import register_backend
+from .backends.registry import lookup_backend, register_backend
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
@@ -220,14 +220,17 @@ def _cuda_system_info_comment():
 
 
 def generate_config_string():
+    import torch._functorch.config
     import torch._inductor.config
 
     return textwrap.dedent(
         f"""\
 import torch._dynamo.config
 import torch._inductor.config
+import torch._functorch.config
 torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
 torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
+torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
         """
     )
 
@@ -956,7 +959,7 @@ import torch.fx as fx
 import functools
 import torch._dynamo
 from torch._dynamo.debug_utils import run_fwd_maybe_bwd
-from torch._dynamo.optimizations.backends import BACKENDS
+from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.testing import rand_strided
 
 {generate_config_string()}
@@ -972,7 +975,7 @@ mod = Repro()
 
 # Setup debug minifier compiler
 torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
-compiler_fn = BACKENDS["{minifier_backend}"]
+compiler_fn = lookup_backend("{minifier_backend}")
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
     compiler_fn,
@@ -1062,8 +1065,6 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
 def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from .eval_frame import lookup_backend
-
     compiler_fn = lookup_backend(compiler_name)
 
     try:
@@ -1097,14 +1098,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torch._dynamo.optimizations.backends import BACKENDS
-
-    if compiler_name == "inductor":
-        from torch._inductor.compile_fx import compile_fx
-
-        compiler_fn = compile_fx
-    else:
-        compiler_fn = BACKENDS[compiler_name]
+    compiler_fn = lookup_backend(compiler_name)
 
     # Set the eval mode to remove randomness.
     gm.eval()
