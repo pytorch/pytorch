@@ -392,6 +392,14 @@ def get_include_and_linking_paths(
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+
+       try:
+            if sys.using_multipy_interpreter:
+                log.info("Using torchdeploy/multipy")
+                libs.append("torch_deploy")
+        except:
+            pass
+
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
