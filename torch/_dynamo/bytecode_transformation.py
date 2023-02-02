@@ -261,6 +261,7 @@ def fix_extended_args(instructions: List[Instruction]):
     instructions[:] = output
     return added
 
+
 # from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
 # TODO use the actual object instead, can interface from eval_frame.c
 _PYOPCODE_CACHES = {
@@ -276,6 +277,7 @@ _PYOPCODE_CACHES = {
     "PRECALL": 1,
     "CALL": 4,
 }
+
 
 def instruction_size(inst):
     if sys.version_info >= (3, 11):
@@ -332,7 +334,6 @@ def fix_vars(instructions: List[Instruction], code_options):
 def transform_code_object(code, transformations, safe=False):
     keys = [
         "co_argcount",
-        "co_posonlyargcount",  # python 3.8+
         "co_kwonlyargcount",
         "co_nlocals",
         "co_stacksize",
@@ -344,12 +345,26 @@ def transform_code_object(code, transformations, safe=False):
         "co_filename",
         "co_name",
         "co_firstlineno",
-        "co_lnotab",  # changed to "co_linetable" if python 3.10+
         "co_freevars",
         "co_cellvars",
     ]
-    if sys.version_info >= (3, 10):
-        keys = list(map(lambda x: x.replace("co_lnotab", "co_linetable"), keys))
+    if sys.version_info < (3, 8):
+        keys.insert(12, "co_lnotab")
+    elif sys.version_info < (3, 10):
+        keys.insert(1, "co_posonlyargcount")
+        keys.insert(13, "co_lnotab")
+    elif sys.version_info < (3, 11):
+        keys.insert(1, "co_posonlyargcount")
+        keys.insert(13, "co_linetable")
+    else:
+        # Python 3.11 changes to code keys are not fully documented.
+        # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
+        # for new format.
+        keys.insert(1, "co_posonlyargcount")
+        keys.insert(12, "co_qualname")
+        keys.insert(14, "co_linetable")
+        # not documented, but introduced in https://github.com/python/cpython/issues/84403
+        keys.insert(15, "co_exceptiontable")
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -380,6 +395,9 @@ def transform_code_object(code, transformations, safe=False):
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
     }
+    if sys.version_info >= (3, 11):
+        # generated code doesn't contain exceptions, so leave exception table empty
+        code_options["co_exceptiontable"] = b""
     return types.CodeType(*[code_options[k] for k in keys])
 
 
