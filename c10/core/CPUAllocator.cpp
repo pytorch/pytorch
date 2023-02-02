@@ -209,7 +209,7 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
     reportMemoryUsageToProfiler(
         ptr,
         static_cast<int64_t>(nbytes),
-        static_cast<int64_t>(allocated),
+        allocated,
         0,
         c10::Device(c10::DeviceType::CPU));
   }
@@ -248,7 +248,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
     reportMemoryUsageToProfiler(
         ptr,
         -static_cast<int64_t>(nbytes),
-        static_cast<int64_t>(allocated),
+        allocated,
         0,
         c10::Device(c10::DeviceType::CPU));
   }
@@ -272,7 +272,7 @@ void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   if (profile_memory) {
     reportOutOfMemoryToProfiler(
         static_cast<int64_t>(nbytes),
-        static_cast<int64_t>(allocated),
+        allocated,
         0,
         c10::Device(c10::DeviceType::CPU));
   }

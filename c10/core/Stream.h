@@ -15,9 +15,9 @@ namespace c10 {
 using StreamId = int64_t;
 
 struct C10_API StreamData3 {
-  int64_t stream_id;
-  int64_t device_index;
-  int64_t device_type;
+  StreamId stream_id;
+  DeviceIndex device_index;
+  DeviceType device_type;
 };
 
 // NB: I decided not to call the above StreamIndex to avoid confusion with
@@ -130,9 +130,8 @@ class C10_API Stream final {
   // implementation detail and should not be relied upon.
   uint64_t hash() const noexcept {
     // Concat these together into a 64-bit integer
-    uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(device_type()))
-            << 56 |
-        static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 48 |
+    uint64_t bits = static_cast<uint64_t>(device_type()) << 56 |
+        static_cast<uint64_t>(device_index()) << 48 |
         // Remove the sign extension part of the 64-bit address because
         // the id might be used to hold a pointer.
         (static_cast<uint64_t>(id()) & ((1ull << 48) - 1));
@@ -140,22 +139,15 @@ class C10_API Stream final {
   }
 
   struct StreamData3 pack3() const {
-    StreamData3 data;
-    data.stream_id = static_cast<int64_t>(id());
-    data.device_index = static_cast<int64_t>(device_index());
-    data.device_type = static_cast<int64_t>(device_type());
-    return data;
+    return {id(), device_index(), device_type()};
   }
 
   static Stream unpack3(
-      int64_t stream_id,
-      int64_t device_index,
-      int64_t device_type) {
-    const auto _stream_id = static_cast<StreamId>(stream_id);
-    const auto _device_index = static_cast<DeviceIndex>(device_index);
-    const auto _device_type = static_cast<DeviceType>(device_type);
-    TORCH_CHECK(isValidDeviceType(_device_type));
-    return Stream(UNSAFE, Device(_device_type, _device_index), _stream_id);
+      StreamId stream_id,
+      DeviceIndex device_index,
+      DeviceType device_type) {
+    TORCH_CHECK(isValidDeviceType(device_type));
+    return Stream(UNSAFE, Device(device_type, device_index), stream_id);
   }
 
   // I decided NOT to provide setters on this class, because really,

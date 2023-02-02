@@ -153,8 +153,8 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   void reportMemoryUsage(
       void* /* unused */,
       int64_t alloc_size,
-      int64_t /* total_allocated, unused for legacy */,
-      int64_t /* total_reserved, unused for legacy */,
+      size_t /* total_allocated, unused for legacy */,
+      size_t /* total_reserved, unused for legacy */,
       c10::Device device) override;
 
   ActiveProfilerType profilerType() override {
@@ -300,8 +300,8 @@ void ProfilerLegacyThreadLocalState::popRange(
 void ProfilerLegacyThreadLocalState::reportMemoryUsage(
     void* /* unused */,
     int64_t alloc_size,
-    int64_t /* total_allocated, unused for legacy */,
-    int64_t /* total_reserved, unused for legacy */,
+    size_t /* total_allocated, unused for legacy */,
+    size_t /* total_reserved, unused for legacy */,
     c10::Device device) {
   if (config_.profile_memory && !config_.disabled()) {
     uint64_t thread_id = at::RecordFunction::currentThreadId();

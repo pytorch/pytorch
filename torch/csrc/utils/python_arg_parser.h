@@ -1026,7 +1026,7 @@ inline c10::Stream PythonArgs::stream(int i) {
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
       ((THPStream*)args[i])->device_index,
-      ((THPStream*)args[i])->device_type);
+      static_cast<DeviceType>(((THPStream*)args[i])->device_type));
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {
