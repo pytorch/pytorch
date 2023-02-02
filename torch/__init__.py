@@ -1245,10 +1245,10 @@ from torch import profiler as profiler
 # is expected to depend on them.
 from torch import ao as ao
 # nn.quant* depends on ao -- so should be after those.
-import torch.nn.quantizable
-import torch.nn.quantized
-import torch.nn.qat
-import torch.nn.intrinsic
+import torch.ao.nn.quantizable
+import torch.ao.nn.quantized
+import torch.ao.nn.qat
+import torch.ao.nn.intrinsic
 
 _C._init_names(list(torch._storage_classes))
 
@@ -1268,7 +1268,7 @@ from torch._classes import classes
 
 # quantization depends on torch.fx
 # Import quantization
-from torch import quantization as quantization
+from torch.ao import quantization as quantization
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom

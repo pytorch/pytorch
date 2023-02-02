@@ -4,6 +4,7 @@ import warnings
 
 import torch
 import torch.nn as nn
+import torch.ao.nn as ao_nn
 import torch.ao.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
@@ -49,12 +50,12 @@ __all__ = [
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
     'float_to_observed_custom_module_class': {
-        nn.LSTM: nn.quantizable.LSTM,
-        nn.MultiheadAttention: nn.quantizable.MultiheadAttention,
+        nn.LSTM: ao_nn.quantizable.LSTM,
+        nn.MultiheadAttention: ao_nn.quantizable.MultiheadAttention,
     },
     'observed_to_quantized_custom_module_class': {
-        nn.quantizable.LSTM: nn.quantized.LSTM,
-        nn.quantizable.MultiheadAttention: nn.quantized.MultiheadAttention,
+        ao_nn.quantizable.LSTM: ao_nn.quantized.LSTM,
+        ao_nn.quantizable.MultiheadAttention: ao_nn.quantized.MultiheadAttention,
     }
 }
 
