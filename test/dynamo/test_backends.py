@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import unittest
 
 import torch
@@ -10,6 +11,9 @@ from torch._dynamo.backends.ipex import has_ipex
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
@@ -138,18 +142,22 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_eager_decomp_partition(self):
         self._check_backend_works("aot_eager_decomp_partition")
 
-    def test_aot_cudagraphs(self):
-        self._check_backend_works("cudagraphs")
-
     def test_aot_ts(self):
         self._check_backend_works("aot_ts")
 
+    @requires_cuda()
+    def test_aot_cudagraphs(self):
+        self._check_backend_works("cudagraphs")
+
+    @requires_cuda()
     def test_aot_ts_nvfuser(self):
         self._check_backend_works("aot_ts_nvfuser")
 
+    @requires_cuda()
     def test_nvprims_nvfuser(self):
         self._check_backend_works("nvprims_nvfuser")
 
+    @requires_cuda()
     def test_nvprims_aten(self):
         self._check_backend_works("nvprims_aten")
 
