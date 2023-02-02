@@ -155,12 +155,17 @@ class TestForeach(TestCase):
                 if isinstance(rhs_arg, list):
                     rhs_arg = rhs_arg[:5]
                     ref_rhs_arg = ref_rhs_arg[:5]
-                sum(wrapped_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False)).mean().backward()
-                sum(ref([ref_tensors, ref_rhs_arg])).mean().backward()
-                self.assertEqual(
-                    [t.grad for t in tensors], [t.grad for t in ref_tensors],
-                    msg=f"{i} th {type(rhs_arg) = }, {tensors[0].grad[:2, :2], ref_tensors[0].grad[:2, :2]}"
-                )
+                try:
+                    sum(wrapped_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False)).mean().backward()
+                except RuntimeError:
+                    with self.assertRaises(RuntimeError):
+                        sum(ref([ref_tensors, ref_rhs_arg])).mean().backward()
+                else:
+                    sum(ref([ref_tensors, ref_rhs_arg])).mean().backward()
+                    self.assertEqual(
+                        [t.grad for t in tensors], [t.grad for t in ref_tensors],
+                        msg=f"{i} th {type(rhs_arg) = }, {tensors[0].grad[:2, :2], ref_tensors[0].grad[:2, :2]}"
+                    )
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
