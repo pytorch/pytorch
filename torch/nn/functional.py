@@ -4841,6 +4841,8 @@ def _in_projection(
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention, r"""
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
+
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
@@ -4855,8 +4857,8 @@ Args:
      is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
 
 
-Returns a tuple containing:
-    output (Tensor): Attention output; shape (N, ..., L, E)
+Returns:
+        output (Tensor): Attention output; shape (N, ..., L, E)
 
 Shape legend:
     N: Batch size
