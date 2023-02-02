@@ -125,9 +125,7 @@ class BaseListVariable(VariableTracker):
         # So, we iterate over the zipped list items.
         equal = True
         comps = []
-        for l_r in zip(left.items, right.items):
-            l = l_r[0]
-            r = l_r[1]
+        for l, r in zip(left.items, right.items):
             comp = BuiltinVariable(op).call_function(tx, [l, r], {})
             list_type = type(comp)
             if isinstance(comp, variables.TensorVariable):
