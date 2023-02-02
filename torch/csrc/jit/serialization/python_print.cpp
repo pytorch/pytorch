@@ -834,7 +834,7 @@ struct PythonPrintImpl {
       case prim::awaitable: {
         // the subgraph gets emitted as another function
         auto name = genName("__awaitable_function");
-        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
+        auto graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "():\n";
         for (size_t i = 0; i < node->inputs().size(); ++i) {
