@@ -89,13 +89,16 @@ class ReenterWith:
 
             cleanup_complete_jump_target = create_instruction("NOP")
 
+            def create_load_none():
+                return create_instruction(
+                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+                )
+
             cleanup[:] = [
                 create_instruction("POP_BLOCK"),
-                create_instruction(
-                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
-                ),
-                create_instruction("DUP_TOP"),
-                create_instruction("DUP_TOP"),
+                create_load_none(),
+                create_load_none(),
+                create_load_none(),
                 create_instruction("CALL_FUNCTION", 3),
                 create_instruction("POP_TOP"),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
