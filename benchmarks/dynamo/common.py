@@ -142,6 +142,8 @@ CI_SKIP[CI("inductor", training=False)] = [
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
+    "botnet26t_256", # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
