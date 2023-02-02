@@ -63,6 +63,19 @@ jobs:
         run: |
           git config --global core.symlinks true
 
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        shell: powershell
+        continue-on-error: true
+        run: |
+          # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process
+          # This needs to be run before checking out PyTorch to avoid locking the working directory
+          try {
+              Get-Process -Name "python" -ErrorAction Stop | Stop-Process -Force
+          }
+          catch {
+              Write-Output "No leftover process, continuing"
+          }
+
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
