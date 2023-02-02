@@ -1,5 +1,6 @@
 import dis
 import copy
+import sys
 import torch
 import inspect
 import operator
@@ -160,10 +161,23 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.is_stack_trace_overridden():
-            proxy.node.meta = fx_traceback.get_current_meta()
-            stacks = fx_traceback.format_stack()
-            proxy.node.stack_trace = '\n'.join(reversed(stacks))
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                proxy.node.stack_trace = stack_trace
+
+            nn_module_stack = current_meta.get("nn_module_stack")
+            if nn_module_stack:
+                proxy.node.meta["nn_module_stack"] = nn_module_stack
+
+            source_fn = current_meta.get("source_fn")
+            if source_fn:
+                proxy.node.meta["source_fn"] = source_fn
+
         elif self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
@@ -358,7 +372,13 @@ class Proxy:
         assert frame is not None
         calling_frame = frame.f_back
         assert calling_frame is not None
-        inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
+        inst_list = list(dis.get_instructions(calling_frame.f_code))
+        if sys.version_info >= (3, 11):
+            from bisect import bisect_left
+            inst_idx = bisect_left(inst_list, calling_frame.f_lasti, key=lambda x: x.offset)
+        else:
+            inst_idx = calling_frame.f_lasti // 2
+        inst = inst_list[inst_idx]
         if inst.opname == 'UNPACK_SEQUENCE':
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
@@ -373,7 +393,11 @@ class Proxy:
             calling_frame = frame.f_back
             assert calling_frame is not None
             insts = list(dis.get_instructions(calling_frame.f_code))
-            cur = calling_frame.f_lasti // 2
+            if sys.version_info >= (3, 11):
+                from bisect import bisect_left
+                cur = bisect_left(insts, calling_frame.f_lasti, key=lambda x: x.offset)
+            else:
+                cur = calling_frame.f_lasti // 2
             inst = insts[cur]
 
             if inst.opname == 'POP_JUMP_IF_TRUE':

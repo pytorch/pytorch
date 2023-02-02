@@ -2233,7 +2233,6 @@ symbolic_aot_autograd_failures = {
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
@@ -2323,8 +2322,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
-    xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
@@ -2345,7 +2342,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.grid_sample', ''),  # RuntimeError: aten.grid_sampler_3d.default - couldn't find sym ...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2385,7 +2381,6 @@ symbolic_aot_autograd_failures = {
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
-    xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
     xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
@@ -2412,7 +2407,6 @@ symbolic_aot_autograd_failures = {
     xfail('var', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
@@ -2446,11 +2440,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
         reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        grad_to_check_device = orig_grad[0] if isinstance(orig_grad, list) else orig_grad
-        is_cpu_device = isinstance(grad_to_check_device, torch.Tensor) and grad_to_check_device.device == torch.device("cpu")
-        atol = 2e-05 if is_cpu_device else 1.3e-05
-        rtol = 1.3e-05 if is_cpu_device else 1.3e-06
-        self.assertEqual(orig_grad, compiled_grad, atol=atol, rtol=rtol)
+        self.assertEqual(orig_grad, compiled_grad)
 
         def create_new_arg(x):
             if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
@@ -2466,7 +2456,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
         reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad, atol=atol, rtol=rtol)
+        self.assertEqual(orig_grad, compiled_grad)
     except DynamicOutputShapeException:
         self.skipTest("Dynamic output shape operation in trace")
 

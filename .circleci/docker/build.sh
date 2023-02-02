@@ -150,8 +150,18 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-bionic-py3.7-clang9)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-bionic-py3.8-clang9)
+    ANACONDA_PYTHON_VERSION=3.8
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-bionic-py3.11-clang9)
+    ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -168,17 +178,7 @@ case "$image" in
     VISION=yes
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-rocm5.2-py3.8)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=5.2
-    NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-focal-rocm5.3-py3.8)
+  pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
@@ -188,8 +188,18 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-py3.7-gcc7)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-focal-rocm-n-py3)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.4.2
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-focal-py3.8-gcc7)
+    ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes

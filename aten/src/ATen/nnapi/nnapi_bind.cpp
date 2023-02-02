@@ -73,7 +73,7 @@ void NnapiCompilation::init2(
     ser_model_ptr,
     serialized_model_tensor.nbytes()
   };
-  TORCH_CHECK(ser_model.size() > 0);
+  TORCH_CHECK(!ser_model.empty());
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ANeuralNetworksModel* model;
