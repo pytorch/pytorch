@@ -2,6 +2,7 @@ import copy
 
 import torch
 from torch import nn
+from torch.ao import nn as ao_nn
 
 import torch.nn.functional as F
 import torch.ao.nn.intrinsic as nni
@@ -209,8 +210,8 @@ DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 def no_observer_set() -> Set[Any]:
     r"""These modules cannot have observers inserted by default."""
     no_observers = set([
-        nn.quantizable.LSTM,
-        nn.quantizable.MultiheadAttention
+        ao_nn.quantizable.LSTM,
+        ao_nn.quantizable.MultiheadAttention
     ])
     return no_observers
 
