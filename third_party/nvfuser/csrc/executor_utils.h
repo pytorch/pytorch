@@ -44,19 +44,22 @@ TORCH_CUDA_CU_API ExpressionEvaluator bindInputs(
     Fusion* fusion,
     bool check_consistency = true);
 
+std::string disassembleBinary(const std::vector<char>& cubin);
+
 struct NvrtcFunction {
   CUmodule module = CUmodule();
   CUfunction function = CUfunction();
 };
 
 // Returns executable function and the ptxas log from compilation
-std::pair<NvrtcFunction, std::string> nvrtcCompile(
+std::tuple<NvrtcFunction, std::string, std::vector<char>> nvrtcCompile(
     c10::optional<std::reference_wrapper<const std::string>> kernel_code,
     const std::string& code,
     const std::string& func_name,
     int id,
     c10::optional<int> opt_block_size = c10::nullopt,
-    const int max_register_heuristic = 255);
+    const int max_register_heuristic = 255,
+    bool return_compiled_binary = false);
 
 namespace caching {
 // TODO: Could consider putting some of

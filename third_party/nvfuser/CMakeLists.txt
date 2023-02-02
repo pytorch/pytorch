@@ -118,6 +118,7 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/scheduler/utils.cpp
     ${NVFUSER_SRCS_DIR}/scheduler/vectorize_helper.cpp
     ${NVFUSER_SRCS_DIR}/swizzle.cpp
+    ${NVFUSER_SRCS_DIR}/sys_utils.cpp
     ${NVFUSER_SRCS_DIR}/type_inference.cpp
     ${NVFUSER_SRCS_DIR}/type_promotion.cpp
     ${NVFUSER_SRCS_DIR}/fusion_segmenter.cpp

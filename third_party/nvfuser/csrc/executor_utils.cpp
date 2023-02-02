@@ -53,6 +53,7 @@
 #include <cuda_occupancy.h>
 #endif
 
+#include <cstdlib>
 #include <fstream>
 
 namespace torch {
@@ -930,9 +931,8 @@ namespace {
 
 // Dump PTX or CUBIN to a file
 #if CUDA_VERSION >= 11010
-void dumpCompiledCodeToFile(
+std::vector<char> dumpCompiledCode(
     const nvrtcProgram& program,
-    int fusion_id,
     bool dump_cubin) {
   const auto getSize = dump_cubin
       ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
@@ -943,13 +943,20 @@ void dumpCompiledCodeToFile(
   AT_CUDA_NVRTC_CHECK(getSize(program, &size));
   std::vector<char> code(size);
   AT_CUDA_NVRTC_CHECK(getCode(program, code.data()));
+  return code;
+}
+
+void dumpCompiledCodeToFile(
+    const std::vector<char>& code,
+    int fusion_id,
+    bool dump_cubin) {
   std::stringstream file_name;
   file_name << "__tmp_kernel" << fusion_id << "."
             << (dump_cubin ? "cubin" : "ptx");
   std::cout << "PRINTING: " << file_name.str() << std::endl;
   std::ofstream out(file_name.str());
   TORCH_INTERNAL_ASSERT(out.is_open());
-  out.write(code.data(), size);
+  out.write(code.data(), code.size());
   out.close();
 }
 #endif
@@ -1019,13 +1026,14 @@ c10::optional<int> getMaxRegCount(
 
 } // namespace
 
-std::pair<NvrtcFunction, std::string> nvrtcCompile(
+std::tuple<NvrtcFunction, std::string, std::vector<char>> nvrtcCompile(
     c10::optional<std::reference_wrapper<const std::string>> kernel_code,
     const std::string& code,
     const std::string& func_name,
     int id,
     c10::optional<int> opt_block_size,
-    const int max_register_heuristic) {
+    const int max_register_heuristic,
+    bool return_compiled_binary) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
   if (isOptionDisabled(DisableOption::ArchCheck)) {
     TORCH_WARN(
@@ -1042,18 +1050,13 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   bool compile_to_sass = false;
   codegenOutputQuery(prop, major, minor, compile_to_sass);
 
-#ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++17"};
-#if ROCM_VERSION >= 40200
-  args.push_back("-hip-pch");
-#endif
-#else
 #if CUDA_VERSION < 11010
   // compile to sass is not allowed prior to CUDA 11.1
   compile_to_sass = false;
 #endif
 
-  if (isOptionDisabled(DisableOption::CompileToSass)) {
+  if (isOptionDisabled(DisableOption::CompileToSass) ||
+      isDebugDumpEnabled(DebugDumpOption::Ptx)) {
     // Allows manually disabling compilation to sass
     //  so the intermediate ptx could be checked.
     compile_to_sass = false;
@@ -1071,21 +1074,13 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++17", compute.c_str(), "-default-device"};
-#endif
 
   const bool disable_fma = isOptionDisabled(DisableOption::Fma);
-#ifdef USE_ROCM
-  if (disable_fma) {
-    TORCH_WARN_ONCE(
-        "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
-  }
-#else
   if (disable_fma) {
     args.push_back("--fmad=false");
   } else {
     args.push_back("--fmad=true");
   }
-#endif
   // Add line info to generated kernels
   if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
     args.push_back("-lineinfo");
@@ -1197,6 +1192,8 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       compile_args += arg;
     }
   }
+
+  std::vector<char> binary;
 
   auto& kernel_db = KernelDb::get();
   // If the Kernel Query failes, the Kernel is recompiled
@@ -1321,23 +1318,22 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       }
     }
 
-#if !defined(USE_ROCM) && CUDA_VERSION >= 11010
-    if (isDebugDumpEnabled(DebugDumpOption::Ptx)) {
-      dumpCompiledCodeToFile(program, id, false);
+#if CUDA_VERSION >= 11010
+    binary = dumpCompiledCode(program, compile_to_sass);
+
+    if (isDebugDumpEnabled(DebugDumpOption::Ptx) ||
+        isDebugDumpEnabled(DebugDumpOption::Cubin)) {
+      dumpCompiledCodeToFile(binary, id, compile_to_sass);
     }
 
-    if (isDebugDumpEnabled(DebugDumpOption::Cubin)) {
-      TORCH_INTERNAL_ASSERT(
-          compile_to_sass,
-          "CUBIN not available as the kernel was compiled only to PTX");
-      dumpCompiledCodeToFile(program, id, true);
+    if (!return_compiled_binary) {
+      binary.clear();
     }
 #endif
   }
 
   NvrtcFunction compiled_kernel_;
 
-#ifndef USE_ROCM
   {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
@@ -1354,12 +1350,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       std::cout << info_log.data() << std::endl;
     }
   }
-#else
-  // load ptx directly
-  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-      &(compiled_kernel_.module), ptx.data()));
 
-#endif
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
       compiled_kernel_.module,
@@ -1369,7 +1360,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       !isOptionDisabled(DisableOption::ArchCheck),
       "NVFuser Compile: arch check disabled, should not return any compiled kernel");
 
-  return {compiled_kernel_, ptxas_log.str()};
+  return {compiled_kernel_, ptxas_log.str(), binary};
 }
 
 namespace caching {
