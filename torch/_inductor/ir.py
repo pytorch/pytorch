@@ -3618,30 +3618,18 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, bias, batch_size):
+    def create(cls, x, packed_w, orig_w, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with V.graph.fake_mode:
-            x_fake = ir_node_to_tensor(x, guard_shape=True)
-            weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
-            bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-            )
-            output = torch.ops.aten.linear(
-                x_fake,
-                weight_fake,
-                bias_fake,
-            )
-            output_size = output.size()
-            req_stride_order = list(reversed(range(len(output_size))))
-            output_stride = output.stride()
-        x = cls.require_stride_order(x, req_stride_order)
+        x = cls.require_stride1(cls.realize_input(x))
+        orig_w = cls.require_stride1(cls.realize_input(orig_w))
+        *m, _ = x.get_size()
+        oc, _ = orig_w.get_size()
+        output_size = list(m) + [oc]
+        output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [batch_size]
-        if bias is not None:
-            inputs.append(bias)
-        else:
-            constant_args.insert(0, bias)
+        bias = None
+        constant_args = [bias, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(

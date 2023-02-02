@@ -984,9 +984,12 @@ def register_onednn_fusion_ops():
                 b: TensorBox,
                 batch_size,
             ):
-                return TensorBox.create(
-                    ir.MKLPackedLinear.create(x, packed_w, orig_w, b, batch_size)
+                result = TensorBox.create(
+                    ir.MKLPackedLinear.create(x, packed_w, orig_w, batch_size)
                 )
+                if b is not None:
+                    result = add(result, b)
+                return result
 
     else:
         pass
