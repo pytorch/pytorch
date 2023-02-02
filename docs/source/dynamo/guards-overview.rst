@@ -312,18 +312,18 @@ Here is what this code does:
 2. The function ``popn`` the items, in this case, the signature is
    ``def  popn(self, n: int) -> List[VariableTracker]:`` this hints at an
    underlying contract - we are returning ``VariableTracker``\ s. If we
-   take a closer look at ``sybmolic_convert.py`` and
-   ``InstructionTranslatorBase``/``InstructionTranslator``\ we see that
+   take a closer look at ``symbolic_convert.py`` and
+   ``InstructionTranslatorBase``/``InstructionTranslator``, we see that
    the only thing pushed onto and popped from our stack are
    ``VariableTracker``\ s.
 
 3) The function calls ``VariableTracker.propagate``. This
    takes the guards from every single item popped off the stack in 2,
    and recursively traverses it and combines all the guards into
-   ``options``: ``py  return {      "guards": guards,  }``
+   ``options``: ``return {"guards": guards}``
 
 4) The function then makes a new instance of a ``VariableTracker``,
-   ``TupleVariable``\ out of the ``items`` and ``options``. This then
+   ``TupleVariable``, out of the ``items`` and ``options``. This then
    allows us to install all the appropriate guards from the ``items``
    that make up the new ``TupleVariable``
 
