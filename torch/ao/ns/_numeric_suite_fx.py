@@ -133,7 +133,7 @@ from torch.ao.ns.fx.n_shadows_utils import (
     group_results_by_subgraph,
     create_results_comparison,
     print_n_shadows_summary,
-    handle_subgraph,
+    create_n_transformed_and_logged_copies_of_subgraph,
     create_add_loggers_graph,
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
@@ -845,7 +845,7 @@ def prepare_n_shadows_model(
     #     4. run `prepare_fx` on the module
     for (subgraph_idx, (match_name, nodes_in_this_subgraph)) in \
             enumerate(subgraphs_dedup.items()):
-        handle_subgraph(
+        create_n_transformed_and_logged_copies_of_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
             qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
             custom_prepare_fn, custom_prepare_kwargs
@@ -885,7 +885,7 @@ def _prepare_n_shadows_add_loggers_model(
     .. code::
 
       x0_0 -> op0_0 -> x1_0 -> log -----> op1_0 -> x2_0 -> log
-       \                        \                           \
+       \                        \                           \       # noqa: W605
          ---> op0_1 -> x1_1 ----> clog -> op1_0 -> x2_1 ----> clog
 
     Where op0_0 is op0, op0_1 is op0 wrapped in a submodule and quantized

@@ -2667,7 +2667,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self._test_add_loggers_impl(m, example_input, qconfig_mapping)
 
     @withQNNPACKBackend
-    def qtest_add_loggers_functions(self):
+    def test_add_loggers_functions(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2707,42 +2707,6 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         example_input = (torch.randn(8, 3, 224, 224),)
         qconfig_mapping = get_default_qconfig_mapping()
         self._test_add_loggers_impl(m, example_input, qconfig_mapping)
-
-        if False:
-            # TODO(before land): remove this
-            # this passes, but not needed long term since the old APIs
-            # will be deleted
-
-            # baseline
-
-            mp = prepare_fx(copy.deepcopy(m), qconfig_mapping, example_input)
-            mp(*example_input)
-            # mp(*example_input)
-            # print(mp)
-
-            mq = convert_fx(mp)
-            # print(mq)
-
-            ns_a, ns_b = add_loggers('fp32', copy.deepcopy(m), 'int8', mq, OutputLogger)
-            ns_a(*example_input)
-            ns_b(*example_input)
-            act_compare_dict = extract_logger_info(ns_a, ns_b, OutputLogger, 'int8')
-            extend_logger_results_with_comparison(
-                act_compare_dict, 'int8', 'fp32', compute_sqnr, 'sqnr')
-            # print(act_compare_dict)
-
-            mobilenetv2_wt_to_print = []
-            for idx, (layer_name, v) in enumerate(act_compare_dict.items()):
-                mobilenetv2_wt_to_print.append([
-                    idx,
-                    layer_name,
-                    v['node_output']['fp32'][0]['prev_node_target_type'],
-                    v['node_output']['fp32'][0]['values'][0].shape,
-                    v['node_output']['fp32'][0]['sqnr'][0],
-                ])
-
-            from tabulate import tabulate
-            print(tabulate(mobilenetv2_wt_to_print, headers=['idx', 'layer_name', 'type', 'shape', 'sqnr']))
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
