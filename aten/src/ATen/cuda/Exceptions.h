@@ -12,6 +12,9 @@
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
 
+#ifdef USE_ROCM
+#include <hipblas.h>
+#endif
 
 namespace c10 {
 
@@ -42,6 +45,9 @@ class CuDNNError : public c10::Error {
 
 namespace at { namespace cuda { namespace blas {
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
+#ifdef USE_ROCM
+C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error);
+#endif
 }}} // namespace at::cuda::blas
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \

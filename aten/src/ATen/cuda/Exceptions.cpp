@@ -43,6 +43,48 @@ C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
   return "<unknown>";
 }
 
+#ifdef USE_ROCM
+C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error) {
+  if (error == HIPBLAS_STATUS_SUCCESS) {
+    return "HIPBLAS_STATUS_SUCCESS";
+  }
+  if (error == HIPBLAS_STATUS_NOT_INITIALIZED) {
+    return "HIPBLAS_STATUS_NOT_INITIALIZED";
+  }
+  if (error == HIPBLAS_STATUS_ALLOC_FAILED) {
+    return "HIPBLAS_STATUS_ALLOC_FAILED";
+  }
+  if (error == HIPBLAS_STATUS_INVALID_VALUE) {
+    return "HIPBLAS_STATUS_INVALID_VALUE";
+  }
+  if (error == HIPBLAS_STATUS_MAPPING_ERROR) {
+    return "HIPBLAS_STATUS_MAPPING_ERROR";
+  }
+  if (error == HIPBLAS_STATUS_EXECUTION_FAILED) {
+    return "HIPBLAS_STATUS_EXECUTION_FAILED";
+  }
+  if (error == HIPBLAS_STATUS_INTERNAL_ERROR) {
+    return "HIPBLAS_STATUS_INTERNAL_ERROR";
+  }
+  if (error == HIPBLAS_STATUS_NOT_SUPPORTED) {
+    return "HIPBLAS_STATUS_NOT_SUPPORTED";
+  }
+  if (error == HIPBLAS_STATUS_ARCH_MISMATCH) {
+    return "HIPBLAS_STATUS_ARCH_MISMATCH";
+  }
+  if (error == HIPBLAS_STATUS_HANDLE_IS_NULLPTR) {
+    return "HIPBLAS_STATUS_HANDLE_IS_NULLPTR";
+  }
+  if (error == HIPBLAS_STATUS_INVALID_ENUM) {
+    return "HIPBLAS_STATUS_INVALID_ENUM";
+  }
+  if (error == HIPBLAS_STATUS_UNKNOWN) {
+    return "HIPBLAS_STATUS_UNKNOWN";
+  }
+  return "<unknown>";
+}
+#endif
+
 } // namespace blas
 
 #ifdef CUDART_VERSION
