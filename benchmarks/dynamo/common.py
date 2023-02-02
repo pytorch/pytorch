@@ -6,6 +6,7 @@ import csv
 import functools
 import importlib
 import io
+import itertools
 import logging
 import os
 import random
@@ -1457,9 +1458,12 @@ class BenchmarkRunner:
             from torch.utils._stats import simple_call_counter
 
             print_time_report()
-            stats = f"STATS: call_* op count: {op_count}"
+            stats = "STATS: "
             stats = stats + " | ".join(
-                f"{key}:{value}" for key, value in simple_call_counter.items()
+                itertools.chain(
+                    [f"call_* op count: {op_count}"],
+                    (f"{key}:{value}" for key, value in simple_call_counter.items()),
+                )
             )
             print(stats)
 
