@@ -4306,8 +4306,11 @@ def arange(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    inputs = [start, end]
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        inputs.append(weight)
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
     # that 0 <= weight <= 1. We take the abs to deal with complex numbers
@@ -4318,7 +4321,12 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     mask = weight.abs() >= 0.5
     coeff = torch.where(mask, weight - 1, weight)
     base = torch.where(mask, end, start)
-    return coeff * (end - start) + base
+    output = coeff * (end - start) + base
+    # make sure the decomposition output's stride is same as non-decomposition path.
+    stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
+    if output.stride() != stride:
+        return prims.copy_strided(output, stride)
+    return output
 
 
 @register_decomposition(aten.linspace)
