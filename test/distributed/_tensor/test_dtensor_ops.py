@@ -451,7 +451,6 @@ dtensor_fails = {
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),
-    xfail("split", "list_args"),
     xfail("squeeze", "multiple"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
