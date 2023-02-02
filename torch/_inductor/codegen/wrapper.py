@@ -312,6 +312,10 @@ class WrapperCodeGen(CodeGen):
 
         self.allocated = set()
         self.freed = set()
+
+        # maps from reusing buffer to reused buffer
+        self.reuses = dict()
+
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
@@ -437,6 +441,14 @@ class WrapperCodeGen(CodeGen):
             return False
         return True
 
+    def did_reuse(self, buffer, reused_buffer):
+        # Check whether a given buffer was reused by a possible reuser in the wrapper codegen
+        # Can be consulted from inside ir codegen, e.g. to determine whether a copy is needed
+        return (
+            buffer.get_name() in self.reuses
+            and self.reuses[buffer.get_name()] == reused_buffer.get_name()
+        )
+
     def write_reuse_line(self, input_buffer, output_buffer):
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
@@ -445,10 +457,7 @@ class WrapperCodeGen(CodeGen):
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
-        # Hack to explicitly track when a buffer is reusing another allocation.
-        # What is the best way to do this - as a new structure in WrapperCodegen,
-        # or as an api on Buffer objects?
-        output_buffer._reuses_buffer = input_buffer
+        self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.write_reuse_line(input_buffer, output_buffer)
 
     def codegen_cuda_device_guard_enter(self, device_idx):
@@ -637,6 +646,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             '''
             #include <dlfcn.h>
             #include <assert.h>
+
+            template <typename KernelFunc>
+            KernelFunc load_cpp_kernel(const char* so_filename) {
+                KernelFunc kernel_cpp;
+                auto kernel_cpp_lib = dlopen(so_filename, RTLD_NOW);
+                assert(kernel_cpp_lib != nullptr);
+                *(void **) (&kernel_cpp) = dlsym(kernel_cpp_lib, "kernel");
+                return kernel_cpp;
+            }
+
             """
         )
         with self.wrapper_call.indent():
@@ -708,11 +727,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         kernel_path = self.get_kernel_path(kernel)
-
-        self.writeline(f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);')
-        self.writeline(f"assert({name}_lib != nullptr);")
-        self.writeline(f"void (*{name})({arg_types});")
-        self.writeline(f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");')
+        self.writeline(
+            f'static auto {name} = load_cpp_kernel<void (*)({arg_types})>("{kernel_path}");'
+        )
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
