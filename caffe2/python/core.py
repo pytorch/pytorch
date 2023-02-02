@@ -384,11 +384,11 @@ def CreateOperator(
     # Add rectified inputs and outputs
     inputs = _RectifyInputOutput(inputs)
     outputs = _RectifyInputOutput(outputs)
-    operator.input.extend([str(i) for i in inputs])
-    operator.output.extend([str(o) for o in outputs])
+    operator.input.extend(map(str, inputs))
+    operator.output.extend(map(str, outputs))
     if control_input:
         control_input = _RectifyInputOutput(control_input)
-        operator.control_input.extend([str(i) for i in control_input])
+        operator.control_input.extend(map(str, control_input))
     # Set device option:
     # (1) If device_option is explicitly set, use device_option.
     # (2) If not, but scope.CurrentDeviceScope() is set,
@@ -666,7 +666,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             # (2) add outputs to the locally generated blobs
             # If an output corresponds to the gradient of an input, we also
             # record it to gradient_generators
-            locally_generated_blobs.extend([str(s) for s in grad_op.output])
+            locally_generated_blobs.extend(map(str, grad_op.output))
             for i, output in enumerate(grad_op.output):
                 input_index = GetIndexFromGradientList(g_input, output)
                 if input_index is not None:
