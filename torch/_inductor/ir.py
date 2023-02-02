@@ -176,6 +176,7 @@ class ModularIndexing(sympy.Function):
     """
 
     nargs = (3,)
+    is_integer = True
 
     @classmethod
     def eval(cls, base, divisor, modulus):
@@ -233,6 +234,8 @@ class CeilDiv(sympy.Function):
     """
     Div used in indexing that rounds up.
     """
+
+    is_integer = True
 
     def __new__(cls, base, divisor):
         if sympy.gcd(base, divisor) == divisor:
