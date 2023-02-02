@@ -166,7 +166,7 @@ class BaseSchedulerNode:
         return False
 
     def allocate(self):
-        if isinstance(self.node, (SchedulerNode,)) and (
+        if isinstance(self, (SchedulerNode, )) and (
             not self.node.should_allocate()
             or self.node.get_alias_names()
             or self.node.get_mutation_names()
@@ -179,7 +179,7 @@ class BaseSchedulerNode:
             return
 
         if (
-            isinstance(self.node, (SchedulerNode,))
+            isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
