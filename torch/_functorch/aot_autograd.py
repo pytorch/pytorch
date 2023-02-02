@@ -1049,9 +1049,9 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    # flat_args is used by line 951 and line 960
+    # flat_args is used by make_fx and aot_config.fw_compiler
     # clone flat_args to avoid flat_args shape changed by inplace ops (unsqueeze_)
-    tmp_flat_args = [x.clone() for x in flat_args]
+    tmp_flat_args = [torch._prims_common.clone_preserve_strides(x) for x in flat_args]
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_args)
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
