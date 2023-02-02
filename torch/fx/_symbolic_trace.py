@@ -849,6 +849,18 @@ def _create_wrapped_func(orig_fn):
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are tracing with proxy tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped fn while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -868,6 +880,18 @@ def _create_wrapped_method(cls, name):
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy("call_method", name, args, kwargs)
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are tracing with proxy tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped method while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -913,7 +937,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -923,6 +947,7 @@ class _Patcher(object):
                 _PatchedFnSetItem(frame_dict, name, frame_dict[name])
             )
         frame_dict[name] = new_fn
+        assert(getattr(frame_dict[name], "__fx_already_patched", False) == deduplicate)
 
     def patch_method(
         self, cls: type, name: str, new_fn: Callable, deduplicate: bool = True
@@ -930,12 +955,13 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
         setattr(cls, name, new_fn)
+        assert(getattr(getattr(cls, name), "__fx_already_patched", False) == deduplicate)
 
     def visit_once(self, thing: Any):
         """Return True on the first call to with thing, otherwise false"""
