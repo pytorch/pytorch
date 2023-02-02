@@ -389,14 +389,18 @@ Attempted to convert a derivative formula for a mutable operator
         base_op_name = f.func.name.name
         if is_foreach_func(f):
             # TODO(crcrpar): Support non-unary foreach functions
-            _is_foreach_add = base_op_name.base in (
+            _is_binary_foreach = base_op_name.base in (
                 "_foreach_add",
                 "_foreach_sub",
                 "_foreach_mul",
                 "_foreach_div",
+                "_foreach_clamp_min",
+                "_foreach_clamp_max",
+                "_foreach_minimum",
+                "_foreach_maximum",
             )
             if len(f.func.arguments.post_self_positional) > 0:
-                if not _is_foreach_add:
+                if not _is_binary_foreach:
                     return None, False
             for function_schema in functional_info_by_signature:
                 if not is_reference_for_foreach(f, function_schema):

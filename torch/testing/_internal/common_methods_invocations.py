@@ -8437,6 +8437,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "clamp_max",
@@ -8444,6 +8445,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "minimum",
@@ -8451,6 +8453,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "maximum",
@@ -8458,6 +8461,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "pow",
