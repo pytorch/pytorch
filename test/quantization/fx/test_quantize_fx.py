@@ -8333,6 +8333,31 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # verify no crash
         res = mq(*example_inputs)
 
+    def test_size_and_view(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(8, 16, 1)
+                self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+                self.conv2 = nn.Conv2d(16, 16, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.avg_pool(x)
+                x = self.conv2(x)
+                x = x.view(x.size(0), -1)
+                return x
+
+        qconfig_mapping = get_default_qconfig_mapping(backend="qnnpack")
+        m = prepare_fx(
+            M().eval(),
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 8),),
+        )
+        print(m)
+        m = convert_fx(m)
+        print(m)
+
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
