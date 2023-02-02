@@ -202,21 +202,6 @@ class DummyProcessGroup:
         return dist_wait
 
 
-class DeterministicModel(torch.nn.Module):
-    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
-        super().__init__()
-        # keep everything deterministic for model initialization
-        torch.manual_seed(0)
-        self.inner: Union[torch.nn.Linear, FSDP] = torch.nn.Linear(2, 2).cuda()
-        if wrap_fsdp:
-            self.inner = FSDP(self.inner, cpu_offload=cpu_offload)
-        self.outer = torch.nn.Linear(2, 2).cuda()
-
-    def forward(self, x):
-        y = self.inner(x)
-        return self.outer(y)
-
-
 class TransformerWithSharedParams(FSDPTestModel):
     def __init__(
         self,
