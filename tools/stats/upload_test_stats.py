@@ -33,8 +33,12 @@ def parse_xml_report(
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    job_id = get_job_id(report)
-    print(f"Found job id: {job_id}")
+    try:
+        job_id = get_job_id(report)
+        print(f"Found job id: {job_id}")
+    except Exception:
+        job_id = None
+        print("Failed to find job id")
 
     test_cases: List[Dict[str, Any]] = []
 

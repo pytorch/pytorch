@@ -2422,7 +2422,7 @@ torch.cuda.synchronize()
         # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
         #   Giving some flexibility to this test might help.
         context = contextlib.nullcontext
-        if optimizer_ctor in (torch.optim.Adam,):
+        if optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
             from functools import partial
             context = partial(self.assertRaises, AssertionError)
         with context():
@@ -2437,23 +2437,27 @@ torch.cuda.synchronize()
             )
 
     def test_grad_scaling_autocast(self):
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
 
     def test_grad_scaling_autocast_foreach(self):
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
     def test_grad_scaling_autocast_fused(self):
-        self._grad_scaling_autocast_test(optimizer_ctor=torch.optim.Adam, optimizer_kwargs={"fused": True})
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
+    # Compare non-fused optimizer vs fused one as the fused one unscales gradients
+    # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs in (
-            (torch.optim.Adam, {"fused": True, "amsgrad": False}),
-            (torch.optim.Adam, {"fused": True, "amsgrad": True}),
+        for optimizer_ctor, optimizer_kwargs in product(
+            (torch.optim.Adam, torch.optim.AdamW),
+            ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
         ):
-            self._grad_scaling_autocast_fused_optimizers(
-                optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+            with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs):
+                self._grad_scaling_autocast_fused_optimizers(
+                    optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
 
     def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs):
         (
@@ -2493,7 +2497,7 @@ torch.cuda.synchronize()
                     actual = state_scaling[k]
                     if k == "step":
                         actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual, msg=k)
+                    self.assertEqual(state_control[k], actual)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -2646,6 +2650,42 @@ torch.cuda.synchronize()
             for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
+
+    def test_grad_scaler_pass_itself(self):
+        class _PlaceHolderOptimizer(torch.optim.Optimizer):
+            tester = self
+
+            def __init__(self, params, defaults=None):
+                if defaults is None:
+                    defaults = {}
+                super().__init__(params, defaults)
+                self._step_supports_amp_scaling = True
+
+        class Optimizer1(_PlaceHolderOptimizer):
+            def step(self, closure=None, *, grad_scaler=None):
+                self.tester.assertTrue(isinstance(grad_scaler, torch.cuda.amp.GradScaler))
+                self.tester.assertFalse(hasattr(self, "grad_scale"))
+                self.tester.assertFalse(hasattr(self, "found_inf"))
+
+        class Optimizer2(_PlaceHolderOptimizer):
+            def step(self, closure=None):
+                self.tester.assertTrue(isinstance(self.grad_scale, torch.Tensor))
+                self.tester.assertTrue(isinstance(self.found_inf, torch.Tensor))
+
+        x = torch.randn(4, 4).cuda()
+        m = torch.nn.Linear(4, 1).cuda()
+        o1 = Optimizer1(m.parameters())
+        o2 = Optimizer2(m.parameters())
+        scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+
+        with torch.cuda.amp.autocast():
+            y = m(x)
+            loss = y.mean()
+        scaler.scale(loss).backward()
+        with self.assertWarns(FutureWarning):
+            scaler.step(o1)
+        scaler.step(o2)
+        scaler.update()
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_multigpu(self):
@@ -4242,8 +4282,8 @@ exit(2)
             for optimizer_ctor, foreach, amsgrad in product(
                 (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
         ] + [
-            (torch.optim.Adam, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
-            for amsgrad in (False, True)
+            (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
+            for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -4254,10 +4294,10 @@ exit(2)
         (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
         "CUDA >= 11.0 required for graphs",
     )
-    def test_graph_scaling_fusedadam(self):
+    def test_graph_scaling_fused_optimizers(self):
         cases = [
-            (torch.optim.Adam, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
-            for amsgrad in (False, True)
+            (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
+            for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ]
 
         steps_warmup = 3
