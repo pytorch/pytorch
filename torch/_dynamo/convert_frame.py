@@ -35,6 +35,7 @@ from .utils import (
     format_bytecode,
     gen_record_file_name,
     guard_failures,
+    increment_frame,
     init_logging,
     is_namedtuple,
     istype,
@@ -194,8 +195,8 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     init_logging()
 
-    @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+        increment_frame()
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -269,10 +270,11 @@ def convert_frame_assert(
             frame,
         )
 
-    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
+    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
+@dynamo_timed(phase_name="entire_frame_compile")
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
