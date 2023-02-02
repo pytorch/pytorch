@@ -1541,7 +1541,7 @@ class CppVecKernelChecker(CppVecKernel):
                     assert opt_ctx
                     max_expr = expr.replace(
                         ir.ModularIndexing, mod_indexing_rep
-                    ).replace(ir.IndexingDiv, indexing_div_rep)
+                    ).replace(ir.FloorDiv, indexing_div_rep)
                     min_expr = max_expr
                     for idx in range(len(self.ranges)):
                         max_expr = sympy.maximum(
