@@ -2575,7 +2575,7 @@ def mkldnn_rnn_layer_backward(
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
-@register_meta(aten.bucketize)
+@register_meta(aten.bucketize.Tensor)
 def meta_bucketize(a, boundaries, *, out_int32=False, right=False):
     return torch.empty_like(a, dtype=torch.int32 if out_int32 else torch.int64)
 
