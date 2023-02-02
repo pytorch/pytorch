@@ -1444,14 +1444,14 @@ class TestTensorCreation(TestCase):
     def test_ctor_with_numpy_array(self, device):
         correct_dtypes = [
             np.double,
-            np.float,
+            float,
             np.float16,
             np.int64,
             np.int32,
             np.int16,
             np.int8,
             np.uint8,
-            np.bool,
+            bool,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
