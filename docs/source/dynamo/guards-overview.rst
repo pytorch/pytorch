@@ -375,7 +375,7 @@ whether we can safely read from the code cache or not.
 
 The most common code paths for getting an instance of a guard are
 through ``make_guards`` on ``VariableTracker``.
-``make_guards``->``source.make_guard``->``return Guard(self.name(), self.guard_source(), fn)``
+``make_guards``-> ``source.make_guard``-> ``return Guard(self.name(), self.guard_source(), fn)``
 
 Or, in a concrete example:
 
