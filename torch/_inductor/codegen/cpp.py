@@ -1442,7 +1442,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return x / y
 
                 max_expr = expr.replace(ir.ModularIndexing, mod_indexing_rep).replace(
-                    ir.IndexingDiv, indexing_div_rep
+                    ir.FloorDiv, indexing_div_rep
                 )
                 min_expr = max_expr
                 for idx in range(len(self.ranges)):
