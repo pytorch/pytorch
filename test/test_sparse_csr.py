@@ -2380,7 +2380,42 @@ class TestSparseCSR(TestCase):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    def test_sparse_mm_reduce_sum(self, device, dtype):
+        def run_test(m, n, k, nnz, train):
+            csr = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+            mat = torch.randn(k, n, dtype=dtype)
+            dense = csr.to_dense()
+            ref_mat = mat.clone()
+
+            if train:
+                csr.requires_grad_()
+                mat.requires_grad_()
+                dense.requires_grad_()
+                ref_mat.requires_grad_()
+
+            out = torch.sparse.mm(csr, mat, 'sum')
+            ref_out = torch.mm(dense, ref_mat)
+
+            self.assertEqual(out, ref_out)
+
+            if train:
+                out.sum().backward()
+                ref_out.sum().backward()
+
+                grad_input = csr.grad
+                ref_grad_input = dense.grad
+                grad_mat = mat.grad
+                ref_grad_mat = ref_mat.grad
+
+                self.assertEqual(grad_input.to_dense(), ref_grad_input)
+                self.assertEqual(grad_mat, ref_grad_mat)
+
+            run_test(4, 5, 4, 10, False)
+            run_test(4, 4, 4, 16, True)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
@@ -2415,7 +2450,7 @@ class TestSparseCSR(TestCase):
             out = torch.sparse.mm(csr, mat, reduce_type)
             self.assertEqual(out, ref_out)
 
-            if train:
+            if train and dtype is not torch.bfloat16:
                 ref_out.sum().backward()
                 out.sum().backward()
 

@@ -370,6 +370,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
 
         # Non-contiguous Bugs
         #
@@ -567,6 +568,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
 
         # ---- Non-Contiguous Failures ----
         # This is expected to fail as the operator
@@ -645,6 +647,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
+        xfail('sparse.mm', 'reduce'),  # sparse tensors have no strides
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
@@ -768,6 +771,7 @@ class TestOperators(TestCase):
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail("sparse.mm", "reduce"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("svd_lowrank"),  # calls random op
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
@@ -894,6 +898,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),
 
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
         xfail('as_strided_scatter', ''),  # calls as_strided
         xfail('index_reduce', ''),  # .item() call
         # ---------------------------------------------------------------------
@@ -1179,6 +1184,7 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'offsets'),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
@@ -1252,6 +1258,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
@@ -1350,6 +1357,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
+        xfail('sparse.mm', 'reduce'),  # Sparse tensors have no strides
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
@@ -1506,6 +1514,7 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
         xfail('symeig'),  # Forward AD not implemented and no decomposition
         xfail('take'),  # vmap: inplace into regular tensor
@@ -1755,6 +1764,7 @@ class TestOperators(TestCase):
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.multi_dot', '', device_type='cpu'),
         skip('sparse.sampled_addmm', ''),
+        skip('sparse.mm', 'reduce'),
         skip('native_layer_norm', '', device_type='cpu'),
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (

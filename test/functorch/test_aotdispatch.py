@@ -2219,6 +2219,7 @@ aot_autograd_failures = {
     xfail('cov'),
     xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
     xfail('sparse.sampled_addmm'),
+    xfail('sparse.mm', 'reduce'),
     skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
     skip('nn.functional.margin_ranking_loss'),  # seems flaky
     skip('linalg.lu_solve'),  # flaky

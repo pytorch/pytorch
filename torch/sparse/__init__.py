@@ -62,8 +62,14 @@ mm = _add_docstr(_sparse._sparse_mm, r"""
     This function doesn't support computing derivaties with respect to CSR matrices.
 
     This function also additionally accepts an optional :attr:`reduce` argument that allows
-    specification of an optional reduction operation, implemented only for CSR storage format
-    on CPU device.
+    specification of an optional reduction operation, mathematically performs the following operation:
+    .. math::
+
+    z_{ij} = \bigoplus_{k = 1}^K x_{ik} y_{kj}
+
+    where :math:`\bigoplus` defines the reduce operator.
+
+    :attr:`reduce` is implemented only for CSR storage format on CPU device.
 
 Args:
     mat1 (Tensor): the first sparse matrix to be multiplied
