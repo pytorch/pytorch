@@ -9,7 +9,7 @@ pushd "$ROOT"
 (
 python -m tools.onnx.gen_diagnostics \
     torch/onnx/_internal/diagnostics/rules.yaml \
-    torch/onnx/_internal/diagnostics \
+    torch/onnx/_internal/diagnostics/generated \
     torch/csrc/onnx/diagnostics/generated \
     torch/docs/source
 )

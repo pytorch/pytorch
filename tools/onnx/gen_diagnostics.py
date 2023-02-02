@@ -17,6 +17,7 @@ import os
 import string
 import subprocess
 import textwrap
+import typing
 from typing import Any, Mapping, Sequence
 
 import yaml
@@ -125,6 +126,13 @@ def _format_rule_for_cpp(rule: _RuleType) -> str:
     return _CPP_RULE_TEMPLATE.format(name=name, short_description=short_description)
 
 
+def load_rules(rules_path: str) -> Sequence[_RuleType]:
+    with open(rules_path, "r") as f:
+        return typing.cast(
+            Sequence[_RuleType], yaml.load(f, Loader=torchgen_utils.YamlLoader)
+        )
+
+
 def gen_diagnostics_python(
     rules: Sequence[_RuleType], out_py_dir: str, template_dir: str
 ) -> None:
@@ -145,7 +153,6 @@ def gen_diagnostics_python(
             "rules": textwrap.indent("\n".join(rule_field_lines), " " * 4),
         },
     )
-    _lint_file(os.path.join(out_py_dir, "_rules.py"))
 
 
 def gen_diagnostics_cpp(
@@ -171,7 +178,6 @@ def gen_diagnostics_cpp(
             "py_rule_names": textwrap.indent("\n".join(rule_names), " " * 4),
         },
     )
-    _lint_file(os.path.join(out_cpp_dir, "rules.h"))
 
 
 def gen_diagnostics_docs(
@@ -193,9 +199,7 @@ def gen_diagnostics(
     out_docs_dir: str,
 ) -> None:
 
-    with open(rules_path, "r") as f:
-        rules = yaml.load(f, Loader=torchgen_utils.YamlLoader)
-
+    rules = load_rules(rules_path)
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
     gen_diagnostics_python(

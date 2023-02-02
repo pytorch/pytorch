@@ -6,6 +6,7 @@ def define_targets(rules):
         deps = [
             rules.requirement("PyYAML"),
             "//tools/autograd",
+            "//tools/onnx",
             "//torchgen",
         ],
     )
