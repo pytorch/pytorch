@@ -1,4 +1,4 @@
-#include <ATen/native/cuda/fused_adam_impl.cuh>
+#include <ATen/native/cuda/fused_adamw_impl.cuh>
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
@@ -6,9 +6,9 @@
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <vector>
 
-namespace at::native {
+namespace at { namespace native {
 
-void _fused_adam_cuda_impl_(
+void _fused_adamw_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
@@ -30,7 +30,7 @@ void _fused_adam_cuda_impl_(
   float* found_inf_ptr = found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, params[0].scalar_type(),
-      "fused_adam_kernel_cuda", [&]() {
+      "fused_adamw_kernel_cuda", [&]() {
         multi_tensor_apply_for_fused_optimizer<4>(
             tensor_lists,
             state_steps,
@@ -44,8 +44,8 @@ void _fused_adam_cuda_impl_(
             /* amsgrad */false,
             grad_scale_ptr,
             found_inf_ptr,
-            ADAM_MODE::ORIGINAL);
+            ADAM_MODE::ADAMW);
         });
 }
 
-} // namespace at::native
+} } // namespace at::native
