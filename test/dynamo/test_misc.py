@@ -29,6 +29,10 @@ from torch._dynamo.testing import (
     unsupported,
 )
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FUSED_SDPA,
+    SM80OrLater,
+)
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -2703,6 +2707,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    # TODO: Fix Me
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        "Can't run fused SDPA on this platform",
+    )
+    @unittest.skip("TypeError: __init__() got an unexpected keyword argument 'mode'")
+    def test_autocast_sdpa(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, query, key, value):
+                with torch.autocast("cpu"):
+                    with torch.autocast("cuda", dtype=torch.float32):
+                        out = F.scaled_dot_product_attention(
+                            query, key, value, None, 0.5, True
+                        )
+                return out
+
+        dtype = torch.float32
+        seq_len_q = 1
+        seq_len_k = 1
+        head_dim = 8
+        query = torch.ones(
+            1, 8, seq_len_q, head_dim, device="cuda", dtype=dtype, requires_grad=True
+        )
+        key = torch.ones(
+            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+        )
+        value = torch.ones(
+            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+        )
+
+        module = MyModule()
+        real = module(query, key, value)
+        real_device = real.device
+        real_dtype = real.dtype
+
+        opt_mod = torch._dynamo.optimize("inductor")(module)
+        compiled = opt_mod(query, key, value)
+
+        self.assertEqual(compiled.device, real_device)
+        self.assertEqual(compiled.dtype, real_dtype)
+
+        self.assertEqual(compiled.device.type, "cuda")
+        self.assertEqual(compiled.device.index, 0)
+        self.assertEqual(compiled.dtype, torch.float16)
+
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -3473,6 +3522,52 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         loaded_model = imp.load_pickle(package_name, resource_name)
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
+
+    # specifically test for tensor.attribute -> torch.something()
+    def test_real_imag_tensor_attribute(self):
+        def fn(x, y):
+            a = x.real
+            b = x.imag
+            return torch.mul(torch.add(a, y), b)
+
+        x_real = torch.rand((4, 4))
+        x_imag = torch.rand((4, 4))
+        x = torch.complex(x_real, x_imag)
+        y = torch.rand((4, 4))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_T_tensor_attribute(self):
+        def fn(x, y):
+            a = x.T
+            return torch.add(a, y)
+
+        x = torch.rand((4, 4))
+        y = torch.rand((4, 4))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_recursive_tensor_attribute(self):
+        def fn(x, y):
+            a = x.real.T
+            b = x.imag
+            return torch.mul(torch.add(a, y), b)
+
+        x_real = torch.rand((4, 4))
+        x_imag = torch.rand((4, 4))
+        x = torch.complex(x_real, x_imag)
+        y = torch.rand((4, 4))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
 
 
 class CustomFunc1(torch.autograd.Function):

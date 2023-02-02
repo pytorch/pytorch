@@ -1,5 +1,7 @@
+import inspect
 import itertools
 import operator
+import types
 from typing import Dict, List
 
 import torch.fx
@@ -155,41 +157,6 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
-        # TODO: reimplement the T/H/mT/mH by generating a function call
-        # to torch.Tensor.{T/H/mT/mH}.__get__
-        elif name in ("T", "H"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "H"
-                else self
-            )
-            args_list = [
-                variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
-            ]
-            args = [variables.TupleVariable(args_list)]
-            result = out.call_method(tx, "permute", args, {})
-        elif name in ("mT", "mH"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "mH"
-                else self
-            )
-            if self.ndim > 0:
-                args = [
-                    variables.ConstantVariable(-2),
-                    variables.ConstantVariable(-1),
-                ]
-                result = out.call_method(tx, "transpose", args, {})
-            else:
-                result = out.call_method(tx, "t", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
@@ -198,6 +165,37 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+
+        # For attributes (not methods) that were not caught in the special handling above,
+        # (e.g. tensor.real), we handle these generically, assuming that the output type is
+        # a tensor.
+        if result is None:
+
+            def try_generic_attr_handling():
+                from .builder import wrap_fx_proxy
+                from .misc import GetAttrVariable
+
+                try:
+                    static_attr = inspect.getattr_static(torch.Tensor, name)
+                except NameError:
+                    return None
+
+                # Make sure this is an attribute, not a method.
+                # type(torch.Tensor.H) should be "getset_descriptor"
+                # This is a because of CPython implementation, see THPVariableType:
+                # these attributes are implemented under tp_getset, which appear
+                # as `getset_descriptor`s, (compared to, say, methods which appear
+                # as `method_descriptor`s)
+                if type(static_attr) != types.GetSetDescriptorType:
+                    return None
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                    **options,
+                )
+
+            result = try_generic_attr_handling()
 
         if result is None:
             raise NotImplementedError()
