@@ -23,8 +23,10 @@ from torch.nn import Module
 from torch.utils._pytree import tree_map
 
 from .. import eval_frame
+from ..backends.registry import register_backend
 from ..utils import counters
-from .backends import BACKENDS
+
+from .backends import torchxla_trace_once, torchxla_trivial
 
 log = logging.getLogger(__name__)
 
@@ -323,12 +325,13 @@ def cudagraphs(model, inputs):
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 
+
 aot_torchxla_trivial = aot_autograd(
-    fw_compiler=BACKENDS["torchxla_trivial"],
+    fw_compiler=torchxla_trivial,
 )
 
 aot_torchxla_trace_once = aot_autograd(
-    fw_compiler=BACKENDS["torchxla_trace_once"],
+    fw_compiler=torchxla_trace_once,
 )
 
 
@@ -337,36 +340,42 @@ def create_aot_backends():
     Register aliases for the AOT backends
     """
     # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-    BACKENDS["aot_eager"] = aot_eager
+    register_backend(name="aot_eager", compiler_fn=aot_eager)
 
     # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
     # isolate inductor vs aot_eager errors
-    BACKENDS["aot_eager_decomp_partition"] = aot_eager_decomp_partition
+    register_backend(
+        name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+    )
 
     # aot_ts uses torchscript backend. We can use this with both nnc and nvfuser
     # by using the relevant fuser with torch.jit.fuser(...)
-    BACKENDS["aot_ts"] = aot_ts
+    register_backend(name="aot_ts", compiler_fn=aot_ts)
 
     # "nvprims" is a subset of PrimTorch primitives that are guaranteed to be
     # supported by nvFuser. This is the preferred backend for nvFuser+PrimTorch.
-    BACKENDS["nvprims_nvfuser"] = aot_nvprims_nvfuser
+    register_backend(name="nvprims_nvfuser", compiler_fn=aot_nvprims_nvfuser)
     # This is useful for debugging. Can be removed later.
-    BACKENDS["nvprims_aten"] = aot_nvprims_aten
+    register_backend(name="nvprims_aten", compiler_fn=aot_nvprims_aten)
 
     # aot_ts_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
     # It uses min cut rematerialization algorithm, uses nvFuser as the
     # compiler backend, and TorchScript as the frontend.
-    BACKENDS["aot_ts_nvfuser"] = aot_mem_efficient_fusion
+    register_backend(name="aot_ts_nvfuser", compiler_fn=aot_mem_efficient_fusion)
 
     # Similar to aot_ts_nvfuser, but disables the decompositions. Decompositions
     # can cause accuracy deviations. This setting allows us to compare accuracy
     # without worrying about the impact of decomposisitons. More details at
     # https://github.com/pytorch/torchdynamo/issues/611
-    BACKENDS["aot_ts_nvfuser_nodecomps"] = aot_mem_efficient_fusion_no_decomp
+    register_backend(
+        name="aot_ts_nvfuser_nodecomps", compiler_fn=aot_mem_efficient_fusion_no_decomp
+    )
 
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
-    BACKENDS["aot_cudagraphs"] = aot_cudagraphs
+    register_backend(name="aot_cudagraphs", compiler_fn=aot_cudagraphs)
 
-    BACKENDS["aot_torchxla_trivial"] = aot_torchxla_trivial
-    BACKENDS["aot_torchxla_trace_once"] = aot_torchxla_trace_once
+    register_backend(name="aot_torchxla_trivial", compiler_fn=aot_torchxla_trivial)
+    register_backend(
+        name="aot_torchxla_trace_once", compiler_fn=aot_torchxla_trace_once
+    )

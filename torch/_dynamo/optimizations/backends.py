@@ -4,38 +4,13 @@ import logging
 import os
 import tempfile
 
-from typing import Dict, Optional
-
 import torch
-from ..output_graph import CompilerFn
+
+from ..backends.registry import register_backend
 
 from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
-BACKENDS: Dict[str, CompilerFn] = dict()
-
-
-def register_backend(compiler_fn: CompilerFn = None, name: Optional[str] = None):
-    """
-    Decorator to add a given compiler to the BACKENDS registry to allow
-    calling `torch.compile` with string shorthand:
-
-        torch.compile(..., backend="name")
-
-    Note: for projects not imported by default, it might be easier to
-    pass a function directly as a backend and not use this:
-
-        torch.compile(..., backend=compiler_fn)
-
-    Args:
-        compiler_fn: callable taking a FX graph and fake tensor inputs
-        name: Optional name, defaults to `compiler_fn.__name__`
-    """
-    if compiler_fn is None:
-        # @register_backend(name="") syntax
-        return functools.partial(register_backend, name=name)
-    BACKENDS[name or compiler_fn.__name__] = compiler_fn
-    return compiler_fn
 
 
 def create_backend(fn):
@@ -60,8 +35,7 @@ def create_backend(fn):
         except KeyboardInterrupt:
             raise
 
-    BACKENDS[fn.__name__] = inner
-    return inner
+    return register_backend(inner)
 
 
 @register_backend
@@ -646,17 +620,17 @@ def torchxla_trace_once(subgraph):
 
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "fp32"}
-    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+    return ipex(gm, example_inputs, **kwargs_ipex)
 
 
 def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "bf16"}
-    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+    return ipex(gm, example_inputs, **kwargs_ipex)
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": True}
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
+    trt_compiled = fx2trt(gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
@@ -668,7 +642,7 @@ def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": False}
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
+    trt_compiled = fx2trt(gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:

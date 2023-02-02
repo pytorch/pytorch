@@ -22,6 +22,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.symbolic_shapes import sym_sqrt
+from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
@@ -3769,18 +3770,7 @@ def _realize(x):
     return clone(x)
 
 
-def _import_kernels():
-    """
-    Need to make sure all these get registered in the lowers dict
-    """
-    import importlib
-    import os
+# populate lowerings defined in kernel/*
+from . import kernel
 
-    from . import kernel
-
-    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
-        if filename.endswith(".py") and filename[0] != "_":
-            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
-
-
-_import_kernels()
+import_submodule(kernel)
