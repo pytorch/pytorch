@@ -50,6 +50,7 @@ from common_utils import (
 )
 import types
 from collections import namedtuple
+import contextlib
 
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
@@ -3602,7 +3603,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
-        xfail('index_fill'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'amax'),
@@ -3624,7 +3624,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
-        xfail('vdot'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
@@ -3721,7 +3720,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('special.scaled_modified_bessel_k1'),
         xfail('special.modified_bessel_k0'),
-        xfail('linalg.vecdot', ''),
         xfail('linalg.ldl_factor', ''),
         xfail('special.modified_bessel_i1'),
         xfail('special.chebyshev_polynomial_t'),
@@ -3730,14 +3728,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # AssertionError: Tensor-likes are not equal!
+        # Issue: https://github.com/pytorch/pytorch/issues/70904
+        xfail('bitwise_left_shift', device_type='cpu'),
+        decorate('bitwise_right_shift', device_type='cpu',
+                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('float_power'),
         xfail('gt'),
         xfail('le'),
@@ -3849,10 +3850,82 @@ class TestVmapOperatorsOpInfo(TestCase):
         # There's no OpInfo for this
         def test():
             B = 2
-            x = torch.randn(2, 5, 5, device=device)
+            x = torch.randn(B, 5, 5, device=device)
             self.vmap_outplace_test(torch.slogdet, (x,), {}, (0,))
 
         check_vmap_fallback(self, test, torch.slogdet)
+
+    def test_index_fill(self, device):
+        # There's no OpInfo for these tests
+
+        B = 2
+
+        def test1():
+            # negative dim
+            x = torch.randn(B, 5, 5, device=device)
+            dim = -2
+            index = torch.tensor([[2, 3], [0, 4]], device=device)
+            value = 5.0
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test2():
+            # self batched, self logical rank 1, index logical rank 1
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test3():
+            # self batched, self logical rank 1, index logical rank 0
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test4():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([[0], [0]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test5():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([0, 0], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test6():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test7():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test8():
+            # self batched, self logical rank > 1, index logical rank 0
+            x = torch.zeros(B, 3, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        for test in (test1, test2, test3, test4, test5, test6, test7, test8):
+            check_vmap_fallback(self, test, torch.index_fill)
 
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
@@ -4254,6 +4327,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
             torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
+
+    def test_vmap_with_anomaly_detection(self):
+        with torch.autograd.set_detect_anomaly(True):
+            x = torch.zeros(3) - 1
+
+            def fn(x):
+                return x.sum()
+
+            per_sample_grad = vmap(grad(fn))(x)
+            self.assertEqual(per_sample_grad, torch.ones_like(x))
+
+            def bad_fn(x):
+                return x.sqrt().sum()
+
+            err_msg = "Function 'SqrtBackward0' returned nan values in its 0th output."
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                vmap(grad(bad_fn))(x)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
@@ -4898,6 +4988,21 @@ class TestRandomness(TestCase):
         jacfwd(torch.bernoulli, randomness="same")(x)
         jacfwd(torch.bernoulli, randomness="different")(x)
 
+    @parametrize('randomness', ['error', 'same', 'different'])
+    def test_dropout_unbatched(self, device, randomness):
+        x = torch.randn(3, device=device)
+        y = torch.randn(1, 3, device=device)
+
+        def fn(x, y):
+            # output from dropout should be a Tensor[B, 1, 3] (B=3)
+            return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
+
+        # We just verify that this doesn't raise an error for
+        # `same` and `different` randomness.
+        # Ref: https://github.com/pytorch/pytorch/issues/92283
+        context = self.assertRaises(RuntimeError) if randomness == 'error' else contextlib.nullcontext()
+        with context:
+            vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
 
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
