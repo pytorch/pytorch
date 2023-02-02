@@ -482,16 +482,16 @@ void CachingAllocatorConfig::lexArgs(
   for (size_t i = 0; i < env_length; i++) {
     if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
       if (buf.size() != 0) {
-        config.emplace_back(std::string(buf.begin(), buf.end()));
+        config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(std::string(1, env[i]));
+      config.emplace_back(1, env[i]);
     } else if (env[i] != ' ') {
       buf.emplace_back(static_cast<char>(env[i]));
     }
   }
   if (!buf.empty()) {
-    config.emplace_back(std::string(buf.begin(), buf.end()));
+    config.emplace_back(buf.begin(), buf.end());
   }
 }
 

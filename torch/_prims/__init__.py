@@ -174,6 +174,7 @@ __all__ = [
     "maximum_value",
     "minimum_value",
     "to_dtype",
+    "copy_strided",
     #
     # Inplace prims
     #
@@ -369,8 +370,13 @@ def _elementwise_meta(
     number = None
     for arg in args_:
         if isinstance(arg, TensorLike):
-            device = arg.device
-            break
+            if utils.is_cpu_scalar_tensor(arg):
+                if device is None:
+                    device = arg.device
+                # keep going, in case there is a cuda tensor later
+            else:
+                device = arg.device
+                break
 
         elif isinstance(arg, Number):
             if number is None:
@@ -2174,6 +2180,45 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+)
+
+
+def _copy_strided_meta(a: TensorLikeType, stride: ShapeType):
+    assert isinstance(a, TensorLike)
+    return torch.empty_strided(
+        a.shape,
+        stride,
+        dtype=a.dtype,
+        layout=a.layout,
+        device=a.device,
+        requires_grad=a.requires_grad,
+    )
+
+
+def _copy_strided_aten(a: Tensor, stride: ShapeType) -> Tensor:
+    out = torch.empty_strided(
+        a.size(),
+        stride=stride,
+        dtype=a.dtype,
+        layout=a.layout,
+        device=a.device,
+        requires_grad=a.requires_grad,
+    )
+    out.copy_(a)
+    return out
+
+
+_copy_strided_doc = """
+  Copies the data in a to a new tensor, the new tensor has same shape with a size, but has different stride.
+  """
+
+
+copy_strided = _make_prim(
+    schema="copy_strided(Tensor a, SymInt[] stride) -> Tensor",
+    meta=_copy_strided_meta,
+    impl_aten=_copy_strided_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_copy_strided_doc,
 )
 
 
