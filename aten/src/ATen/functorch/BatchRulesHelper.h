@@ -19,6 +19,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/VmapGeneratedPlumbing.h>
 
+#include <utility>
+
 // This file contains helper functions for batching rules.
 
 namespace at { namespace functorch {
@@ -339,7 +341,7 @@ inline void boxed_all_tensors_have_optional_bdim(
       if (tensor_idx == contig_tensor_index) {
         value_ = value_.contiguous();
       }
-      (*stack)[args_begin + tensor_pos[tensor_idx]] = value_;
+      (*stack)[args_begin + tensor_pos[tensor_idx]] = std::move(value_);
       continue;
     }
     TORCH_INTERNAL_ASSERT(logical_rank == feature_rank + 1);
@@ -347,7 +349,7 @@ inline void boxed_all_tensors_have_optional_bdim(
     if (tensor_idx == contig_tensor_index) {
       value_ = value_.contiguous();
     }
-    (*stack)[args_begin + tensor_pos[tensor_idx]] = value_;
+    (*stack)[args_begin + tensor_pos[tensor_idx]] = std::move(value_);
   }
 
   op.callBoxed(stack);

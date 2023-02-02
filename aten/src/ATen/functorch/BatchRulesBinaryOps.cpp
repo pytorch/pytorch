@@ -9,6 +9,8 @@
 #include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
@@ -306,7 +308,7 @@ std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
 }
 
 Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
-  return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
+  return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
