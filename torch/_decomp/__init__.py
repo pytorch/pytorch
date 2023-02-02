@@ -241,6 +241,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.mv,
+            aten.nan_to_num,
             aten.narrow,
             aten.native_batch_norm,
             aten._native_batch_norm_legit,
