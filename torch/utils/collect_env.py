@@ -205,9 +205,7 @@ def get_nvidia_smi():
 
 
 def get_cpu_info(run_lambda):
-    rc = 0
-    out = ''
-    err = ''
+    rc, out, err = 0, '', ''
     if get_platform() == 'linux':
         rc, out, err = run_lambda('lscpu')
     elif get_platform() == 'win32':
