@@ -26,3 +26,5 @@ The list of support files are as follows:
     setup the pip environment
   * pip-requirements-macOS.txt. This is used by MacOS build and test jobs to
     setup the pip environment
+  * pip-requirements-Windows.txt. This is used by Windows build and test jobs to
+    setup the pip environment
