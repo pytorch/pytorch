@@ -9,6 +9,7 @@ import torch.nn
 from .bytecode_transformation import (
     create_dup_top,
     create_instruction,
+    create_load_global,
     create_rot_n,
     Instruction,
 )
@@ -213,12 +214,15 @@ class PyCodegen(object):
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
         )
 
-    def create_load_global(self, name, add=False):
+    # NOTE: push_null defaults to false for now - it will be made
+    # into a mandatory argument in a subsequent PR, when function calls
+    # are supported.
+    def create_load_global(self, name, add=False, push_null=False):
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
-        return create_instruction(
-            "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
+        return create_load_global(
+            name, self.code_options["co_names"].index(name), push_null
         )
 
     def create_load_const(self, value):
