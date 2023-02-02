@@ -312,7 +312,7 @@ Here is what this code does:
 2. The function ``popn`` the items, in this case, the signature is
    ``def  popn(self, n: int) -> List[VariableTracker]:`` this hints at an
    underlying contract - we are returning ``VariableTracker``\ s. If we
-   take a closer look at ``symbolic_convert.py`` and
+   take a closer look at ``sybmolic_convert.py`` and
    ``InstructionTranslatorBase``/``InstructionTranslator``\ we see that
    the only thing pushed onto and popped from our stack are
    ``VariableTracker``\ s.
