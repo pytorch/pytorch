@@ -179,7 +179,7 @@ PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
-  const char* accepted_kwargs[] = {// NOLINT
+  constexpr char* accepted_kwargs[] = {// NOLINT
                                    "tensors",
                                    "grad_tensors",
                                    "keep_graph",
@@ -192,7 +192,7 @@ PyObject* THPEngine_run_backward(
           args,
           kwargs,
           "OObb|Obb",
-          (char**)accepted_kwargs,
+          const_cast<char**>(accepted_kwargs),
           &tensors,
           &grad_tensors,
           &keep_graph,

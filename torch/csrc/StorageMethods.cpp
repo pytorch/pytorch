@@ -176,9 +176,7 @@ static PyObject* THPStorage_fromBuffer(
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr char* kwlist[] = {
       "buffer", "byte_order", "count", "offset", "dtype", nullptr};
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const char* argtypes;
-  argtypes = "O|snnO";
+  constexpr char* argtypes = "O|snnO";
 
   if (!PyArg_ParseTupleAndKeywords(
           args,
