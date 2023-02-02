@@ -403,7 +403,7 @@ class EmbeddingBag(Module):
         s += ', mode={mode}'
         if self.padding_idx is not None:
             s += ', padding_idx={padding_idx}'
-        return s.format(**self.__dict__)
+        return s.format(**{k: repr(v) for k, v in self.__dict__.items()})
 
     @classmethod
     def from_pretrained(cls, embeddings: Tensor, freeze: bool = True, max_norm: Optional[float] = None,

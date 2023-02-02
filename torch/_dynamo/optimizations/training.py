@@ -22,10 +22,9 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-from .. import config, eval_frame
-from ..utils import clone_inputs, counters
+from .. import eval_frame
+from ..utils import counters
 from .backends import BACKENDS
-from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
 
@@ -44,13 +43,6 @@ def aot_autograd(**kwargs):
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
-
-        if not functorch.compile.config.use_functionalize and config.normalize_ir:
-            try:
-                gm = normalize_ir(gm, clone_inputs(example_inputs))
-            except Exception:
-                log.debug("TorchDynamo unable to remove mutation")
-                use_fallback = True
 
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
@@ -97,7 +89,7 @@ aot_eager_decomp_partition = aot_autograd(
     bw_compiler=nop,
     # NB: lambda here is to delay import of inductor
     decompositions=lambda: import_module(
-        f"{config.inductor_import}.compile_fx"
+        "torch._inductor.compile_fx"
     ).select_decomp_table(),
     partition_fn=functools.partial(
         min_cut_rematerialization_partition, compiler="inductor"
