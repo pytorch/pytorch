@@ -600,7 +600,7 @@ def _update_schema_suggestion_for_cat(
     return output_sharding
 
 
-@register_prop_rule(aten.split.Tensor)
+@register_prop_rule([aten.split.Tensor, aten.split_with_sizes.default])
 def split_rule(op_schema: OpSchema) -> OutputSharding:
     output_spec_list: List[DTensorSpec] = []
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
