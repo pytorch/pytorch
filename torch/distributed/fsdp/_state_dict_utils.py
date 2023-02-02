@@ -244,7 +244,7 @@ def _common_unshard_post_state_dict_hook(
             _cast_buffers_to_dtype_and_device(
                 buffers, buffer_dtypes, fsdp_state.compute_device
             )
-            for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
+            for buffer, clean_fqn in zip(buffers, buffer_clean_fqns):
                 fqn = f"{prefix}{clean_fqn}"
                 state_dict[fqn] = buffer.clone()
     return state_dict
