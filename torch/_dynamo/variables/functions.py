@@ -278,14 +278,16 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if (
-            isinstance(self.obj, variables.NNModuleVariable)
-            and getattr(self.fn, "__module__", "").startswith("torch.nn.")
-            or self.is_constant
-        ):
-            return self.obj.call_method(
-                tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-            ).add_options(self)
+        if isinstance(self.obj, variables.NNModuleVariable):
+            module_attr = getattr(self.fn, "__module__", "")
+            if (
+                module_attr is not None
+                and module_attr.startswith("torch.nn.")
+                or self.is_constant
+            ):
+                return self.obj.call_method(
+                    tx, self.fn.__name__, args, kwargs, constant=self.is_constant
+                ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
