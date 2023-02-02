@@ -22,7 +22,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-from .. import config, eval_frame
+from .. import eval_frame
 from ..utils import counters
 from .backends import BACKENDS
 
