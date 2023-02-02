@@ -6,7 +6,6 @@ import sys
 from copy import copy, deepcopy
 from pathlib import Path
 from typing import Dict, List
-from unittest.mock import patch
 
 import sympy
 
@@ -1422,7 +1421,7 @@ class CppKernelProxy(CppKernel):
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
-        with patch.object(torch._inductor.config, "inplace_buffers", False):
+        with torch._inductor.config.patch(inplace_buffers=False):
 
             with CppVecKernelChecker(
                 deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
