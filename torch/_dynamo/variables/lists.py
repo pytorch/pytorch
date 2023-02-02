@@ -132,15 +132,10 @@ class BaseListVariable(VariableTracker):
                 unimplemented("List Comparison for Tensors is not yet supported")
             comps.append(comp)
 
-        if len(comps) == 1:
-            return comps[0]
-
-        # Initial postiions
-        prev = comps[0]
-        for i in range(1, len(comps)):
-            # Target for comparison
-            curr = comps[i]
-            options = VariableTracker.propagate([prev, curr])
+        return functools.reduce(
+            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
+            comps
+        )
 
             # Produces prev = operator.and_(prev, curr)
             # This can be chained as needed, ex: operator.and_(operator.and_(comps[0], comps[1]), comps[2]) etc
