@@ -75,7 +75,6 @@ SKIP = {
     "levit_128",
 }
 
-SKIP
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
