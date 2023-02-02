@@ -91,9 +91,7 @@ class TORCH_API OptimizerParamGroup {
   const std::vector<Tensor>& params() const;
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<Tensor> params_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<OptimizerOptions> options_;
 };
 
@@ -134,7 +132,7 @@ class TORCH_API Optimizer {
   void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
-  void zero_grad();
+  void zero_grad(bool set_to_none = true);
 
   /// Provides a const reference to the parameters in the first param_group this
   /// optimizer holds.
@@ -172,11 +170,8 @@ class TORCH_API Optimizer {
   virtual void load(serialize::InputArchive& archive);
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<OptimizerParamGroup> param_groups_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<OptimizerOptions> defaults_;
 };
 

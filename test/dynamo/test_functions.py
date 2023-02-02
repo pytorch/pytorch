@@ -372,6 +372,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return m + b.type(m.type())
 
     @make_test
+    def test_tensor_type3(a, b):
+        m = a.type(torch.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
+    def test_tensor_type4(a, b):
+        m = a.type("torch.HalfTensor")
+        return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type5(a, b):
+        m = a.type(torch.cuda.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
@@ -379,6 +395,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_T(x):
         return torch.ones_like(x.T)
+
+    @make_test
+    def test_mT(x):
+        return torch.ones_like(x.mT)
 
     @make_test
     def test_is_sparse(x):
@@ -718,6 +738,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         normal = torch.distributions.Normal(x, torch.tensor(1))
         independent = torch.distributions.Independent(normal, 1)
         return independent.log_prob(x)
+
+    @make_test
+    def test_context_wrapping_nested_functions_no_closure(x):
+        @torch.no_grad()
+        def augment(x: torch.Tensor) -> torch.Tensor:
+            return (x + 1) * 2
+
+        return augment(x)
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.

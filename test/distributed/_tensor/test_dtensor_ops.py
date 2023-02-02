@@ -118,7 +118,6 @@ dtensor_fails = {
     xfail("bernoulli"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
-    xfail("cat"),
     xfail("cartesian_prod"),
     xfail("cdist"),
     xfail("cholesky"),
@@ -128,11 +127,9 @@ dtensor_fails = {
     xfail("clamp"),
     xfail("clamp_max"),
     xfail("clamp_min"),
-    xfail("column_stack"),
     xfail("combinations"),
     xfail("complex"),
     xfail("constant_pad_nd"),
-    xfail("copysign"),
     xfail("corrcoef"),
     xfail("count_nonzero"),
     xfail("cov"),
@@ -147,10 +144,8 @@ dtensor_fails = {
     xfail("diagonal"),
     xfail("diagonal_copy"),
     xfail("diagonal_scatter"),
-    xfail("diff"),
     xfail("dist"),
     xfail("dot"),
-    xfail("dstack"),
     xfail("einsum"),
     xfail("empty"),
     xfail("empty_like"),
@@ -188,7 +183,6 @@ dtensor_fails = {
     xfail("histc"),
     xfail("histogram"),
     xfail("histogramdd"),
-    xfail("hstack"),
     xfail("index_add"),
     xfail("index_copy"),
     xfail("index_fill"),
@@ -406,7 +400,6 @@ dtensor_fails = {
     xfail("put"),
     xfail("qr"),
     xfail("quantile"),
-    xfail("rad2deg"),
     xfail("rand_like"),
     xfail("randint_like"),
     xfail("randint"),
@@ -458,7 +451,6 @@ dtensor_fails = {
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),
-    xfail("split"),
     xfail("split", "list_args"),
     xfail("split_with_sizes"),
     xfail("squeeze", "multiple"),
@@ -481,7 +473,6 @@ dtensor_fails = {
     xfail("stft"),
     xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("symeig"),
     xfail("t"),
     xfail("take_along_dim"),
     xfail("take"),
@@ -507,7 +498,6 @@ dtensor_fails = {
     xfail("vdot"),
     xfail("view_copy"),
     xfail("view_as_complex"),
-    xfail("vstack"),
     xfail("where"),
     xfail("zeros"),
     # ops inside this might even fail without dtensor
@@ -629,6 +619,11 @@ class TestDTensorOps(DTensorOpTestBase):
 
         # TODO: also handle cases where func raise an exception
         rs = func(*args, **kwargs)
+        if (
+            (resolve_name(func) is not None)
+            and ("split" in resolve_name(func))
+        ):
+            rs = torch.cat(rs)
 
         def to_replicate(e: object) -> object:
             return (
@@ -669,6 +664,11 @@ class TestDTensorOps(DTensorOpTestBase):
 
                         # redistribute/all_gather the results to compare with normal output
                         dtensor_rs = tree_map(to_replicate, dtensor_rs)
+                        if (
+                            (resolve_name(func) is not None)
+                            and ("split" in resolve_name(func))
+                        ):
+                            dtensor_rs = torch.cat(dtensor_rs)
                         try:
                             if resolve_name(func) not in skip_bw:
                                 if isinstance(dtensor_rs, DTensor):
