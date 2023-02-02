@@ -729,7 +729,7 @@ class TestOptim(TestCase):
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for enabled in (False, True):
+            for flag_value in (False, True):
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
@@ -743,7 +743,7 @@ class TestOptim(TestCase):
                 )
                 model.to(dtype=torch.float64, device=device)
                 params_with_flags = deepcopy(params)
-                params_with_flags[flag] = enabled
+                params_with_flags[flag] = flag_value
 
                 optimizer = optimizer_constructor(
                     model.parameters(), **params_with_flags
@@ -871,12 +871,15 @@ class TestOptim(TestCase):
         self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
 
     def test_fused_optimizers(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-        ]
+        optimizer_pairs_with_flags = tuple(itertools.product(
+            (optim.Adam, optim.AdamW),
+            (
+                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=True),
+                dict(weight_decay=0., amsgrad=False),
+                dict(weight_decay=0., amsgrad=True),
+            ),
+        ))
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1602,35 +1605,21 @@ class TestOptim(TestCase):
             opt.step()
 
     # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
-    def test_functional_fused_adam_with_foundinf(self):
+    def test_functional_fused_optimizer_with_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
-        from torch.optim import adam
+        from torch.optim import adam, adamw
 
         num_tensors = 5
-        for amsgrad in (False, True):
-            params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                for _ in range(4)
-            ]
-            max_exp_avg_sqs = (
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                if amsgrad
-                else []
-            )
-            state_steps = [
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-                for _ in range(num_tensors)
-            ]
-            grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
-            found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
+        for functional_optim, amsgrad in itertools.product((adam.adam, adamw.adamw), (False, True)):
+            params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
+            grad_scale = torch.ones((1,), dtype=torch.float32, device="cuda")
+            found_inf = torch.ones((1,), dtype=torch.float32, device="cuda")
 
-            adam.adam(
+            functional_optim(
                 params,
                 grads,
                 exp_avgs,
@@ -1787,6 +1776,15 @@ class TestOptim(TestCase):
         opt1.step()
         opt2.step()
         self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+
+    def test_fused_optimizer_raises(self):
+        if not torch.cuda.is_available():
+            self.skipTest("Requires CUDA devices")
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            with self.assertRaisesRegex(RuntimeError, "`fused` and `foreach` cannot be `True` together."):
+                optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
+            with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
+                optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
 
 class SchedulerTestNet(torch.nn.Module):
