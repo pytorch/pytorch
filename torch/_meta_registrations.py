@@ -2577,7 +2577,7 @@ def mkldnn_rnn_layer_backward(
 
 @register_meta(aten.bucketize)
 def meta_bucketize(a, boundaries, *, out_int32=False, right=False):
-    return a
+    return torch.empty_like(a)
 
 
 # We must also trigger meta registrations from PrimTorch ref
