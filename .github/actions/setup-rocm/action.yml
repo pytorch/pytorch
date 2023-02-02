@@ -56,8 +56,9 @@ runs:
             echo "$msg"
             exit 1
         fi
+
     - name: Runner diskspace health check
-      uses: pytorch/pytorch/.github/actions/diskspace-cleanup
+      uses: actions/diskspace-cleanup@v3
       if: always()
 
     - name: Runner health check disconnect on failure

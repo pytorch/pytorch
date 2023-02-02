@@ -15,5 +15,5 @@ runs:
         # Prune all stopped containers.
         docker container prune -f
     - name: Runner diskspace health check
-      uses: pytorch/pytorch/.github/actions/diskspace-cleanup
+      uses: actions/diskspace-cleanup@v3
       if: always()
