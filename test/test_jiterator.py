@@ -41,9 +41,6 @@ class TestPythonJiterator(TestCase):
         self.assertEqual(expected, result)
 
     @skipCUDAIfRocm
-    # See https://github.com/pytorch/pytorch/pull/76394#issuecomment-1118018287 for details
-    @skipCUDAIf(_get_torch_cuda_version() < (11, 6), "On cuda 11.3, nvrtcCompileProgram is taking too long to "
-                "compile jiterator generated kernels for non-contiguous input that requires dynamic-casting.")
     @parametrize("shape_strides", [
         (([3, 3], [1, 3]), ([3, 1], [1, 3])),  # non-contiguous
     ])
