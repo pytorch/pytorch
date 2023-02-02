@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
+#include <c10/util/Exception.h>
 
 #include <torch/library.h>
 
@@ -167,6 +168,8 @@ std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
       return std::make_tuple(src_out, incr_key.value(), incr_value.value());
     }
   }
+  TORCH_WARN("_transformer_decoder_only_layer_fwd is deprecated")
+
   TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   auto mha_out = native_decoder_only_multi_head_attention(
       src,

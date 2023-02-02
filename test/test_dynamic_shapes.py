@@ -18,7 +18,9 @@ import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
+from torch.fx.experimental.symbolic_shapes import \
+    FloorDiv, ShapeEnv, sym_float, guard_int, SymNode, \
+    sym_sqrt, sym_int, to_node, GuardOnDataDependentSymNode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymInt
 
@@ -389,6 +391,12 @@ class TestPySymInt(TestCase):
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
     @skipIfNoSympy
+    def test_data_dependent_guard(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
+
+    @skipIfNoSympy
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -479,9 +487,6 @@ expected_failure_sym_magic_methods = {
     ('floordiv', 'SymFloat', 'int'),  # Scalars are not close!
     ('floordiv', 'float', 'SymInt'),  # Scalars are not close!
     ('floordiv', 'SymFloat', 'SymInt'),  # Scalars are not close!
-    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to float
-    ('floordiv', 'int', 'SymFloat'),  # Cannot convert complex to float
-    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to float
 }
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -610,6 +615,65 @@ class TestSymNumberMagicMethods(TestCase):
         self._do_test(fn, inp1, inp2, shape_env, is_unary_fn)
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
+
+class TestFloorDiv(TestCase):
+    @skipIfNoSympy
+    def test_floordiv_simplify(self):
+        # Tests how we simplify or evaluate FloorDiv without free variables
+        shape_env = ShapeEnv()
+        result = 21
+        exprs = (
+            7 * FloorDiv(6, 2),
+            7 * FloorDiv(6.28, 2),
+            7 * FloorDiv(6.28, 2.0),
+            7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))),
+        )
+
+        for expr in exprs:
+            self.assertEqual(expr, result)
+            self.assertEqual(expr.doit(deep=False), result)
+            self.assertEqual(expr.doit(deep=True), result)
+            self.assertEqual(sympy.simplify(expr), result)
+            self.assertEqual(shape_env.simplify(expr), result)
+            self.assertEqual(shape_env.evaluate_expr(expr), result)
+
+    @skipIfNoSympy
+    def test_floordiv_assumptions(self):
+        # We define two Symbols (with different names) for each type to make
+        # sure the behavior is consistent regardless of whether both arguments
+        # are the same object or not.
+        cases = (
+            sympy.Symbol("i1", integer=True),
+            sympy.Symbol("i2", integer=True),
+            sympy.Symbol("r1", real=True),
+            sympy.Symbol("r2", real=True),
+            sympy.Symbol("c1", complex=True, real=False, integer=False),
+            sympy.Symbol("c2", complex=True, real=False, integer=False),
+            sympy.Symbol("s1"),
+            sympy.Symbol("s2"),
+        )
+
+        for base, divisor in itertools.product(cases, repeat=2):
+            op = FloorDiv(base, divisor)
+
+            def is_complex(x):
+                return x.is_integer is False and x.is_real is False and x.is_complex
+
+            # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
+            # always returns an integer 1 when both args are the same object.
+            # This even works for Symbols with no assumptions specified.
+            if base is divisor:
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            elif base.is_integer and divisor.is_integer:
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            elif is_complex(base) or is_complex(divisor):
+                self.assertEqual(op.is_integer, False)
+                self.assertTrue(op.is_real)
+            else:
+                self.assertEqual(op.is_integer, None)
+                self.assertTrue(op.is_real)
 
 if __name__ == '__main__':
     run_tests()

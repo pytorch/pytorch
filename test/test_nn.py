@@ -219,25 +219,24 @@ class TestNN(NNTestCase):
         self.assertIsNotNone(module.weight.grad)
         self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         module.zero_grad()
-        self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
+        self.assertIsNone(module.weight.grad)
 
         module.bias.requires_grad = True
         module.zero_grad()
-        self.assertIsNotNone(module.weight.grad)
+        self.assertIsNone(module.weight.grad)
         self.assertIsNone(module.bias.grad)
         module(i).sum().backward()
         self.assertIsNotNone(module.weight.grad)
         self.assertIsNotNone(module.bias.grad)
         self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         self.assertGreater(module.bias.grad.data.abs().sum(), 0)
-        module.zero_grad()
+        module.zero_grad(set_to_none=False)   # Force set to zeros.
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
-        # Force set to None.
-        module.zero_grad(set_to_none=True)
+        module.zero_grad()
         self.assertIsNone(module.weight.grad)
-
+        self.assertIsNone(module.bias.grad)
 
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -4925,7 +4924,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper(self, shape, torch.bfloat16, False)
             helper(self, shape, torch.bfloat16, True)
 
-    @parametrize_test('bn_module', [torch.nn.BatchNorm2d, torch.nn.SyncBatchNorm])
+    @parametrize_test(
+        'bn_module',
+        [
+            subtest(torch.nn.BatchNorm2d, name="BatchNorm2d"),
+            subtest(torch.nn.SyncBatchNorm, name="SyncBatchNorm"),
+        ],
+    )
     def test_batchnorm_non_contig_cpu(self, bn_module):
         input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
         input = input.permute(0, 2, 1, 3)
