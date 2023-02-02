@@ -88,7 +88,7 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         scope: Optional[Dict[str, object]],
-        guarded_code: "CheckFunctionManager",
+        check_fn_manager: "CheckFunctionManager",
         renames=True,
     ):
         self.id_ref = id_ref
@@ -134,8 +134,7 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_examples: List[torch.Tensor] = []
 
         self.tensor_check_ids: Dict[str, int] = {}
-        # TODO: tf is this naming
-        self.guarded_code: CheckFunctionManager = guarded_code
+        self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -380,7 +379,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.guarded_code)
+        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         """Guard on the initial grad state"""
@@ -398,7 +397,7 @@ class GuardBuilder(GuardBuilderBase):
         # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         assert guard.name == ""
-        output_graph = self.guarded_code.output_graph
+        output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
         code = output_graph.shape_env.codegen_guards(
