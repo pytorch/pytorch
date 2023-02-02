@@ -44,6 +44,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'miopen_runtime_version',
     'caching_allocator_config',
     'is_xnnpack_available',
+    'cpu_info',
 ])
 
 
@@ -201,6 +202,22 @@ def get_nvidia_smi():
                 smi = '"{}"'.format(candidate_smi)
                 break
     return smi
+
+
+def get_cpu_info(run_lambda):
+    rc = 0
+    out = ''
+    err = ''
+    if get_platform() == 'linux':
+        rc, out, err = run_lambda('lscpu')
+    elif get_platform() == 'win32':
+        rc, out, err = run_lambda('wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID,CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE')
+    cpu_info = ''
+    if rc == 0:
+        cpu_info = out
+    else:
+        cpu_info = err
+    return cpu_info
 
 
 def get_platform():
@@ -373,6 +390,7 @@ def get_env_info():
         cmake_version=get_cmake_version(run_lambda),
         caching_allocator_config=get_cachingallocator_config(),
         is_xnnpack_available=is_xnnpack_available(),
+        cpu_info=get_cpu_info(run_lambda),
     )
 
 env_info_fmt = """
@@ -398,6 +416,9 @@ cuDNN version: {cudnn_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+
+CPU:
+{cpu_info}
 
 Versions of relevant libraries:
 {pip_packages}
@@ -476,6 +497,7 @@ def pretty_str(envinfo):
     if mutable_dict['conda_packages']:
         mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
                                                  '[conda] ')
+    mutable_dict['cpu_info'] = envinfo.cpu_info
     return env_info_fmt.format(**mutable_dict)
 
 
