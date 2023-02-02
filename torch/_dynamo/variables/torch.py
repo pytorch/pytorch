@@ -433,7 +433,8 @@ class TorchVariable(VariableTracker):
             )
             bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
             if (
-                self.value.__module__ == "torch"
+                not isinstance(self.value, types.MethodDescriptorType)
+                and self.value.__module__ == "torch"
                 and self.value.__name__ in bin_ops
                 and any_symints_or_symfloats
                 and all_ints_or_floats
