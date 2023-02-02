@@ -38,32 +38,6 @@ static __m128i inline mm_cvtepu8_epi32(void* ptr) {
 // TODO: We may want to hard-code an unrolled version for the case where
 // num_channels=3 to hint the compiler to vectorize this (looks at original
 // PIL-SIMD's code).
-// void unpack_rgb(
-//     uint8_t* unpacked, // OUT
-//     const at::Tensor& packed_tensor, // IN
-//     bool is_channels_last) {
-//   // Convert a "packed" tensor (typically RGBRGBRGB if channels_last) into
-//   // RGBARGBARGBA format where A is hard-coded to 255. Each pixel is encoded
-//   // into as 32bits. This generalizes to num_channels <= 4 and also works for
-//   // non-channels_last tensors.
-//   const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
-//   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
-//   auto num_channels = packed_tensor.size(0);
-//   auto packed_stride = is_channels_last ? 1 : num_pixels;
-//   auto packed_increment = is_channels_last ? num_channels : 1;
-
-//   for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
-//     for (const auto j : c10::irange(num_channels)) {
-//       unpacked[j] = packed[j * packed_stride];
-//     }
-//     for (const auto j : c10::irange(num_channels, 4)) {
-//       unpacked[j] = 255;
-//     }
-//     unpacked += 4;
-//     packed += packed_increment;
-//   }
-// }
-
 at::Tensor unpack_rgb(const at::Tensor& packed_tensor, bool is_channels_last) {
   // Convert a "packed" tensor (typically RGBRGBRGB if channels_last) into
   // RGBARGBARGBA format where A is hard-coded to 255. Each pixel is encoded
@@ -73,21 +47,18 @@ at::Tensor unpack_rgb(const at::Tensor& packed_tensor, bool is_channels_last) {
   const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
-  auto packed_stride = is_channels_last ? 1 : num_pixels;
-  auto packed_increment = is_channels_last ? num_channels : 1;
 
-  auto unpacked_tensor = at::empty({4, packed_tensor.size(1), packed_tensor.size(2)}, at::CPU(at::kByte));
+  constexpr int rgba_size = 4;
+  auto unpacked_tensor = at::empty({rgba_size, packed_tensor.size(1), packed_tensor.size(2)}, at::CPU(at::kByte));
   uint8_t* unpacked = (uint8_t*) unpacked_tensor.data_ptr<uint8_t>();
 
+  auto stride_i = (is_channels_last) ? num_channels : 1;
+  auto stride_j = (is_channels_last) ? 1 : num_pixels;
+
   for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
-    for (const auto j : c10::irange(num_channels)) {
-      unpacked[j] = packed[j * packed_stride];
+    for (const auto j : c10::irange(rgba_size)) {
+      unpacked[rgba_size * i + j] = (j < num_channels) ? packed[stride_i * i + stride_j * j] : 0;
     }
-    for (const auto j : c10::irange(num_channels, 4)) {
-      unpacked[j] = 255;
-    }
-    unpacked += 4;
-    packed += packed_increment;
   }
   return unpacked_tensor;
 }
@@ -145,13 +116,12 @@ void ImagingResampleVerticalConvolution8u(
     int coefs_precision,
     int xin);
 
-at::Tensor ImagingResampleHorizontal(
+void ImagingResampleHorizontal(
+    const at::Tensor & unpacked_output,
     const at::Tensor & unpacked_input,
     int ksize,
     const std::vector<at::Tensor>& horiz_indices_weights,
-    unsigned int horiz_weights_precision,
-    int xout,
-    int yout) {
+    unsigned int horiz_weights_precision) {
   // TODO: we may want to merge that into the fallback code (currently called
   // basic_loop_aa_horizontal<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
@@ -159,6 +129,10 @@ at::Tensor ImagingResampleHorizontal(
   int yy;
 
   int16_t* kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
+
+  auto xout = unpacked_output.size(2);
+  auto yout = unpacked_output.size(1);
+  auto xin = unpacked_input.size(2);
 
   std::vector<int> bounds_vec(2 * xout, 0);
   int* bounds = bounds_vec.data();
@@ -170,11 +144,7 @@ at::Tensor ImagingResampleHorizontal(
     bounds[2 * i + 1] = idx_ptr_size[i];
   }
 
-  auto xin = unpacked_input.size(2);
-  auto yin = unpacked_input.size(1);
   uint32_t* unpacked_input_p = (uint32_t*) unpacked_input.data_ptr<uint8_t>();
-
-  auto unpacked_output = at::empty({4, yin, xout}, at::CPU(at::kByte));
   uint32_t* unpacked_output_p = (uint32_t*) unpacked_output.data_ptr<uint8_t>();
 
   yy = 0;
@@ -204,17 +174,14 @@ at::Tensor ImagingResampleHorizontal(
         ksize,
         (int)horiz_weights_precision);
   }
-
-  return unpacked_output;
 }
 
-at::Tensor ImagingResampleVertical(
+void ImagingResampleVertical(
+    const at::Tensor & unpacked_output,
     const at::Tensor & unpacked_input,
     int ksize,
     const std::vector<at::Tensor>& vert_indices_weights,
-    unsigned int vert_weights_precision,
-    int xout,
-    int yout) {
+    unsigned int vert_weights_precision) {
   // TODO: we may want to merge that into the fallback code (currently called
   // basic_loop_aa_vertical<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
@@ -226,10 +193,11 @@ at::Tensor ImagingResampleVertical(
   int64_t* idx_ptr_xmin = vert_indices_weights[0].data_ptr<int64_t>();
   int64_t* idx_ptr_size = vert_indices_weights[1].data_ptr<int64_t>();
 
-  auto unpacked_output = at::empty({4, yout, xout}, at::CPU(at::kByte));
   uint32_t* unpacked_output_p = (uint32_t*) unpacked_output.data_ptr<uint8_t>();
-
   uint32_t* unpacked_input_p = (uint32_t*) unpacked_input.data_ptr<uint8_t>();
+
+  auto xout = unpacked_output.size(2);
+  auto yout = unpacked_output.size(1);
 
   for (const auto yy : c10::irange(yout)) {
     k = &kk[yy * ksize];
@@ -245,7 +213,6 @@ at::Tensor ImagingResampleVertical(
         (int)vert_weights_precision,
         xout);
   }
-  return unpacked_output;
 }
 
 // This is the only public entry point in this file.  It supports bilinear
@@ -318,7 +285,7 @@ void upsample_avx_bilinear(
   }
 
   at::Tensor unpacked_input;
-  bool c = num_channels < 4 || input.is_contiguous(at::MemoryFormat::Contiguous);
+  bool is_rgba = num_channels == 4 && input.is_contiguous(at::MemoryFormat::ChannelsLast);
 
   // TODO: The unpack / pack operations create a copy of the original input and
   // output tensor. There should be a way to avoid these copies by instead
@@ -326,42 +293,41 @@ void upsample_avx_bilinear(
   // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
 
-    if (c) {
-      unpacked_input = unpack_rgb(
-          input[i],
-          input.is_contiguous(at::MemoryFormat::ChannelsLast));
-    } else {
-      unpacked_input = input[i];
-    }
+    unpacked_input = (is_rgba) ? input[i] : unpack_rgb(input[i], input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
     at::Tensor unpacked_output_temp, unpacked_output;
 
     if (need_horizontal) {
-      unpacked_output_temp = ImagingResampleHorizontal(
+
+      unpacked_output_temp = (is_rgba && !need_vertical) ? output[i] : at::empty({4, yin, xout}, unpacked_input.options());
+
+      ImagingResampleHorizontal(
+          unpacked_output_temp,
           unpacked_input,
           ksize_horiz,
           horiz_indices_weights,
-          horiz_weights_precision,
-          xout,
-          yin);
+          horiz_weights_precision);
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
-      unpacked_output = ImagingResampleVertical(
+      unpacked_output = (is_rgba) ? output[i] : at::empty({4, yout, xout}, unpacked_input.options());
+
+      ImagingResampleVertical(
+          unpacked_output,
           unpacked_input,
           ksize_vert,
           vert_indices_weights,
-          vert_weights_precision,
-          xout,
-          yout);
+          vert_weights_precision);
     }
 
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
 
-    pack_rgb(
-        unpacked_output,
-        output[i],
-        output.is_contiguous(at::MemoryFormat::ChannelsLast));
+    if (!is_rgba) {
+      pack_rgb(
+          unpacked_output,
+          output[i],
+          output.is_contiguous(at::MemoryFormat::ChannelsLast));
+    }
   }
 }
 
