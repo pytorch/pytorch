@@ -601,7 +601,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(_lu_with_info, fp32)
   KERNEL_CPU(qr, fp32)
   KERNEL_CPU(svd, fp32)
-  KERNEL_CPU(symeig, fp32)
   KERNEL_CPU(triangular_solve, fp32)
   KERNEL_CPU(fractional_max_pool2d, fp32)
   KERNEL_CPU(fractional_max_pool3d, fp32)
