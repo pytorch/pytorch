@@ -942,9 +942,9 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
   auto mask = _mm512_set1_ps(-0.f);
   auto fabs_cd = _mm512_andnot_ps(mask, b);     // |c|    |d|
   auto fabs_dc = _mm512_permute_ps(fabs_cd, 0xB1);   // |d|    |c|
-  auto scale = _mm512_max_ps(fabs_cd, fabs_dc);  // sc     sc
-  auto a2 = _mm512_div_ps(a, scale);         // a/sc     b/sc
-  auto b2 = _mm512_div_ps(b, scale);         // c/sc     d/sc
+  auto scale = _mm512_rcp14_ps(_mm512_max_ps(fabs_cd, fabs_dc));  // 1/sc     1/sc
+  auto a2 = _mm512_mul_ps(a, scale);         // a/sc     b/sc
+  auto b2 = _mm512_mul_ps(b, scale);         // c/sc     d/sc
   auto acbd2 = _mm512_mul_ps(a2, b2);
 
   const __m512 sign_mask = _mm512_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0,
