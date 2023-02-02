@@ -28,7 +28,6 @@ import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.optimizations import backends
-from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
@@ -1177,7 +1176,8 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
-    def run_n_iterations(self, mod, inputs, n=2):
+    def run_n_iterations(self, mod, inputs):
+        n = self.args.iterations
         for _ in range(n - 1):
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
@@ -1609,6 +1609,9 @@ def parse_args(args=None):
         help="use channels last format",
     )
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--iterations", type=int, default=2, help="how many iterations to run"
+    )
     parser.add_argument(
         "--batch-size-file", type=str, help="String to load batch size from"
     )
@@ -2167,11 +2170,6 @@ def run(runner, args, original_dir=None):
             output_filename = f"accuracy_{args.backend}.csv"
         else:
             output_filename = f"speedup_{args.backend}.csv"
-    elif args.log_conv_args:
-        optimize_ctx = torch._dynamo.optimize(
-            conv_args_analysis, nopython=args.nopython
-        )
-        output_filename = "log_conv_args.csv"
     elif args.recompile_profiler:
         output_filename = "recompile_profiler_log.csv"
         experiment = recompile_profiler_experiment
