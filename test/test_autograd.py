@@ -7562,6 +7562,18 @@ for shape in [(1,), ()]:
 
         self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
 
+    def test_ignore_disable_saved_tensor_hooks(self):
+        with torch.autograd.graph._ignore_disable_saved_tensor_hooks():
+            with torch.autograd.graph.disable_saved_tensors_hooks("error message"):
+                self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
+                with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+                    pass
+
+        with torch.autograd.graph._ignore_disable_saved_tensor_hooks():
+            with self.assertRaisesRegex(RuntimeError, "cannot be nested"):
+                with torch.autograd.graph._ignore_disable_saved_tensor_hooks():
+                    pass
+
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 

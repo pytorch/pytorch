@@ -262,6 +262,20 @@ class save_on_cpu(saved_tensors_hooks):
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
 
+_ignore_disable_saved_tensor_hooks_state = False
+
+@contextlib.contextmanager
+def _ignore_disable_saved_tensor_hooks():
+    global _ignore_disable_saved_tensor_hooks_state
+    try:
+        if _ignore_disable_saved_tensor_hooks_state:
+            raise RuntimeError("_ignore_disable_saved_tensor_hooks cannot be nested")
+        _ignore_disable_saved_tensor_hooks_state = True
+        yield
+    finally:
+        _ignore_disable_saved_tensor_hooks_state = False
+
+
 @contextlib.contextmanager
 def disable_saved_tensors_hooks(error_message):
     """Context-manager that disables the saved tensors default hooks feature.
@@ -284,6 +298,10 @@ def disable_saved_tensors_hooks(error_message):
         ...         pass
 
     """
+    global _ignore_disable_saved_tensor_hooks_state
+    if _ignore_disable_saved_tensor_hooks_state:
+        yield
+        return
     try:
         maybe_prev_message = torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
         torch._C._autograd._saved_tensors_hooks_disable(error_message)
