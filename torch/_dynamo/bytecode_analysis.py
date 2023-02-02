@@ -16,6 +16,7 @@ if sys.version_info >= (3, 11):
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
+JUMP_OPNAMES = set(dis.opname[opcode] for opcode in JUMP_OPCODES)
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
 
