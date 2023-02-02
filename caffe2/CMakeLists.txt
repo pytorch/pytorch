@@ -657,6 +657,7 @@ if(USE_CUDA)
     PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
   )
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
@@ -976,10 +977,6 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
-endif()
-
-if(USE_CUDA OR USE_ROCM)
-  include(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/nvfuser.cmake)
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
@@ -1858,13 +1855,8 @@ if(BUILD_PYTHON)
   pycmd(PY_EXT_SUFFIX "
       def get_ext_suffix():
           import sys
-          if sys.version_info < (3, 8) and sys.platform == 'win32':
-              # Workaround for https://bugs.python.org/issue39825
-              import _imp
-              return _imp.extension_suffixes()[0]
-          else:
-              import sysconfig
-              return sysconfig.get_config_var('EXT_SUFFIX')
+          import sysconfig
+          return sysconfig.get_config_var('EXT_SUFFIX')
 
       suffix = get_ext_suffix()
       if suffix is not None:
