@@ -86,6 +86,7 @@ from torch.ao.ns._numeric_suite_fx import (
     loggers_set_enabled,
     loggers_set_save_activations,
     _prepare_n_shadows_add_loggers_model,
+    _n_shadows_compare_weights,
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 from torch.ao.quantization.backend_config import get_native_backend_config
@@ -2566,6 +2567,52 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         results = extract_results_n_shadows_model(msq)
         print_comparisons_n_shadows_model(results)
+
+    def _test_extract_weights_impl(self, m, example_input, qconfig_mapping):
+        backend_config = get_native_backend_config()
+        results = _n_shadows_compare_weights(
+            m, example_input, qconfig_mapping, backend_config)
+        print_comparisons_n_shadows_model(results)
+
+    @withQNNPACKBackend
+    def test_extract_weights_linear(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+                self.w2 = nn.Parameter(torch.randn(2, 2))
+                self.b2 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+                self.w3 = nn.Parameter(torch.randn(2, 2))
+                self.b3 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w3, a=math.sqrt(5))
+                self.w4 = nn.Parameter(torch.randn(2, 2))
+                self.b4 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w4, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w2, self.b2)
+                x = F.relu(x)
+                x = F.linear(x, self.w3, self.b3)
+                x = F.linear(x, self.w4, self.b4)
+                return x
+
+        per_tensor_qconfig = torch.quantization.default_qconfig
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        # test unquantized
+        qconfig_mapping.set_module_name_object_type_order(
+            '', F.linear, 2, None)
+        # test per-tensor
+        qconfig_mapping.set_module_name_object_type_order(
+            '', F.linear, 3, per_tensor_qconfig)
+        self._test_extract_weights_impl(m, example_input, qconfig_mapping)
+
 
     def _test_add_loggers_impl(self, m, example_input, qconfig_mapping):
         backend_config = get_native_backend_config()

@@ -135,6 +135,7 @@ from torch.ao.ns.fx.n_shadows_utils import (
     print_n_shadows_summary,
     create_n_transformed_and_logged_copies_of_subgraph,
     create_add_loggers_graph,
+    extract_weight_comparison,
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 
@@ -765,7 +766,7 @@ def prepare_n_shadows_model(
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
     custom_tracer: Any = None,
-) -> torch.nn.Module:
+) -> GraphModule:
     """
     Given a model with a graph with M ops such as
 
@@ -928,6 +929,29 @@ def _prepare_n_shadows_add_loggers_model(
         mt, subgraphs_dedup, qconfig_mapping, node_name_to_qconfig)
 
     return mt
+
+# TODO(future PR): we should rethink the names of all the PNP APIs
+def _n_shadows_compare_weights(
+    model: torch.nn.Module,
+    example_inputs: Any,
+    qconfig_mapping: QConfigMapping,
+    backend_config: BackendConfig,
+) -> NSResultsType:
+    """
+    Note: this API is not recommended for wide usage, it is only
+    provided for customers who need to migrate from the `add_loggers`
+    API.
+    """
+    qconfig_multi_mapping = \
+        QConfigMultiMapping.from_list_qconfig_mapping([qconfig_mapping])
+    mp = prepare_n_shadows_model(
+        model, example_inputs, qconfig_multi_mapping, backend_config)
+    # passing inputs through the model is necessary to populate
+    # observers which observe weights with real values
+    mp(*example_inputs)
+    mq = convert_n_shadows_model(mp)
+    weight_comparison = extract_weight_comparison(mq)
+    return weight_comparison
 
 # TODO(future PR): consider aligning API signature with other similar quantization
 # functions (enable_fake_quant, etc)
