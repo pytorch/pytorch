@@ -143,7 +143,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["11.6"],
+            arches=["11.7"],
             python_versions=["3.8"]),
         branches="master",
     ),
