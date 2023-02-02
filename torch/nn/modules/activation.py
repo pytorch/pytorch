@@ -1010,6 +1010,9 @@ class MultiheadAttention(Module):
 
         super(MultiheadAttention, self).__setstate__(state)
 
+    def use_alt_fastpath(self, use_alt_fastpath=True):
+        self.use_alt_fastpath=use_alt_fastpath
+
     def forward(
             self,
             query: Tensor,
@@ -1083,77 +1086,89 @@ class MultiheadAttention(Module):
             target_type=query.dtype
         )
 
-        why_not_fast_path = ''
-        if not is_batched:
-            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
-        elif query is not key or key is not value:
-            # When lifting this restriction, don't forget to either
-            # enforce that the dtypes all match or test cases where
-            # they don't!
-            why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
-        elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
-            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
-        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
-            # this case will fail anyway, but at least they'll get a useful error message.
-            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
-        elif self.training:
-            why_not_fast_path = "training is enabled"
-        elif not self.batch_first:
-            why_not_fast_path = "batch_first was not True"
-        elif self.bias_k is not None:
-            why_not_fast_path = "self.bias_k was not None"
-        elif self.bias_v is not None:
-            why_not_fast_path = "self.bias_v was not None"
-        elif self.add_zero_attn:
-            why_not_fast_path = "add_zero_attn was enabled"
-        elif not self._qkv_same_embed_dim:
-            why_not_fast_path = "_qkv_same_embed_dim was not True"
-        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
-            why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
-                                 is not supported with NestedTensor input"
-        elif torch.is_autocast_enabled():
-            why_not_fast_path = "autocast is enabled"
+        # Give users an option to use the alternate fastpath (for now)
+        # short-circuiting AND is not supported in TorchScript
+        use_alt_fastpath = False
+        if hasattr(self,"alt_fastpath"):
+            use_alt_fastpath = self.alt_fastpath
 
-        if not why_not_fast_path:
-            tensor_args = (
-                query,
-                key,
-                value,
-                self.in_proj_weight,
-                self.in_proj_bias,
-                self.out_proj.weight,
-                self.out_proj.bias,
-            )
-            # We have to use list comprehensions below because TorchScript does not support
-            # generator expressions.
-            if torch.overrides.has_torch_function(tensor_args):
-                why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all([(x is None or x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
-                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x is not None and x.requires_grad for x in tensor_args]):
-                why_not_fast_path = ("grad is enabled and at least one of query or the "
-                                     "input/output projection weights or biases requires_grad")
+        if use_alt_fastpath:
+            why_not_fast_path = ''
+
+            if not is_batched:
+                why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
+            elif query is not key or key is not value:
+                # When lifting this restriction, don't forget to either
+                # enforce that the dtypes all match or test cases where
+                # they don't!
+                why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
+            elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
+                why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
+            elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
+                # this case will fail anyway, but at least they'll get a useful error message.
+                why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
+            elif self.training:
+                why_not_fast_path = "training is enabled"
+            elif not self.batch_first:
+                why_not_fast_path = "batch_first was not True"
+            elif self.bias_k is not None:
+                why_not_fast_path = "self.bias_k was not None"
+            elif self.bias_v is not None:
+                why_not_fast_path = "self.bias_v was not None"
+            elif self.add_zero_attn:
+                why_not_fast_path = "add_zero_attn was enabled"
+            elif not self._qkv_same_embed_dim:
+                why_not_fast_path = "_qkv_same_embed_dim was not True"
+            elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
+                why_not_fast_path = (
+                    "supplying both src_key_padding_mask and src_mask at the "
+                    "same time is not supported with NestedTensor input"
+                )
+            elif torch.is_autocast_enabled():
+                why_not_fast_path = "autocast is enabled"
+
             if not why_not_fast_path:
-                merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
-
-                return torch._native_multi_head_attention(
+                tensor_args = (
                     query,
                     key,
                     value,
-                    self.embed_dim,
-                    self.num_heads,
                     self.in_proj_weight,
                     self.in_proj_bias,
                     self.out_proj.weight,
                     self.out_proj.bias,
-                    merged_mask,
-                    need_weights,
-                    average_attn_weights,
-                    mask_type)
+                )
+                # We have to use list comprehensions below because TorchScript does not support
+                # generator expressions.
+                if torch.overrides.has_torch_function(tensor_args):
+                    why_not_fast_path = "some Tensor argument has_torch_function"
+                elif not all([(x is None or x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+                    why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
+                elif torch.is_grad_enabled() and any([x is not None and x.requires_grad for x in tensor_args]):
+                    why_not_fast_path = ("grad is enabled and at least one of query or the "
+                                         "input/output projection weights or biases requires_grad")
+                if not why_not_fast_path:
+                    merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
 
-        any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
-                                f"The fast path was not hit because {why_not_fast_path}")
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        merged_mask,
+                        need_weights,
+                        average_attn_weights,
+                        mask_type)
+
+                any_nested = query.is_nested or key.is_nested or value.is_nested
+                assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
+                                        f"The fast path was not hit because {why_not_fast_path}")
+                if why_not_fast_path:
+                    raise AssertionError("do not manual enable fastpath because " + why_not_fast_path)
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
