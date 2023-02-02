@@ -632,11 +632,19 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
 
+    # Setting this global PIC flag for all XNNPACK targets.
+    # This is needed for Object libraries within XNNPACK which must
+    # be PIC to successfully link this static libXNNPACK with pytorch
+    set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
-    set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Revert to whatever it was before
+    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
+
     # Workaround for https://github.com/pytorch/pytorch/issues/47292
     if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
       # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
