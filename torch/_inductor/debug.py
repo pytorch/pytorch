@@ -290,7 +290,7 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        log = logging.getLogger(config.inductor_import)
+        log = logging.getLogger("torch._inductor")
         if not log.handlers:
             init_logging()
 
@@ -318,7 +318,7 @@ class DebugContext:
             self._prof.enable()
 
     def _setup_log_capture(self, filename, level):
-        log = logging.getLogger(config.inductor_import)
+        log = logging.getLogger("torch._inductor")
         fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
         ch.setLevel(level)
@@ -377,6 +377,12 @@ class DebugFormatter:
             save_graph_repro(fd, gm, inputs, "inductor")
 
         with self.fopen("fx_graph_readable.py") as fd:
+            fd.write(gm.print_readable(print_output=False))
+
+    def fx_graph_transformed(
+        self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]
+    ):
+        with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList):
