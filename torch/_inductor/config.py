@@ -134,6 +134,9 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
 
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
+
 
 # config specific to codegen/triton.py
 class triton:
