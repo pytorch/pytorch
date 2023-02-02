@@ -2212,7 +2212,7 @@ _copy_strided_doc = """
   Copies the data in a to a new tensor, the new tensor has same shape with a size, but has different stride.
   """
 
-# TODO: Remove safe casting and implement on reference instead
+
 copy_strided = _make_prim(
     schema="copy_strided(Tensor a, SymInt[] stride) -> Tensor",
     meta=_copy_strided_meta,

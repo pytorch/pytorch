@@ -1721,16 +1721,9 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    output = empty_strided(
-        x.get_size(),
-        stride,
-        dtype=x.get_dtype(),
-        layout=torch.strided,
-        device=x.get_device(),
-        pin_memory=False,
-    )
-    copy_(output, x)
-    return output
+    stride = [V.graph.sizevars.size_hint(x) for x in stride]
+    stride_order = sorted(range(len(stride)), key=stride.__getitem__)
+    return ir.ExternKernel.require_stride_order(x, stride_order)
 
 
 @register_lowering([torch.full, aten.full])
