@@ -756,6 +756,9 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         if len(node.args[index_node].users) > 1:
                             continue
                         computation_node = modules[node.args[index_node].target]
+                        if computation_node.training:
+                            continue
+
                         # TODO: support padding str input("valid", "same").
                         if type(computation_node) in [nn.Conv2d] and isinstance(
                             computation_node.padding, str
@@ -805,6 +808,8 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     if node.args[1].args[0] == node.args[0]:
                         continue
                     computation_node = modules[node.args[1].target]
+                    if computation_node.training:
+                        continue
                     # TODO: support padding str input("valid", "same").
                     if type(computation_node) in [nn.Conv2d] and isinstance(
                         computation_node.padding, str
@@ -835,12 +840,19 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
+                if cur_module.training:
+                    continue
                 computation_node_input_meta = node.args[0].meta.get("tensor_meta")
                 if computation_node_input_meta.dtype != torch.float32:
                     continue
                 if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
                     continue
                 computation_node_input_size = computation_node_input_meta.shape
+                if (
+                    type(cur_module) in [torch.nn.Linear]
+                    and len(computation_node_input_size) < 2
+                ):
+                    continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
                 ):
