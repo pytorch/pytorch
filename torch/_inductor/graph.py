@@ -362,6 +362,8 @@ class GraphLowering(torch.fx.Interpreter):
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
+            if isinstance(value, ir.ReinterpretView):
+                continue
             assert isinstance(value, ir.StorageBox)
             value_storage_box = value
             value = value.data
