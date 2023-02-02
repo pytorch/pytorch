@@ -21,10 +21,12 @@ from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
-from .. import config, eval_frame
 
-from ..backends.registry import lookup_backend, register_backend
+from .. import eval_frame
+from ..backends.registry import register_backend
 from ..utils import counters
+
+from .backends import torchxla_trace_once, torchxla_trivial
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +91,7 @@ aot_eager_decomp_partition = aot_autograd(
     bw_compiler=nop,
     # NB: lambda here is to delay import of inductor
     decompositions=lambda: import_module(
-        f"{config.inductor_import}.compile_fx"
+        "torch._inductor.compile_fx"
     ).select_decomp_table(),
     partition_fn=functools.partial(
         min_cut_rematerialization_partition, compiler="inductor"
@@ -323,12 +325,13 @@ def cudagraphs(model, inputs):
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 
+
 aot_torchxla_trivial = aot_autograd(
-    fw_compiler=lookup_backend("torchxla_trivial"),
+    fw_compiler=torchxla_trivial,
 )
 
 aot_torchxla_trace_once = aot_autograd(
-    fw_compiler=lookup_backend("torchxla_trace_once"),
+    fw_compiler=torchxla_trace_once,
 )
 
 
