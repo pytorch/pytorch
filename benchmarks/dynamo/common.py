@@ -137,8 +137,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
-    # TIMM
-    "cait_m36_384",  # Accuracy
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
