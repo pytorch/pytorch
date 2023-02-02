@@ -121,9 +121,7 @@ def enable_dynamic(enable: bool = True):
     if not enable:
         yield
         return
-    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
-    ), patch("torch._dynamo.config.specialize_int_float", False):
+    with config.patch(dynamic_shapes=True, specialize_int_float=False):
         yield
 
 
@@ -649,7 +647,7 @@ def export(
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.override_stack_trace():
+            with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
         graph = make_fx(

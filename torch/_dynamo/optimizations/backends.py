@@ -352,13 +352,9 @@ def fx2trt(subgraph, **kwargs):
     from torch_tensorrt.fx.trt_module import TRTModule  # type: ignore[import]
     from torch_tensorrt.fx.utils import LowerPrecision  # type: ignore[import]
 
-    from .normalize import normalize_ir
-
     try:
         model = subgraph.model
         inputs = subgraph.example_inputs
-        # normalize
-        model = normalize_ir(model, inputs)
         # pass rewrite
         model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)

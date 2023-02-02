@@ -526,8 +526,8 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            chmod a+x .ci/pytorch/macos-build.sh
+            unbuffer .ci/pytorch/macos-build.sh 2>&1 | ts
 
       - persist_to_workspace:
           root: /Users/distiller/workspace/
@@ -562,8 +562,8 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            chmod a+x .ci/pytorch/macos-build.sh
+            unbuffer .ci/pytorch/macos-build.sh 2>&1 | ts
 
       - persist_to_workspace:
           root: /Users/distiller/workspace/
@@ -644,7 +644,7 @@ jobs:
             brew link --force libomp
 
             echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
-            .jenkins/pytorch/macos-build.sh
+            .ci/pytorch/macos-build.sh
 
       - when:
           condition: << parameters.build-generates-artifacts >>
@@ -727,7 +727,7 @@ jobs:
             export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
 
             python3 -mpip install dist/*.whl
-            .jenkins/pytorch/macos-test.sh
+            .ci/pytorch/macos-test.sh
       - run:
           name: Copy files for uploading test stats
           command: |
@@ -779,8 +779,8 @@ jobs:
             set -e
             export JOB_BASE_NAME=$CIRCLE_JOB
 
-            chmod a+x .jenkins/pytorch/macos-test.sh
-            unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+            chmod a+x .ci/pytorch/macos-test.sh
+            unbuffer .ci/pytorch/macos-test.sh 2>&1 | ts
       - store_test_results:
           path: test/test-reports
 
@@ -801,8 +801,8 @@ jobs:
             set -e
             export BUILD_LITE_INTERPRETER=1
             export JOB_BASE_NAME=$CIRCLE_JOB
-            chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
-            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
+            chmod a+x ${HOME}/project/.ci/pytorch/macos-lite-interpreter-build-test.sh
+            unbuffer ${HOME}/project/.ci/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
           path: test/test-reports
 
@@ -1151,7 +1151,7 @@ jobs:
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .ci/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -1197,9 +1197,9 @@ jobs:
           trap "retrieve_test_reports" ERR
 
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
-            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .ci/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
-            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .ci/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 

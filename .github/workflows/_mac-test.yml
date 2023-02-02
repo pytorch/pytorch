@@ -166,7 +166,7 @@ jobs:
           arch
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
-          ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
+          ${CONDA_RUN} .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
         shell: bash
