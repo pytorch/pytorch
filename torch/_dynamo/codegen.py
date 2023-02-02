@@ -313,7 +313,8 @@ class PyCodegen(object):
             )
         output.append(create_instruction("BUILD_TUPLE", len(freevars)))
         output.append(self.create_load_const(code))
-        output.append(self.create_load_const(fn_name))
+        if sys.version_info < (3, 11):
+            output.append(self.create_load_const(fn_name))
         output.append(create_instruction("MAKE_FUNCTION", 0x08))
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
