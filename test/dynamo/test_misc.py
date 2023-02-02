@@ -1506,7 +1506,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_cuda_stream_context_manager(self):
-        def fn(x, s):
+        def fn(x):
+            s = torch.cuda.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
             with torch.cuda.stream(s):
@@ -1516,14 +1517,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x
 
         x = torch.randn((2, 2))
-        s = torch.cuda.Stream()
-        ref = fn(x, s)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        res = opt_fn(x, s)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        res = opt_fn(x)
         self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 5)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):

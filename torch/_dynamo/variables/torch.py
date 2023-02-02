@@ -183,6 +183,7 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
+            CUDAStreamContextVariable,
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
@@ -269,6 +270,12 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
             )
+        elif self.value is torch.cuda.stream:
+            return CUDAStreamContextVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.cuda.streams.Stream:
+            return TorchVariable(self.value(), **options)
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):

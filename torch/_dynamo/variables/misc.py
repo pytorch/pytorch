@@ -441,6 +441,37 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
+class CUDAStreamContextVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        var = CUDAStreamContextVariable(target_values=[target_value], **kwargs)
+        return var
+
+    def __init__(self, target_values=None, **kwargs):
+        stream_context = kwargs.pop("stream_context", None)
+        super(CUDAStreamContextVariable, self).__init__(
+            target_values=target_values, **kwargs
+        )
+        assert len(target_values) == 1
+        if stream_context:
+            self.stream_context = stream_context
+        else:
+            self.stream_context = torch.cuda.stream(target_values[0])
+
+    def enter(self, tx):
+        tx.output.create_node("call_function", self.stream_context.__enter__, (), {})
+        return self.stream_context.__enter__()
+
+    def exit(self, tx, *args):
+        tx.output.create_node(
+            "call_function", self.stream_context.__exit__, (None, None, None), {}
+        )
+        return self.stream_context.__exit__(None, None, None)
+
+    def fn_name(self):
+        return "cuda.stream"
+
+
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
         super(WithExitFunctionVariable, self).__init__(**kwargs)

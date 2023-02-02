@@ -21,6 +21,7 @@ from .misc import (
     BlackHoleVariable,
     ClosureVariable,
     ContextWrappingVariable,
+    CUDAStreamContextVariable,
     GetAttrVariable,
     GradModeVariable,
     InspectSignatureVariable,
