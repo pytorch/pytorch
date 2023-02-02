@@ -2588,12 +2588,8 @@ def max_pool2d_with_indices(
     new_size = list(batch) + [h_out, w_out]
     window_size = kernel_size[0] * kernel_size[1]
 
-    if window_size > 25:
+    if window_size > 25 or dilation != 1 or any(d != 1 for d in dilation):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode
-        )
-    if dilation != 1:
         return fallback_max_pool2d_with_indices(
             x, kernel_size, stride, padding, dilation, ceil_mode
         )
