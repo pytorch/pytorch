@@ -53,16 +53,23 @@ HOMOGENEOUS_ATTR_NAMES = (
 )
 
 
-def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+def _get_fsdp_root_states_with_modules(
+    module: nn.Module,
+) -> Tuple[List[_FSDPState], List[nn.Module]]:
     """
-    Returns all root ``_FSDPState`` instances in the module tree rooted at
-    ``module``.
+    Returns a tuple containing:
+    1. A list of the root ``_FSDPState`` instances in the module tree rooted at
+    ``module`` without any duplicates and following the ``module.modules()``
+    traversal order (which is assumed to be depth-first).
+    2. A corresponding list of the root modules owning the states in the first
+    list.
 
-    This is similar to :func:`_get_fsdp_states` except we must call
-    :func:`_is_fsdp_root` to force a lazy initialization to determine the FSDP
-    root in case lazy initialization has not yet happened.
+    This is similar to :func:`_get_fsdp_states_with_modules` except that we
+    must call :func:`_is_fsdp_root` to force a lazy initialization to determine
+    the FSDP root in case lazy initialization has not yet happened.
     """
     fsdp_root_states: List[_FSDPState] = []
+    fsdp_root_modules: List[nn.Module] = []
     visited_fsdp_states: Set[_FSDPState] = set()
     # NOTE: This function assumes that `module.modules()` proceeds top-down.
     for submodule in module.modules():
@@ -74,6 +81,13 @@ def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
         ):
             visited_fsdp_states.add(optional_state)
             fsdp_root_states.append(optional_state)
+            fsdp_root_modules.append(submodule)
+    return fsdp_root_states, fsdp_root_modules
+
+
+def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+    """See :func:`_get_fsdp_root_states_with_modules`."""
+    fsdp_root_states, _ = _get_fsdp_root_states_with_modules(module)
     return fsdp_root_states
 
 
