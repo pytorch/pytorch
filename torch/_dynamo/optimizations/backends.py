@@ -772,7 +772,7 @@ def torchxla_trivial(subgraph):
 
 @create_backend
 def torchxla_trace_once(subgraph):
-    import torch._dynamo.optimizations.torchxla_integration as integration
+    import torch_xla.core.dynamo_bridge as bridge  # type: ignore[import]
 
     compiled_graph = None
     model = subgraph.model
@@ -781,7 +781,7 @@ def torchxla_trace_once(subgraph):
         nonlocal subgraph
         nonlocal compiled_graph
         if compiled_graph is None:
-            compiled_graph = integration.extract_compiled_graph(model, args)
+            compiled_graph = bridge.extract_compiled_graph(model, args)
             del subgraph
         return compiled_graph(*args)
 

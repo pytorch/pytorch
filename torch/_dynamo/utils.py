@@ -5,6 +5,7 @@ import cProfile
 import dataclasses
 import datetime
 import dis
+import enum
 import functools
 import gc
 import inspect
@@ -34,6 +35,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 
 import torch
+import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -49,7 +51,6 @@ log = logging.getLogger(__name__)
 
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
-
 
 timer_counter = itertools.count()
 
@@ -101,6 +102,14 @@ def reset_frame_count():
     global curr_frame
     frame_phase_timing.clear()
     curr_frame = 0
+
+
+op_count = 0
+
+
+def increment_op_count(cnt):
+    global op_count
+    op_count += cnt
 
 
 # Print a report of time spent so far
@@ -691,7 +700,7 @@ def is_safe_constant(v):
             type(type),
             torch.device,
         ),
-    )
+    ) or isinstance(v, enum.Enum)
 
 
 def check_constant_args(args, kwargs):
@@ -740,12 +749,33 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def enum_repr(value):
+    # Workaround repr(Enum) returning invalid global reference before python 3.11
+    # https://peps.python.org/pep-0663/
+    if sys.version_info < (3, 11):
+        return str(value)
+    else:
+        return repr(value)
+
+
 def dict_param_key_ids(value):
     return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
 
 
 def dict_const_keys(value):
     return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+
+
+def dict_const_keys_repr(const_keys):
+    if any(isinstance(k, enum.Enum) for k in const_keys):
+        # To workaround repr(Enum) returning invalid global reference before python 3.11
+        # by calling enum_repr and removing quotes to render enum in guard code.
+        const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
+            "'", ""
+        )
+    else:
+        const_keys_str = f"{const_keys!r}"
+    return const_keys_str
 
 
 def global_key_name(key):
@@ -1123,14 +1153,15 @@ def get_fake_value(node, tx):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            if config.capture_scalar_outputs and node.target == "item":
-                return torch.zeros(size=(), dtype=args[0].dtype).item()
-            else:
-                unimplemented(f"data dependent operator: {cause.func}")
+            unimplemented(f"data dependent operator: {cause.func}")
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        ):
+            unimplemented("guard on data-dependent symbolic int/float")
         raise TorchRuntimeError() from e
 
 
@@ -1240,3 +1271,17 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode is flat_input.fake_mode
     return fake_mode
+
+
+def fqn(obj: Any):
+    """
+    Returns the fully qualified name of the object.
+    """
+    return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def ifdyn(count1, count2):
+    if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2

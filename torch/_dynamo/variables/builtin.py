@@ -24,7 +24,9 @@ from ..utils import (
     specialize_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
+from .constant import ConstantVariable
 from .dicts import ConstDictVariable
+from .lists import BaseListVariable, ListVariable, TupleVariable
 from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
@@ -216,21 +218,28 @@ class BuiltinVariable(VariableTracker):
 
         # List-like addition (e.g. [1, 2] + [3, 4])
         list_like_addition_handlers = [
+            # NB: Prefer the tuple-specific logic over base logic because of
+            # some SizeVariable weirdness. Specifically, the tuple-specific logic
+            # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
             (
-                (variables.BaseListVariable, variables.BaseListVariable),
-                lambda tx, a, b, options: type(a)(a.items + b.items, **options),
-            ),
-            (
-                (variables.TupleVariable, variables.ConstantVariable),
-                lambda tx, a, b, options: variables.TupleVariable(
+                (TupleVariable, ConstantVariable),
+                lambda tx, a, b, options: TupleVariable(
                     a.items + list(b.unpack_var_sequence(tx)), **options
                 ),
             ),
             (
-                (variables.ConstantVariable, variables.TupleVariable),
-                lambda tx, a, b, options: type(b)(
+                (ConstantVariable, TupleVariable),
+                lambda tx, a, b, options: TupleVariable(
                     list(a.unpack_var_sequence(tx)) + b.items, **options
                 ),
+            ),
+            (
+                (TupleVariable, TupleVariable),
+                lambda tx, a, b, options: TupleVariable(a.items + b.items, **options),
+            ),
+            (
+                (BaseListVariable, BaseListVariable),
+                lambda tx, a, b, options: type(a)(a.items + b.items, **options),
             ),
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
@@ -244,20 +253,14 @@ class BuiltinVariable(VariableTracker):
             )
 
         list_like_expansion_handlers = [
+            ((ListVariable, ConstantVariable), expand_list_like),
+            ((TupleVariable, ConstantVariable), expand_list_like),
             (
-                (variables.ListVariable, variables.ConstantVariable),
-                expand_list_like,
-            ),
-            (
-                (variables.TupleVariable, variables.ConstantVariable),
-                expand_list_like,
-            ),
-            (
-                (variables.ConstantVariable, variables.ListVariable),
+                (ConstantVariable, ListVariable),
                 lambda tx, a, b, options: expand_list_like(tx, b, a, options),
             ),
             (
-                (variables.ConstantVariable, variables.TupleVariable),
+                (ConstantVariable, TupleVariable),
                 lambda tx, a, b, options: expand_list_like(tx, b, a, options),
             ),
         ]
@@ -698,6 +701,15 @@ class BuiltinVariable(VariableTracker):
             unimplemented(
                 f"isinstance called on UserDefinedClass {arg} {isinstance_type}"
             )
+        # handle __instancecheck__ defined in user class
+        if (
+            isinstance(arg, variables.UserDefinedObjectVariable)
+            and "__instancecheck__" in isinstance_type.__class__.__dict__
+        ):
+            return variables.ConstantVariable(
+                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
+            )
+
         try:
             val = issubclass(arg_type, isinstance_type)
         except TypeError:
