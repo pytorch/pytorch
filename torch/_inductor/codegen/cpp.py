@@ -378,7 +378,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
-        return f"decltype({b})::blendv({c}, {b}, {a})"
+        return f"decltype({b})::blendv({c}, {b}, {a} != 0)"
 
     @staticmethod
     def sign(x):
