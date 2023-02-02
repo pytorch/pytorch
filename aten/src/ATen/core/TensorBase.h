@@ -858,7 +858,7 @@ auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t
 
 template <typename T>
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_var_t<T> {
-  return _register_hook(std::move(hook));
+  return _register_hook(std::forward<T>(hook));
 }
 
 namespace detail {

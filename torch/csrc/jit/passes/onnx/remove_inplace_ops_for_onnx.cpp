@@ -294,7 +294,7 @@ static std::pair<Value*, Value*> PrepareListDeleteForONNX(Node* n) {
 
 static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::insert || n->kind() == aten::append);
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
@@ -306,7 +306,7 @@ static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   // It seems the JIT does not always produce an output for _set_item.
   // In particular it seems to for list but not for dict.
   // So we add one if needed.
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
