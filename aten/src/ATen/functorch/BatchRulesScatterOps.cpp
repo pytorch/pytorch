@@ -350,14 +350,12 @@ namespace {
   // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L294-L312
   VmapDimVector compute_indexed_shape(const Tensor &src, TensorList indices_list)
   {
-    int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
+    int64_t dims_before = 0, dims_indexed = 0;
     IntArrayRef replacement_shape;
     for (const auto dim : c10::irange(indices_list.size())) {
       if (!indices_list[dim].defined()) {
         if (dims_indexed == 0) {
           dims_before++;
-        } else {
-          dims_after++;
         }
       } else {
         dims_indexed++;

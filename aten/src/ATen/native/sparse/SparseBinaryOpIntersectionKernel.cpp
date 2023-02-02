@@ -42,13 +42,13 @@ struct CPUValueSelectionIntersectionKernel {
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx,
-      const c10::optional<Tensor>& match_mask = c10::nullopt) {
+      const c10::optional<Tensor>& intersection_counts = c10::nullopt) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
         rhs_values,
         rhs_select_idx,
-        match_mask);
+        intersection_counts);
     auto res_values = iter.tensor(0);
 
     auto lhs_nnz_stride = lhs_values.stride(0);
@@ -65,7 +65,7 @@ struct CPUValueSelectionIntersectionKernel {
                   const auto* ptr_lhs_select_idx_bytes = data[2];
                   const auto* ptr_rhs_values_bytes = data[3];
                   const auto* ptr_rhs_select_idx_bytes = data[4];
-                  const auto* ptr_match_bytes = data[5];
+                  const auto* ptr_intersection_counts_bytes = data[5];
 
                   for (int64_t i = 0; i < n; ++i) {
                     // Exctract data
@@ -74,10 +74,10 @@ struct CPUValueSelectionIntersectionKernel {
                     const auto lhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_lhs_select_idx_bytes);
                     const auto* ptr_rhs_values = reinterpret_cast<const scalar_t*>(ptr_rhs_values_bytes);
                     const auto rhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_rhs_select_idx_bytes);
-                    const auto match = *reinterpret_cast<const bool*>(ptr_match_bytes);
+                    const auto count = *reinterpret_cast<const int64_t*>(ptr_intersection_counts_bytes);
 
                     // Apply op
-                    if (match) {
+                    if (count) {
                       *ptr_res_values = binary_op_t::apply(
                           *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
                           *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
@@ -91,7 +91,7 @@ struct CPUValueSelectionIntersectionKernel {
                     ptr_lhs_select_idx_bytes += strides[2];
                     ptr_rhs_values_bytes += strides[3];
                     ptr_rhs_select_idx_bytes += strides[4];
-                    ptr_match_bytes += strides[5];
+                    ptr_intersection_counts_bytes += strides[5];
                   }
                 };
                 iter.for_each(loop, at::internal::GRAIN_SIZE);
