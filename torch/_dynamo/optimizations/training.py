@@ -22,7 +22,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-from .. import config, eval_frame
+from .. import eval_frame
 from ..utils import counters
 from .backends import BACKENDS
 
@@ -89,7 +89,7 @@ aot_eager_decomp_partition = aot_autograd(
     bw_compiler=nop,
     # NB: lambda here is to delay import of inductor
     decompositions=lambda: import_module(
-        f"{config.inductor_import}.compile_fx"
+        "torch._inductor.compile_fx"
     ).select_decomp_table(),
     partition_fn=functools.partial(
         min_cut_rematerialization_partition, compiler="inductor"
