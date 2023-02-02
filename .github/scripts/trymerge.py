@@ -1105,7 +1105,7 @@ class MergeRule:
     patterns: List[str]
     approved_by: List[str]
     mandatory_checks_name: Optional[List[str]]
-
+    ignore_flaky_failures: bool = True
 
 def gen_new_issue_link(
     org: str,
@@ -1119,8 +1119,9 @@ def gen_new_issue_link(
             f"template={urllib.parse.quote(template)}")
 
 
-def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+def read_merge_and_flaky_rules(repo: Optional[GitRepo], org: str, project: str) -> Tuple[List[MergeRule], List[FlakyRule]]:
     repo_relative_rules_path = MERGE_RULE_PATH
+    rc = None
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -1128,15 +1129,24 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
             reader=json.load,
         )
         content = base64.b64decode(json_data["content"])
-        return [MergeRule(**x) for x in yaml.safe_load(content)]
+        rc = yaml.safe_load(content)
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
             print(f"{rules_path} does not exist, returning empty rules")
-            return []
+            return [], []
         with open(rules_path) as fp:
             rc = yaml.safe_load(fp)
-        return [MergeRule(**x) for x in rc]
+    merge_rules = []
+    flaky_rules = []
+    for x in rc:
+        try:
+            merge_rules.append(MergeRule(**x))
+        except Exception as e:
+            if "flaky_rules_location_url" in x:
+                flaky_rules = get_flaky_rules(x["flaky_rules_location_url"], 3)
+
+    return merge_rules, flaky_rules
 
 
 def find_matching_merge_rule(
@@ -1149,7 +1159,6 @@ def find_matching_merge_rule(
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
-    checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
 
     issue_link = gen_new_issue_link(
         org=pr.org,
@@ -1158,10 +1167,12 @@ def find_matching_merge_rule(
     )
     reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
 
-    rules = read_merge_rules(repo, pr.org, pr.project)
+    rules, flaky_rules = read_merge_and_flaky_rules(repo, pr.org, pr.project)
     if not rules:
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
+    checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
+    checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1225,7 +1236,11 @@ def find_matching_merge_rule(
         # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         required_checks = list(filter(lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks))
-        [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
+        [pending_checks, failed_checks] = categorize_checks(
+            checks,
+            required_checks,
+            ok_failed_checks_threshold=3 if rule.ignore_flaky_failures else 0
+        )
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
@@ -1292,14 +1307,13 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
 
-def get_flaky_rules(num_retries: int = 3) -> List[FlakyRule]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
+def get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
     try:
         return [FlakyRule(**rule) for rule in fetch_json_list(url)]
     except Exception as e:
         print(f"Could not download {url} because: {e}.")
         if num_retries > 0:
-            return get_flaky_rules(num_retries=num_retries - 1)
+            return get_flaky_rules(url, num_retries=num_retries - 1)
         return []
 
 def get_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> List[Dict[str, Any]]:
@@ -1334,9 +1348,9 @@ where
 def get_classifications(
     head_sha: str,
     merge_base: str,
-    checks: Dict[str, JobCheckState]
+    checks: Dict[str, JobCheckState],
+    flaky_rules: List[FlakyRule]
 ) -> Dict[str, JobCheckState]:
-    flaky_rules_json = get_flaky_rules()
 
     rockset_results = get_rockset_results(head_sha, merge_base)
     head_sha_jobs: Dict[str, Dict[str, Any]] = {}
@@ -1368,7 +1382,7 @@ def get_classifications(
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
             check.classification = "BROKEN_TRUNK"
-        elif any([rule.matches(head_sha_job) for rule in flaky_rules_json]):
+        elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
             check.classification = "FLAKY"
     return checks
 
@@ -1398,7 +1412,7 @@ def get_combined_checks_from_pr_and_land_validation(
 
     # Merge the two checks together. Land validation check results (if any) overwrite pr check results
     merged_checks = {**pr_checks, **land_validation_checks}  # explanation: https://stackoverflow.com/a/26853961/21539
-    return get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), merged_checks)
+    return merged_checks
 
 def filter_checks_with_lambda(
     checks: JobNameToStateDict,
@@ -1601,6 +1615,7 @@ def merge(pr_num: int, repo: GitRepo,
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
+    _, flaky_rules = read_merge_and_flaky_rules(repo, pr.org, pr.project)
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
@@ -1614,15 +1629,23 @@ def merge(pr_num: int, repo: GitRepo,
         try:
             required_checks = []
             failed_rule_message = None
+            ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(pr, repo)
             except MandatoryChecksMissingError as ex:
-                if ex.rule is not None and ex.rule.mandatory_checks_name is not None:
-                    required_checks = ex.rule.mandatory_checks_name
+                if ex.rule is not None:
+                    ignore_flaky_failures = ex.rule.ignore_flaky_failures
+                    if ex.rule.mandatory_checks_name is not None:
+                        required_checks = ex.rule.mandatory_checks_name
                 failed_rule_message = ex
 
             checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-            pending, failing = categorize_checks(checks, required_checks + [x for x in checks.keys() if x not in required_checks])
+            checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+            pending, failing = categorize_checks(
+                checks,
+                required_checks + [x for x in checks.keys() if x not in required_checks],
+                ok_failed_checks_threshold=3 if ignore_flaky_failures else 0
+            )
             # HACK until GitHub will be better about surfacing those
             startup_failures = filter_checks_with_lambda(checks, lambda status: status == "STARTUP_FAILURE")
             if len(startup_failures) > 0:

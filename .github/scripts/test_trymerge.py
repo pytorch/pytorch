@@ -17,7 +17,7 @@ from trymerge import (
     validate_land_time_checks,
     gh_graphql,
     gh_get_team_members,
-    read_merge_rules,
+    read_merge_and_flaky_rules,
     validate_revert,
     GitHubPR,
     MergeRule,
@@ -28,9 +28,10 @@ from trymerge import (
     get_combined_checks_from_pr_and_land_validation,
     get_rockset_results,
     main as trymerge_main,
+    get_classifications,
 )
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from unittest import TestCase, main, mock
 from urllib.error import HTTPError
 
@@ -138,7 +139,7 @@ def mock_gh_get_info() -> Any:
     return {"closed": False, "isCrossRepository": False}
 
 
-def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_and_flaky_rules_NE(repo: Any, org: str, project: str) -> Tuple[List[MergeRule], List[FlakyRule]]:
     return [
         MergeRule(name="mock with nonexistent check",
                   patterns=["*"],
@@ -147,10 +148,10 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeR
                                          "Facebook CLA Check",
                                          "nonexistent"],
                   ),
-    ]
+    ], []
 
 
-def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_and_flaky_rules(repo: Any, org: str, project: str) -> Tuple[List[MergeRule], List[FlakyRule]]:
     return [
         MergeRule(name="super",
                   patterns=["*"],
@@ -160,13 +161,13 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                                          "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
                                          ],
                   ),
-    ]
+    ], []
 
 
-def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_and_flaky_rules_raise(repo: Any, org: str, project: str) -> Tuple[List[MergeRule], List[FlakyRule]]:
     raise RuntimeError("testing")
 
-def empty_flaky_rules() -> List[FlakyRule]:
+def empty_flaky_rules(url: str, retries: int) -> List[FlakyRule]:
     return []
 
 def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
@@ -175,8 +176,6 @@ def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]
 def dummy_merge_base() -> str:
     return "dummy"
 
-def mocked_flaky_rules() -> List[FlakyRule]:
-    return [FlakyRule("distributed", ["##[error]The operation was canceled."])]
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -195,10 +194,11 @@ class TestGitHubPR(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
-        self.assertGreater(len(read_merge_rules(repo, "pytorch", "pytorch")), 1)
+        merge_rules, _ = read_merge_and_flaky_rules(repo, "pytorch", "pytorch")
+        self.assertGreater(len(merge_rules), 1)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
+    @mock.patch('trymerge.read_merge_and_flaky_rules', side_effect=mocked_read_merge_and_flaky_rules)
     def test_match_rules(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
         "Tests that PR passes merge rules"
         pr = GitHubPR("pytorch", "pytorch", 77700)
@@ -206,15 +206,15 @@ class TestGitHubPR(TestCase):
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_raise)
-    def test_read_merge_rules_fails(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
+    @mock.patch('trymerge.read_merge_and_flaky_rules', side_effect=mocked_read_merge_and_flaky_rules_raise)
+    def test_read_merge_and_flaky_rules_fails(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
         "Tests that PR fails to read the merge rules"
         pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = DummyGitRepo()
         self.assertRaisesRegex(RuntimeError, "testing", lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
+    @mock.patch('trymerge.read_merge_and_flaky_rules', side_effect=mocked_read_merge_and_flaky_rules)
     def test_lint_fails(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
         "Tests that PR fails mandatory lint check"
         pr = GitHubPR("pytorch", "pytorch", 90791)
@@ -302,9 +302,9 @@ class TestGitHubPR(TestCase):
         self.assertGreater(len(authors), 50)
         self.assertTrue("@" in pr.get_author())
 
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_NE)
+    @mock.patch('trymerge.read_merge_and_flaky_rules', side_effect=mocked_read_merge_and_flaky_rules_NE)
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_pending_status_check(self, mocked_gql: Any, mocked_read_merge_rules: Any, *args: Any) -> None:
+    def test_pending_status_check(self, mocked_gql: Any, mocked_read_merge_and_flaky_rules: Any, *args: Any) -> None:
         """ Tests that PR with nonexistent/pending status checks fails with the right reason.
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
@@ -394,7 +394,7 @@ class TestGitHubPR(TestCase):
                                            mandatory_only=False)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
+    @mock.patch('trymerge.read_merge_and_flaky_rules', side_effect=mocked_read_merge_and_flaky_rules)
     def test_revert_rules(self, mock_gql: Any, mock_mr: Any, *args: Any) -> None:
         """ Tests that reverts from collaborators are allowed """
         pr = GitHubPR("pytorch", "pytorch", 79694)
@@ -421,10 +421,11 @@ class TestGitHubPR(TestCase):
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestBypassFailures(TestCase):
-    @mock.patch("trymerge.get_flaky_rules", side_effect=mocked_flaky_rules)
     def test_get_classifications(self, *args: Any) -> None:
+        flaky_rules = [FlakyRule("distributed", ["##[error]The operation was canceled."])]
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = get_combined_checks_from_pr_and_land_validation(pr, None)
+        checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
         self.assertTrue(
             checks[
                 "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
