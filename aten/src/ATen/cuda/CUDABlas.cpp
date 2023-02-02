@@ -8,6 +8,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
@@ -618,7 +619,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 } // namespace
 
-template <typename Dtype>
+template <typename Dtype, typename RDtype>
 void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -631,9 +632,10 @@ void gemm_and_bias(
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
     const Dtype* bias,
-    Dtype* result_ptr,
+    RDtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
+  std::cout << " GEMM AN DBIAS " << std::endl;
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 
@@ -653,6 +655,14 @@ void gemm_and_bias(
     abcType = CUDA_R_16F;
   } else if (std::is_same<Dtype, at::BFloat16>::value) {
     abcType = CUDA_R_16BF;
+  }
+  cudaDataType_t abType = abcType;
+  cudaDataType_t cType = abcType;
+  if (std::is_same<Dtype, int8_t>::value) {
+    abType = CUDA_R_8I1;
+    cType = CUDA_R_32I;
+    // TORCH_CHECK(std::is_same<RDtype, int32_t>::value);
+    std::cout << "USING THEM INT DTYPES" << std::endl;
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -832,6 +842,22 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<int8_t> alpha_val,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    const int8_t* bias,
+    int32_t* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER)

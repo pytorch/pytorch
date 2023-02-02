@@ -30,6 +30,8 @@
 #include <ATen/ops/vdot_native.h>
 #endif
 
+#include <iostream>
+
 namespace at::native {
 
 namespace {
@@ -296,6 +298,7 @@ Tensor& addmm_out_cuda_impl(
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
+    std::cout << "USING LtInteraface!" << std::endl;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -679,6 +682,58 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
       });
     }
   }
+}
+
+Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const Scalar& beta, const Scalar& alpha) {
+  std::cout << "Calling _int_addmm_out_cuda" << std::endl;
+  Tensor result = at::empty({mat1.size(0), mat2.size(1)}, mat1.options().dtype(at::kInt));
+  Tensor bias = at::empty({mat2.size(1)}, mat1.options());
+  result.fill_(0);
+  bias.fill_(0);
+
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  bool transpose_result;
+  c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
+  bool transpose_mat1;
+  bool transpose_mat2;
+  auto mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+
+  if (transpose_result) {
+    transpose_mat1 = !transpose_mat1;
+    transpose_mat2 = !transpose_mat2;
+    mat1_sizes = mat1_->sizes();
+    mat2_sizes = mat2_->sizes();
+  }
+
+  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
+  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
+  int64_t n = mat2_sizes[transpose_result ? 0 : 1];
+  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
+  int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
+  int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
+
+  // addmm_out_cuda_impl(result, self, mat1, mat2, 1.0, 1.0);
+
+  at::cuda::blas::gemm_and_bias<int8_t, int32_t>(
+      transpose_mat1,
+      transpose_mat2,
+      m,
+      n,
+      k,
+      1.0, //alpha.to<at::opmath_type<scalar_t>>(),
+      mat1_->data_ptr<int8_t>(),
+      mat1_ld,
+      mat2_->data_ptr<int8_t>(),
+      mat2_ld,
+      // self.data_ptr<scalar_t>(),
+      bias.data_ptr<int8_t>(),
+      // nullptr,
+      result_->data_ptr<int32_t>(),
+      result_ld);
+
+  return result;
 }
 
 } // namespace at::native
