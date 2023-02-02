@@ -4,8 +4,8 @@ from typing import Any, List, Optional
 
 import torch
 from torch import fx
+from torch._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 from torch.fx.node import Node
-from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 
 log = logging.getLogger(__name__)
 

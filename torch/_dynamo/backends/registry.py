@@ -72,10 +72,9 @@ def _lazy_import():
 
     # TODO(jansel): refactor backends defined in other places
     from .. import debug_utils
-    from ..optimizations import backends, distributed, training
+    from ..optimizations import backends, training
 
     training.create_aot_backends()
     # avoid unused import lint
     assert backends is not None
-    assert distributed is not None
     assert debug_utils is not None
