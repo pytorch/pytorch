@@ -25,6 +25,8 @@ from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
+from torch.utils.checkpoint import checkpoint
+from torch.autograd.graph import _ignore_disable_saved_tensor_hooks
 
 import functorch
 from functorch import (
@@ -2498,6 +2500,141 @@ class TestJvp(TestCase):
 
         # Should not error
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
+
+
+class TestSavedTensorHooks(TestCase):
+    @staticmethod
+    def checkpoint(fn):
+        def checkpointed_fn(*args, **kwargs):
+            return checkpoint(fn, *args, use_reentrant=False)
+        return checkpointed_fn
+
+    @staticmethod
+    def sum(fn):
+        def fn_and_sum(x):
+            return fn(x).sum()
+        return fn_and_sum
+
+    @_ignore_disable_saved_tensor_hooks()
+    def test_count_unpack_pack(self):
+        # Tests several invariants about packing/unpacking + functorch. We note that:
+        # - Number of pack calls is multiplied by the number of grads nested at the time
+        #   the pack is made. See below for specific examples in the first and second order
+        #   cases.
+        # - Number of unpacks in functorch is the same as that in vanilla autograd, no matter
+        #   the number of nested grad transforms.
+        # - Number of packs is equivalent to number of unpacks only when considering a single
+        #   forward and backward. You cannot assume this to be true when doing double
+        #   backward, because double backward may reuse the graph of the forward in subtly
+        #   different ways depending on the operation.
+        # - These numbers would be different if grad_out also required grad. In functorch,
+        #   grad_out does not require_grad by default when using grad transform
+        pack_count = [0]
+        unpack_count = [0]
+
+        def pack(x):
+            pack_count[0] += 1
+            return x
+
+        def unpack(x):
+            unpack_count[0] += 1
+            return x
+
+        def reset_counts():
+            pack_count[0] = 0
+            unpack_count[0] = 0
+
+        fns_and_pack_counts = [
+            # Function, num-fwd-packs, num-bw-packs, num-bw-unpacks, num-bwbw-packs
+            # --------------------------------------------------------------------------
+            # 1) sin
+            # during forward: sin saves the input, during backward: cos also saves the input,
+            # and mul saves grad_out. During double backward, I don't need to unpack what sin saved.
+            # num-bw-unpacks = num-bw-packs
+            (lambda x: x.sin().sum(), 1, 2, 2, 2),
+            # 2) exp
+            # the derivative of exp is exp, so during backward no non-linear computation
+            # needs to be done. num-bw-unpacks = num-bw-packs + num-fwd-packs
+            (lambda x: x.exp().sum(), 1, 1, 2, 1),
+            # 3) x * x
+            # the same variable is saved twice by the same node. during backward
+            # running MulBackward saves grad_out twice. But grad_out doesn't require grad, so
+            # running double backward does not pack anything.
+            (lambda x: (x * x).sum(), 2, 2, 2, 0),
+            # 4) exp then sin
+            # the save variable is saved twice by two different nodes.
+            (lambda x: x.exp().sin().sum(), 2, 4, 5, 8)
+        ]
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            for fn, fw_count, bw_pack_count, bw_unpack_count, bwbw_pack_count in fns_and_pack_counts:
+                a = torch.ones(5, requires_grad=True)
+
+                # Vanilla autograd, don't need to multiply pack counts
+                # Single forward
+                reset_counts()
+                y = fn(a)
+                self.assertEqual(pack_count[0], fw_count)
+
+                # Backward
+                reset_counts()
+                ga, = torch.autograd.grad(y, a, create_graph=True)
+                self.assertEqual(unpack_count[0], fw_count)
+                self.assertEqual(pack_count[0], bw_pack_count)
+
+                # Double backward
+                reset_counts()
+                torch.autograd.grad(ga.sum(), a, create_graph=True)
+                self.assertEqual(unpack_count[0], bw_unpack_count)
+                self.assertEqual(pack_count[0], bwbw_pack_count)
+
+                # Functorch, need to multiply pack counts, but not unpack counts
+                for inner_requires_grad in (True, False):
+                    a = torch.ones(5, requires_grad=inner_requires_grad)
+
+                    first_level_factor = 1
+                    second_level_factor = 2
+                    if inner_requires_grad:
+                        first_level_factor += 1
+                        second_level_factor += 1
+
+                    # First-order functorch:
+                    # grad (x2)
+                    #   forward
+                    #   backward
+                    reset_counts()
+                    y = grad(fn)(a)
+                    self.assertEqual(unpack_count[0], fw_count)
+                    self.assertEqual(pack_count[0], (fw_count + bw_pack_count) * first_level_factor)
+
+                    # Second-order functorch:
+                    # grad (x2)
+                    #   forward
+                    #      grad (x3)
+                    #         forward
+                    #         backward
+                    #   backward
+                    reset_counts()
+                    y = grad(self.sum(grad(fn)))(a)
+                    self.assertEqual(unpack_count[0], fw_count + bw_unpack_count)
+                    self.assertEqual(
+                        pack_count[0],
+                        (fw_count + bw_pack_count) * second_level_factor + bwbw_pack_count * first_level_factor)
+
+    @_ignore_disable_saved_tensor_hooks()
+    def test_basic_single_order_checkpointing_correct(self):
+        count = [0]
+
+        def fn(x):
+            count[0] += 1
+            return (x * x).exp().sin().exp().sum()
+
+        a = torch.randn(3, 3, requires_grad=True)
+        out2 = grad(fn)(a)
+        self.assertEqual(count[0], 1)
+        out1 = grad(self.checkpoint(fn))(a)
+        self.assertEqual(count[0], 3)
+        self.assertEqual(out1, out2)
 
 
 # The tests here follow the cases in [Forward Grad View/inplace]
