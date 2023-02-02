@@ -8,8 +8,8 @@
 Global flags for aot autograd
 """
 import os
-import logging
 import sys
+import logging
 
 use_functionalize = True
 
@@ -42,8 +42,7 @@ log_level = (
     logging.DEBUG if debug_partitioner or debug_graphs or debug_joint else logging.INFO
 )
 
-from torch._dynamo.config_utils import get_config_serialization_fns
+from .._dynamo.config_utils import install_config_module
 
-save_config, load_config = get_config_serialization_fns(
-    sys.modules[__name__],
-)
+# adds patch, save_config, invalid config checks, etc
+install_config_module(sys.modules[__name__])
