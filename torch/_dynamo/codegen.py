@@ -1,13 +1,17 @@
 import collections
 import dataclasses
 import re
-import sys
 import types
 from typing import List
 
 import torch.nn
 
-from .bytecode_transformation import create_instruction, Instruction
+from .bytecode_transformation import (
+    create_dup_top,
+    create_instruction,
+    create_rot_n,
+    Instruction,
+)
 from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, istype, rot_n_helper
@@ -72,7 +76,7 @@ class PyCodegen(object):
         graph_outputs = self.graph_outputs
 
         if self.top_of_stack is value:
-            output.append(create_instruction("DUP_TOP"))
+            output.append(create_dup_top())
             return
 
         if allow_cache:
@@ -141,7 +145,7 @@ class PyCodegen(object):
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
-                self._output.append(create_instruction("DUP_TOP"))
+                self._output.append(create_dup_top())
                 self.add_cache(value)
 
         self.top_of_stack = value
@@ -259,24 +263,21 @@ class PyCodegen(object):
         )
 
     def rot_n(self, n):
-        if n == 0 or n == 1:
-            return []
-        elif n == 2:
-            return [create_instruction("ROT_TWO")]
-        elif n == 3:
-            return [create_instruction("ROT_THREE")]
-        elif n == 4:
-            return [create_instruction("ROT_FOUR")]
-        elif sys.version_info >= (3, 10):
-            return [create_instruction("ROT_N", n)]
-        else:
-            return [
-                create_instruction("BUILD_TUPLE", n),
-                self._create_load_const(rot_n_helper(n)),
-                create_instruction("ROT_TWO"),
-                create_instruction("CALL_FUNCTION_EX", 0),
-                create_instruction("UNPACK_SEQUENCE", n),
-            ]
+        try:
+            return create_rot_n(n)
+        except AttributeError:
+            # desired rotate bytecode doesn't exist, generate equivalent bytecode
+            return (
+                [
+                    create_instruction("BUILD_TUPLE", n),
+                    self._create_load_const(rot_n_helper(n)),
+                ]
+                + create_rot_n(2)
+                + [
+                    create_instruction("CALL_FUNCTION_EX", 0),
+                    create_instruction("UNPACK_SEQUENCE", n),
+                ]
+            )
 
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, num_on_stack=0

@@ -1503,6 +1503,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 return getattr(self, "INPLACE_" + opname[8:])(inst)
             return getattr(self, "BINARY_" + opname)(inst)
 
+    def COPY(self, inst):
+        self.push(self.stack[-inst.arg])
+
+    def SWAP(self, inst):
+        self.stack[-1], self.stack[-inst.arg] = self.stack[-inst.arg], self.stack[-1]
+
     JUMP_BACKWARD = jump
     JUMP_BACKWARD_NO_INTERRUPT = jump
 
