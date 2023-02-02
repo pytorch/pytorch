@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: 17,47 * * * *
   workflow_dispatch:
+  push:
 
 concurrency:
   group: ${{ github.workflow }}
@@ -32,9 +33,8 @@ jobs:
 
       - name: Install Python Packages
         run: |
-          pip3 install rockset==0.8.10
+          pip3 install rockset==1.0.3
           pip3 install boto3==1.19.12
-          pip3 install six==1.16.0
 
       - name: Get latest viable commit
         env:
@@ -44,14 +44,14 @@ jobs:
           echo "latest_viable_sha=$output" >> "${GITHUB_OUTPUT}"
         id: get-latest-commit
 
-      - name: Push SHA to viable/strict branch
-        if: steps.get-latest-commit.outputs.latest_viable_sha != 'None'
-        env:
-          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-        run: |
-          git config --global user.email "pytorchmergebot@users.noreply.github.com"
-          git config --global user.name "PyTorch MergeBot"
-          echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
-          # Pushing an older green commit here will fail because it's non-fast-forward, which is ok
-          # to ignore because we already have the later green commit in visable/strict
-          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict || true
+      # - name: Push SHA to viable/strict branch
+      #   if: steps.get-latest-commit.outputs.latest_viable_sha != 'None'
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      #   run: |
+      #     git config --global user.email "pytorchmergebot@users.noreply.github.com"
+      #     git config --global user.name "PyTorch MergeBot"
+      #     echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
+      #     # Pushing an older green commit here will fail because it's non-fast-forward, which is ok
+      #     # to ignore because we already have the later green commit in visable/strict
+      #     git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict || true
