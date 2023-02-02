@@ -6220,6 +6220,8 @@ class DistributedTest:
                 # Case where rank != GPU device.
                 next_rank = (self.rank + 1) % int(self.world_size)
                 torch.cuda.set_device(next_rank)
+                # initialize context
+                dummy = torch.randn(1, device="cuda")
 
             # If GPU test, add object with GPU tensor
             if backend == "nccl":
