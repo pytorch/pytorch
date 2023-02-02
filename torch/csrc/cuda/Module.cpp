@@ -234,7 +234,7 @@ PyObject* THCPModule_setStream_wrap(
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|KKK",
+          "|LLL",
           kwlist,
           &stream_id,
           &device_index,

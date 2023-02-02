@@ -21,7 +21,7 @@ static PyObject* THPStream_pynew(
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|KKK",
+          "|LLL",
           kwlist,
           &stream_id,
           &device_index,
