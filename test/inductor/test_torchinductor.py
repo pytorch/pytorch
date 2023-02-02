@@ -5202,6 +5202,26 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_lerp(self):
+        # non-contiguous inputs for lerp
+        def fn0(i0, i1):
+            x1 = i0.transpose(-2, -3)
+            return torch.lerp(i1, x1, 70000)
+
+        # contiguous inputs for lerp
+        def fn1(i0, i1):
+            return torch.lerp(i1, i0, 70000)
+
+        def compare(fn, inputs):
+            compiled = torch._dynamo.optimize("inductor")(fn)
+            expected = fn(*inputs)
+            actual = compiled(*inputs)
+            self.assertEqual(expected, actual)
+            self.assertEqual(expected.stride(), actual.stride())
+
+        compare(fn0, [torch.rand(10, 3, 10), torch.rand(3, 10, 10)])
+        compare(fn1, [torch.rand(3, 10, 10), torch.rand(3, 10, 10)])
+
     def test_unspec_inputs(self):
         if self.device == "cpu":
             raise unittest.SkipTest("segfault with CPU backend")
