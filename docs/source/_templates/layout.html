@@ -34,9 +34,16 @@
 {%- block content %}
 {{ super() }}
 <script>
-if((window.location.href.indexOf("/_([0-9]+)$/")!= -1))
+
+//const re = new RegExp("/_[a-zA-Z0-9_]*.html")
+//const match = window.location.href.match(re)
+
+var match      = window.location.href.match(/\/_[a-zA-Z0-9_]*.html|_dynamo/gi);
+var url  = window.location.href.lastIndexOf(match[match.length-1]);
+
+if (url)
   {
-    var div = '<div class="admonition note"><p class="admonition-title">Note</p><p><i class="fa fa-flask" aria-hidden="true">&nbsp</i> This page describes a private API. No support is provided for private APIs.</p></div>'
+    var div = '<div class="admonition note"><p class="admonition-title">Note</p><p><i class="fa fa-exclamation-circle" aria-hidden="true">&nbsp</i> This page describes a private API. No support is provided for private APIs.</p></div>'
     document.getElementById("pytorch-article").insertAdjacentHTML('afterBegin', div)
   }
 </script>
