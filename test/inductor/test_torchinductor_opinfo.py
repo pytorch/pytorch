@@ -417,6 +417,9 @@ inductor_all_samples = {
     "all",
     "T",
     "H",
+    "isinf",
+    "isposinf",
+    "isneginf",
     "mT",
     "mH",
 }
