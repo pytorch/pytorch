@@ -657,6 +657,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         return source
 
     def LOAD_GLOBAL(self, inst):
+        if sys.version_info >= (3, 11):
+            if inst.arg % 2:
+                self.PUSH_NULL(inst)
+
         name = inst.argval
 
         if config.replay_record_enabled:

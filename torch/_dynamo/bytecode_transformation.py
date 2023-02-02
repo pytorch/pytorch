@@ -63,6 +63,12 @@ def create_jump_absolute(target):
     return create_instruction(inst, target=target)
 
 
+def create_load_global(name, arg, push_null):
+    if sys.version_info >= (3, 11):
+        arg = (arg << 1) + push_null
+    return create_instruction("LOAD_GLOBAL", arg, name)
+
+
 def create_dup_top():
     if sys.version_info >= (3, 11):
         return create_instruction("COPY", 1)
@@ -362,10 +368,23 @@ def fix_vars(instructions: List[Instruction], code_options):
     varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     for i in range(len(instructions)):
+        if sys.version_info >= (3, 11) and instructions[i].opname == "LOAD_GLOBAL":
+            # LOAD_GLOBAL is in HAS_NAME, so instructions[i].arg will be overwritten.
+            # So we must compute push_null earlier.
+            assert instructions[i].arg is not None
+            shift = 1
+            push_null = instructions[i].arg % 2
+        else:
+            shift = 0
+            push_null = 0
+
         if instructions[i].opcode in HAS_LOCAL:
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             instructions[i].arg = names[instructions[i].argval]
+
+        if instructions[i].arg is not None:
+            instructions[i].arg = (instructions[i].arg << shift) + push_null
 
 
 def transform_code_object(code, transformations, safe=False):
