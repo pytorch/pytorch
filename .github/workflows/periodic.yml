@@ -92,13 +92,9 @@ jobs:
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
-      # test-matrix: |
-      #   { include: [
-      #     { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-      #     { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-      #     { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
-      #   ]}
 
   linux-focal-rocm5_4_2-py3_8-test:
     name: linux-focal-rocm5.4.2-py3.8
