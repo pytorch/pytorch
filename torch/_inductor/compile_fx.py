@@ -4,7 +4,7 @@ import itertools
 import logging
 import sys
 import warnings
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
@@ -14,7 +14,6 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.optimizations.normalize import normalize_ir
 from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
@@ -370,14 +369,23 @@ def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
+    config_patches: Optional[Dict[str, Any]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+            )
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
     with overrides.patch_functions():
-        model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)

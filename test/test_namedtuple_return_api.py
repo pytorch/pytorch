@@ -24,6 +24,10 @@ all_operators_with_namedtuple_return = {
     '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex'
 }
 
+all_operators_with_namedtuple_return_skip_list = {
+    '_scaled_dot_product_flash_attention'
+}
+
 
 class TestNamedTupleAPI(TestCase):
 
@@ -39,7 +43,7 @@ class TestNamedTupleAPI(TestCase):
                 f = f['func']
                 ret = f.split('->')[1].strip()
                 name = regex.findall(f)[0][0]
-                if name in all_operators_with_namedtuple_return:
+                if name in all_operators_with_namedtuple_return :
                     operators_found.add(name)
                     continue
                 if '_backward' in name or name.endswith('_forward'):
@@ -47,6 +51,8 @@ class TestNamedTupleAPI(TestCase):
                 if not ret.startswith('('):
                     continue
                 if ret == '()':
+                    continue
+                if name in all_operators_with_namedtuple_return_skip_list:
                     continue
                 ret = ret[1:-1].split(',')
                 for r in ret:
