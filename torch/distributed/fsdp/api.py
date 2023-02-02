@@ -20,6 +20,11 @@ __all__ = [
     "FullStateDictConfig",
     "LocalStateDictConfig",
     "ShardedStateDictConfig",
+    "OptimStateDictConfig",
+    "FullOptimStateDictConfig",
+    "LocalOptimStateDictConfig",
+    "ShardedOptimStateDictConfig",
+    "StateDictSettings",
 ]
 
 
@@ -301,3 +306,38 @@ class LocalStateDictConfig(StateDictConfig):
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     pass
+
+
+@dataclass
+class OptimStateDictConfig:
+    """
+    ``OptimStateDictConfig`` is the base class for all optimizer state_dict
+    configuration classes.  Users should instantiate a child version
+    (i.e. ``FullOptimStateDictConfig``) in order to configure settings for the
+    particular type of ``optim_state_dict`` implementation FSDP will use.
+    """
+
+    # TODO: actually use this flag in the _optim_utils.py
+    offload_to_cpu: bool = True
+
+
+@dataclass
+class FullOptimStateDictConfig(OptimStateDictConfig):
+    rank0_only: bool = False
+
+
+@dataclass
+class LocalOptimStateDictConfig(OptimStateDictConfig):
+    offload_to_cpu: bool = False
+
+
+@dataclass
+class ShardedOptimStateDictConfig(OptimStateDictConfig):
+    pass
+
+
+@dataclass
+class StateDictSettings:
+    state_dict_type: StateDictType
+    state_dict_config: StateDictConfig
+    optim_state_dict_config: OptimStateDictConfig

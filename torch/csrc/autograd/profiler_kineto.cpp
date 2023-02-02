@@ -577,7 +577,7 @@ void prepareProfiler(
   torch::profiler::impl::kineto::prepareTrace(
       /*cpuOnly=*/!at::hasCUDA(), activities, config.experimental_config);
 
-  if (config.experimental_config.performance_events.size()) {
+  if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
     TORCH_CHECK(
         activities.count(torch::autograd::profiler::ActivityType::CPU),

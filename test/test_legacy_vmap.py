@@ -8,8 +8,7 @@ from torch._vmap_internals import vmap
 import functools
 import itertools
 import warnings
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import types
 
 
@@ -1871,6 +1870,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         # Single vmap, various in_dims / out_dims
         test(lambda x: x.sum(()), [torch.randn([B0])])
+        test(lambda x: x.sum(()), [torch.randn([B0, 2])])
         test(lambda x: x.sum(0), [torch.randn([B0])])
         test(lambda x: x.sum(-1), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0, 3])])
@@ -2413,16 +2413,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_trace(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(Tensor.trace, (x,))
-
-    @skipCUDAIfNoMagma
-    @allowVmapFallbackUsage
-    def test_symeig(self, device):
-        def op(x):
-            return torch.symeig(x, eigenvectors=True)[0]
-
-        x = torch.randn(3, 3, device=device, requires_grad=True)
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
 
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
