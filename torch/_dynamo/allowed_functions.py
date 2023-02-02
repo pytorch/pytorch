@@ -185,7 +185,7 @@ def _allowed_function_ids():
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
-    # torch.Tensor._{fn}
+    # torch.Tensor.{fn}
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
         if isinstance(method, types.MethodDescriptorType):

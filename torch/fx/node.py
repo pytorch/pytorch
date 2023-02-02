@@ -70,7 +70,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
-    # torch.Tensor._{fn}
+    # torch.Tensor.{fn}
     if isinstance(func, types.MethodDescriptorType) and func.__name__ in dir(torch.Tensor):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
