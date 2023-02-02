@@ -8,6 +8,8 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <utility>
+
 // This file contains batching rules for random operations. These are different
 // from our regular batching rules: regular batching rules get registered to the
 // FuncTorchBatched key, but batching rules for random operations get
@@ -99,11 +101,11 @@ Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c
     "If this is necessary for your usage, please file an issue with functorch.");
   if (randomness == RandomnessType::Same && self_bdim) {
     auto intermediate = empty(self.sizes(), self.options());
-    intermediate.bernoulli_(other_, gen);
+    intermediate.bernoulli_(other_, std::move(gen));
     self.copy_(intermediate); // batching should make this just work out...
     return self;
   } else {
-    self_.bernoulli_(other_, gen);
+    self_.bernoulli_(other_, std::move(gen));
     return self;
   }
 }
@@ -198,9 +200,21 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
     check_randomness(randomness); // if we are in eval mode, we don't use about randomness
   }
 
-  if ((train.has_value() && !train) || randomness == RandomnessType::Different) {
-    auto res = at::native_dropout(tensor_value, p, train);
-    return std::make_tuple(makeBatched(std::get<0>(res), 0, cur_level), makeBatched(std::get<1>(res), 0, cur_level));
+  if ((train.has_value() && !train) ||
+      randomness == RandomnessType::Different) {
+    if (!tensor_bdim) {
+      // if tensor is unbatched, add batch dim before
+      // calling dropout.
+      auto shape = tensor_value.sizes();
+      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      shapeVec.reserve(shape.size() + 1);
+      shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
+      tensor_value = tensor_value.expand(shapeVec);
+    }
+    auto [output, mask] = at::native_dropout(tensor_value, p, train);
+    return std::make_tuple(
+        makeBatched(std::move(output), 0, cur_level),
+        makeBatched(std::move(mask), 0, cur_level));
   }
 
   // repeated code from the CPU kernel since the CUDA one doesn't call bernoulli_ explicitly
