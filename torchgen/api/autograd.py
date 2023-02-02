@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Match, Optional, Sequence, Set, Tuple
+from typing import cast, Dict, List, Match, Optional, Sequence, Set, Tuple
 
 from torchgen import local
 
@@ -420,7 +420,7 @@ Attempted to convert a derivative formula for a mutable operator
                 all_var_names: List[str] = []
                 for derivative in ref_diff_info.derivatives:
                     # note(crcrpar): Assumption: `grads` and `result` always are a sequence of Tensors.
-                    modified_formula = derivative.original_formula.replace(
+                    modified_formula = derivative.formula.replace(
                         "grad", "grads[i]"
                     ).replace("result", "result[i]")
 
@@ -440,7 +440,7 @@ Attempted to convert a derivative formula for a mutable operator
                                 ref_input_jit_name, mapped_expr
                             )
                             modified_formula = modified_formula.replace(
-                                ref_input.expr, new_expr
+                                cast(str, ref_input.nctype.name), new_expr
                             )
 
                             nctype = cpp.argument_type(
