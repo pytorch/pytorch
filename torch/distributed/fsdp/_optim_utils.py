@@ -1292,8 +1292,13 @@ def _unflatten_param_groups(
 
 
 def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
+    state = optim_state_dict.get("state", None)
+    if not state:
+        # If we cannot find a state, assume it is not NamedOptimizer as
+        # NamedOptimizer has eagerly initialization.
+        return False
     try:
-        key = next(iter(optim_state_dict["state"].keys()))
+        key = next(iter(state.keys()))
     except Exception as e:
         raise Exception(optim_state_dict) from e
     return isinstance(key, str)
