@@ -100,9 +100,6 @@ compile_threads = (
 # for larger kernels limit this
 kernel_name_max_ops = 10
 
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = __name__.replace(".config", "")
-
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
 
