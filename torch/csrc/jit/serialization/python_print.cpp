@@ -29,7 +29,7 @@ static bool isValidIdentifierChar(char c, size_t pos) {
 }
 
 static bool isValidIdentifier(const std::string& name) {
-  if (name.size() == 0)
+  if (name.empty())
     return false;
   for (const auto i : c10::irange(name.size())) {
     if (!isValidIdentifierChar(name[i], i))
@@ -146,11 +146,11 @@ struct PythonPrintImpl {
       // This prevents having redundant entries at the same offset,
       // which can happen for example in printValueList when begin
       // and end are the empty string.
-      if (s.size() == 0) {
+      if (s.empty()) {
         return *this;
       }
 
-      if (!ranges_.size() || ranges_.back().range != srs_->back()) {
+      if (ranges_.empty() || ranges_.back().range != srs_->back()) {
         ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
       }
       oss_ << s;
@@ -159,7 +159,7 @@ struct PythonPrintImpl {
 
     TaggedStringStream& operator<<(const TaggedStringStream& rhs) {
       for (const auto& range : rhs.ranges_) {
-        if (!ranges_.size() || ranges_.back().range != range.range) {
+        if (ranges_.empty() || ranges_.back().range != range.range) {
           ranges_.emplace_back((size_t)oss_.tellp() + range.bytes, range.range);
         }
       }
@@ -178,7 +178,7 @@ struct PythonPrintImpl {
 
     template <typename T>
     TaggedStringStream& operator<<(const T& t) {
-      if (!ranges_.size() || ranges_.back().range != srs_->back()) {
+      if (ranges_.empty() || ranges_.back().range != srs_->back()) {
         ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
       }
       oss_ << t;
@@ -236,7 +236,7 @@ struct PythonPrintImpl {
     if (v->hasDebugName() && use.user->kind() != prim::Return)
       return false;
     // don't try to inline control blocks
-    if (n->blocks().size() != 0)
+    if (!n->blocks().empty())
       return false;
     // if it is a loop-carried input, we need a variable
     // otherwise the condition or trip count may be emitted in the wrong order
@@ -375,7 +375,7 @@ struct PythonPrintImpl {
   // force them to be by rewriting them
   static std::string makeValidIdentifier(const std::string& candidate) {
     std::stringstream ss;
-    if (candidate.size() == 0 || isdigit(candidate[0]))
+    if (candidate.empty() || isdigit(candidate[0]))
       ss << "_";
     for (char c : candidate) {
       if (isupper(c) || islower(c) || isdigit(c) || c == '_')
@@ -510,7 +510,7 @@ struct PythonPrintImpl {
   }
 
   void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
-    if (lhs.size() == 0) {
+    if (lhs.empty()) {
       return;
     }
     indent();
@@ -561,13 +561,13 @@ struct PythonPrintImpl {
     {
       auto guard = WithIndented();
       // Print node contents
-      printBlock(stmt.thenBlock(), stmt.outputs().size() > 0);
+      printBlock(stmt.thenBlock(), !stmt.outputs().empty());
       printAssignment(stmt.outputs(), stmt.thenOutputs());
     }
     indent() << "else:\n";
     {
       auto guard = WithIndented();
-      printBlock(stmt.elseBlock(), stmt.outputs().size() > 0);
+      printBlock(stmt.elseBlock(), !stmt.outputs().empty());
       printAssignment(stmt.outputs(), stmt.elseOutputs());
     }
   }
@@ -622,7 +622,7 @@ struct PythonPrintImpl {
       auto body_block = stmt.bodyBlock();
       ArrayRef<Value*> loop_carried_block_inputs =
           body_block->inputs().slice(offset);
-      printBlock(body_block, loop_carried_block_inputs.size() > 0);
+      printBlock(body_block, !loop_carried_block_inputs.empty());
       printAssignment(
           loop_carried_block_inputs, body_block->outputs().slice(offset));
     }
@@ -694,7 +694,7 @@ struct PythonPrintImpl {
     assignValuesToTheirUniqueNames(node->outputs());
     indent();
     // Print outputs
-    if (node->outputs().size() > 0) {
+    if (!node->outputs().empty()) {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
@@ -782,7 +782,7 @@ struct PythonPrintImpl {
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this";
         }
-        if (node->inputs().size() > 0) {
+        if (!node->inputs().empty()) {
           indent();
           body_ << "return ";
           printValueList(body_, node->inputs());
@@ -803,7 +803,7 @@ struct PythonPrintImpl {
         // the unpack to be inserted when parsed back in:
         // a, b, = unpacked
         // a, = unpacked # trailing comma forces an unpack to happen
-        if (node->outputs().size() > 0) {
+        if (!node->outputs().empty()) {
           printValueList(body_, node->outputs(), "", ", = ");
         }
         body_ << useOf(node->input()) << "\n";
@@ -831,12 +831,26 @@ struct PythonPrintImpl {
         ss << "fork(" << name << ")";
         printOutputDefinition(node, ss.str());
       } break;
+      case prim::awaitable: {
+        // the subgraph gets emitted as another function
+        auto name = genName("__awaitable_function");
+        auto graph = node->g(attr::Subgraph);
+        indent();
+        body_ << "def " << name << "():\n";
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
+          assignValue(graph->inputs().at(i), node->inputs().at(i));
+        }
+        printBody(graph->block());
+        std::stringstream ss;
+        ss << "awaitable(" << name << ")";
+        printOutputDefinition(node, ss.str());
+      } break;
       case prim::Enter: {
         const auto in = node->inputs().at(0);
         const auto out = node->outputs().at(0);
         indent();
         body_ << "with " << useOf(in);
-        if (out->uses().size() > 0) {
+        if (!out->uses().empty()) {
           assignValue(out, genUniqueNameFor(out));
           body_ << " as " << useOf(out);
         }
@@ -1054,7 +1068,7 @@ struct PythonPrintImpl {
         TypePtr elem_type = list_type->getElementType();
         // Empty lists must be annotated with their type so the compiler knows
         // what type is supposed to be inside them
-        if (node->inputs().size() == 0) {
+        if (node->inputs().empty()) {
           stmt << "annotate("
                << node->output()->type()->annotation_str(type_printer_)
                << ", [])";
@@ -1078,7 +1092,7 @@ struct PythonPrintImpl {
         //   - the dict is empty
         //   - the dict has potentially ambiguous element types
         //       (e.g. Tensor vs. Optional[Tensor])
-        if (node->inputs().size() == 0 ||
+        if (node->inputs().empty() ||
             !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
             !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
           stmt << "annotate("
@@ -1320,7 +1334,7 @@ struct PythonPrintImpl {
         printNode(n, /*print_const=*/true);
       }
       // Print body
-      printBlock(body, body->return_node()->inputs().size() > 0);
+      printBlock(body, !body->return_node()->inputs().empty());
       printNode(body->return_node(), /*print_const=*/false);
     }
   }
@@ -1432,7 +1446,7 @@ struct PythonPrintImpl {
         }
         body_ << "]\n";
         auto forwardPreHooks = classType->getForwardPreHooks();
-        if (forwardPreHooks.size() > 0) {
+        if (!forwardPreHooks.empty()) {
           indent();
           body_ << "__forward_pre_hooks__ = [";
           for (const auto& pre_hook : forwardPreHooks) {
@@ -1442,7 +1456,7 @@ struct PythonPrintImpl {
         }
 
         auto forwardHooks = classType->getForwardHooks();
-        if (forwardHooks.size() > 0) {
+        if (!forwardHooks.empty()) {
           indent();
           body_ << "__forward_hooks__ = [";
           for (const auto& hook : forwardHooks) {
@@ -1543,7 +1557,7 @@ struct PythonPrintImpl {
           indent();
           body_ << "def " << method.name() << "(self";
           TORCH_INTERNAL_ASSERT(
-              method.arguments().size() > 0 &&
+              !method.arguments().empty() &&
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {

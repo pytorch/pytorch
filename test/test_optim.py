@@ -673,6 +673,7 @@ class TestOptim(TestCase):
             if p.requires_grad:
                 p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
 
+        kIterations = 7 if kwarg == "foreach" else 1
         for optimizer_constructor, kwargs in optimizer_with_kwargs:
             res, state = [], []
             for enabled in (False, True):
@@ -688,7 +689,8 @@ class TestOptim(TestCase):
                         params_clone.append(p_clone)
 
                 optimizer = optimizer_constructor(params_clone, **kwargs_clone)
-                optimizer.step()
+                for _ in range(kIterations):
+                    optimizer.step()
 
                 state.append(optimizer.state)
                 res.append(params_clone)
@@ -720,11 +722,14 @@ class TestOptim(TestCase):
             return
         assert flag in ("foreach", "fused")
 
-        kIterations = 4
+        # why 7? iteration 7 is where we start to see differences for RAdam
+        # params interacting with the small eps value, because that's right
+        # after rho_t becomes greater than 5 in step 6.
+        kIterations = 7
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for enabled in (False, True):
+            for flag_value in (False, True):
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
@@ -738,7 +743,7 @@ class TestOptim(TestCase):
                 )
                 model.to(dtype=torch.float64, device=device)
                 params_with_flags = deepcopy(params)
-                params_with_flags[flag] = enabled
+                params_with_flags[flag] = flag_value
 
                 optimizer = optimizer_constructor(
                     model.parameters(), **params_with_flags
@@ -762,7 +767,7 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
             for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
+                self.assertEqual(st_p, mt_p)
 
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
@@ -778,7 +783,7 @@ class TestOptim(TestCase):
                         and actual.ndim == 1
                     ):
                         actual = actual[0]
-                    self.assertEqual(st_p_state[k], actual, atol=5e-5, rtol=0)
+                    self.assertEqual(st_p_state[k], actual)
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
@@ -802,7 +807,9 @@ class TestOptim(TestCase):
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
             ),
+            (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
@@ -831,7 +838,10 @@ class TestOptim(TestCase):
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False)),
-            # TODO: add NAdam, which currently is not accurate enough for the standard atols.
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
             (
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
@@ -840,7 +850,9 @@ class TestOptim(TestCase):
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
             ),
+            (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=1)),
             (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
             (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
@@ -859,12 +871,15 @@ class TestOptim(TestCase):
         self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
 
     def test_fused_optimizers(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-        ]
+        optimizer_pairs_with_flags = tuple(itertools.product(
+            (optim.Adam, optim.AdamW),
+            (
+                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=True),
+                dict(weight_decay=0., amsgrad=False),
+                dict(weight_decay=0., amsgrad=True),
+            ),
+        ))
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1590,35 +1605,21 @@ class TestOptim(TestCase):
             opt.step()
 
     # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
-    def test_functional_fused_adam_with_foundinf(self):
+    def test_functional_fused_optimizer_with_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
-        from torch.optim import adam
+        from torch.optim import adam, adamw
 
         num_tensors = 5
-        for amsgrad in (False, True):
-            params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                for _ in range(4)
-            ]
-            max_exp_avg_sqs = (
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                if amsgrad
-                else []
-            )
-            state_steps = [
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-                for _ in range(num_tensors)
-            ]
-            grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
-            found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-            )
+        for functional_optim, amsgrad in itertools.product((adam.adam, adamw.adamw), (False, True)):
+            params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
+            grad_scale = torch.ones((1,), dtype=torch.float32, device="cuda")
+            found_inf = torch.ones((1,), dtype=torch.float32, device="cuda")
 
-            adam.adam(
+            functional_optim(
                 params,
                 grads,
                 exp_avgs,
@@ -1775,6 +1776,15 @@ class TestOptim(TestCase):
         opt1.step()
         opt2.step()
         self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+
+    def test_fused_optimizer_raises(self):
+        if not torch.cuda.is_available():
+            self.skipTest("Requires CUDA devices")
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            with self.assertRaisesRegex(RuntimeError, "`fused` and `foreach` cannot be `True` together."):
+                optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
+            with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
+                optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
 
 class SchedulerTestNet(torch.nn.Module):
