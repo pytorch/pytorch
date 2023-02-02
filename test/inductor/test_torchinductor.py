@@ -5235,6 +5235,7 @@ class CommonTemplate:
 
     def test_where(self):
         """https://github.com/pytorch/pytorch/issues/93374"""
+
         def fn(x, p1, p0):
             o = torch.where(x, p1, p0)
             return o
@@ -5243,6 +5244,7 @@ class CommonTemplate:
             fn,
             (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
         )
+
 
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
