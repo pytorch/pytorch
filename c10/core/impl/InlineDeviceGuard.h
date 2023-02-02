@@ -115,8 +115,7 @@ class InlineDeviceGuard {
       if (at::cuda::detail::hasPrimaryContext(original_device_.index())) {
         impl_.uncheckedSetDevice(original_device_);
       }
-    }
-    else {
+    } else {
       impl_.uncheckedSetDevice(original_device_);
     }
 #else

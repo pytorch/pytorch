@@ -1503,6 +1503,9 @@ if(USE_CUDA)
         torch_cuda PRIVATE  caffe2::cudnn-private)
   endif()
 
+  # This is for CUDA 12 cudaSetDevice workaround
+  target_link_libraries(torch_cpu PRIVATE caffe2_nvrtc)
+
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
