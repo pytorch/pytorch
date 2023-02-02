@@ -68,6 +68,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     e.restore();                                                        \
     retstmnt;                                                           \
   }                                                                     \
+  catch (py::error_already_set & e) {                                   \
+    e.restore();                                                        \
+    retstmnt;                                                           \
+  }                                                                     \
   _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)          \
   _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)          \
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)            \
