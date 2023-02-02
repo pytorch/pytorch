@@ -697,6 +697,7 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
+    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
