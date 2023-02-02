@@ -13,9 +13,7 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["11.6", "11.7", "11.8"]
-
-
+CUDA_ARCHES = ["11.7", "11.8"]
 ROCM_ARCHES = ["5.2", "5.3"]
 
 
@@ -182,11 +180,7 @@ def generate_wheels_matrix(os: str,
     if python_versions is None:
         # Define default python version
         python_versions = list(FULL_PYTHON_VERSIONS)
-
-        if os == "linux":
-            # NOTE: We only build 3.11 wheel on linux as 3.11 is not
-            # available on conda right now
-            python_versions.append("3.11")
+        python_versions.append("3.11")
 
     if arches is None:
         # Define default compute archivectures

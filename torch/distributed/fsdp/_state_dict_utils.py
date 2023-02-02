@@ -8,7 +8,6 @@ import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 
-# Import the entire FSDP file to avoid circular imports
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -43,7 +42,7 @@ from ._fsdp_extensions import (
 from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_orig_params,
-    _unshard_params,
+    _unshard_fsdp_state_params,
     FLAT_PARAM,
 )
 from .flat_param import FlatParamHandle
@@ -54,8 +53,7 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
     module_name = module_name.replace(f"{FSDP_WRAPPED_MODULE}", "")
     if module_name:
         module_name = f"{module_name}."
-    # Activation checkpoint adds a prefix that has to be
-    # removed as well.
+    # `CheckpointWrapper` adds a prefix that has to be removed as well.
     module_name = module_name.replace(checkpoint_wrapper._CHECKPOINT_PREFIX, "")
     return module_name
 
@@ -86,7 +84,6 @@ def _shared_param_fqns(module: nn.Module, fsdp_state) -> Iterator[Tuple[str, str
 def _enter_unshard_params_ctx(
     module: nn.Module,
     fsdp_state: _FSDPState,
-    recurse: bool = False,
     writeback: bool = False,
     rank0_only: bool = False,
     offload_to_cpu: bool = False,
@@ -95,13 +92,13 @@ def _enter_unshard_params_ctx(
     """
     state_dict hooks cannot use the pure context call as the checkpoint flow
     requires to enter the context in the pre-hook but leave the context in the
-    post-hook. This API enters the context of ``_unshard_params``.
+    post-hook. This API enters the context of ``_unshard_fsdp_state_params``.
     """
     assert module not in fsdp_state._unshard_params_ctx, (
-        "Entering the ``_unshard_params`` context but _unshard_params_ctx[module] "
+        "Entering the ``_unshard_fsdp_state_params`` context but _unshard_params_ctx[module] "
         "is not None."
     )
-    fsdp_state._unshard_params_ctx[module] = _unshard_params(
+    fsdp_state._unshard_params_ctx[module] = _unshard_fsdp_state_params(
         module,
         fsdp_state,
         writeback=writeback,
@@ -114,7 +111,7 @@ def _enter_unshard_params_ctx(
 
 @no_type_check
 def _exit_unshard_params_ctx(module: nn.Module, fsdp_state: _FSDPState) -> None:
-    """A helper function to exit ``_unshard_params`` context."""
+    """A helper function to exit ``_unshard_fsdp_state_params`` context."""
     fsdp_state._unshard_params_ctx[module].__exit__(None, None, None)
     fsdp_state._unshard_params_ctx.pop(module)
 
@@ -141,12 +138,11 @@ def _common_unshard_pre_state_dict_hook(
 ) -> None:
     """
     Performs the pre-state_dict tasks shared by all state_dict types that require
-    ``_unshard_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
+    ``_unshard_fsdp_state_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
     """
     _enter_unshard_params_ctx(
         module,
         fsdp_state,
-        recurse=False,
         writeback=False,
         offload_to_cpu=offload_to_cpu,
         rank0_only=rank0_only,
@@ -164,7 +160,7 @@ def _common_unshard_post_state_dict_hook(
 ) -> Dict[str, Any]:
     """
     The post-state_dict flow that shared by all state_dict types that require
-    ``_unshard_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this
+    ``_unshard_fsdp_state_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this
     hook.
     """
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
@@ -290,7 +286,7 @@ def _full_post_state_dict_hook(
     """
     Hook that runs after model.state_dict() is called before returning result to
     user. For FSDP, we may have to clone the tensors in state_dict as params go
-    back to sharded version after _unshard_params ends, and also remove
+    back to sharded version after _unshard_fsdp_state_params ends, and also remove
     the ``FSDP_WRAPPED_MODULE`` prefix.
     """
 
@@ -307,7 +303,7 @@ def _full_post_state_dict_hook(
         if clean_key.startswith(clean_prefix):
             clean_key = clean_key[len(clean_prefix) :]
 
-        # Clone parameters before exiting the `_unshard_params()` context.
+        # Clone parameters before exiting the `_unshard_fsdp_state_params()` context.
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
             try:
                 state_dict[fqn] = state_dict[fqn].clone().detach()
@@ -333,7 +329,7 @@ def _full_pre_load_state_dict_hook(
     prefix: str,
 ) -> None:
     _lazy_init(fsdp_state, module)
-    _enter_unshard_params_ctx(module, fsdp_state, recurse=False, writeback=True)
+    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
     # Add FSDP_PREFIX only for wrapper-based FSDP.
     if not _is_composable(fsdp_state):
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")

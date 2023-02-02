@@ -98,7 +98,6 @@ BLOCKED_OPS = frozenset(
         "median",
         "nanmedian",
         "_sparse_sparse_matmul",
-        "_sparse_mask_helper",
         "batch_norm_backward_elemt",
         "_euclidean_dist",
         "pixel_shuffle",
