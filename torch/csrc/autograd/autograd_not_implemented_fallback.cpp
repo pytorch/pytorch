@@ -115,7 +115,7 @@ void autogradNotImplementedFallbackImpl(
       stack_start,
       num_arguments);
 
-  const bool any_requires_grad = tensors_requiring_grad_on_stack.size() > 0;
+  const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {

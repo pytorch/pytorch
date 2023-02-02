@@ -448,6 +448,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=8
         )
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_item_capture(self):
         def fn(a, b):
@@ -462,6 +463,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):
         def fn(a, b):
@@ -900,6 +902,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return a - b / c
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
+
+    def test_user_defined_class_python_type(self):
+        class MyClass1:
+            pass
+
+        class ExampleMeta(type):
+            pass
+
+        class MyClass2(metaclass=ExampleMeta):
+            pass
+
+        def fn(x, c):
+            if isinstance(c, MyClass1):
+                return x + 1
+            elif isinstance(c, MyClass2):
+                return x + 2
+            else:
+                return x + 3
+
+        x = torch.rand(3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for c in [MyClass1, MyClass2]:
+            ref = fn(x, c)
+            res = opt_fn(x, c)
+            self.assertTrue(same(ref, res))
 
     def test_manual_seed(self):
         def fn(a, b):
@@ -1536,6 +1563,33 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res1, 8)
         self.assertEqual(res2, 9)
 
+    def test_enum_as_dict_key(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+        def fn(x):
+            y = x + 2
+            z = {
+                MyEnum.FOO: torch.tensor(1),
+                MyEnum.BAR: 10,
+                "MyEnum.BAR": torch.tensor(8),
+                5: torch.rand(3),
+            }
+            torch._dynamo.graph_break()
+            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
+            b = y * 2
+            return a, b
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.rand(3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
@@ -1983,6 +2037,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_f(x, n)
         self.assertEqual(cnts.frame_count, 1)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item(self):
         class MyMod(torch.nn.Module):
@@ -1996,6 +2051,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 11)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item_changes(self):
         class MyMod(torch.nn.Module):
@@ -2012,6 +2068,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item_changes_new_shape(self):
         class MyMod(torch.nn.Module):
@@ -3013,6 +3070,94 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         ref = model(x)
         res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+    def test_if_cond_user_defined_object(self):
+        # obj.__bool__ is not existed
+        class A(object):  # noqa: B903
+            def __init__(self, x):
+                self.x = x
+
+        # obj.__bool__ is function and returns bool type
+        class B(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __bool__(self):
+                return self.x > 0
+
+        # obj.__bool__ is non-function
+        class C(object):
+            def __init__(self, x):
+                self.x = x
+                self.__bool__ = False
+
+        def fn(x, obj):
+            if not obj:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        obj1 = A(0.5)
+        obj2 = B(0.5)
+        obj3 = B(-0.5)
+        obj4 = C(0.5)
+        for obj in [obj1, obj2, obj3, obj4, obj3, obj2]:
+            ref = fn(x, obj)
+            res = opt_fn(x, obj)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 4)
+
+    def test_if_cond_user_defined_object2(self):
+        # obj.__bool__ is function and returns non-bool type
+        class MyObj(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __bool__(self):
+                self.x = 1
+                return self.x
+
+        def fn(a, obj):
+            if not obj:
+                return a + obj.x
+            else:
+                return a - obj.x
+
+        x = torch.rand(4)
+        obj = MyObj(0.5)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        try:
+            opt_fn(x, obj)
+            self.assertFalse(True)
+        except TypeError as e:
+            self.assertIn("__bool__ should return bool, returned int", str(e))
+
+    def test_class_has_instancecheck_method(self):
+        class A(object):
+            pass
+
+        class ExampleMeta(type):
+            def __instancecheck__(cls, instance):
+                return True
+
+        class B(object, metaclass=ExampleMeta):
+            pass
+
+        def fn(x, obj):
+            if isinstance(obj, B):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        obj = A()
+        ref = fn(x, obj)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
     def test_torch_cuda_is_available(self):

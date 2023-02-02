@@ -14,6 +14,7 @@
 #include <utility>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -497,6 +498,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
     bool average_attn_weights) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
+
+  TORCH_WARN("_native_decoder_only_multi_head_attention is deprecated");
 
   TORCH_CHECK(
       !mask || !query.is_nested(),

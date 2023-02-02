@@ -121,9 +121,7 @@ def enable_dynamic(enable: bool = True):
     if not enable:
         yield
         return
-    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
-    ), patch("torch._dynamo.config.specialize_int_float", False):
+    with config.patch(dynamic_shapes=True, specialize_int_float=False):
         yield
 
 
@@ -590,8 +588,7 @@ def export(
 
         return result_capturing_wrapper
 
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
@@ -650,7 +647,7 @@ def export(
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.override_stack_trace():
+            with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
         graph = make_fx(
@@ -665,9 +662,10 @@ def export(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
+    input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            [f"orig_arg_{i}" for i in range(len(args))],
+            input_strs,
             in_spec,
             out_spec_traced,
         )
