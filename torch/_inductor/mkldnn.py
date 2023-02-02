@@ -47,6 +47,12 @@ def is_bfloat16_module(m):
     return weight_is_bf16 and bias_is_bf16
 
 
+def is_group_depthwise_conv_transpose(m):
+    return (
+        type(m) in [nn.ConvTranspose2d] and m.groups > 1 and m.groups == m.in_channels
+    )
+
+
 def check_node_kind(current_node, modules, node_kind):
     if not isinstance(current_node, torch.fx.Node):
         return False
@@ -421,7 +427,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
     def __init__(
         self,
         conv_transpose: nn.Module,
-        unary: nn.Module,
+        unary: Optional[nn.Module],
         input_size: list,
     ):
         super(ConvTransposeUnary2d, self).__init__(
@@ -442,8 +448,8 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
 
     def _update_module_params(self, conv_transpose, unary, input_size):
         self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
+        self.attr, self.scalars, self.algorithm = (
+            unary_modules_map[unary.__class__](unary) if unary else ("none", [], "")
         )
         packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
             self.weight.to_mkldnn(),
@@ -498,6 +504,15 @@ def packed_conv_eval(conv: nn.Module, input_size: list):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
+        None,
+        input_size,
+    )
+
+
+def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: list):
+    assert not (conv_transpose.training), "Fusion only for eval!"
+    return ConvTransposeUnary2d(
+        conv_transpose,
         None,
         input_size,
     )
@@ -673,6 +688,9 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     computation_node
                 ):
                     continue
+                # TODO: remove this when group depthwise ConvTranspose is supported
+                if is_group_depthwise_conv_transpose(computation_node):
+                    continue
                 computation_node_input_size = (
                     node.args[0].args[0].meta.get("tensor_meta").shape
                 )
@@ -826,6 +844,9 @@ def pack_module(gm: torch.fx.GraphModule):
                     cur_module.padding, str
                 ):
                     continue
+                # TODO: remove this when group depthwise ConvTranspose is supported
+                if is_group_depthwise_conv_transpose(cur_module):
+                    continue
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
                 )
@@ -916,6 +937,7 @@ computation_op_binary_op_fusion_inplace_map = {
 computation_op_packed_map = {
     nn.Linear: packed_linear_eval,
     nn.Conv2d: packed_conv_eval,
+    nn.ConvTranspose2d: packed_conv_transpose_eval,
 }
 
 
