@@ -286,20 +286,20 @@ class WrapperCodeGen(CodeGen):
 
         if has_triton():
             self.header.splice(
-                f"""
+                """
                 import triton
                 import triton.language as tl
-                from {config.inductor_import}.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
 
             if config.triton.convolution != "aten":
                 self.header.splice(
-                    f"""
-                    from {config.inductor_import}.triton_ops.conv_perf_model import early_config_prune
-                    from {config.inductor_import}.triton_ops.conv_perf_model import estimate_conv_time
-                    from {config.inductor_import}.triton_ops.autotune import conv_heuristics
+                    """
+                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
+                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
+                    from torch._inductor.triton_ops.autotune import conv_heuristics
                     """
                 )
 

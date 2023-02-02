@@ -1066,10 +1066,10 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from {config.inductor_import}.ir import ReductionHint
-                    from {config.inductor_import}.ir import TileHint
-                    from {config.inductor_import}.triton_ops.autotune import {heuristics}
-                    from {config.inductor_import}.utils import instance_descriptor
+                    from torch._inductor.ir import ReductionHint
+                    from torch._inductor.ir import TileHint
+                    from torch._inductor.triton_ops.autotune import {heuristics}
+                    from torch._inductor.utils import instance_descriptor
                 """
             )
 
