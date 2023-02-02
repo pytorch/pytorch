@@ -5,13 +5,16 @@ from numbers import Real
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
-    dis.opmap["JUMP_ABSOLUTE"],
     dis.opmap["JUMP_FORWARD"],
     dis.opmap["RAISE_VARARGS"],
     # TODO(jansel): double check exception handling
 }
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
+if sys.version_info >= (3, 11):
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
+else:
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
