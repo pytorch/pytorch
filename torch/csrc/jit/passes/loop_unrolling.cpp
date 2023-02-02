@@ -172,7 +172,7 @@ void unroll(Node* loop) {
   // default one, because this will allow us to share it between the unrolled
   // loop and its epilogue. This is necessary only if the loop counter is
   // actually used in the body.
-  if (body->inputs()[0]->uses().size() > 0)
+  if (!body->inputs()[0]->uses().empty())
     replaceLoopCounter(loop);
 
   // Some optimization for constant-length loops. If we know they won't run too
