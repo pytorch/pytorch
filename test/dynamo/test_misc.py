@@ -29,6 +29,10 @@ from torch._dynamo.testing import (
     unsupported,
 )
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FUSED_SDPA,
+    SM80OrLater,
+)
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -2702,6 +2706,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cuda")
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
+
+    # TODO: Fix Me
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        "Can't run fused SDPA on this platform",
+    )
+    @unittest.skip("TypeError: __init__() got an unexpected keyword argument 'mode'")
+    def test_autocast_sdpa(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, query, key, value):
+                with torch.autocast("cpu"):
+                    with torch.autocast("cuda", dtype=torch.float32):
+                        out = F.scaled_dot_product_attention(
+                            query, key, value, None, 0.5, True
+                        )
+                return out
+
+        dtype = torch.float32
+        seq_len_q = 1
+        seq_len_k = 1
+        head_dim = 8
+        query = torch.ones(
+            1, 8, seq_len_q, head_dim, device="cuda", dtype=dtype, requires_grad=True
+        )
+        key = torch.ones(
+            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+        )
+        value = torch.ones(
+            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+        )
+
+        module = MyModule()
+        real = module(query, key, value)
+        real_device = real.device
+        real_dtype = real.dtype
+
+        opt_mod = torch._dynamo.optimize("inductor")(module)
+        compiled = opt_mod(query, key, value)
+
+        self.assertEqual(compiled.device, real_device)
+        self.assertEqual(compiled.dtype, real_dtype)
+
+        self.assertEqual(compiled.device.type, "cuda")
+        self.assertEqual(compiled.device.index, 0)
+        self.assertEqual(compiled.dtype, torch.float16)
 
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):

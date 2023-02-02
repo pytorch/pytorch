@@ -19,6 +19,8 @@ SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >
 SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
 SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
 
+PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
