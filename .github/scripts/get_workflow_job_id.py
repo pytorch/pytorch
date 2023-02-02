@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib
 import urllib.parse
 
@@ -37,16 +38,20 @@ def fetch_url(url: str, *,
               reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
     if headers is None:
         headers = {}
-    try:
-        with urlopen(Request(url, headers=headers)) as conn:
-            return reader(conn)
-    except urllib.error.HTTPError as err:
-        exception_message = (
-            "Is github alright?",
-            f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
-            f"{err.reason}\n\nheaders={err.headers}"
-        )
-        raise RuntimeError(exception_message) from err
+    retries = 3
+    for i in range(retries + 1):
+        try:
+            with urlopen(Request(url, headers=headers)) as conn:
+                return reader(conn)
+        except urllib.error.HTTPError as err:
+            exception_message = (
+                "Is github alright?",
+                f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
+                f"{err.reason}\n\nheaders={err.headers}"
+            )
+            if i == retries:
+                raise RuntimeError(exception_message) from err
+        time.sleep(0.5)
 
 def parse_args() -> Any:
     parser = argparse.ArgumentParser()

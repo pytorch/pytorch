@@ -432,7 +432,7 @@ def create_submodule_from_subgraph(
     gm.recompile()
     return gm
 
-def handle_subgraph_candidate(
+def create_one_transformed_and_logged_copy_of_subgraph(
     mt: GraphModule,
     subgraph_idx: int,
     subgraph_candidate_idx: int,
@@ -567,7 +567,7 @@ def handle_subgraph_candidate(
 
     mt.recompile()
 
-def handle_subgraph(
+def create_n_transformed_and_logged_copies_of_subgraph(
     mt: GraphModule,
     subgraph_idx: int,
     match_name: str,
@@ -657,7 +657,7 @@ def handle_subgraph(
     last_added_shadow_node_list: List[Optional[Node]] = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
 
-        handle_subgraph_candidate(
+        create_one_transformed_and_logged_copy_of_subgraph(
             mt, subgraph_idx, subgraph_candidate_idx, first_node,
             last_node, fqn, list_of_node_name_to_qconfig,
             example_inputs, last_added_shadow_node_list, custom_prepare_fn,
@@ -688,7 +688,7 @@ def create_add_loggers_graph(
     .. code::
 
       x0_0 -> op0_0 -> x1_0 -> log -----> op1_0 -> x2_0 -> log
-       \                        \          \                 \
+       \                        \          \                 \       # noqa: W605
          ---> op0_1 -> x1_1 ----> clog    op1_1 -> x2_1 ----> clog
 
     Example output, case 1:
@@ -696,7 +696,7 @@ def create_add_loggers_graph(
     .. code::
 
       x0_0 -> op0_0 -> x1_0 -> log -----> op1_0 -> x2_0 -> log
-       \                        \                           \
+       \                        \                           \        # noqa: W605
          ---> op0_1 -> x1_1 ----> clog -> op1_1 -> x2_1 ----> clog
 
     """
@@ -728,11 +728,13 @@ def create_add_loggers_graph(
     # associate them to matched subgraphs if possible.
 
     nodes_to_skip = set()
+    # for each subgraph, save a mapping from first node of subgraph
+    # to first and last node of the shadow of this subgraph
+    orig_first_node_to_shadow_in_node = {}
+    orig_first_node_to_shadow_out_node = {}
     # need to record original list because we will mutate the graph as we go
     orig_nodes = list(model.graph.nodes)  # type: ignore[union-attr, arg-type]
     cur_subgraph_idx = 0
-    orig_first_node_to_shadow_in_node = {}
-    orig_first_node_to_shadow_out_node = {}
     for n in orig_nodes:
         if n.op in ('placeholder', 'get_attr', 'output') or n in nodes_to_skip:
             continue
@@ -751,17 +753,18 @@ def create_add_loggers_graph(
 
         if insert_submodule_copy:
             match_name = first_node.name
-            handle_subgraph(
+            create_n_transformed_and_logged_copies_of_subgraph(
                 model, cur_subgraph_idx, match_name, maybe_subgraph,
                 [qconfig_mapping], [node_name_to_qconfig],
                 None, None
             )
             # find the created shadow module and record it so we
             # can find it easily in step 2
-            expected_shadow_name = f"shadow_wrapper_{cur_subgraph_idx}_1"
+            expected_shadow_target = f"shadow_wrapper_{cur_subgraph_idx}_1"
             new_shadow_mod = None
             for maybe_shadow_mod in model.graph.nodes:
-                if maybe_shadow_mod.name == expected_shadow_name:
+                if maybe_shadow_mod.op == 'call_module' and \
+                        maybe_shadow_mod.target == expected_shadow_target:
                     new_shadow_mod = maybe_shadow_mod
                     break
             assert new_shadow_mod is not None
@@ -790,6 +793,7 @@ def create_add_loggers_graph(
                     attr_name, args=(last_node,), kwargs={})
                 insertion_point = logger
 
+            # create a copy of the subgraph
             cur_node_orig = first_node
             cur_node_copy = None
             first_node_copy = None
@@ -800,7 +804,7 @@ def create_add_loggers_graph(
                     new_kwargs = cur_node_orig.kwargs
                 else:
                     first_arg_for_copy = cur_node_copy
-                    new_args = tuple([first_arg_for_copy, *cur_node_orig.args[1:]])
+                    new_args = tuple([first_arg_for_copy, *cur_node_orig.args[1:]])  # noqa: C409
                     new_kwargs = cur_node_orig.kwargs
                 # make a copy of cur_node_orig
                 with model.graph.inserting_after(insertion_point):
@@ -813,11 +817,15 @@ def create_add_loggers_graph(
                     )
                     if first_node_copy is None:
                         first_node_copy = cur_node_copy
+                # since now only linear subgraphs are supported, all nodes
+                # except the last one must have only one user
+                if cur_node_orig != last_node:
+                    assert len(cur_node_orig.users.keys()) == 1
                 cur_node_orig = list(cur_node_orig.users.keys())[0]
                 assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
                 insertion_point = cur_node_copy
 
-            # add a comparison logger after last_node copy
+            # add a comparison logger after last_node's copy
             subgraph_candidate_idx = 1
             logger_mod_orig = _get_logger_for_subgraph(
                 model, first_node, last_node, cur_subgraph_idx, subgraph_candidate_idx,
@@ -849,9 +857,16 @@ def create_add_loggers_graph(
     #    \                     \
     #      -> op0_1 -> x1_1 -> clog -> x1_1 -> op1_1 -> ...
     #
+    # sample values of key internal variables for the example above:
+    #
+    #   orig_first_node_to_shadow_in_node = {op0_0: op0_1, op1_0: op1_1}
+    #   orig_first_node_to_shadow_out_node = {op0_0: op0_1, op1_0: op1_1}
+    #
+    # note: for subgraphs with more than one node, in_node will be different
+    # compared to out_node
+
 
     nodes_to_skip = set()
-    cur_subgraph_idx = 0
     for n in orig_nodes:
         if n.op in ('placeholder', 'get_attr', 'output') or n in nodes_to_skip:
             continue
@@ -900,8 +915,6 @@ def create_add_loggers_graph(
         cur_shadow_input.kwargs = tree_map(
             maybe_remap_node_to_shadow, cur_shadow_input.kwargs)
 
-        cur_subgraph_idx += 1
-
         model.recompile()
 
 def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
@@ -939,17 +952,17 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
         if quant_node.target == torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
             scale_val = getattr_from_fqn(
-               shadow_wrapper, scale_node.target)
+                shadow_wrapper, scale_node.target)
             zp_val = getattr_from_fqn(
-               shadow_wrapper, zp_node.target)
+                shadow_wrapper, zp_node.target)
             new_args = (scale_val, zp_val, axis, dtype)
         else:
             assert quant_node.target == torch.quantize_per_tensor
             _weight, scale_node, zp_node, dtype = quant_node.args
             scale_val = getattr_from_fqn(
-               shadow_wrapper, scale_node.target)
+                shadow_wrapper, scale_node.target)
             zp_val = getattr_from_fqn(
-               shadow_wrapper, zp_node.target)
+                shadow_wrapper, zp_node.target)
             new_args = (scale_val, zp_val, dtype)
         return (quant_node.target, new_args)
 
@@ -968,22 +981,16 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
     #   shadow_0_1 = self.shadow_0_1(shadow_wrapper_0_1, linear)
     #
     # algorithm:
-    # 1. start with shadow_wrapper
-    # 2. check if the op inside shadow_wrapper is weighted, if not abort
-    # 3. if (2) passes, find the original op using the comparison logger
-    # 4. compare the weight
-    #
-    # algorithm v2:
     # 1. for each call_function node matching our allowlist:
     # 2.   if corresponding shadow wrapper exists, extract the weight pair
     #
     # Note: this is not super robust, but that's ok because this is
     # just for legacy customers who depend on the previous two-model version
-    # of this API. New customers should not use this.
+    # of this API. TBD if we need to make this robust.
     # Note: modules are not supported, since existing customers only
     # use functions.
 
-    # TODO(before land): move this to config
+    # TODO(future PR): move this to config
     weighted_ops = set([
         torch.nn.functional.linear,
     ])
