@@ -22,7 +22,7 @@ from .utils import clone_inputs, get_debug_dir
 log = logging.getLogger(__name__)
 
 
-inductor_config = import_module(f"{config.inductor_import}.config")
+inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
 
@@ -224,10 +224,10 @@ def generate_config_string():
 
     return textwrap.dedent(
         f"""\
-import {config.dynamo_import}.config
-import {config.inductor_import}.config
-{config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
-{config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+import torch._dynamo.config
+import torch._inductor.config
+torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
+torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
         """
     )
 
@@ -241,7 +241,7 @@ def generate_compiler_repro_string(gm, args):
 import torch
 from torch import tensor, device
 import torch.fx as fx
-from {config.dynamo_import}.testing import rand_strided
+from torch._dynamo.testing import rand_strided
 from math import inf
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -265,13 +265,17 @@ from torch.fx.experimental.proxy_tensor import make_fx
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += "mod = make_fx(Repro())(*args)\n"
+    # TODO: fake may be better for performance here
+    tracing_mode = "real"
+    if config.dynamic_shapes:
+        tracing_mode = "symbolic"
+    model_str += f"mod = make_fx(Repro(), tracing_mode={repr(tracing_mode)})(*args)\n"
     return model_str
 
 
-INDUCTOR_IMPORT = f"""
-from {config.inductor_import}.compile_fx import compile_fx_inner
-from {config.dynamo_import}.debug_utils import same_two_models
+INDUCTOR_IMPORT = """
+from torch._inductor.compile_fx import compile_fx_inner
+from torch._dynamo.debug_utils import same_two_models
 """
 
 COMPILER_REPRO_OPTIONS = {
@@ -312,7 +316,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
             break
 
     if "inductor" in compiler_name:
-        fd.write(f"import {config.inductor_import}.overrides\n")
+        fd.write("import torch._inductor.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
@@ -492,7 +496,7 @@ class AccuracyError(Exception):
     pass
 
 
-def wrap_compiler_debug(compiler_fn, compiler_name: str):
+def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -501,9 +505,11 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
     to save the graph as a string.
     """
 
-    @functools.wraps(compiler_fn)
+    @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
         from torch._subclasses import FakeTensorMode
+
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
@@ -538,7 +544,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                         "Accuracy minification is supported for inductor only"
                     )
                 if inner_compiled_fn is None:
-                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    inner_compiled_fn = compiler_fn(gm, example_inputs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
@@ -560,7 +566,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
                     if inner_compiled_fn is None:
-                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                        inner_compiled_fn = compiler_fn(gm, example_inputs)
                     # Call the compiled function with real inputs
                     return inner_compiled_fn(real_inputs)
                 except Exception as e:
@@ -583,7 +589,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True
         else:
-            compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_fn = compiler_fn(gm, example_inputs)
 
         return compiled_fn
 
@@ -665,16 +671,16 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
-        log.warning(
+        log.exception(
             (
-                "While minifying the program in accuracy minification mode,"
+                "While minifying the program in accuracy minification mode, "
                 "ran into a runtime exception which is likely an unrelated issue."
                 " Skipping this graph."
             )
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
+    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
     return passing
 
 
@@ -751,10 +757,10 @@ from math import inf
 import torch
 from torch import tensor, device
 import torch.fx as fx
-import {config.dynamo_import}
-from {config.dynamo_import}.testing import rand_strided
-from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
-from {config.dynamo_import}.debug_utils import same_two_models
+import torch._dynamo
+from torch._dynamo.testing import rand_strided
+from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+from torch._dynamo.debug_utils import same_two_models
 
 {generate_config_string()}
 
@@ -767,7 +773,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 {model_str}
 
 mod = Repro()
-opt_mod = {config.dynamo_import}.optimize("{compiler_name}")(mod)
+opt_mod = torch._dynamo.optimize("{compiler_name}")(mod)
 
 {run_code}
         """
@@ -875,9 +881,9 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
-        log.warning(
+        log.exception(
             (
-                "While minifying the program in accuracy minification mode,"
+                "While minifying the program in accuracy minification mode, "
                 "ran into a runtime exception which is likely an unrelated issue."
                 " Skipping this graph"
             )
@@ -948,10 +954,10 @@ import torch
 from torch import tensor, device
 import torch.fx as fx
 import functools
-import {config.dynamo_import}
-from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
-from {config.dynamo_import}.optimizations.backends import BACKENDS
-from {config.dynamo_import}.testing import rand_strided
+import torch._dynamo
+from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+from torch._dynamo.optimizations.backends import BACKENDS
+from torch._dynamo.testing import rand_strided
 
 {generate_config_string()}
 
@@ -972,7 +978,7 @@ dynamo_minifier_backend = functools.partial(
     compiler_fn,
     compiler_name="{compiler_name}",
 )
-opt_mod = {config.dynamo_import}.optimize(dynamo_minifier_backend)(mod)
+opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
 with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     opt_mod(*args)
@@ -981,7 +987,7 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     helper_for_dump_minify(contents)
 
 
-def wrap_backend_debug(compiler_fn, compiler_name: str):
+def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
     As opposed to wrap_compiler_debug, this wrapper intercepts at the
@@ -991,8 +997,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     repro.tar.gz.
     """
 
-    @functools.wraps(compiler_fn)
+    @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
             if config.repro_level == 3:
@@ -1001,7 +1008,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -1018,9 +1025,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(
-                        copy.deepcopy(gm), example_inputs, **kwargs
-                    )
+                    compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
@@ -1044,11 +1049,11 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     )
                     raise
         else:
-            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_gm = compiler_fn(gm, example_inputs)
 
         return compiled_gm
 
-    debug_wrapper._torchdynamo_orig_callable = compiler_fn
+    debug_wrapper._torchdynamo_orig_callable = unconfigured_compiler_fn
 
     return debug_wrapper
 
@@ -1105,14 +1110,17 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     gm.eval()
 
     # Check Accuracy
-    if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-        log.warning("Accuracy failed for the TorchDyanmo produced graph")
+    if backend_accuracy_fails(
+        gm, example_inputs, compiler_fn, only_fwd=config.repro_forward_only
+    ):
+        log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
         fails_fn = functools.partial(
             backend_accuracy_fails,
             compiler_fn=compiler_fn,
+            only_fwd=config.repro_forward_only,
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         minifier(
