@@ -249,81 +249,95 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp: Union[Callable, List[Any]],
+        inp_: Union[Callable, List[Any]],
         *,
         test_mutation: bool = False,
         decompositions: Optional[Dict] = None,
     ):
-        # Some tests pass in a callable for inp, to generate the inputs
-        # (useful if we want to generate complicated aliasing inputs)
-        if isinstance(inp, Callable):
-            inp_callable = inp
-            # The callable should return a tuple of f_inputs, f_graph_inputs
-            # (The idea is that we might want to compile a function with the graph inputs,
-            # but test autograd backprop all the way through the actual inputs)
-            inp_copy, graph_inps_copy = inp_callable()
-            inp, graph_inps = inp_callable()
-        else:
-            inp_copy = []
-            # Our input clones need to mimic when inputs are duplicates of one another
-            dupes_map = {}
-            for i, x in enumerate(inp):
-                if x in dupes_map:
-                    x_dupe_idx = dupes_map[x]
-                    inp_copy.append(inp_copy[x_dupe_idx])
-                else:
-                    dupes_map[x] = i
-                    if not isinstance(x, torch.Tensor):
-                        x_copy = x
-                    else:
-                        x_copy = x.clone().detach().requires_grad_(x.requires_grad)
-                        if x.requires_grad and not x.is_leaf:
-                            x_copy = x_copy.clone()
-                    inp_copy.append(x_copy)
-
-            if test_mutation:
-                # For graphs where we mutate inputs, need our test to make sure inputs aren't leaves
-                graph_inps = [x.add(1) for x in inp]
-                graph_inps_copy = [x.add(1) for x in inp_copy]
+        for keep_input_mutations in [True, False]:
+            # Some tests pass in a callable for inp, to generate the inputs
+            # (useful if we want to generate complicated aliasing inputs)
+            if isinstance(inp_, Callable):
+                inp_callable = inp_
+                # The callable should return a tuple of f_inputs, f_graph_inputs
+                # (The idea is that we might want to compile a function with the graph inputs,
+                # but test autograd backprop all the way through the actual inputs)
+                inp_copy, graph_inps_copy = inp_callable()
+                inp, graph_inps = inp_callable()
             else:
-                graph_inps = inp
-                graph_inps_copy = inp_copy
+                inp_copy = []
+                inp = []
+                # Our input clones need to mimic when inputs are duplicates of one another
+                dupes_map = {}
+                for i, x in enumerate(inp_):
+                    if x in dupes_map:
+                        x_dupe_idx = dupes_map[x]
+                        inp_copy.append(inp_copy[x_dupe_idx])
+                        inp.append(inp[x_dupe_idx])
+                    else:
+                        dupes_map[x] = i
+                        if not isinstance(x, torch.Tensor):
+                            x_copy = x
+                            x_copy2 = x
+                        else:
+                            x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+                            x_copy2 = x.clone().detach().requires_grad_(x.requires_grad)
+                            if x.requires_grad and not x.is_leaf:
+                                x_copy = x_copy.clone()
+                                x_copy2 = x_copy2.clone()
+                        inp_copy.append(x_copy)
+                        inp.append(x_copy2)
 
-        # Create a copy of inputs, so we can test input mutation correctness.
-
-        fw_graph_cell = [None]
-        if isinstance(f, nn.Module):
-            compiled_f = aot_module(
-                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
-        else:
-            compiled_f = aot_function(
-                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
-        ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
-        test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
-        self.assertEqual(ref_grad, test_grad)
-
-        if isinstance(ref_out, torch.Tensor):
-            self.assertTrue(isinstance(test_out, torch.Tensor))
-            ref_out, test_out = [ref_out], [test_out]
-        for ref_o, test_o in zip(ref_out, test_out):
-            if isinstance(ref_o, torch.Tensor):
-                self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
-                self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                if ref_o.requires_grad:
-                    # _is_view() should probably unconditionally be the same,
-                    # but in practice I don't think this matters for tensors that don't require grad
-                    self.assertEqual(ref_o._is_view(), test_o._is_view())
-                self.assertEqual(ref_o, test_o)
                 if test_mutation:
-                    # This tests that autograd meta is set properly on the output we can
-                    # mutate it.
-                    ref_o.mul_(2)
-                    test_o.mul_(2)
+                    # For graphs where we mutate inputs, need our test to make sure inputs aren't leaves
+                    graph_inps = [x.add(1) for x in inp]
+                    graph_inps_copy = [x.add(1) for x in inp_copy]
+                else:
+                    graph_inps = inp
+                    graph_inps_copy = inp_copy
+            fw_graph_cell = [None]
+            if isinstance(f, nn.Module):
+                compiled_f = aot_module(
+                    f,
+                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    bw_compiler=nop,
+                    decompositions=decompositions,
+                    keep_inference_input_mutations=keep_input_mutations
+                )
+            else:
+                compiled_f = aot_function(
+                    f,
+                    fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+                    bw_compiler=nop,
+                    decompositions=decompositions,
+                    keep_inference_input_mutations=keep_input_mutations
+                )
+            ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
+            test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
+            self.assertEqual(ref_grad, test_grad)
+
+            if isinstance(ref_out, torch.Tensor):
+                self.assertTrue(isinstance(test_out, torch.Tensor))
+                ref_out, test_out = [ref_out], [test_out]
+            for ref_o, test_o in zip(ref_out, test_out):
+                if isinstance(ref_o, torch.Tensor):
+                    self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
+                    self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
+                    if ref_o.requires_grad:
+                        # _is_view() should probably unconditionally be the same,
+                        # but in practice I don't think this matters for tensors that don't require grad
+                        self.assertEqual(ref_o._is_view(), test_o._is_view())
                     self.assertEqual(ref_o, test_o)
-        for ref_i, test_i in zip(inp, inp_copy):
-            if isinstance(ref_i, torch.Tensor):
-                self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
-            self.assertEqual(ref_i, test_i)
+                    if test_mutation:
+                        # This tests that autograd meta is set properly on the output we can
+                        # mutate it.
+                        ref_o.mul_(2)
+                        test_o.mul_(2)
+                        self.assertEqual(ref_o, test_o)
+            for ref_i, test_i in zip(inp, inp_copy):
+                if isinstance(ref_i, torch.Tensor):
+                    self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
+                self.assertEqual(ref_i, test_i)
         return fw_graph_cell[0]
 
     def test_non_tensor_and_none_inputs(self):
@@ -856,10 +870,13 @@ def forward(self, primals_1):
             a.transpose_(1, 0)
             tmp = a.mul(2)
             return tmp.squeeze(), tmp.transpose(1, 0), a.unsqueeze(0)
-        inp = [torch.ones(1, 2, 4, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-        inp = [torch.ones(1, 2, 4, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+
+        def inp_callable(req_grad):
+            x = torch.ones(1, 2, 4, requires_grad=req_grad).clone()
+            return [(x,), (x,)]
+
+        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
+        fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
         self.assertExpectedInline(fw_graph.code.strip(), """\
@@ -1423,7 +1440,7 @@ def forward(self, primals_1, primals_2):
         fxx = aot_module_simplified(F(), (x, x), nop)
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+            """At compilation time, graph 2 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
 
