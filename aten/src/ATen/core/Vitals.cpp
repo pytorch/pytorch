@@ -32,7 +32,7 @@ TorchVitalAttr& TorchVital::create(const std::string& attr, bool force) {
   }
   auto iter = attrs.find(attr);
   if (iter == attrs.end()) {
-    auto r = attrs.emplace(std::make_pair(attr, TorchVitalAttr()));
+    auto r = attrs.emplace(attr, TorchVitalAttr());
     return r.first->second;
   }
   return iter->second;
@@ -60,7 +60,7 @@ std::string APIVitals::readVitals() {
   }
 
   std::stringstream buf;
-  for (auto x : name_map_) {
+  for (const auto& x : name_map_) {
     buf << x.second;
   }
   return buf.str();
@@ -79,7 +79,7 @@ bool APIVitals::setVital(
   TorchVital* vital = nullptr;
   if (iter == name_map_.end()) {
     auto r =
-        name_map_.emplace(std::make_pair(vital_name, TorchVital(vital_name)));
+        name_map_.emplace(vital_name, TorchVital(vital_name));
     vital = &r.first->second;
   } else {
     vital = &iter->second;

@@ -49,13 +49,6 @@ class VariableTracker(object, metaclass=HasPostInit):
             if type(var) in (list, tuple, dict_values, odict_values):
                 for i in var:
                     visit(i)
-            elif isinstance(var, variables.BaseListVariable):
-                guards.update(var.guards)
-                for i in var.items:
-                    visit(i)
-            elif isinstance(var, variables.ConstDictVariable):
-                guards.update(var.guards)
-                visit(var.items.values())
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
@@ -288,6 +281,8 @@ class VariableTracker(object, metaclass=HasPostInit):
             VariableTracker.apply(
                 aggregate_mutables, self, skip_fn=lambda var: var is not self
             )
+
+        assert None not in self.recursively_contains
 
 
 def typestr(*objs):

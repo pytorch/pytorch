@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import cast, Dict, List, Optional, Sequence, Tuple
+
 import torch
-from typing import List, Sequence, Dict, Tuple, Optional, cast
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
-from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.ops.utils import prod
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -44,9 +45,7 @@ def _gen_reshard_suggestions(
                 shape=input_spec.shape,
             )
         )
-    suggested_schema = OpSchema(
-        op_schema.func_schema, tuple(suggested_arg_specs), {}
-    )
+    suggested_schema = OpSchema(op_schema.func_schema, tuple(suggested_arg_specs), {})
     _inplace_rewrap_schema_suggestion(suggested_schema, op_schema)
     return OutputSharding(
         None,
@@ -121,13 +120,9 @@ def einop_rule(
                 seen_shardings[sum_dim] = "+"
             # update pending sum counter for pending sum mesh
             # dimension with the occurance from each input
-            pending_sums_counter[sum_dim] = (
-                pending_sums_counter.get(sum_dim, 0) + 1
-            )
+            pending_sums_counter[sum_dim] = pending_sums_counter.get(sum_dim, 0) + 1
 
-        for idx, (dim, mesh_dim) in enumerate(
-            zip(input_dim, input_spec.dim_map)
-        ):
+        for idx, (dim, mesh_dim) in enumerate(zip(input_dim, input_spec.dim_map)):
             if enforce_sharding and dim in enforce_sharding:
                 if enforce_sharding[dim] != mesh_dim:
                     needs_reshard = True
@@ -185,9 +180,9 @@ def einop_rule(
                         d in input_dim
                         and input_spec.dim_map[input_dim.index(d)] == mesh_dim
                     ):
-                        cost += prod(
-                            input_spec.local_shape
-                        ) * input_spec.mesh.size(mesh_dim)
+                        cost += prod(input_spec.local_shape) * input_spec.mesh.size(
+                            mesh_dim
+                        )
                 costs.append(cost)
             d_to_keep_sharding = dims[costs.index(max(costs))]
             for d in dims:
@@ -230,9 +225,7 @@ def einop_rule(
     )
 
 
-def pointwise_rule(
-    op_schema: OpSchema, linearity: bool = False
-) -> OutputSharding:
+def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputSharding:
     """
     Propagate the sharding for pointwise operations. Examples:
         ij,ij->ij - addition/mul
@@ -270,9 +263,7 @@ def pointwise_rule(
     for output_dim_idx in range(len(out_dimchars)):
         out_dimchar = out_dimchars[output_dim_idx]
         if singleton_counter[output_dim_idx] == len(input_specs):
-            out_dimchars = _replace_char_in_str(
-                out_dimchars, "1", output_dim_idx
-            )
+            out_dimchars = _replace_char_in_str(out_dimchars, "1", output_dim_idx)
 
     fmt = f"{','.join(p for p in dimchars)}->{out_dimchars}"
 
@@ -340,9 +331,7 @@ def reduction_rule(
             no_partial_spec = DTensorSpec.from_dim_map(
                 input_spec.mesh, reshard_dim_map, [], input_spec.shape
             )
-            schema_suggestion = OpSchema(
-                op_schema.func_schema, (no_partial_spec,), {}
-            )
+            schema_suggestion = OpSchema(op_schema.func_schema, (no_partial_spec,), {})
             _inplace_rewrap_schema_suggestion(schema_suggestion, op_schema)
             return OutputSharding(
                 output_spec=None, schema_suggestions=[schema_suggestion]

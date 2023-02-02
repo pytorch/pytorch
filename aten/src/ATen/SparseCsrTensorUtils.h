@@ -122,6 +122,13 @@
     }                                                                     \
   }()
 
+#define AT_DISPATCH_SPARSE_VALUE_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
+          kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
+
 namespace at {
 namespace sparse_csr {
 
@@ -284,6 +291,20 @@ inline Layout flip_compressed_layout(Layout layout) {
     default:
       TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
       return kSparseCsr;
+  }
+}
+
+inline DimVector getBlockSize(Tensor const& self) {
+  int64_t n_batch = numBatchDimensions(self);
+  return at::DimVector(self.values().sizes().slice(n_batch + 1, 2));
+}
+
+inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
+  if (self.layout() == at::kSparseBsr || self.layout() == at::kSparseBsc) {
+    int64_t n_batch = numBatchDimensions(self);
+    return self.values().sym_sizes().slice(n_batch + 1, 2).vec();
+  } else {
+    return {};
   }
 }
 

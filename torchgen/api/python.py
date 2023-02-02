@@ -227,7 +227,7 @@ class PythonArgument:
         # s/self/input/ outside method bindings
         # [old codegen] TODO: remove this? doesn't rename in codegen, it's just
         # for the parse string
-        if name == "self" and type_str == "Tensor" and not method:
+        if name == "self" and type_str in ["Tensor", "Number"] and not method:
             name = "input"
 
         # add default

@@ -23,8 +23,7 @@
 #include <sstream>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Controls whether graph source ranges are printed by default
 bool global_print_source_ranges = true;
@@ -1039,6 +1038,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofFloats", &ListType::ofFloats)
       .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
+      .def_static("ofStrings", &ListType::ofStrings)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, DictTypePtr>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
@@ -1076,7 +1076,7 @@ void initPythonIRBindings(PyObject* module_) {
         for (const auto& enum_name_value : enum_names_values) {
           auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
           auto enum_value = toIValue(enum_name_value.attr("value"), value_type);
-          names_values.emplace_back(std::make_pair(enum_name, enum_value));
+          names_values.emplace_back(enum_name, enum_value);
         }
         return EnumType::create(
             c10::QualifiedName(qualified_name),
@@ -1144,5 +1144,4 @@ void initPythonIRBindings(PyObject* module_) {
             return g.graph_output_to_symbolic_shape_dim_;
           });
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

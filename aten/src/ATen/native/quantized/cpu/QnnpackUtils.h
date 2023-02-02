@@ -47,7 +47,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
             bias, bias.suggest_memory_format())),
         per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
         input_scale(std::move(input_scale)),
-        w_scales(w_scales),
+        w_scales(std::move(w_scales)),
         w_zero_points(std::move(w_zps)) {}
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
@@ -137,7 +137,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         is_per_channel_(is_per_channel),
         input_scale(input_scale),
         kernel_(std::move(kernel)),
-        w_scales(w_scale),
+        w_scales(std::move(w_scale)),
         w_zero_points(std::move(w_zps)) {
     const bool any_padding = std::any_of(
         padding_.begin(), padding_.end(), [](const auto& e) { return e != 0; });

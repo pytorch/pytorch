@@ -389,6 +389,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(gru_cell, lower_precision_fp)
   KERNEL(rnn_tanh_cell, lower_precision_fp)
   KERNEL(rnn_relu_cell, lower_precision_fp)
+  KERNEL(_scaled_dot_product_flash_attention, lower_precision_fp)
+  KERNEL(_scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
   KERNEL(acos, fp32)
@@ -412,7 +414,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(layer_norm, fp32)
   KERNEL(native_layer_norm, fp32)
   KERNEL(group_norm, fp32)
-  KERNEL(frobenius_norm, fp32)
   KERNEL2(frobenius_norm, dim, fp32)
   KERNEL(nuclear_norm, fp32)
   KERNEL2(nuclear_norm, dim, fp32)
@@ -505,6 +506,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(_convolution, deprecated, lower_precision_fp)
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
+  KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
 
   // fp32 cast policy
   KERNEL_CPU(conv_transpose1d, fp32)

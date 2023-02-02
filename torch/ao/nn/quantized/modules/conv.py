@@ -245,8 +245,8 @@ class _ConvNd(WeightedQuantizedModule):
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
-                          utilities or provided by the user
+            ref_qconv (Module): a reference quantized  module, either produced by torch.ao.quantization
+                                utilities or provided by the user
             output_scale (float): scale for output Tensor
             output_zero_point (int): zero point for output Tensor
         """
@@ -293,6 +293,7 @@ class Conv1d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
@@ -400,6 +401,7 @@ class Conv2d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # With square kernels and equal stride
         >>> m = nn.quantized.Conv2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -498,6 +500,7 @@ class Conv3d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # With square kernels and equal stride
         >>> m = nn.quantized.Conv3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -635,8 +638,8 @@ class _ConvTransposeNd(_ConvNd):
     def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
-                          utilities or provided by the user
+            ref_qconvt (Module): a reference quantized  module, either produced by torch.ao.quantization
+                                 utilities or provided by the user
             output_scale (float): scale for output Tensor
             output_zero_point (int): zero point for output Tensor
         """

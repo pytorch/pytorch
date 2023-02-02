@@ -1,9 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -88,7 +89,8 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -106,16 +108,28 @@ Tensor mkldnn_reorder_conv2d_weight(
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
   }
 
-  auto desc =
-      ideep::convolution_forward::expected_weights_desc(
-          w.get_dims(),
-          w.get_data_type(),
-          {stride.begin(), stride.end()},
-          {padding.begin(), padding.end()},
-          {padding.begin(), padding.end()},
-          {dilation.begin(), dilation.end()},
-          groups,
-          ideep::algorithm::convolution_direct);
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+  }
+
+  auto desc = ideep::convolution_forward::expected_weights_desc(
+      w.get_dims(),
+      w.get_data_type(),
+      {stride.begin(), stride.end()},
+      {padding.begin(), padding.end()},
+      {padding.begin(), padding.end()},
+      {dilation.begin(), dilation.end()},
+      groups,
+      ideep::algorithm::convolution_direct,
+      ideep::prop_kind::forward,
+      w.get_data_type(),
+      src_dims,
+      ideep::attr_t(),
+      is_channels_last);
   ideep::tensor result;
   result.init(desc);
   result.feed_from(w);
@@ -169,7 +183,8 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
   TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
@@ -184,4 +199,48 @@ Tensor mkldnn_reorder_conv3d_weight(
 
 #endif // AT_MKLDNN_ENABLED()
 
+#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+#include <mkl.h>
+
+Tensor mkl_reorder_linear_weight(
+    const Tensor& weight,
+    const int64_t batch_size) {
+  TORCH_CHECK(
+      weight.scalar_type() == ScalarType::Float,
+      "reorder_linear_weight: weight's dtype should be float");
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  auto M = batch_size;
+  auto N = weight.size(0);
+  auto K = weight.size(1);
+  int64_t pack_size =
+      (int64_t)(cblas_sgemm_pack_get_size(CblasBMatrix, M, N, K) / sizeof(float) + 1);
+  auto packed_weight = empty_mkldnn(
+      {pack_size, 1},
+      weight.scalar_type(),
+      weight.options().layout_opt(),
+      weight.options().device_opt(),
+      weight.options().pinned_memory_opt());
+  ideep::tensor& mkl_weight = itensor_from_mkldnn(packed_weight);
+  ideep::tensor& orig_w = itensor_from_mkldnn(weight);
+  cblas_sgemm_pack(
+      CblasRowMajor,
+      CblasBMatrix,
+      CblasTrans,
+      M,
+      N,
+      K,
+      1.0f,
+      (float*)(orig_w.get_data_handle()),
+      K,
+      (float*)(mkl_weight.get_data_handle()));
+  return packed_weight;
+}
+
+TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
+      TORCH_FN(mkl_reorder_linear_weight));
+}
+
+#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
 }}

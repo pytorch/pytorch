@@ -452,21 +452,13 @@ class CodeGen(object):
 
                         lines = node.stack_trace.strip().split('\n')
                         idx = 0
-                        context_lines = []
                         while idx < len(lines):
                             line = lines[idx].strip()
                             if line.startswith('File '):
                                 break
-
-                            # Skip printing module stack
-                            if not line.startswith("Module stack"):
-                                context_lines.append(line)
                             idx += 1
 
                         summary_lines = []
-                        if context_lines:
-                            summary_lines.append(', '.join(context_lines))
-
                         if idx + 1 < len(lines):
                             matches = pattern.match(lines[idx].strip())
                             if matches:
@@ -633,7 +625,7 @@ class _PyTreeCodeGen(CodeGen):
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
         function_args = self.pytree_info.orig_args
-        has_orig_self = (function_args[0] == 'self')
+        has_orig_self = (function_args[0] == 'self') if len(function_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)

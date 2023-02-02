@@ -509,7 +509,7 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = res_values.dim() - 1;
-  const auto res_shape = broadcasted_shape;
+  const auto& res_shape = broadcasted_shape;
   const auto res_nnz = selected_source.numel();
 
   auto* res_sparse_impl = get_sparse_impl(res);

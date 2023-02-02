@@ -1,17 +1,18 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import cast, List, Optional, Sequence, Tuple
+
 import torch
 from torch.distributed._tensor.api import (
+    _Partial,
     DTensor,
     DTensorSpec,
     Placement,
     Replicate,
     Shard,
-    _Partial,
 )
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
-from typing import List, Optional, Sequence, Tuple, cast
 
 
 # NOTE: the default propagation rule should apply for
@@ -34,8 +35,7 @@ def prop_create_like(op_schema: OpSchema) -> OutputSharding:
     output_spec = DTensorSpec(
         mesh=input_spec.mesh,
         placements=tuple(
-            Replicate() if isinstance(p, _Partial) else p
-            for p in input_spec.placements
+            Replicate() if isinstance(p, _Partial) else p for p in input_spec.placements
         ),
         ndim=input_spec.ndim,
         shape=input_spec.shape,
@@ -139,8 +139,7 @@ def prop_bucketize(op_schema: OpSchema) -> OutputSharding:
                         input_schema,
                         DTensorSpec(
                             mesh=boundaries.mesh,
-                            placements=[Replicate()]
-                            * len(boundaries.placements),
+                            placements=[Replicate()] * len(boundaries.placements),
                             ndim=boundaries.ndim,
                             shape=boundaries.shape,
                         ),
@@ -193,8 +192,7 @@ def _prop_all_but_dim(
             schema_suggestions=[
                 OpSchema(
                     func_schema=op_schema.func_schema,
-                    args_schema=(suggested_input_spec,)
-                    + op_schema.args_schema[1:],
+                    args_schema=(suggested_input_spec,) + op_schema.args_schema[1:],
                     kwargs_schema=op_schema.kwargs_schema,
                 ),
             ],
@@ -390,19 +388,14 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
             multi_indices_spec[valid_indices_spec[i][0]] = v
         # we'll need to call pointwise_rule again to see what's our ideal indices_spec and then
         # use that to compute our ideal values_spec
-        indices_output_spec = pointwise_rule(
-            valid_indices_suggestion
-        ).output_spec
+        indices_output_spec = pointwise_rule(valid_indices_suggestion).output_spec
         assert isinstance(indices_output_spec, DTensorSpec)
         indices_spec = indices_output_spec
 
     lookup_dims = set(v[0] for v in valid_indices_spec)
 
     need_reshard_on_values = tuple(
-        (
-            isinstance(vp, Shard)
-            and (vp.dim in lookup_dims or isinstance(ip, Shard))
-        )
+        (isinstance(vp, Shard) and (vp.dim in lookup_dims or isinstance(ip, Shard)))
         for vp, ip in zip(values_spec.placements, indices_spec.placements)
     )
 

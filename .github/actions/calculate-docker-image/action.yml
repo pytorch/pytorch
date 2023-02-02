@@ -41,7 +41,7 @@ runs:
       id: calculate-tag
       env:
         IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
-        XLA_IMAGE_TAG: v0.4
+        XLA_IMAGE_TAG: v0.6
         DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
       run: |
         if [ -n "${IS_XLA}" ]; then

@@ -7,17 +7,15 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
-
 import torch
-from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
+from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -177,22 +175,6 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
-    def unspec_numpy_args(self, *args, **kwargs):
-        return all(
-            isinstance(
-                i,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                    variables.ConstantVariable,
-                ),
-            )
-            for i in itertools.chain(args, kwargs.values())
-        ) and any(
-            isinstance(x, variables.UnspecializedNumpyVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
-
     def unspec_python_args(self, *args, **kwargs):
         return check_unspec_python_args(args, kwargs)
 
@@ -203,10 +185,7 @@ class BuiltinVariable(VariableTracker):
         for x in args:
             if isinstance(
                 x,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                ),
+                (variables.UnspecializedPythonVariable,),
             ):
                 unwrapped_args.append(x.raw_value)
             else:
@@ -214,10 +193,7 @@ class BuiltinVariable(VariableTracker):
         for k, v in kwargs:
             if isinstance(
                 x,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                ),
+                (variables.UnspecializedPythonVariable,),
             ):
                 unwrapped_kwargs.update({k: v.raw_value})
             else:
@@ -273,23 +249,15 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
+                    "call_function",
+                    fn,
+                    *proxy_args_kwargs(args, kwargs),
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
                     return wrap_fx_proxy_cls(
                         FakeItemVariable,
                         tx,
                         proxy,
-                        **options,
-                    )
-                elif self.unspec_numpy_args(*args, **kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
-                    return wrap_fx_proxy_cls(
-                        variables.UnspecializedNumpyVariable,
-                        tx,
-                        proxy,
-                        raw_value=raw_value,
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
@@ -333,7 +301,6 @@ class BuiltinVariable(VariableTracker):
                     fn_,
                     (args[0].as_proxy(),),
                     {},
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -393,7 +360,6 @@ class BuiltinVariable(VariableTracker):
                         "call_function",
                         self.fn,
                         *proxy_args_kwargs([a, b], {}),
-                        current_tx=tx,
                     ),
                     **VariableTracker.propagate(self, [a, b]),
                 )
@@ -413,7 +379,6 @@ class BuiltinVariable(VariableTracker):
                 isinstance(
                     i,
                     (
-                        variables.UnspecializedNumpyVariable,
                         variables.UnspecializedPythonVariable,
                         variables.ConstantVariable,
                     ),
@@ -433,19 +398,14 @@ class BuiltinVariable(VariableTracker):
                 else:
                     raw_res = min(a.raw_value, raw_b)
 
-                if isinstance(raw_res, np.number):
-                    return variables.UnspecializedNumpyVariable.from_tensor_variable(
-                        result, raw_res
-                    )
-                else:
-                    need_unwrap = any(
-                        x.need_unwrap
-                        for x in [a, b]
-                        if isinstance(x, variables.UnspecializedPythonVariable)
-                    )
-                    return variables.UnspecializedPythonVariable.from_tensor_variable(
-                        result, raw_res, need_unwrap
-                    )
+                need_unwrap = any(
+                    x.need_unwrap
+                    for x in [a, b]
+                    if isinstance(x, variables.UnspecializedPythonVariable)
+                )
+                return variables.UnspecializedPythonVariable.from_tensor_variable(
+                    result, raw_res, need_unwrap
+                )
             # otherwise return tensor
             else:
                 return result
@@ -468,28 +428,19 @@ class BuiltinVariable(VariableTracker):
     call_min = _call_min_max
     call_max = _call_min_max
 
-    def call_range(self, tx, *args, **kwargs):
-        if self.unspec_python_args(*args, **kwargs) or self.constant_args(
-            *args, **kwargs
-        ):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
-            return variables.RangeVariable(
-                value=range(
-                    *[x.value for x in args],
-                    **{k: v.value for k, v in kwargs.items()},
-                ),
-            )
-        elif self._dynamic_args(*args, **kwargs):
-            assert len(kwargs) == 0
+    def call_range(self, tx, *args):
+        if self.unspec_python_args(*args) or self.constant_args(*args):
+            args, _ = specialize_args_kwargs(tx, args, {})
+            return variables.RangeVariable(args)
+        elif self._dynamic_args(*args):
 
             def guard_if_dyn(arg):
                 if isinstance(arg, DynamicShapeVariable):
                     return arg.evaluate_expr(tx.output)
                 return arg
 
-            args = [guard_if_dyn(arg) for arg in args]
-            value = self.fn(*args)
-            return variables.RangeVariable(value=value)
+            args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
+            return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -585,6 +536,11 @@ class BuiltinVariable(VariableTracker):
             return b.__class__(
                 items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
             ).add_options(self, a, b)
+        # TODO this doesn't generalize in other builtin operators.
+        elif isinstance(a, variables.ConstantVariable) and isinstance(
+            b, DynamicShapeVariable
+        ):
+            return b.call_method(tx, "__rmul__", [a], {})
         else:
             return a.call_method(tx, "__mul__", [b], {})
 
@@ -633,7 +589,12 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        return variables.SuperVariable(a, b)
+        source = (
+            None
+            if a.source is None or b.source is None
+            else SuperSource(a.source, b.source)
+        )
+        return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):
         if isinstance(arg, variables.ListIteratorVariable):

@@ -67,6 +67,11 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            All builds are done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
+            To start Python docs build type:
+              cd docs && make html && make coverage
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -90,6 +95,8 @@ jobs:
         env:
           GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
+          # sometimes .netrc exists as a directory even though this is the temp folder
+          rm -rf "${RUNNER_TEMP}/.netrc"
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
           echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
@@ -170,3 +177,6 @@ jobs:
           if-no-files-found: error
           path: functorch_ghpages/nightly/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/functorchdocs
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

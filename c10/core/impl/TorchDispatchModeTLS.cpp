@@ -21,8 +21,7 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
   TORCH_CHECK(
       torchDispatchModeState.stack_.size() > 0,
       "trying to pop from empty mode stack");
-  const std::shared_ptr<SafePyObject> out =
-      torchDispatchModeState.stack_.back();
+  std::shared_ptr<SafePyObject> out = torchDispatchModeState.stack_.back();
   torchDispatchModeState.stack_.pop_back();
 
   if (torchDispatchModeState.stack_.size() == 0) {
@@ -65,7 +64,8 @@ void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
 // UTIL
 
 bool dispatch_mode_enabled() {
-  return TorchDispatchModeTLS::stack_len() > 0;
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
+      TorchDispatchModeTLS::stack_len() > 0;
 }
 
 } // namespace impl

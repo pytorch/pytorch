@@ -25,6 +25,7 @@ import torch.distributed as dist
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    MultiThreadedTestCase,
     TEST_SKIPS,
     skip_if_lt_x_gpu,
 )
@@ -54,6 +55,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     """
     Test decorator which skips the test unless there's a GPU available to torch.
 
+    >>> # xdoctest: +SKIP
     >>> @skip_unless_torch_gpu
     >>> def test_some_method(self) -> None:
     >>>   ...
@@ -173,6 +175,23 @@ def with_comms(
     return wrapper
 
 
+class DTensorOpTestBase(MultiThreadedTestCase):
+    @property
+    def world_size(self) -> int:
+        return NUM_DEVICES
+
+    @property
+    def device_type(self) -> str:
+        return DEVICE_TYPE
+
+    def build_device_mesh(self):
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_threads()
+
+
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
 class DTensorConverter(object):
     def __init__(
@@ -290,8 +309,8 @@ class DTensorConverter(object):
                 tree_unflatten(new_args, self.flatten_args_spec),
                 tree_unflatten(new_kwargs, self.flatten_kwargs_spec),
             )
-        except StopIteration:
-            raise StopIteration
+        except StopIteration as e:
+            raise StopIteration from e
 
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]

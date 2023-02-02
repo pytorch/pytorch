@@ -858,6 +858,7 @@ struct TORCH_API Node {
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
+    names.reserve(values_.size());
     for (const AVPtr& a : values_) {
       names.push_back(a->name);
     }
@@ -865,6 +866,7 @@ struct TORCH_API Node {
   }
   std::vector<const char*> attributeNamesS() const {
     std::vector<const char*> names;
+    names.reserve(values_.size());
     for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
     }

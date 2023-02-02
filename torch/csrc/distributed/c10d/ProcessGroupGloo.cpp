@@ -4,6 +4,7 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <chrono>
 #include <exception>
 #include <ratio>
@@ -608,7 +609,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -625,16 +626,16 @@ void socketInitialize() {
 // gracefully fall back to an alternative if it doesn't.
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
   socketInitialize();
-  struct addrinfo hints;
+  struct addrinfo hints {};
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  struct addrinfo* result;
+  struct addrinfo* result = nullptr;
   auto rv = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
   if (rv < 0) {
     return false;
   }
-  struct addrinfo* rp;
+  struct addrinfo* rp = nullptr;
   for (rp = result; rp != nullptr; rp = rp->ai_next) {
     auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
     if (fd == -1) {
@@ -731,7 +732,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : ProcessGroup(rank, size),
+    : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(options),
       stop_(false),

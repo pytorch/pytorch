@@ -2028,17 +2028,6 @@ TEST_F(LazyOpsTest, TestNormNuclear) {
   });
 }
 
-TEST_F(LazyOpsTest, TestFrobeniusNorm) {
-  torch::Tensor a = torch::rand(
-      {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::frobenius_norm(a);
-  ForEachDevice([&](const torch::Device& device) {
-    torch::Tensor lazy_a = CopyToDevice(a, device);
-    torch::Tensor lazy_b = torch::frobenius_norm(lazy_a);
-    AllClose(b, lazy_b);
-  });
-}
-
 TEST_F(LazyOpsTest, TestFrobeniusNormInDim) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));

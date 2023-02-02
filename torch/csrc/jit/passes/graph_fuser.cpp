@@ -16,6 +16,7 @@
 
 #include <queue>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -613,7 +614,7 @@ struct GraphFuser {
   void insertExplicitBroadcast(Node* node) {
     WithInsertPoint insert_guard{node};
     auto tensors = tensorInputs(node);
-    auto new_tensors = broadcast_tensors(tensors);
+    auto new_tensors = broadcast_tensors(std::move(tensors));
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();

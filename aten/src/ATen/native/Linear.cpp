@@ -33,6 +33,7 @@
 #include <cctype>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace at { namespace native {
@@ -149,7 +150,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   out_size.reserve(out_num_dim);
   for (auto& d : lro) out_size.push_back(left.sym_size(d));
   for (auto& d : lo) out_size.push_back(left.sym_size(d));
-  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warning about not using d
+  for (auto& d : sum_dims_) { out_size.emplace_back(1); (void)(d); }; // avoid warning about not using d
   for (auto& d : ro) out_size.push_back(right.sym_size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -181,8 +182,8 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   }
 
   // now we can execute the operations above
-  left = left.permute(lpermutation).reshape_symint({lro_size, lo_size, sum_size});
-  right = right.permute(rpermutation).reshape_symint({lro_size, sum_size, ro_size});
+  left = left.permute(lpermutation).reshape_symint({lro_size, std::move(lo_size), sum_size});
+  right = right.permute(rpermutation).reshape_symint({std::move(lro_size), std::move(sum_size), std::move(ro_size)});
   Tensor result = at::bmm(left, right);
   result = result.view_symint(out_size).permute(opermutation);
 
@@ -305,7 +306,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
   for(const auto i : c10::irange(num_ops)) {
-    const auto operand = operands[i];
+    const auto& operand = operands[i];
     const auto labels = op_labels[i];
     const auto ndims = operand.dim();
     int64_t nlabels = static_cast<int64_t>(labels.size());

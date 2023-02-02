@@ -2,10 +2,13 @@
 from typing import cast
 
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.ops.common_rules import linear_pointwise_rule, pointwise_rule
-from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, _Partial
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.ops.common_rules import (
+    linear_pointwise_rule,
+    pointwise_rule,
+)
 from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Replicate
 
 # leave the remaining pointwise_ops list here for convenience,
 # Below ops are some pointwise ops that are yet to be supported,
@@ -117,6 +120,7 @@ pointwise_ops = [
     "aten.conj_physical.default",
     "aten.conj_physical.out",
     "aten.conj_physical_.default",
+    "aten.constant_.default",
     "aten.copy_sign.Scalar",
     "aten.copy_sign.Scalar_out",
     "aten.copy_sign.Tensor",
@@ -373,24 +377,29 @@ for op in pointwise_ops:
     DTensor._op_to_rules[op] = pointwise_rule
 
 
-@register_prop_rule("aten.native_dropout.default")
-def dropout_rule(op_schema: OpSchema) -> OutputSharding:
-    self_spec = cast(DTensorSpec, op_schema.args_schema[0])
+def _register_non_deterministic_op(op):
+    @register_prop_rule(op)
+    def non_deterministic_rule(op_schema: OpSchema) -> OutputSharding:
+        self_spec = cast(DTensorSpec, op_schema.args_schema[0])
 
-    # TODO: We are specializing dropout_rule now because it's
-    # a non-deterministic algorithm, and replication does not
-    # not support non-deterministic op yet. We should remove
-    # this rule and make dropout to use pointwise rule instead
-    # once we support non-deterministic op.
-    replicate_or_partial = False
-    for placement in self_spec.placements:
-        if isinstance(placement, (Replicate, _Partial)):
-            replicate_or_partial = True
-            break
+        # TODO: We are specializing non_deterministic_rule now because
+        # replicate does not support this op yet. We should remove
+        # this rule once we support non-deterministic op for replicate.
+        replicate_or_partial = False
+        for placement in self_spec.placements:
+            if isinstance(placement, (Replicate, _Partial)):
+                replicate_or_partial = True
+                break
 
-    if replicate_or_partial:
-        return OutputSharding(
-            None, failed_reason="Dropout with replication is not supported yet!"
-        )
-    else:
-        return OutputSharding(self_spec)
+        if replicate_or_partial:
+            return OutputSharding(
+                None, failed_reason=f"{op} with replication is not supported yet!"
+            )
+        else:
+            return OutputSharding(self_spec)
+
+
+_register_non_deterministic_op("aten.native_dropout.default")
+_register_non_deterministic_op("aten.uniform_.default")
+_register_non_deterministic_op("aten.normal_.default")
+_register_non_deterministic_op("aten.kaiming_uniform_.default")

@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct NoneValue : SugaredValue {
   NoneValue() = default;
@@ -602,6 +601,7 @@ SugaredValuePtr IterableTree::getitem(
     Value* idx,
     TypePtr type_hint) {
   std::vector<SugaredValuePtr> child_items;
+  child_items.reserve(children_.size());
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
   }
@@ -774,5 +774,4 @@ SugaredValuePtr SugaredEnumClass::iter(
   return enum_values_list_constant;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

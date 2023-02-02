@@ -23,7 +23,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import (
@@ -1810,9 +1810,9 @@ class TestQuantizedOps(TestCase):
             for name, op in ops_under_test.items():
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                           msg=error_message.format(name, X_ref, X_hat.int_repr()))
+                self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
                                  msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1886,10 +1886,9 @@ class TestQuantizedOps(TestCase):
                     devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
                     for device in devices:
                         qX_hat = op(qX.to(device=device), output_size=output_size)
-                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                        self.assertEqualIgnoreType(
+                        self.assertEqual(
                             X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat), exact_dtype=False)
                         self.assertEqual(
                             scale, qX_hat.q_scale(),
                             msg=error_message.format(name + '.scale', scale,
@@ -1961,9 +1960,9 @@ class TestQuantizedOps(TestCase):
             for name, op in ops_under_test.items():
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                           msg=error_message.format(name, X_ref, X_hat.int_repr()))
+                self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
                                  msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -2108,10 +2107,10 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off: qX_hat={} X_ref={}"
-                                           .format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
+                             msg="{} results are off: qX_hat={} X_ref={}"
+                             .format(name, qX_hat.int_repr(), X_ref),
+                             exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -2163,10 +2162,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off: qX_hat={}, X_ref={}"
-                                           .format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
+                             msg="{} results are off: qX_hat={}, X_ref={}"
+                             .format(name, qX_hat.int_repr(), X_ref), exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -3528,17 +3526,8 @@ class TestDynamicQuantizedOps(TestCase):
 
 
 class TestQuantizedLinear(TestCase):
-    """Tests the correctness of the quantized linear and linear_relu op."""
-    @given(batch_size=st.integers(1, 4),
-           input_channels=st.integers(16, 32),
-           output_channels=st.integers(4, 8),
-           use_bias=st.booleans(),
-           use_relu=st.booleans(),
-           use_multi_dim_input=st.booleans(),
-           use_channelwise=st.booleans())
-    @override_qengines
-    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
-                     use_relu, use_multi_dim_input, use_channelwise):
+    def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,
+                           post_op, use_multi_dim_input, use_channelwise, **post_op_kwargs):
         decimal_val = 4
         dtypes = [torch.quint8]
         if torch.backends.quantized.engine == 'qnnpack':
@@ -3560,10 +3549,180 @@ class TestQuantizedLinear(TestCase):
 
             nptype = np_dtype[dtype]
             qlinear_prepack = torch.ops.quantized.linear_prepack
-            if use_relu:
+            if post_op == 'relu':
                 qlinear = torch.ops.quantized.linear_relu
+            elif post_op == 'leaky_relu':
+                qlinear = torch.ops.quantized.linear_leaky_relu
             else:
                 qlinear = torch.ops.quantized.linear
+            if use_multi_dim_input:
+                batch_size *= 3  # Test the multi-dim input tensor
+            X_scale = 1.5
+            X_zp = 5
+            X_value_min = -128 if dtype == torch.qint8 else 0
+            X_value_max = 127 if dtype == torch.qint8 else 255
+            X_q0 = np.round(
+                np.random.rand(batch_size, input_channels) *
+                (X_value_max - X_value_min)
+                + X_value_min
+            ).astype(nptype)
+
+            W_scales = np.random.rand(output_channels)
+            # xnnpack forces W_zp to 0 when using symmetric quantization
+            # ONEDNN only supports symmetric quantization of weight
+            if dtype == torch.qint8 or qengine_is_onednn():
+                W_zps = np.zeros(output_channels).astype(np.int)
+            else:
+                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
+            # when using symmetric quantization
+            # special restriction for xnnpack fully connected op weight
+            # [-127, 127] instead of [-128, 127]
+            W_value_min = -127 if dtype == torch.qint8 else -128
+            W_value_max = 127
+            W_q0 = np.round(
+                np.random.rand(output_channels, input_channels)
+                * (W_value_max - W_value_min)
+                + W_value_min
+            ).astype(np.int8)  # weight is always int8_t
+            b_value_min = -10
+            b_value_max = 10
+            b_q0 = np.round(
+                np.random.rand(output_channels) *
+                (b_value_max - b_value_min) + b_value_min
+            ).astype(np.int32) if use_bias else None
+            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
+                avoid_vpmaddubsw_overflow_linear(
+                    batch_size,
+                    input_channels,
+                    output_channels,
+                    X_q0,
+                    X_value_min,
+                    X_value_max,
+                    W_q0,
+                    W_value_min,
+                    W_value_max,
+                )
+            X = torch.from_numpy(_dequantize(
+                X_q0, X_scale, X_zp)).to(dtype=torch.float)
+            X_q = torch.quantize_per_tensor(
+                X, scale=X_scale, zero_point=X_zp, dtype=dtype)
+            if use_channelwise:
+                W = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
+                    (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
+                W_q = torch.quantize_per_channel(W, scales=torch.from_numpy(W_scales),
+                                                 zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
+                b = torch.from_numpy(_dequantize(
+                    b_q0, X_scale * W_scales, 0)).to(dtype=torch.float) if use_bias else None
+                b_q = torch.quantize_per_channel(b, scales=torch.from_numpy(X_scale * W_scales),
+                                                 zero_points=torch.zeros(output_channels, dtype=torch.long),
+                                                 axis=0, dtype=torch.qint32) if use_bias else None
+            else:
+                W = torch.from_numpy(_dequantize(
+                    W_q0, W_scales[0], W_zps[0])).to(dtype=torch.float)
+                W_q = torch.quantize_per_tensor(W, scale=W_scales[0], zero_point=(
+                    W_zps[0].astype(int).item()), dtype=torch.qint8)
+                b = torch.from_numpy(_dequantize(
+                    b_q0, X_scale * (W_scales[0].item()), 0)).to(dtype=torch.float) if use_bias else None
+                b_q = torch.quantize_per_tensor(
+                    b, scale=X_scale * (W_scales[0].item()), zero_point=0, dtype=torch.qint32) if use_bias else None
+            # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+            # Y_scale * 255 (max for uint8).
+            Y_scale = 12.34
+            Y_zp = 5
+            # Weight prepacking operator for quantized Linear
+            float_bias = b if use_bias else None
+            W_prepack = qlinear_prepack(W_q, float_bias)
+            if use_multi_dim_input:
+                X_q = X_q.view(3, int(batch_size / 3), input_channels)
+            # Quantized Linear operator with prepacked weight
+            Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp, **post_op_kwargs)
+            if not use_channelwise and post_op in ('none', 'relu'):
+                # Test the per-tensor quantization only
+                # Reference quantized Linear operator
+                Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
+                                      W_scales[0], W_zps[0], b_q0, Y_scale, Y_zp, dtype=nptype)
+                if post_op == 'relu':
+                    Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+                if use_multi_dim_input:
+                    Y_q_ref = np.reshape(
+                        Y_q_ref, (3, int(batch_size / 3), output_channels))
+                # Assert equal
+                np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
+            # Test both per-tensor and per-channel quantization
+            # Reference quantized result from PyTorch Linear operator
+            W_fp32 = W_q.dequantize().to(dtype=torch.float)
+            X_fp32 = X_q.dequantize().to(dtype=torch.float)
+            b_fp32 = b_q.dequantize().to(dtype=torch.float) if use_bias else None
+            Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+            if post_op == 'relu':
+                Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+            elif post_op == 'leaky_relu':
+                Y_fp32_ref = F.leaky_relu(Y_fp32_ref, **post_op_kwargs)
+            Y_q_ref2 = torch.quantize_per_tensor(
+                Y_fp32_ref, Y_scale, Y_zp, dtype)
+            # Assert equal
+            np.testing.assert_array_almost_equal(
+                Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
+
+    """Tests the correctness of the quantized linear op."""
+    @override_qengines
+    def test_qlinear(self):
+        batch_size_list = [1, 4]
+        input_channels_list = [16, 32]
+        output_channels_list = [4, 8]
+        use_bias_list = [True, False]
+        use_multi_dim_input_list = [True, False]
+        use_channelwise_list = [True, False]
+        post_op = 'none'
+        cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
+                                  use_bias_list, use_multi_dim_input_list, use_channelwise_list)
+        for batch_size, input_channels, output_channels, use_bias,\
+                use_multi_dim_input, use_channelwise in cases:
+            self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                    use_bias, post_op, use_multi_dim_input, use_channelwise)
+
+    """Tests the correctness of the quantized linear_relu op."""
+    @override_qengines
+    def test_qlinear_relu(self):
+        batch_size_list = [1, 4]
+        input_channels_list = [16, 32]
+        output_channels_list = [4, 8]
+        use_bias_list = [True, False]
+        use_multi_dim_input_list = [True, False]
+        use_channelwise_list = [True, False]
+        post_op = 'relu'
+        cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
+                                  use_bias_list, use_multi_dim_input_list, use_channelwise_list)
+        for batch_size, input_channels, output_channels, use_bias,\
+                use_multi_dim_input, use_channelwise in cases:
+            self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                    use_bias, post_op, use_multi_dim_input, use_channelwise)
+
+    @given(batch_size=st.integers(1, 4),
+           input_channels=st.integers(16, 32),
+           output_channels=st.integers(4, 8),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
+           use_multi_dim_input=st.booleans(),
+           use_channelwise=st.booleans())
+    @skipIfNoFBGEMM
+    def test_qlinear_with_input_q_dq_qweight_dq_output_fp32(
+            self, batch_size, input_channels, output_channels, use_bias,
+            use_relu, use_multi_dim_input, use_channelwise):
+        decimal_val = 4
+        dtypes = [torch.quint8]
+        for dtype in dtypes:
+            # No support for channelwise in xnnpack (int8)
+            # ONEDNN does not support qint8
+            if dtype == torch.qint8 and (use_channelwise or qengine_is_onednn()):
+                return
+
+            nptype = np_dtype[dtype]
+            qlinear_prepack = torch.ops.quantized.linear_prepack
+            if use_relu:
+                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_relu_output_fp32
+            else:
+                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_output_fp32
             if use_multi_dim_input:
                 batch_size *= 3  # Test the multi-dim input tensor
             X_scale = 1.5
@@ -3642,21 +3801,10 @@ class TestQuantizedLinear(TestCase):
             float_bias = b if use_bias else None
             W_prepack = qlinear_prepack(W_q, float_bias)
             if use_multi_dim_input:
+                X = X.view(3, int(batch_size / 3), input_channels)
                 X_q = X_q.view(3, int(batch_size / 3), input_channels)
             # Quantized Linear operator with prepacked weight
-            Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
-            if not use_channelwise:
-                # Test the per-tensor quantization only
-                # Reference quantized Linear operator
-                Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
-                                      W_scales[0], W_zps[0], b_q0, Y_scale, Y_zp, dtype=nptype)
-                if use_relu:
-                    Y_q_ref[Y_q_ref < Y_zp] = Y_zp
-                if use_multi_dim_input:
-                    Y_q_ref = np.reshape(
-                        Y_q_ref, (3, int(batch_size / 3), output_channels))
-                # Assert equal
-                np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
+            Y_q_dq = qlinear(X, X_scale, X_zp, W_prepack)
             # Test both per-tensor and per-channel quantization
             # Reference quantized result from PyTorch Linear operator
             W_fp32 = W_q.dequantize().to(dtype=torch.float)
@@ -3665,11 +3813,8 @@ class TestQuantizedLinear(TestCase):
             Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
             if use_relu:
                 Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
-            Y_q_ref2 = torch.quantize_per_tensor(
-                Y_fp32_ref, Y_scale, Y_zp, dtype)
-            # Assert equal
-            np.testing.assert_array_almost_equal(
-                Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
+            decimal_val = 1
+            np.testing.assert_array_almost_equal(Y_fp32_ref.numpy(), Y_q_dq.numpy(), decimal=decimal_val)
 
     @given(batch_size=st.integers(1, 4),
            # in cudnn v. 8.4.0, there is a limitation that input channels
@@ -3812,6 +3957,45 @@ class TestQuantizedLinear(TestCase):
                 W_q.q_scale()), np.float32(W_q_origin.q_scale()))
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
+
+    @skipIfNoONEDNN
+    def test_qlinear_leaky_relu(self):
+        with override_quantized_engine('onednn'):
+            batch_size_list = [1, 4]
+            input_channels_list = [16, 32]
+            output_channels_list = [4, 8]
+            use_bias_list = [True, False]
+            use_multi_dim_input_list = [True, False]
+            use_channelwise_list = [True, False]
+            negative_slopes_list = [0.01, 0.05]
+            post_op = 'leaky_relu'
+            cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
+                                      use_bias_list, use_multi_dim_input_list,
+                                      use_channelwise_list, negative_slopes_list)
+            for batch_size, input_channels, output_channels, use_bias,\
+                    use_multi_dim_input, use_channelwise, neg_slope in cases:
+                self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                        use_bias, post_op, use_multi_dim_input,
+                                        use_channelwise, negative_slope=neg_slope)
+
+    @skipIfNoONEDNN
+    def test_qlinear_tanh(self):
+        with override_quantized_engine('onednn'):
+            batch_size_list = [1, 4]
+            input_channels_list = [16, 32]
+            output_channels_list = [4, 8]
+            use_bias_list = [True, False]
+            use_multi_dim_input_list = [True, False]
+            use_channelwise_list = [True, False]
+            post_op = 'tanh'
+            cases = itertools.product(batch_size_list, input_channels_list,
+                                      output_channels_list, use_bias_list,
+                                      use_multi_dim_input_list, use_channelwise_list)
+            for batch_size, input_channels, output_channels, use_bias,\
+                    use_multi_dim_input, use_channelwise in cases:
+                self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                        use_bias, post_op, use_multi_dim_input,
+                                        use_channelwise)
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
@@ -5453,6 +5637,35 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs,
             (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
             channelwise)
+
+    def test_conv_reorder_issue_onednn(self):
+        """ Ensure reorder failure issue in conv is fixed for onednn backend.
+            Onednn backend used to encounter reorder failure
+            when running conv with dynamic input shapes.
+            Solved by https://github.com/pytorch/pytorch/pull/86876
+        """
+        if 'onednn' not in supported_qengines:
+            return
+        with override_quantized_engine('onednn'):
+            bs = 1
+            ic, oc = 128, 512
+            kh, kw = 1, 1
+            ih, iw = 28, 28
+            bias = None
+            strides, paddings, dilates, groups = (1, 1), (0, 0), (1, 1), 1
+            w = torch.randn((oc, ic, kh, kw))
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            w_packed = torch.ops.quantized.conv2d_prepack(
+                qw, bias, strides, paddings, dilates, groups
+            )
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            ih, iw = 5, 4
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            # The following should pass when input shape is changed
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),

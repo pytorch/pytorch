@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//third_party:substitution.bzl", "template_rule")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
 
 _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_${DNNL_CPU_THREADING_RUNTIME}": "#define DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_OMP",
@@ -55,8 +55,8 @@ template_rule(
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "2",
         "@DNNL_VERSION_MINOR@": "7",
-        "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "650085b2f3643aad05c629425983491d63b5c289",
+        "@DNNL_VERSION_PATCH@": "3",
+        "@DNNL_VERSION_HASH@": "7710bdc92064a08b985c5cbdb09de773b19cba1f",
     },
 )
 
@@ -100,7 +100,7 @@ cc_library(
         "-fno-strict-overflow",
         "-fopenmp",
     ] + select({
-        "@//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
+        "@pytorch//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
         "//conditions:default": ["-DDNNL_CPU_RUNTIME=2"],
     }),
     includes = [
@@ -119,7 +119,7 @@ cc_library(
     deps = [
         "@mkl",
     ] + select({
-        "@//tools/config:thread_sanitizer": [],
+        "@pytorch//tools/config:thread_sanitizer": [],
         "//conditions:default": ["@tbb"],
     }),
 )

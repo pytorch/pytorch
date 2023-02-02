@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
+// Note [llvm::SCEVPredicate non-virtual destructor]
 // llvm::SCEVPredicate has virtual function but non-virtual destructor
 // https://github.com/llvm/llvm-project/blob/c1a0a213378a458fbea1a5c77b315c7dce08fd05/llvm/include/llvm/Analysis/ScalarEvolution.h#L198
 #pragma GCC diagnostic push
@@ -15,15 +16,30 @@
 #include <llvm/Analysis/TargetTransformInfo.h>
 #pragma GCC diagnostic pop
 
+#include <llvm/Analysis/CGSCCPassManager.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/MDBuilder.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/Pass.h>
+
+// see Note [llvm::SCEVPredicate non-virtual destructor]
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#include <llvm/Passes/PassBuilder.h>
+#pragma GCC diagnostic pop
+
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Vectorize/LoopVectorize.h>
+#include <llvm/Transforms/Vectorize/SLPVectorizer.h>
 
 #if LLVM_VERSION_MAJOR >= 10
 #include <llvm/Support/CodeGen.h>
@@ -58,9 +74,7 @@ C10_DEFINE_bool(
     false,
     "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 c10::optional<std::string>& LLVMTargetTriple() {
   static c10::optional<std::string> triple = c10::nullopt;
@@ -332,9 +346,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 LLVMCodeGen::~LLVMCodeGen() = default;
 
@@ -593,7 +605,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
 
 class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
  private:
-  ExprPtr mutate(IntrinsicsPtr v) {
+  ExprPtr mutate(IntrinsicsPtr v) override {
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
@@ -2446,6 +2458,54 @@ void LLVMCodeGenImpl::visit(CondPtr v) {
   irb_.SetInsertPoint(end_block);
 }
 
+// "New" PassManager needed to replace TM.adjustPassManager
+#if LLVM_VERSION_MAJOR >= 15
+void LLVMCodeGenImpl::optimize(llvm::Module& M) {
+  // Add internal analysis passes from the target machine.
+  auto& TM = jit_->getTargetMachine();
+
+  // Create the analysis managers.
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager CGAM;
+  llvm::ModuleAnalysisManager MAM;
+
+  // Create the new pass manager builder.
+  // Take a look at the PassBuilder constructor parameters for more
+  // customization, e.g. specifying a TargetMachine or various debugging
+  // options.
+  llvm::PassBuilder PB(&TM);
+
+  TM.registerPassBuilderCallbacks(PB);
+
+  // Register all the basic analyses with the managers.
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  llvm::ModulePassManager MPM =
+      PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+  llvm::FunctionPassManager FPM = PB.buildFunctionSimplificationPipeline(
+      llvm::OptimizationLevel::O3, llvm::ThinOrFullLTOPhase::None);
+
+  FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
+
+  FPM.addPass(llvm::LoopVectorizePass());
+  FPM.addPass(llvm::SLPVectorizerPass());
+
+  FPM.addPass(llvm::DCEPass());
+  MPM.addPass(llvm::AlwaysInlinerPass());
+
+  MPM.run(M, MAM);
+  for (auto& FF : M) {
+    if (!FF.empty()) {
+      FPM.run(FF, FAM);
+    }
+  }
+}
+#else // "Old" PassManager
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
@@ -2472,6 +2532,7 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   }
   FPM.doFinalization();
 }
+#endif
 
 RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");
 

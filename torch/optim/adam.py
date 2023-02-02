@@ -1,10 +1,10 @@
-from collections import defaultdict
-import math
-from typing import cast, List, Optional, Dict, Tuple
+from typing import cast, List, Optional, Dict
 
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
+                        _dispatch_sqrt, _capturable_doc, _differentiable_doc, _maximize_doc)
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
 
@@ -48,7 +48,170 @@ def _get_fp16AMP_params(
     return _MultiDeviceReplicator(found_inf_combined)
 
 class Adam(Optimizer):
-    r"""Implements Adam algorithm.
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
+                 maximize: bool = False, capturable: bool = False,
+                 differentiable: bool = False, fused: Optional[bool] = None):
+        if not 0.0 <= lr:
+            raise ValueError("Invalid learning rate: {}".format(lr))
+        if not 0.0 <= eps:
+            raise ValueError("Invalid epsilon value: {}".format(eps))
+        if not 0.0 <= betas[0] < 1.0:
+            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+        if not 0.0 <= betas[1] < 1.0:
+            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+        if not 0.0 <= weight_decay:
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        weight_decay=weight_decay, amsgrad=amsgrad,
+                        maximize=maximize, foreach=foreach, capturable=capturable,
+                        differentiable=differentiable, fused=fused)
+        super(Adam, self).__init__(params, defaults)
+
+        if fused:
+            if differentiable:
+                raise RuntimeError("`fused` cannot be `differentiable`")
+            self._step_supports_amp_scaling = True
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Suppor AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("FusedAdam requires all the params to be CUDA, floating point")
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('amsgrad', False)
+            group.setdefault('maximize', False)
+            group.setdefault('foreach', None)
+            group.setdefault('capturable', False)
+            group.setdefault('differentiable', False)
+            group.setdefault('fused', False)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
+
+    def _init_group(
+        self,
+        group,
+        grad_scaler,
+        params_with_grad,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps
+    ):
+
+        grad_scale = None
+        found_inf = None
+        if group['fused'] and grad_scaler is not None:
+            grad_scale = grad_scaler._get_scale_async()
+            device = grad_scale.device
+            grad_scale = _MultiDeviceReplicator(grad_scale)
+            found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
+
+        for p in group['params']:
+            if p.grad is not None:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
+                    raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                grads.append(p.grad)
+
+                state = self.state[p]
+                # Lazy state initialization
+                if len(state) == 0:
+                    state['step'] = (
+                        torch.zeros((1,), dtype=torch.float, device=p.device)
+                        if self.defaults['capturable'] or self.defaults['fused']
+                        else torch.tensor(0.)
+                    )
+                    # Exponential moving average of gradient values
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if group['amsgrad']:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                exp_avgs.append(state['exp_avg'])
+                exp_avg_sqs.append(state['exp_avg_sq'])
+
+                if group['amsgrad']:
+                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+                if group['differentiable'] and state['step'].requires_grad:
+                    raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
+                state_steps.append(state['step'])
+
+        return grad_scale, found_inf
+
+    @_use_grad_for_differentiable
+    def step(self, closure=None, *, grad_scaler=None):
+        """Performs a single optimization step.
+
+        Args:
+            closure (Callable, optional): A closure that reevaluates the model
+                and returns the loss.
+            grad_scaler (:class:`torch.cuda.amp.GradScaler`, optional): A GradScaler which is
+                supplied from ``grad_scaler.step(optimizer)``.
+        """
+        self._cuda_graph_capture_health_check()
+
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            exp_avgs = []
+            exp_avg_sqs = []
+            max_exp_avg_sqs = []
+            state_steps = []
+            beta1, beta2 = group['betas']
+
+            grad_scale, found_inf = self._init_group(
+                group,
+                grad_scaler,
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps)
+
+            adam(params_with_grad,
+                 grads,
+                 exp_avgs,
+                 exp_avg_sqs,
+                 max_exp_avg_sqs,
+                 state_steps,
+                 amsgrad=group['amsgrad'],
+                 beta1=beta1,
+                 beta2=beta2,
+                 lr=group['lr'],
+                 weight_decay=group['weight_decay'],
+                 eps=group['eps'],
+                 maximize=group['maximize'],
+                 foreach=group['foreach'],
+                 capturable=group['capturable'],
+                 differentiable=group['differentiable'],
+                 fused=group['fused'],
+                 grad_scale=grad_scale,
+                 found_inf=found_inf)
+
+        return loss
+
+
+Adam.__doc__ = r"""Implements Adam algorithm.
 
     .. math::
        \begin{aligned}
@@ -86,7 +249,7 @@ class Adam(Optimizer):
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-
+    """ + r"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -101,157 +264,22 @@ class Adam(Optimizer):
             (default: False)
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
-            Passing True can impair ungraphed performance, so if you don't intend to
-            graph capture this instance, leave it False (default: False)
-        fused (bool, optional): whether fused implementation of optimizer is used.
+        {maximize}
+        {capturable}
+        {differentiable}
+        fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported. (default: False)
+            are supported. Since the fused implementation is usually significantly faster than
+            the for-loop implementation, we try to use it whenever possible (all parameters
+            are on CUDA and are of a supported type). Else, we continue with the for-loop
+            implementation. (default: None)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
-    """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
-                 maximize: bool = False, capturable: bool = False,
-                 differentiable: bool = False, fused: bool = False):
-        if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
-        if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
-        if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
-        if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
-        defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad,
-                        maximize=maximize, foreach=foreach, capturable=capturable,
-                        differentiable=differentiable, fused=fused)
-        super(Adam, self).__init__(params, defaults)
-
-        if fused:
-            if differentiable:
-                raise RuntimeError("`fused` cannot be `differentiable`")
-            self._step_supports_amp_scaling = True
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Suppor AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
-            if not all(
-                p.is_cuda and torch.is_floating_point(p)
-                for pg in self.param_groups for p in pg['params']
-            ):
-                raise RuntimeError("FusedAdam requires all the params to be CUDA, floating point")
-
-    def __setstate__(self, state):
-        super().__setstate__(state)
-        for group in self.param_groups:
-            group.setdefault('amsgrad', False)
-            group.setdefault('maximize', False)
-            group.setdefault('foreach', None)
-            group.setdefault('capturable', False)
-            group.setdefault('differentiable', False)
-            group.setdefault('fused', False)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
-        if not step_is_tensor:
-            for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
-
-    @_use_grad_for_differentiable
-    def step(self, closure=None, *, grad_scaler=None):
-        """Performs a single optimization step.
-
-        Args:
-            closure (Callable, optional): A closure that reevaluates the model
-                and returns the loss.
-            grad_scaler (:class:`torch.cuda.amp.GradScaler`, optional): A GradScaler which is
-                supplied from ``grad_scaler.step(optimizer)``.
-        """
-        self._cuda_graph_capture_health_check()
-
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            max_exp_avg_sqs = []
-            state_steps = []
-            beta1, beta2 = group['betas']
-
-            grad_scale = None
-            found_inf = None
-            if group['fused'] and grad_scaler is not None:
-                grad_scale = grad_scaler._get_scale_async()
-                device = grad_scale.device
-                grad_scale = _MultiDeviceReplicator(grad_scale)
-                found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
-
-            for p in group['params']:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    if p.grad.is_sparse:
-                        raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                    grads.append(p.grad)
-
-                    state = self.state[p]
-                    # Lazy state initialization
-                    if len(state) == 0:
-                        state['step'] = (
-                            torch.zeros((1,), dtype=torch.float, device=p.device)
-                            if self.defaults['capturable'] or self.defaults['fused']
-                            else torch.tensor(0.)
-                        )
-                        # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        if group['amsgrad']:
-                            # Maintains max of all exp. moving avg. of sq. grad. values
-                            state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                    exp_avgs.append(state['exp_avg'])
-                    exp_avg_sqs.append(state['exp_avg_sq'])
-
-                    if group['amsgrad']:
-                        max_exp_avg_sqs.append(state['max_exp_avg_sq'])
-                    if group['differentiable'] and state['step'].requires_grad:
-                        raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
-                    state_steps.append(state['step'])
-
-            adam(params_with_grad,
-                 grads,
-                 exp_avgs,
-                 exp_avg_sqs,
-                 max_exp_avg_sqs,
-                 state_steps,
-                 amsgrad=group['amsgrad'],
-                 beta1=beta1,
-                 beta2=beta2,
-                 lr=group['lr'],
-                 weight_decay=group['weight_decay'],
-                 eps=group['eps'],
-                 maximize=group['maximize'],
-                 foreach=group['foreach'],
-                 capturable=group['capturable'],
-                 differentiable=group['differentiable'],
-                 fused=group['fused'],
-                 grad_scale=grad_scale,
-                 found_inf=found_inf)
-
-        return loss
+    """.format(maximize=_maximize_doc, capturable=_capturable_doc, differentiable=_differentiable_doc)
 
 
 def adam(params: List[Tensor],
@@ -265,7 +293,7 @@ def adam(params: List[Tensor],
          foreach: Optional[bool] = None,
          capturable: bool = False,
          differentiable: bool = False,
-         fused: bool = False,
+         fused: Optional[bool] = None,
          grad_scale: Optional[_MultiDeviceReplicator] = None,
          found_inf: Optional[_MultiDeviceReplicator] = None,
          *,
@@ -279,6 +307,22 @@ def adam(params: List[Tensor],
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
+
+    # We try to use the fused implementation whenever we can since it is fastest.
+    # It's only available when the tensors are floats on the same CUDA device
+    # and when differentiable=False.
+    # We still respect when the user inputs False for fused.
+    if fused is None:
+        all_tensors = []
+        all_tensors.extend(params)
+        all_tensors.extend(grads)
+        all_tensors.extend(exp_avgs)
+        all_tensors.extend(exp_avg_sqs)
+        all_tensors.extend(max_exp_avg_sqs)
+        all_tensors.extend(state_steps)
+        fused = not torch.jit.is_scripting() and not differentiable and all(
+            p.is_cuda and torch.is_floating_point(p) for p in all_tensors
+        )
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
@@ -392,14 +436,14 @@ def _single_tensor_adam(params: List[Tensor],
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = step_t.item()
+            step = _get_value(step_t)
 
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = math.sqrt(bias_correction2)
+            bias_correction2_sqrt = _dispatch_sqrt(bias_correction2)
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -410,6 +454,7 @@ def _single_tensor_adam(params: List[Tensor],
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
             param.addcdiv_(exp_avg, denom, value=-step_size)
+
 
 
 def _multi_tensor_adam(params: List[Tensor],
@@ -439,113 +484,93 @@ def _multi_tensor_adam(params: List[Tensor],
 
     assert grad_scale is None and found_inf is None
 
-    if maximize:
-        grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
-
     assert not differentiable, "_foreach ops don't support autograd"
-    # Handle complex parameters
-    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
-    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
-    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
-    params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
 
-    # update steps
-    torch._foreach_add_(state_steps, 1)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
+         device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
 
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        if maximize:
+            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
 
-    # Decay the first and second moment running average coefficient
-    torch._foreach_mul_(exp_avgs, beta1)
-    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+        # Handle complex parameters
+        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
+        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
+        device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
+        params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
-    torch._foreach_mul_(exp_avg_sqs, beta2)
-    torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
+        # update steps
+        torch._foreach_add_(device_state_steps, 1)
 
-    if capturable:
-        # TODO: use foreach_pow if/when foreach_pow is added
-        bias_correction1 = [torch.pow(beta1, step) for step in state_steps]
-        bias_correction2 = [torch.pow(beta2, step) for step in state_steps]
-        # foreach_sub doesn't allow a scalar as the first arg
-        torch._foreach_sub_(bias_correction1, 1)
-        torch._foreach_sub_(bias_correction2, 1)
-        torch._foreach_neg_(bias_correction1)
-        torch._foreach_neg_(bias_correction2)
+        if weight_decay != 0:
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
-        # foreach_div doesn't allow a scalar as the first arg
-        step_size = torch._foreach_div(bias_correction1, lr)
-        torch._foreach_reciprocal_(step_size)
-        torch._foreach_neg_(step_size)
+        # Decay the first and second moment running average coefficient
+        torch._foreach_mul_(device_exp_avgs, beta1)
+        torch._foreach_add_(device_exp_avgs, device_grads, alpha=1 - beta1)
 
-        bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2)
+        torch._foreach_mul_(device_exp_avg_sqs, beta2)
+        torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
+        if capturable:
+            # TODO: use foreach_pow if/when foreach_pow is added
+            bias_correction1 = [torch.pow(beta1, step) for step in device_state_steps]
+            bias_correction2 = [torch.pow(beta2, step) for step in device_state_steps]
+            # foreach_sub doesn't allow a scalar as the first arg
+            torch._foreach_sub_(bias_correction1, 1)
+            torch._foreach_sub_(bias_correction2, 1)
+            torch._foreach_neg_(bias_correction1)
+            torch._foreach_neg_(bias_correction2)
 
-            # Use the max. for normalizing running avg. of gradient
-            max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-            # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
-            # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-            torch._foreach_div_(max_exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
-            eps_over_step_size = torch._foreach_div(step_size, eps)
-            torch._foreach_reciprocal_(eps_over_step_size)
-            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+            # foreach_div doesn't allow a scalar as the first arg
+            step_size = torch._foreach_div(bias_correction1, lr)
+            torch._foreach_reciprocal_(step_size)
+            torch._foreach_neg_(step_size)
+
+            bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2)
+
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)  # type: ignore[assignment]
+
+                # Use the max. for normalizing running avg. of gradient
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
+                # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
+                # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+                eps_over_step_size = torch._foreach_div(step_size, eps)
+                torch._foreach_reciprocal_(eps_over_step_size)
+                denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+            else:
+                exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                torch._foreach_div_(exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+                eps_over_step_size = torch._foreach_div(step_size, eps)
+                torch._foreach_reciprocal_(eps_over_step_size)
+                denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+
+            torch._foreach_addcdiv_(params_, device_exp_avgs, denom)
         else:
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
-            eps_over_step_size = torch._foreach_div(step_size, eps)
-            torch._foreach_reciprocal_(eps_over_step_size)
-            denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+            bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
+            bias_correction2 = [1 - beta2 ** _get_value(step) for step in device_state_steps]
 
-        torch._foreach_addcdiv_(params_, exp_avgs, denom)
-    else:
-        bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-        bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+            step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-        step_size = [(lr / bc) * -1 for bc in bias_correction1]
+            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
 
-        bias_correction2_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
 
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
+                # Use the max. for normalizing running avg. of gradient
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
+                denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
+            else:
+                exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
+                denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-            # Use the max. for normalizing running avg. of gradient
-            max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-            torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
-            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
-        else:
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
-            denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
-
-        torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
-
-
-# TODO(crcrpar): Move this to another place when adding another fused optimizer.
-# TODO(crcrpar): Make this generic when there's more fused optimizers.
-# TODO(crcrpar): Think of rewriting this in C++.
-@torch.no_grad()
-def _group_params_by_device_and_dtype(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    max_exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-) -> Dict[Tuple[str, torch.dtype], List[List[Tensor]]]:
-    per_device_and_dtype_tensors = defaultdict(lambda: [[] for _ in range(6)])
-    for i, (p, step) in enumerate(zip(params, state_steps)):
-        key = (str(p.device), p.dtype)
-        per_device_and_dtype_tensors[key][0].append(p)
-        per_device_and_dtype_tensors[key][1].append(grads[i])
-        per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
-        per_device_and_dtype_tensors[key][3].append(exp_avg_sqs[i])
-        if max_exp_avg_sqs:
-            per_device_and_dtype_tensors[key][4].append(max_exp_avg_sqs[i])
-        per_device_and_dtype_tensors[key][5].append(step)
-    return per_device_and_dtype_tensors
+            torch._foreach_addcdiv_(params_, device_exp_avgs, denom, step_size)
 
 
 def _fused_adam(
@@ -568,7 +593,7 @@ def _fused_adam(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
-    grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,
@@ -579,8 +604,8 @@ def _fused_adam(
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
         if grad_scale is not None and found_inf is not None:
-            device_grad_scale = grad_scale.get(device)
-            device_found_inf = found_inf.get(device)
+            device_grad_scale = grad_scale.get(str(device))
+            device_found_inf = found_inf.get(str(device))
         else:
             device_grad_scale = None
             device_found_inf = None

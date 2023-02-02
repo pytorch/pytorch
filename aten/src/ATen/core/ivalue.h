@@ -8,11 +8,12 @@
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
 #include <c10/core/SymFloat.h>
+#include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/macros/Export.h>
 #include <typeindex>
+#include <utility>
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -68,9 +69,20 @@ struct ComplexHolder : c10::intrusive_ptr_target {
     ComplexHolder(c10::complex<T> c) {
       val = convert<decltype(val), c10::complex<T>>(c);
     }
-    ComplexHolder() {}
+    ComplexHolder() = default;
     c10::complex<double> val;
 };
+
+// Similar to ComplexHolder, for StreamData3
+struct StreamData3Holder : c10::intrusive_ptr_target {
+  public:
+    StreamData3Holder(struct c10::StreamData3 d) {
+      val = d;
+    }
+    StreamData3Holder() {}
+    struct c10::StreamData3 val;
+};
+
 } // namespace ivalue
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -82,7 +94,7 @@ template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray(){}
+  OptionalArray()= default;
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
@@ -574,7 +586,8 @@ public:
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const;
+  c10::SymInt toSymInt() &&;
+  c10::SymInt toSymInt() const&;
 
   IValue(c10::SymFloat i) {
     if (i.is_symbolic()) {
@@ -590,7 +603,8 @@ public:
     return Tag::SymFloat == tag;
   }
 
-  c10::SymFloat toSymFloat() const;
+  c10::SymFloat toSymFloat() &&;
+  c10::SymFloat toSymFloat() const&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -865,10 +879,11 @@ public:
     return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 
-  //Stream
-  IValue(c10::Stream stream)
+  // Stream
+  IValue(c10::Stream s)
     : tag(Tag::Stream) {
-    payload.u.as_int = stream.pack();
+    auto v = c10::make_intrusive<ivalue::StreamData3Holder>(s.pack3());
+    payload.u.as_intrusive_ptr = v.release();
   }
   c10::Stream toStream() &&;
   c10::Stream toStream() const &;
@@ -1385,16 +1400,10 @@ struct TORCH_API WeakTypePtr {
 // internal build errors with std::variant :/
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
-      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
-    strong_ptr_ = shared_cu;
-    weak_ptr_ = c10::nullopt;
-  }
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
-      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
-    strong_ptr_ = c10::nullopt;
-    weak_ptr_ = weak_cu;
-  }
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
     TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
@@ -1422,17 +1431,11 @@ struct WeakOrStrongCompilationUnit {
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
   explicit WeakOrStrongTypePtr(WeakTypePtr weak)
-      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
-    type_ = weak.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(weak.cu_))), type_(std::move(weak.type_)) {}
   explicit WeakOrStrongTypePtr(StrongTypePtr strong)
-      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
-    type_ = strong.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(strong.cu_))), type_(std::move(strong.type_)) {}
   explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
-      : cu_(cu) {
-    type_ = type;
-  }
+      : cu_(std::move(cu)), type_(std::move(type)) {}
   WeakTypePtr asWeakTypePtr() const;
 
   WeakOrStrongCompilationUnit cu_;

@@ -120,7 +120,7 @@ class ParametrizationList(ModuleList):
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
         #    # If it has one input, this allows to be able to use set_ to be able to
         #    # move data to/from the original tensor without changing its id (which is what the
-        #    # optimiser uses to track parameters)
+        #    # optimizer uses to track parameters)
         #    if isinstance(Y, Tensor)
         #      assert X.dtype == Y.dtype
         # Below we use original = X, new = Y
@@ -591,7 +591,7 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
 
     Args:
         module (nn.Module): module to query
-        name (str, optional): attribute in the module to query
+        tensor_name (str, optional): attribute in the module to query
             Default: ``None``
     """
     parametrizations = getattr(module, "parametrizations", None)
@@ -657,7 +657,7 @@ def remove_parametrizations(
                                            "for a parameter that is an instance of a tensor subclass requires "
                                            "set_() to be implemented correctly for the tensor subclass. Either "
                                            "set leave_parametrized=False or provide a working implementation for "
-                                           "set_() in the tensor subclass.")
+                                           "set_() in the tensor subclass.") from e
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more

@@ -36,9 +36,6 @@ if [[ -z "${GITHUB_ACTIONS}" ]]; then
   trap "docker logout ${registry}" EXIT
 fi
 
-# export EC2=1
-# export JENKINS=1
-
 # Try to pull the previous image (perhaps we can reuse some layers)
 # if [ -n "${last_tag}" ]; then
 #   docker pull "${image}:${last_tag}" || true

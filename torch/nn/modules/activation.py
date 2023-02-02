@@ -14,6 +14,7 @@ __all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsi
            'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Tanhshrink',
            'Softmin', 'Softmax', 'Softmax2d', 'LogSoftmax']
 
+
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
 
@@ -89,7 +90,7 @@ class ReLU(Module):
 
         >>> m = nn.ReLU()
         >>> input = torch.randn(2).unsqueeze(0)
-        >>> output = torch.cat((m(input),m(-input)))
+        >>> output = torch.cat((m(input), m(-input)))
     """
     __constants__ = ['inplace']
     inplace: bool
@@ -1009,9 +1010,16 @@ class MultiheadAttention(Module):
 
         super(MultiheadAttention, self).__setstate__(state)
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
-                need_weights: bool = True, attn_mask: Optional[Tensor] = None,
-                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
+    def forward(
+            self,
+            query: Tensor,
+            key: Tensor,
+            value: Tensor,
+            key_padding_mask: Optional[Tensor] = None,
+            need_weights: bool = True,
+            attn_mask: Optional[Tensor] = None,
+            average_attn_weights: bool = True,
+            is_causal : bool = False) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
@@ -1042,6 +1050,8 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a byte mask, a non-zero value indicates that the
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
+        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+            Default: ``False``.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
@@ -1060,6 +1070,9 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
+        if attn_mask is not None and is_causal:
+            raise AssertionError("Only allow causal mask or attn_mask")
+
         is_batched = query.dim() == 3
         if key_padding_mask is not None:
             _kpm_dtype = key_padding_mask.dtype
@@ -1157,9 +1170,12 @@ class MultiheadAttention(Module):
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask, use_separate_proj_weight=True,
+                attn_mask=attn_mask,
+                use_separate_proj_weight=True,
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
-                v_proj_weight=self.v_proj_weight, average_attn_weights=average_attn_weights)
+                v_proj_weight=self.v_proj_weight,
+                average_attn_weights=average_attn_weights,
+                is_causal=is_causal)
         else:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -1167,8 +1183,11 @@ class MultiheadAttention(Module):
                 self.bias_k, self.bias_v, self.add_zero_attn,
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
-                key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask, average_attn_weights=average_attn_weights)
+                key_padding_mask=key_padding_mask,
+                need_weights=need_weights,
+                attn_mask=attn_mask,
+                average_attn_weights=average_attn_weights,
+                is_causal=is_causal)
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
