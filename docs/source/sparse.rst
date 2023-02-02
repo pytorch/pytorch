@@ -38,7 +38,7 @@ performance optimization.
 
 Like many other performance optimization sparse storage formats are not
 always advantageous. When trying sparse formats for your use case
-you might find your execution time to decrease rather than increase.
+you might find your execution time to increase rather than decrease.
 
 Please feel encouraged to open a GitHub issue if you analytically
 expected to see a stark increase in performance but measured a

@@ -50,6 +50,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
+    'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
 ]
 
@@ -97,18 +98,10 @@ if sys.platform == 'win32':
 
     kernel32.LoadLibraryW.restype = ctypes.c_void_p
     if with_load_library_flags:
-        kernel32.AddDllDirectory.restype = ctypes.c_void_p
         kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
     for dll_path in dll_paths:
-        if sys.version_info >= (3, 8):
-            os.add_dll_directory(dll_path)
-        elif with_load_library_flags:
-            res = kernel32.AddDllDirectory(dll_path)
-            if res is None:
-                err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
-                raise err
+        os.add_dll_directory(dll_path)
 
     try:
         ctypes.CDLL('vcruntime140.dll')
@@ -145,18 +138,25 @@ if sys.platform == 'win32':
 
 
 def _preload_cuda_deps():
-    """ Preloads cudnn/cublas deps if they could not be found otherwise """
+    """Preloads cudnn/cublas deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
+    cublas_path = None
+    cudnn_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
-            continue
-        break
+        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
+        if os.path.exists(candidate_cublas_path) and not cublas_path:
+            cublas_path = candidate_cublas_path
+        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
+        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
+            cudnn_path = candidate_cudnn_path
+        if cublas_path and cudnn_path:
+            break
+    if not cublas_path or not cudnn_path:
+        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
 
     ctypes.CDLL(cublas_path)
     ctypes.CDLL(cudnn_path)
@@ -272,10 +272,6 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
-    # For BC; direct access of node is OK too
-    def get_pyobj(self):
-        return self.node
-
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -319,9 +315,65 @@ class SymFloat:
     def __repr__(self):
         return self.node.str()
 
-    # For BC; direct access of node is OK too
-    def get_pyobj(self):
-        return self.node
+class SymBool:
+    """
+    Like an bool (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+
+    Unlike regular bools, regular boolean operators will force extra guards instead
+    of symbolically evaluate.  Use the bitwise operators instead to handle this.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    def __and__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __or__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    # We very carefully define __sym_not__, and not a number of other
+    # plausible alternatives:
+    #
+    #   - We do not override __not__ because this is not a real magic
+    #     method; you cannot override the meaning of the not builtin in
+    #     Python.  We use the name 'sym_not' to clarify that in user code you
+    #     cannot use the builtin not or operator.not_ or operator.__not__ and
+    #     hit this magic method; you must use our custom sym_not operator.
+    #
+    #   - We do not override the __invert__ method because SymBool is
+    #     meant to be usable in situations where bool is expected.  However,
+    #     bitwise negation ~a does the wrong thing with booleans (because
+    #     bool is a subclass of int, so ~1 = -2 which is not falseish.)
+    #     This would be a giant footgun, so we get around it by defining
+    #     our own operator.  Note that bitwise and/or do the right thing,
+    #     so we reuse the conventional operators there for readability.
+    #
+    def __sym_not__(self) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __repr__(self):
+        return self.node.str()
+
+def sym_not(a):
+    r""" SymInt-aware utility for logical negation.
+
+    Args:
+        a (SymBool or bool): Object to negate
+    """
+    if hasattr(a, '__sym_not__'):
+        return a.__sym_not__()
+    return not a
 
 def sym_float(a):
     r""" SymInt-aware utility for float casting.
@@ -381,7 +433,7 @@ except ImportError:
     import torch._C as _C_for_compiled_check
 
     # The __file__ check only works for Python 3.7 and above.
-    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+    if _C_for_compiled_check.__file__ is None:
         raise ImportError(textwrap.dedent('''
             Failed to load PyTorch C extensions:
                 It appears that PyTorch has loaded the `torch/_C` folder
@@ -488,6 +540,13 @@ def set_default_device(device):
     device to another device (e.g., ``cuda``) without a device index, tensors
     will be allocated on whatever the current device for the device type,
     even after :func:`torch.cuda.set_device` is called.
+
+    .. warning::
+
+        This function imposes a slight performance cost on every Python
+        call to the torch API (not just factory functions).  If this
+        is causing problems for you, please comment on
+        https://github.com/pytorch/pytorch/issues/92701
 
     Args:
         device (device or string): the device to set as default
@@ -1153,6 +1212,7 @@ from torch.autograd import (
 )
 from torch import fft as fft
 from torch import futures as futures
+from torch import _awaits as _awaits
 from torch import nested as nested
 from torch import nn as nn
 from torch.signal import windows as windows
@@ -1247,21 +1307,65 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
+
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, passes):
-        from torch._dynamo.eval_frame import lookup_backend
-        from torch._inductor.config import InductorConfigContext
+    def __init__(self, mode, passes, dynamic):
+        from torch._inductor.compile_fx import compile_fx
 
-        self.compile_fn = lookup_backend(self.compiler_name)
-        self.cm = InductorConfigContext(mode if mode is not None else passes)
-        self._torchdynamo_orig_callable = self.compile_fn
+        self.compile_fn = compile_fx
+        self._torchdynamo_orig_callable = compile_fx
+        self.config = dict()
+        self.apply_mode(mode)
+        self.apply_passes(passes)
+        if dynamic:
+            # cudagraphs conflicts with dynamic shapes
+            self.config["triton.cudagraphs"] = False
+            assert "triton.cudagraphs" not in (
+                passes or ()
+            ), "triton.cudagraphs does not support dynamic shapes"
+
+    def apply_mode(self, mode: Optional[str]):
+        if mode is None:
+            return
+        elif mode == "default":
+            pass
+        elif mode == "reduce-overhead":
+            self.config["triton.cudagraphs"] = True
+        elif mode == "max-autotune":
+            self.config["max_autotune"] = True
+            self.config["triton.cudagraphs"] = True
+        else:
+            raise RuntimeError(
+                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
+            )
+
+    def apply_passes(self, passes: Optional[Dict[str, Any]]):
+        if not passes:
+            return
+
+        from torch._inductor import config
+        current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+
+        for key, val in passes.items():
+            attr_name = key.replace("-", "_")
+            if attr_name not in current_config:
+                raise RuntimeError(
+                    f"Unexpected optimization pass {key}, known passes are {list(current_config.keys())}"
+                )
+            if type(val) is not type(current_config[attr_name]):
+                val_type_str = type(val).__name__
+                expected_type_str = type(current_config[attr_name]).__name__
+                raise RuntimeError(
+                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+                )
+            self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
-        with self.cm:
-            return self.compile_fn(model_, inputs_)
+        return self.compile_fn(model_, inputs_, config_patches=self.config)
 
 
 def compile(model: Optional[Callable] = None, *,
@@ -1270,9 +1374,9 @@ def compile(model: Optional[Callable] = None, *,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
-            **kwargs) -> Callable:
+            disable: builtins.bool = False) -> Callable:
     """
-    Optimizes given model/function using Dynamo and specified backend
+    Optimizes given model/function using TorchDynamo and specified backend.
 
     Args:
        model (Callable): Module/function to optimize
@@ -1280,16 +1384,8 @@ def compile(model: Optional[Callable] = None, *,
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       passes (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
-                       - static-memory
-                       - matmul-tune
-                       - matmul-padding
-                       - triton-autotune
-                       - triton-bmm
-                       - triton-mm
-                       - triton-convolution
-                       - rematerialize-threshold
-                       - rematerialize-acc-threshold
+       passes (dict): A dictionary of options to pass to the backend.
+       disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
@@ -1310,7 +1406,7 @@ def compile(model: Optional[Callable] = None, *,
                            backend=backend,
                            mode=mode,
                            passes=passes,
-                           **kwargs)
+                           disable=disable)
         return fn
 
     import torch._dynamo
@@ -1319,8 +1415,8 @@ def compile(model: Optional[Callable] = None, *,
     if mode is None and passes is None:
         mode = "default"
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, passes)
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
+        backend = _TorchCompileInductorWrapper(mode, passes, dynamic)
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
 def _register_device_module(device_type, module):

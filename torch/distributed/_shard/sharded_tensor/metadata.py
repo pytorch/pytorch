@@ -79,4 +79,4 @@ class ShardedTensorMetadata(object):
     # Size of each dim of the overall Tensor.
     size: torch.Size = field(default=torch.Size([]))
 
-    tensor_properties: TensorProperties = field(default=TensorProperties())
+    tensor_properties: TensorProperties = field(default_factory=TensorProperties)
