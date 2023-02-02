@@ -1149,6 +1149,9 @@ if TYPE_CHECKING:
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    # Fixup segment_reduce visibility
+    _segment_reduce = segment_reduce
+    del segment_reduce
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
