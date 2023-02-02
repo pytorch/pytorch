@@ -78,7 +78,8 @@ public:
                                              int64_t device_index,
                                              int64_t device_type) {
     // NB: constructor manages CUDA->HIP translation for us
-    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(stream_id, device_index, device_type));
+    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(
+        stream_id, device_index, static_cast<c10::DeviceType>(device_type)));
   }
 
   static std::tuple<int, int> priority_range() { return HIPStream::priority_range(); }

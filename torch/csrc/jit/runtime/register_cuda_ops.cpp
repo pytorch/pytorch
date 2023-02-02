@@ -50,10 +50,9 @@ RegisterOperators const reg({
     Operator(
         "cuda::current_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack& stack) {
-          auto idx = pop(stack).toOptional<int64_t>();
-          c10::DeviceIndex device_index = idx.has_value()
-              ? static_cast<c10::DeviceIndex>(idx.value())
-              : c10::cuda::current_device();
+          auto idx = pop(stack).toOptional<c10::DeviceIndex>();
+          c10::DeviceIndex device_index =
+              idx.has_value() ? idx.value() : c10::cuda::current_device();
           auto s = c10::cuda::getCurrentCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
@@ -74,10 +73,9 @@ RegisterOperators const reg({
     Operator(
         "cuda::default_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack& stack) {
-          auto idx = pop(stack).toOptional<int64_t>();
-          c10::DeviceIndex device_index = idx.has_value()
-              ? static_cast<c10::DeviceIndex>(idx.value())
-              : c10::cuda::current_device();
+          auto idx = pop(stack).toOptional<c10::DeviceIndex>();
+          c10::DeviceIndex device_index =
+              idx.has_value() ? idx.value() : c10::cuda::current_device();
           auto s = c10::cuda::getDefaultCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
@@ -166,10 +164,9 @@ RegisterOperators const reg({
     Operator(
         "cuda::synchronize.int(int? val) -> ()",
         [](Stack& stack) {
-          auto idx = pop(stack).toOptional<int64_t>();
-          c10::DeviceIndex device_index = idx.has_value()
-              ? static_cast<c10::DeviceIndex>(idx.value())
-              : c10::cuda::current_device();
+          auto idx = pop(stack).toOptional<c10::DeviceIndex>();
+          c10::DeviceIndex device_index =
+              idx.has_value() ? idx.value() : c10::cuda::current_device();
           _device_synchronize(device_index);
         },
         aliasAnalysisFromSchema()),
