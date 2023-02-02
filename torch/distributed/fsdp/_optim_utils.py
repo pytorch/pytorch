@@ -1,5 +1,6 @@
 import copy
 import functools
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -972,7 +973,9 @@ def _rekey_sharded_optim_state_dict(
         if isinstance(key, str):
             rekeyed_osd_state[key] = param_state
             continue
-        flat_param_key = unflat_param_names_to_flat_param_key[key.unflat_param_names]
+        flat_param_key = unflat_param_names_to_flat_param_key.get(
+            key.unflat_param_names, key.unflat_param_names
+        )
         rekeyed_osd_state[flat_param_key] = param_state
 
     rekeyed_osd_param_groups: List[Dict[str, Any]] = []
@@ -1082,6 +1085,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         model,
         module_fn,
         return_fn,
+        [fqn for fqn, _ in model.named_parameters()],
         flat_param_to_fqn_ret,
     )
 
@@ -1231,7 +1235,10 @@ def _map_param_key_to_optim_keys(
         fqns = param_to_fqns[param]
         is_fsdp_managed = isinstance(param, FlatParameter)
         if is_fsdp_managed:
-            assert fqns[0] in fqn_to_fsdp_param_info
+            assert fqns[0] in fqn_to_fsdp_param_info, (
+                fqns[0],
+                list(fqn_to_fsdp_param_info.keys()),
+            )
         is_fsdp_managed = fqns[0] in fqn_to_fsdp_param_info
         optim_state_key = _OptimStateKey(
             unflat_param_names=tuple(fqns),
@@ -1454,8 +1461,18 @@ def _optim_state_dict(
                 continue
             if key in param_key_to_param:
                 continue
-            # This key is not a parameter state. It is a user-defined state.
-            fsdp_osd_state[key] = copy.copy(value)
+            # This key is not recognized by FSDP. It may be a user-defined state
+            # or some parameters state that FSDP is unable to map from
+            # ``optim.param_groups``.
+            warnings.warn(
+                f"Found a optim state, {key}, that FSDP cannot process. FSDP "
+                "will directly copy everything to the returned state_dict. In "
+                "most cases, this is a user-defined state that is not "
+                "associated with any particular parameter. Another possible "
+                "case is this state is managed by DMP. Otherwise, there may "
+                " be a mismatched assumption of optim_state_dict of this mode."
+            )
+            fsdp_osd_state[key] = value
 
         fsdp_osd["param_groups"] = _unflatten_param_groups(
             optim_state_dict, param_key_to_param, param_to_fqns
@@ -1500,6 +1517,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         model,
         module_fn,
         return_fn,
+        [fqn for fqn, _ in model.named_parameters()],
         fqn_to_param_info,
     )
 

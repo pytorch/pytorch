@@ -3,6 +3,7 @@ This file includes private common utilities for FSDP.
 """
 
 import traceback
+import warnings
 from enum import auto, Enum
 from typing import (
     Callable,
@@ -212,8 +213,27 @@ def _get_param_to_fqns(
             is_shared_param = param in param_to_fqns
             if not is_shared_param:
                 param_to_fqns[param] = global_fqns
-            elif not dedup_shared_params:
-                param_to_fqns[param].extend(global_fqns)
+            else:
+                if type(param) is flat_param_file.FlatParameter:
+                    # DMP overwrites `named_parameters` and skip (advance to
+                    # the next child module) the wrapped_module (e.g.,
+                    # _dmp_wrapped_module and _fsdp_wrapped_module). When a user
+                    # calls `named_child` to traverse the module recursively and
+                    # calls `named_parameters` with `recurse=False`, parameters
+                    # will be traversed more than once.
+                    # This hack is specificed designed for DMP + FSDP. We
+                    # overwite the flat_parameters traversal result to only obtain
+                    # the last one, which happens to be the correct one.
+                    #
+                    # TODO: Remove this hack once DMP + FSDP is not supported.
+                    warnings.warn(
+                        "FlatParameter is being traversed more than once. "
+                        "This case should only happen when using "
+                        "DistributedModelParallel with FullyShardedDataParallel."
+                    )
+                    param_to_fqns[param] = global_fqns
+                elif not dedup_shared_params:
+                    param_to_fqns[param].extend(global_fqns)
 
     def return_fn(param_to_fqns):
         return param_to_fqns
@@ -223,6 +243,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
+        [key for key, _ in model.named_parameters()],
         param_to_unflat_param_names,
     )
 
@@ -231,6 +252,7 @@ def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
     return_fn: Callable,
+    filter_fqns: Optional[List[str]] = None,
     *args,
     **kwargs,
 ):
@@ -240,6 +262,10 @@ def _apply_to_modules(
     returning a value using ``return_fn``. The traversal constructs the full
     module prefix name (e.g. "module.submodule." just like in model state dict)
     and makes that available to ``module_fn``.
+
+    ``filter_fqns`` is used because some module may have its own prefix similar
+    to ``FullyShardedDataParallel`` and the ``named_parameters()`` is overwritten
+    to remove the prefix.
     """
 
     def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
@@ -248,6 +274,18 @@ def _apply_to_modules(
         for submodule_name, submodule in module.named_children():
             if submodule is not None:
                 new_prefix = prefix + submodule_name + "."
+                if filter_fqns is not None:
+                    for fqn in filter_fqns:
+                        if fqn.startswith(new_prefix):
+                            break
+                    else:
+                        # TODO: Remove this hack once DMP + FSDP is not supported.
+                        warnings.warn(
+                            "An unexpected prefix is detected. "
+                            "This case should only happen when using "
+                            "DistributedModelParallel with FullyShardedDataParallel."
+                        )
+                        new_prefix = prefix
                 f(submodule, new_prefix, *args, **kwargs)
 
     f(root_module, "", *args, **kwargs)
