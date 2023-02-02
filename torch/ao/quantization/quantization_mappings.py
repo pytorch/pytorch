@@ -2,7 +2,6 @@ import copy
 
 import torch
 from torch import nn
-from torch.ao import nn as ao_nn
 
 import torch.nn.functional as F
 import torch.ao.nn.intrinsic as nni
