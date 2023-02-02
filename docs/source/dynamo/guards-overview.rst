@@ -238,7 +238,7 @@ bytecode instructions as possible.
 
 Across both the logic downstream of ``step`` and the logic from invoking
 ``VariableBuilder`` - we now have a lot of ``VariableTracker``\ s and of
-course, we’ve spoken about creating guards quiet a bit. Let’s dig into
+course, we’ve spoken about creating guards quite a bit. Let’s dig into
 what Variables are, and get a little closer to understanding guards.
 
 Variables
