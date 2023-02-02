@@ -1062,7 +1062,7 @@ class CompileProfiler:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
             rpt += (
-                f"You may gain additional insight by passing `nopython=True` to {config.dynamo_import}.optimize, "
+                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
@@ -1087,7 +1087,7 @@ class CompileProfiler:
             )
             rpt += "\n"
             rpt += (
-                f"Set {config.dynamo_import}.config.cache_size_limit to "
+                f"Set torch._dynamo.config.cache_size_limit to "
                 f"{max_recompiles} to avoid being cache limited.\n"
             )
         else:
