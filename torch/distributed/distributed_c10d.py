@@ -1009,6 +1009,7 @@ def _new_process_group_helper(
             backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
             extended_api = backend_plugin.extended_api
+            backend_type = ProcessGroup.BackendType.CUSTOM
 
             if not extended_api:
                 backend_class = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
