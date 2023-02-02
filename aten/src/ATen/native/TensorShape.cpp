@@ -348,7 +348,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
 
 namespace native {
 
-DEFINE_DISPATCH(cat_serial_stub);
+DEFINE_DISPATCH(cat_contig_stub);
 DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
@@ -563,12 +563,11 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 
   auto materialized = tensors.materialize();
 
-  // fast path for single thread when both inputs and result are contiguous and not empty
-  bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  // fast path when both inputs and result are contiguous and not empty
   ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = (dtype == ScalarType::Double || dtype == ScalarType::Float || dtype == ScalarType::BFloat16);
-  if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
-    cat_serial_stub(kCPU, result, materialized, dim);
+  if (all_contiguous && all_same_dtype && serial_dtype) {
+    cat_contig_stub(kCPU, result, materialized, dim, all_same_sizes_and_stride);
     return;
   }
 

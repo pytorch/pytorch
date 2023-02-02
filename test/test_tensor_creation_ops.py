@@ -666,6 +666,53 @@ class TestTensorCreation(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.float, torch.double)
+    def test_cat_contig_fast_path(self, device, dtype):
+        # test cat fast path for contigous inputs on CPU:
+        def helper(shapes, dim, N, memory_format=torch.contiguous_format):
+            inputs = []
+            if N < 0:
+                for shape in shapes:
+                    inputs.append(make_tensor(shape, dtype=dtype, device=device, noncontiguous=True))
+            else:
+                for _ in range(N):
+                    inputs.append(make_tensor(shapes, dtype=dtype, device=device, noncontiguous=True))
+
+            inputs2 = []
+            for x in inputs:
+                inputs2.append(x.contiguous(memory_format=memory_format))
+
+            out = torch.cat(inputs, dim)
+            out2 = torch.cat(inputs2, dim)
+            self.assertEqual(out, out2)
+
+        # firstdim: all inputs have same shape, short input tensor list
+        helper([1, 110, 329, 41], 1, 2)
+        helper([1, 110, 329, 41], 1, 2, memory_format=torch.channels_last)
+        # firstdim: all inputs have same shape, long input tensor list
+        helper([300], 0, 110)
+        # firstdim: inputs have different shape, sequential
+        helper([[1, 63, 4, 5], [1, 1, 4, 5]], 1, -1)
+        helper([[1, 63, 4, 5], [1, 1, 4, 5]], 1, -1, memory_format=torch.channels_last)
+        # fistdim: inputs have different shape, parallel
+        helper([[1, 128, 32, 32, 64], [1, 256, 32, 32, 64]], 1, -1)
+        helper([[1, 128, 32, 32, 64], [1, 256, 32, 32, 64]], 1, -1, memory_format=torch.channels_last_3d)
+        # fistdim: inputs have different shape, parallel, long input tensor list list
+        input_shapes = []
+        for _ in range(100):
+            input_shapes.append([401])
+            input_shapes.append([399])
+        helper(input_shapes, 0, -1)
+        # non-firstdim: most inner size = 1; most inner size = 2
+        helper([13, 47, 1], 2, 2)
+        helper([13, 47, 2], 2, 2)
+        # non-fistdim: generic case
+        helper([[5, 8, 113, 64], [5, 8, 1, 64]], 2, -1)
+        for dim in [1, 2, 3]:
+            helper([3, 12, 19, 17], dim, 2)
+            helper([3, 12, 19, 17], dim, 3, memory_format=torch.channels_last)
+
     # TODO: update this test to compare against NumPy instead of CPU
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
