@@ -917,6 +917,173 @@ def create_add_loggers_graph(
 
         model.recompile()
 
+def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
+    # input: shadow wrapper module
+    # output if shadow wrapper module has a weighted op:
+    #   (quantize_fn, (quantize_fn_args))
+    # output if shadow wrapper module doesn't have a weighted op:
+    #   None
+
+    # For now, assume that the weight is the second input
+    # to the shadow module. If that changes, we can fix it later.
+    placeholders_seen = 0
+    for shadow_n in shadow_wrapper.graph.nodes:  # type: ignore[union-attr]
+        if shadow_n.op != 'placeholder':
+            continue
+
+        placeholders_seen += 1
+        if placeholders_seen != 2:
+            continue
+
+        # the subgraph looks like
+        #
+        #   _input_scale_1 = self._input_scale_1
+        #   _input_zero_point_1 = self._input_zero_point_1
+        #   quantize_per_channel = torch.quantize_per_channel(
+        #       w2_0, _input_scale_1, _input_zero_point_1,
+        #       0, torch.qint8)
+        #
+        #  we have `w2_0`, and are navigating this subgraph
+        #  to get `_input_scale_1` and `_input_zero_point_1`
+
+        assert len(shadow_n.users) == 1
+        quant_node = list(shadow_n.users.keys())[0]
+        new_args: Any = None
+        if quant_node.target == torch.quantize_per_channel:
+            _weight, scale_node, zp_node, axis, dtype = quant_node.args
+            scale_val = getattr_from_fqn(
+                shadow_wrapper, scale_node.target)
+            zp_val = getattr_from_fqn(
+                shadow_wrapper, zp_node.target)
+            new_args = (scale_val, zp_val, axis, dtype)
+        else:
+            assert quant_node.target == torch.quantize_per_tensor
+            _weight, scale_node, zp_node, dtype = quant_node.args
+            scale_val = getattr_from_fqn(
+                shadow_wrapper, scale_node.target)
+            zp_val = getattr_from_fqn(
+                shadow_wrapper, zp_node.target)
+            new_args = (scale_val, zp_val, dtype)
+        return (quant_node.target, new_args)
+
+    return None
+
+
+def extract_weight_comparison(m: GraphModule) -> NSResultsType:
+
+    # example graph:
+    #
+    #   w1 = self.w1
+    #   b1 = self.b1
+    #   linear = torch._C._nn.linear(x, w1, b1)
+    #   shadow_0_0 = self.shadow_0_0(linear)
+    #   shadow_wrapper_0_1 = self.shadow_wrapper_0_1(x, w1, b1)
+    #   shadow_0_1 = self.shadow_0_1(shadow_wrapper_0_1, linear)
+    #
+    # algorithm:
+    # 1. for each call_function node matching our allowlist:
+    # 2.   if corresponding shadow wrapper exists, extract the weight pair
+    #
+    # Note: this is not super robust, but that's ok because this is
+    # just for legacy customers who depend on the previous two-model version
+    # of this API. TBD if we need to make this robust.
+    # Note: modules are not supported, since existing customers only
+    # use functions.
+
+    # TODO(future PR): move this to config
+    weighted_ops = set([
+        torch.nn.functional.linear,
+    ])
+
+    results: NSResultsType = {
+        'model': {NSSingleResultValuesType.WEIGHT.value: {}}
+    }
+
+    for n in m.graph.nodes:  # type: ignore[union-attr]
+        if not (n.op == 'call_function' and n.target in weighted_ops):
+            continue
+
+        # Check if we have a corresponding shadow wrapper
+        # TODO(future PR, if needed): support kwargs
+        # TODO(future PR, if needed): support multiple shadow users
+        first_arg = n.args[0]
+        shadow_wrapper_node = None
+        for user in first_arg.users:
+            # TODO(before land): fix string match
+            if user.op == 'call_module' and \
+                    user.target.startswith('shadow_wrapper'):
+                shadow_wrapper_node = user
+                break
+
+        if shadow_wrapper_node is None:
+            continue
+
+        shadow_wrapper = getattr_from_fqn(
+            m, shadow_wrapper_node.target)  # type: ignore[arg-type]
+        weight_info = _get_weight_info_from_shadow_wrapper(
+            shadow_wrapper)
+        if weight_info is None:
+            continue
+
+        # get weight
+        w_node = n.args[1]
+        w_obj = getattr_from_fqn(m, w_node.target).detach()
+
+        # get a quantized version of weight
+        quant_fn, quant_fn_args_except_first = weight_info
+        new_args = (w_obj, *quant_fn_args_except_first)
+        w_obj_q = quant_fn(*new_args)
+
+        # add a comparison
+        ref_node_name = n.name
+        prev_node_name = n.name
+        ref_node_type = get_target_type_str(n, m)
+        prev_node_type = ref_node_type
+        fqn = None
+        if hasattr(m, '_node_name_to_scope'):
+            fqn = m._node_name_to_scope[n.name][0]  # type: ignore[index]
+        comparison = torch.ao.ns.fx.utils.compute_sqnr(w_obj, w_obj_q)
+        result_fp32 = {
+            'res_type': NSSingleResultValuesType.WEIGHT.value,
+            'values': [w_obj],
+            'prev_node_name': prev_node_name,
+            'prev_node_target_type': prev_node_type,
+            'ref_node_name': ref_node_name,
+            'ref_node_target_type': ref_node_type,
+            'index_within_arg': 0,
+            'index_of_arg': 0,
+            'fqn': fqn,
+            'qconfig_str': '',
+            'comparisons': [comparison],
+            'comparison_fn_name': 'sqnr',
+        }
+        result_q = {
+            'res_type': NSSingleResultValuesType.WEIGHT.value,
+            'values': [w_obj_q],
+            'prev_node_name': prev_node_name,
+            'prev_node_target_type': prev_node_type,
+            'ref_node_name': ref_node_name,
+            'ref_node_target_type': ref_node_type,
+            'index_within_arg': 0,
+            'index_of_arg': 0,
+            'fqn': fqn,
+            'qconfig_str': '',
+            'comparisons': [comparison],
+            'comparison_fn_name': 'sqnr',
+        }
+
+        # go from subgraph_n_1 to subgraph_n_0
+        _1, _2, node_idx, _3 = shadow_wrapper_node.target.split('_')
+        name_fp32 = f"subgraph_{node_idx}_0"
+        name_q = f"subgraph_{node_idx}_1"
+
+        results['model'][NSSingleResultValuesType.WEIGHT.value][name_fp32] = \
+            [result_fp32]
+        results['model'][NSSingleResultValuesType.WEIGHT.value][name_q] = \
+            [result_q]
+
+    return results
+
 # TODO(future PR): redesign this to make it easier to consume outputs
 def group_results_by_subgraph(results: NSResultsType) -> Any:
     """
@@ -977,8 +1144,11 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     """
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
+    # node_output or weight
+    key_to_use = list(results['model'].keys())[0]
+
     for subgraph_name_with_idx, subgraph_candidate_results in \
-            results['model']['node_output'].items():
+            results['model'][key_to_use].items():
 
         # convert from `subgraph_m_n` to `subgraph_m` and `n`
         subgraph_str, subgraph_idx, subgraph_candidate_idx = \
