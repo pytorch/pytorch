@@ -2050,7 +2050,21 @@ def meta__scaled_dot_product_flash(
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
+    return_debug_mask: bool = False,
 ):
+    # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
+    # We have added logic to torch/_dynamo/variables/torch.py
+    # We need to check if scaled_dot_product_attention will run the flash attention
+    # kernel and if dropout is != 0.0. If that is the case then we want dynamo
+    # to graph break. The derivative calculation for _scaled_dot_product_flash_attention
+    # does not function correctly with cuda graphs because the full philox state is not captured
+    # the forward's return values. Another reason to graph break is that the the meta function
+    # returns the wrong outputs for philox seed and offset and these values get baked into the
+    # inductor fallback calls to the eager kernels.
+    check(
+        dropout_p == 0.0,
+        lambda: f"Can only trace _scaled_dot_product_flash_attention when dropout is set to 0 but got a dropout_p of {dropout_p}.",
+    )
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
@@ -2067,7 +2081,7 @@ def meta__scaled_dot_product_flash(
     output = torch.empty(
         (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
     )
-    ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
+    output = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
         1, 2
     )
     max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
@@ -2076,22 +2090,86 @@ def meta__scaled_dot_product_flash(
         dtype=torch.float,
         device=query.device,
     )
-    is_sm80 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
-    is_sm75 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5)
-    head_size_rounded = 64 if head_dim <= 64 else 128
-    blocksize_c = (
-        128
-        if (head_size_rounded == 128 and (dropout_p != 0.0 or not is_sm80))
-        or (is_sm75 and head_size_rounded == 64 and dropout_p != 0.0)
-        else 256
+    cumulative_sequence_length_q = torch.empty(
+        batch_size + 1, dtype=torch.int32, device="meta"
     )
-    max_seqlen_k = math.ceil(max_seqlen_batch_k / blocksize_c) * blocksize_c
-    if max_seqlen_k <= 128:
-        max_seqlen_k = 128
-    elif max_seqlen_k <= 256:
-        max_seqlen_k = 256
+    cumulative_sequence_length_k = torch.empty(
+        batch_size + 1, dtype=torch.int32, device="meta"
+    )
 
-    return ouput, logsumexp
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+            dtype=query.dtype,
+            device=query.device,
+        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+
+    return (
+        output,
+        logsumexp,
+        cumulative_sequence_length_q,
+        cumulative_sequence_length_k,
+        max_seqlen_batch_q,
+        max_seqlen_batch_k,
+        1,  # Philox Seed will not be used, see note at top.
+        1,  # Philox Offset will not be used, see note at top.
+        debug_mask,
+    )
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_flash_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: int,
+    philox_offset: int,
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    head_dim = query.size(3)
+
+    Nnz_q = batch_size * max_q
+    Nnz_kv = batch_size * max_k
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
+    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
+    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
+
+    grad_q = torch.empty_like(query_reshaped)
+    grad_k = torch.empty_like(key_reshaped)
+    grad_v = torch.empty_like(value_reshaped)
+
+    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
+    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+
+    return grad_q, grad_k, grad_v
 
 
 @register_meta(
