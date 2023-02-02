@@ -183,6 +183,14 @@ def main() -> None:
         action="store_true",
         help="Enable generation of source files for ONNX diagnostics rules",
     )
+    parser.add_argument(
+        "--onnx_diagnostics_rule_path",
+        help="Path to the YAML file that contains the list of ONNX diagnostics rules",
+    )
+    parser.add_argument(
+        "--onnx_diagnostics_template_dir",
+        help="Path to the folder that contains template files for ONNX diagnostics rules",
+    )
     options = parser.parse_args()
 
     generate_code(
@@ -241,8 +249,11 @@ def main() -> None:
         )
         cpp_install_dir = os.path.join(install_dir, "csrc/onnx/diagnostics/generated")
 
-        rules_path = "torch/onnx/_internal/diagnostics/rules.yaml"
-        template_dir = os.fspath(
+        rules_path = (
+            options.onnx_diagnostics_rule_path
+            or "torch/onnx/_internal/diagnostics/rules.yaml"
+        )
+        template_dir = options.onnx_diagnostics_template_dir or os.fspath(
             pathlib.Path(__file__).parent.parent / "onnx/templates"
         )
 
