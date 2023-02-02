@@ -114,7 +114,7 @@ def linetable_writer(first_lineno):
     return linetable, update, end
 
 
-def assemble(instructions: List[dis.Instruction], firstlineno):
+def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
     if sys.version_info < (3, 10):
@@ -127,6 +127,9 @@ def assemble(instructions: List[dis.Instruction], firstlineno):
             update_lineno(inst.starts_line, len(code))
         arg = inst.arg or 0
         code.extend((inst.opcode, arg & 0xFF))
+        if sys.version_info >= (3, 11):
+            for _ in range(instruction_size(inst) // 2 - 1):
+                code.extend((0, 0))
 
     if sys.version_info >= (3, 10):
         end(len(code))
@@ -258,8 +261,25 @@ def fix_extended_args(instructions: List[Instruction]):
     instructions[:] = output
     return added
 
+# from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
+# TODO use the actual object instead, can interface from eval_frame.c
+_PYOPCODE_CACHES = {
+    "BINARY_SUBSCR": 4,
+    "STORE_SUBSCR": 1,
+    "UNPACK_SEQUENCE": 1,
+    "STORE_ATTR": 4,
+    "LOAD_ATTR": 4,
+    "COMPARE_OP": 2,
+    "LOAD_GLOBAL": 5,
+    "BINARY_OP": 1,
+    "LOAD_METHOD": 10,
+    "PRECALL": 1,
+    "CALL": 4,
+}
 
 def instruction_size(inst):
+    if sys.version_info >= (3, 11):
+        return 2 * (_PYOPCODE_CACHES.get(dis.opname[inst.opcode], 0) + 1)
     return 2
 
 
