@@ -8,6 +8,7 @@
 Global flags for aot autograd
 """
 import os
+import sys
 import logging
 
 use_functionalize = True
@@ -31,6 +32,17 @@ use_dynamic_shapes = os.getenv("AOT_DYNAMIC_SHAPES", False)
 
 static_weight_shapes = True
 
+# Applies CSE to the graph before partitioning
+cse = True
+
+# Restricts the amount of computation AOTAutograd can do.
+max_dist_from_bw = 3
+
 log_level = (
     logging.DEBUG if debug_partitioner or debug_graphs or debug_joint else logging.INFO
 )
+
+from .._dynamo.config_utils import install_config_module
+
+# adds patch, save_config, invalid config checks, etc
+install_config_module(sys.modules[__name__])

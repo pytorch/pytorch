@@ -66,6 +66,7 @@ Here's how we would compute the Jacobian over the parameters
 
     functional_call
     stack_module_state
+    replace_all_batch_norm_modules_
 
 If you're looking for information on fixing Batch Norm modules, please follow the
 guidance here

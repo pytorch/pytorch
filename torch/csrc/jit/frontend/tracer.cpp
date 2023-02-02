@@ -26,9 +26,7 @@
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace tracer {
+namespace torch::jit::tracer {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Recording the traces
@@ -683,7 +681,7 @@ void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, c10::Stream stream) {
-  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+  detail::genericAddInput(n, c10::IValue(stream));
 }
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
@@ -1114,6 +1112,4 @@ void _do_warn(const char* _reason, const char* _kind) {
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
 }
-} // namespace tracer
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tracer

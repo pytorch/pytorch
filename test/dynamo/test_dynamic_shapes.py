@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
@@ -26,7 +27,7 @@ import unittest
 
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
-        cls, "DynamicShapes", "_dynamic_shapes", ("dynamic_shapes", True)
+        cls, "DynamicShapes", "_dynamic_shapes", (config, "dynamic_shapes", True)
     )
 
 
@@ -37,18 +38,6 @@ DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
 DynamicShapesUnspecTests = make_dynamic_cls(test_unspec.UnspecTests)
 DynamicShapesExportTests = make_dynamic_cls(test_export.ExportTests)
 DynamicShapesSubGraphTests = make_dynamic_cls(test_subgraphs.SubGraphTests)
-
-
-# DynamicShapesFunctionTests
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_len_tensor_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_tensor_len_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
 
 
 unittest.expectedFailure(
@@ -63,6 +52,11 @@ unittest.expectedFailure(
 
 unittest.expectedFailure(
     DynamicShapesReproTests.test_hf_t5_forward_dynamic_shapes
+    # Cannot call sizes() on tensor with symbolic sizes/strides
+)
+
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_sort_out2_dynamic_shapes
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
@@ -85,21 +79,7 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )
-unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
 
-# DynamicShapesUnspecTests
-# Missing decomp
-# RuntimeError: Failed running call_function <function batch_norm at 0x7f7d1ce38310>
-# (*(FakeTensor(FakeTensor(..., device='meta', size=(5, 1, 28, 28)), cpu),
-# FakeTensor(FakeTensor(..., device='meta', size=(1,)), cpu),
-#  FakeTensor(FakeTensor(..., device='meta', size=(1,)), cpu),
-#  FakeTensor(Parameter(FakeTensor(..., device='meta', size=(1,),
-#  requires_grad=True)), cpu),
-#  FakeTensor(Parameter(FakeTensor(..., device='meta', size=(1,),
-#  requires_grad=True)), cpu), False, 0.1,
-# FakeTensor(FakeTensor(..., device='meta', size=()), cpu)), **{}):
-# aten._local_scalar_dense.default
-unittest.expectedFailure(test_unspec.UnspecReproTests.test_batch_norm_act_unspec)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

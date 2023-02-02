@@ -13,8 +13,7 @@
 #include <c10/util/Optional.h>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 void* pageAlignedBlockPtr(
@@ -206,11 +205,11 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
     NSUInteger sourceOffset = 0;
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
+    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                           length:alignedLength
                                          options:options
                                      deallocator:nil];
-    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
 
     stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];
@@ -335,5 +334,5 @@ Tensor _copy_from_mps(const at::Tensor& self, const at::Tensor& dst, bool non_bl
 {
   return mps::mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
 }
-} // namespace native
-} // namespace at
+
+} // namespace at::native

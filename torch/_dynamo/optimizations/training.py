@@ -22,10 +22,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-from .. import config, eval_frame
-from ..utils import clone_inputs, counters
-from .backends import BACKENDS
-from .normalize import normalize_ir
+from .. import eval_frame
+from ..backends.registry import register_backend
+from ..utils import counters
+
+from .backends import torchxla_trace_once, torchxla_trivial
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def aot_autograd(**kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
         import functorch.compile
 
-        # Hack to get around circular import problems with aot_inductor_debug
+        # Hack to get around circular import problems with aot_eager_decomp_partition
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()
 
@@ -44,17 +45,6 @@ def aot_autograd(**kwargs):
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
-
-        if not functorch.compile.config.use_functionalize and config.normalize_ir:
-            try:
-                gm = normalize_ir(gm, clone_inputs(example_inputs))
-            except Exception:
-                log.debug("TorchDynamo unable to remove mutation")
-                use_fallback = True
-
-        # NB: no clone here on example inputs
-        if not is_aot_autograd_safe_to_run(gm, example_inputs):
-            use_fallback = True
 
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
@@ -85,34 +75,6 @@ def aot_autograd(**kwargs):
     return compiler_fn
 
 
-def is_aot_autograd_safe_to_run(gm, example_inputs):
-    """
-    There are some known issues with Aot Autograd. This is a workaround to catch
-    such cases, and fallback to eager. We should fix these quickly.
-
-    Issues
-    1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
-    2) LSTM - https://github.com/pytorch/functorch/issues/586
-    3) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
-    """
-
-    def raise_or_warn(reason):
-        msg = f"Unable to use Aot Autograd because of presence of {reason}"
-        if config.raise_on_unsafe_aot_autograd:
-            raise NotImplementedError(msg)
-        else:
-            log.warning(msg)
-        return False
-
-    # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
-    for submod in gm.modules():
-        if submod.__class__.__name__ == "LSTM":
-            return raise_or_warn("LSTM")
-
-    # 2) Mutation in the graphs are now always handled by AOT Autograd.
-    return True
-
-
 DEBUG = False
 
 # Useful for debugging purpose
@@ -123,13 +85,13 @@ aot_ts = aot_autograd(fw_compiler=ts_compile)
 
 # Uses TorchInductor AOT Autograd decomps and partitioner to isolate aot vs
 # inductor problems.
-aot_inductor_debug = aot_autograd(
+aot_eager_decomp_partition = aot_autograd(
     # these are taken from memory_efficient_fusion()
     fw_compiler=nop,
     bw_compiler=nop,
     # NB: lambda here is to delay import of inductor
     decompositions=lambda: import_module(
-        f"{config.inductor_import}.compile_fx"
+        "torch._inductor.compile_fx"
     ).select_decomp_table(),
     partition_fn=functools.partial(
         min_cut_rematerialization_partition, compiler="inductor"
@@ -363,12 +325,13 @@ def cudagraphs(model, inputs):
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 
+
 aot_torchxla_trivial = aot_autograd(
-    fw_compiler=BACKENDS["torchxla_trivial"],
+    fw_compiler=torchxla_trivial,
 )
 
 aot_torchxla_trace_once = aot_autograd(
-    fw_compiler=BACKENDS["torchxla_trace_once"],
+    fw_compiler=torchxla_trace_once,
 )
 
 
@@ -377,36 +340,42 @@ def create_aot_backends():
     Register aliases for the AOT backends
     """
     # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-    BACKENDS["aot_eager"] = aot_eager
+    register_backend(name="aot_eager", compiler_fn=aot_eager)
+
+    # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
+    # isolate inductor vs aot_eager errors
+    register_backend(
+        name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+    )
 
     # aot_ts uses torchscript backend. We can use this with both nnc and nvfuser
     # by using the relevant fuser with torch.jit.fuser(...)
-    BACKENDS["aot_ts"] = aot_ts
+    register_backend(name="aot_ts", compiler_fn=aot_ts)
 
     # "nvprims" is a subset of PrimTorch primitives that are guaranteed to be
     # supported by nvFuser. This is the preferred backend for nvFuser+PrimTorch.
-    BACKENDS["nvprims_nvfuser"] = aot_nvprims_nvfuser
+    register_backend(name="nvprims_nvfuser", compiler_fn=aot_nvprims_nvfuser)
     # This is useful for debugging. Can be removed later.
-    BACKENDS["nvprims_aten"] = aot_nvprims_aten
+    register_backend(name="nvprims_aten", compiler_fn=aot_nvprims_aten)
 
     # aot_ts_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
     # It uses min cut rematerialization algorithm, uses nvFuser as the
     # compiler backend, and TorchScript as the frontend.
-    BACKENDS["aot_ts_nvfuser"] = aot_mem_efficient_fusion
+    register_backend(name="aot_ts_nvfuser", compiler_fn=aot_mem_efficient_fusion)
 
     # Similar to aot_ts_nvfuser, but disables the decompositions. Decompositions
     # can cause accuracy deviations. This setting allows us to compare accuracy
     # without worrying about the impact of decomposisitons. More details at
     # https://github.com/pytorch/torchdynamo/issues/611
-    BACKENDS["aot_ts_nvfuser_nodecomps"] = aot_mem_efficient_fusion_no_decomp
+    register_backend(
+        name="aot_ts_nvfuser_nodecomps", compiler_fn=aot_mem_efficient_fusion_no_decomp
+    )
 
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
-    BACKENDS["aot_cudagraphs"] = aot_cudagraphs
+    register_backend(name="aot_cudagraphs", compiler_fn=aot_cudagraphs)
 
-    # aot_inductor_debug just replaces the inductor compiler with nop to help
-    # isolate inductor vs aot_eager errors
-    BACKENDS["aot_inductor_debug"] = aot_inductor_debug
-
-    BACKENDS["aot_torchxla_trivial"] = aot_torchxla_trivial
-    BACKENDS["aot_torchxla_trace_once"] = aot_torchxla_trace_once
+    register_backend(name="aot_torchxla_trivial", compiler_fn=aot_torchxla_trivial)
+    register_backend(
+        name="aot_torchxla_trace_once", compiler_fn=aot_torchxla_trace_once
+    )

@@ -6,7 +6,7 @@ import warnings
 import functools
 import math
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List, Tuple
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -53,6 +53,50 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
         return x.sqrt()
     else:
         return math.sqrt(x)
+
+# For any optimizer with a faster implementation, we attempt to default to the
+# fastest whenever possible. For foreach, the requirements are to have native
+# tensors all on CUDA. For fused, there's currently the additional requirement
+# that the tensors' dtypes must be floating point. Neither alternative supports
+# torch.jit.script nor differentiable, so we fall back to the single tensor
+# implementation in those cases.
+def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
+                                 differentiable: bool,
+                                 has_fused: bool = False) -> Tuple[bool, bool]:
+    if torch.jit.is_scripting() or differentiable:
+        return False, False
+    all_tensors = []
+    for tensorlist in tensorlists:
+        all_tensors.extend(tensorlist)
+    fused = has_fused and all(
+        p is None or (type(p) == torch.Tensor and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+    )
+    foreach = not fused and all(
+        p is None or (type(p) == torch.Tensor and p.is_cuda) for p in all_tensors
+    )
+    return fused, foreach
+
+
+# Common doc strings among optimizers
+_foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
+            is used. If unspecified by the user (so foreach is None), we will try to use
+            foreach over the for-loop implementation on CUDA, since it is usually
+            significantly more performant. (default: None)"""
+
+_capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
+            capture in a CUDA graph. Passing True can impair ungraphed performance,
+            so if you don't intend to graph capture this instance, leave it False
+            (default: False)"""
+
+_differentiable_doc = r"""differentiable (bool, optional): whether autograd should
+            occur through the optimizer step in training. Otherwise, the step()
+            function runs in a torch.no_grad() context. Setting to True can impair
+            performance, so leave it False if you don't intend to run autograd
+            through this instance (default: False)"""
+
+_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
+            objective, instead of minimizing (default: False)"""
+
 
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following
@@ -339,13 +383,10 @@ class Optimizer(object):
             if isinstance(value, torch.Tensor):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                if param.is_floating_point():
-                    value = value.to(param.dtype)
-
-                # Make sure singleton tensors (e.g. state['step']) do not change device.
-                # See https://github.com/pytorch/pytorch/issues/74424
-                is_singleton: bool = value.dim() == 0
-                if not is_singleton:
+                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+                if (key != "step"):
+                    if param.is_floating_point():
+                        value = value.to(param.dtype)
                     value = value.to(param.device)
                 return value
             elif isinstance(value, dict):
@@ -374,7 +415,7 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none: bool = False):
+    def zero_grad(self, set_to_none: bool = True):
         r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Args:
