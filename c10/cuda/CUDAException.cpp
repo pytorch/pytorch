@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <cuda_runtime.h>
 
+#include <iostream>
 #include <string>
 
 namespace c10 {
