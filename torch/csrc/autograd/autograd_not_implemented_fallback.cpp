@@ -185,7 +185,10 @@ void autogradNotImplementedFallbackImpl(
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
               t.use_count() <= 1, op_name); // Okay to return undefined tensor
-        if (!is_aliased_output[idx_ret] && t.has_storage())
+        // Exempt `_foreach_norm`, see
+        // https://github.com/pytorch/pytorch/issues/93940
+        if (!is_aliased_output[idx_ret] && t.has_storage() &&
+            op_name != "aten::_foreach_norm")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,
