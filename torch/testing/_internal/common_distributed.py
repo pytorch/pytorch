@@ -18,8 +18,10 @@ from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
 from typing import Dict, NamedTuple, Optional, Union
+from unittest.mock import patch
 
 import torch
+import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
 import torch.nn as nn
@@ -937,13 +939,15 @@ def spawn_threads_and_init_comms(
 
 class MultiThreadedTestCase(TestCase):
     """
-    Simple test runner that executes all tests with the in-proc process group.
+    Test runner that runs all tests with the in-proc process group using
+    multiple threads with the threaded process group.
 
-    A single instance of the TestCase object for all threads.
+    Each test spawns world_size threads and run the test method in each thread.
 
-    Difference from regular test runner:
+    Difference from regular MultiProcess test runner:
+    Must explicitly defines SetUp and call self._spawn_threads() to run the tests.
     Cannot use setUp / tearDown (must use perThreadSetup / perThreadShutdown)
-        Not sure what these two would be good for though.
+        to set up / tear down each thread when running each test.
     No global state possible
         How bad of a limitation is this?
     """
@@ -994,7 +998,7 @@ class MultiThreadedTestCase(TestCase):
 
     def _spawn_threads(self):
         """
-        class method to spawn threads and run test, this is shared by both wrapper and base class approach
+        class method to spawn threads and run test, use this method in the SetUp of your TestCase
         """
         test_name = self._current_test_name
         # for each test case, we need to create thread local world, and a global store
@@ -1028,7 +1032,7 @@ class MultiThreadedTestCase(TestCase):
 
     def run_test_with_threaded_pg(self, test_name, rank, world_size):
         """
-        Run ``callback`` with ``world_size`` threads using the in-proc process group
+        Run the current test associated with `test_name` using the threaded process group.
         """
 
         c10d.init_process_group(
@@ -1128,7 +1132,6 @@ class MultiThreadedTestCase(TestCase):
 
     @property
     def world_size(self) -> int:
-        # raise RuntimeError("world size not implemented")
         return DEFAULT_WORLD_SIZE
 
     @property
@@ -1180,3 +1183,91 @@ class SaveForwardInputsModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.forward_inputs[self] = x
         return self.c2(self.c1(x))
+
+@contextmanager
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
+    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+    torch.cuda.set_device(rank)
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '6789'
+    if init_pg:
+        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    yield
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    if init_pg:
+        c10d.destroy_process_group()
+
+
+class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
+    """
+    Test harness for single-process dynamo distributed tests,
+    initializes dist process group.
+
+    Prefer this for simple tests, as it's easier to debug.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # _exit_stack is set up in TestCase
+        cls._exit_stack.enter_context(
+            patch.dict(
+                os.environ,
+                {
+                    "MASTER_ADDR": "localhost",
+                    "MASTER_PORT": "12355",
+                },
+            )
+        )
+        cls.rank = 0
+        cls.device = f"cuda:{cls.rank}"
+        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
+        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+
+    @classmethod
+    def tearDownClass(cls):
+        c10d.destroy_process_group()
+        super().tearDownClass()
+
+
+class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
+    """
+    Use this for tests that actually run on multiple GPUs.
+
+    Decorate tests with @skip_if_lt_x_gpu(ngpu)
+
+    Note: MultiProcTestCase spawns processes per test and is slow.
+    Prefer MultiThreadedTestCase for most tests. Perhaps use this one
+    sparingly for integration tests.
+    """
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self) -> int:
+        return torch.cuda.device_count()
+
+    @classmethod
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
+        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
+        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
+        # _set_ddp_with_replicated_tensor(True)
+
+        # The rest is copypasta from MultiProcessTestCase._run
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        self.run_test(test_name, parent_pipe)

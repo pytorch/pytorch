@@ -1,3 +1,4 @@
+import builtins
 import collections
 import logging
 import math
@@ -29,6 +30,7 @@ from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
+    dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
     HAS_NUMPY,
@@ -97,6 +99,17 @@ class GuardBuilder(GuardBuilderBase):
         else:
             scope = dict()
         self.scope: Dict[str, object] = scope
+        self.scope["__builtins__"] = builtins.__dict__.copy()
+        for (
+            name,
+            package_module,
+        ) in torch.package.package_importer._package_imported_modules.items():
+            name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            # Write the package module into the scope so that we can import it
+            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
+            # Write the demangled name to the scope so that we can use it
+            self.scope[name] = package_module
+
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
@@ -330,11 +343,12 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
+        const_keys_repr = dict_const_keys_repr(const_keys)
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys!r}")
+            code.append(f"set({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -589,18 +603,18 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = guard.input_pos_a
-                pos_b = guard.input_pos_b
-                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
-                    self.output_graph.graphargs
-                ), "Deduped args out of bounds"
+                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
+                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
+                assert (
+                    pos_b >= 0 and pos_a >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
                 assert self.output_graph.graphargs[
                     pos_a
                 ].is_tensor, "Deduped arg must be a tensor"
                 assert self.output_graph.graphargs[
                     pos_b
                 ].is_tensor, "Deduped arg must be a tensor"
-
                 code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
