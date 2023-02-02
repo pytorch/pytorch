@@ -1585,6 +1585,68 @@ class TestSDPA(NNTestCase):
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
+    @parametrize("head_dim", [8, 16, 32, 64, 128])
+    @parametrize("is_causal", [True, False])
+    @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_mem_efficient_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
+                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+        n_heads = 4
+        query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
+                           device="cuda", dtype=dtype, requires_grad=True)
+        key = torch.rand(batch_size, n_heads, seq_len_k, head_dim, device="cuda",
+                         dtype=dtype, requires_grad=True)
+        value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
+                           device="cuda", dtype=dtype, requires_grad=True)
+
+        # Run the math kernel on low precision references
+        query_ref_lp = query.clone().detach().requires_grad_(True)
+        key_ref_lp = key.clone().detach().requires_grad_(True)
+        value_ref_lp = value.clone().detach().requires_grad_(True)
+
+        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+
+        query_ref = query.clone().detach().to(higher_precision_dtype).requires_grad_(True)
+        key_ref = key.clone().detach().to(higher_precision_dtype).requires_grad_(True)
+        value_ref = value.clone().detach().to(higher_precision_dtype).requires_grad_(True)
+
+        # Create real output
+        with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal)
+
+        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
+            # High Precision Math Reference
+            out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
+                                                     dropout_p=dropout_p, is_causal=is_causal)
+            # Low Precision Math Reference
+            out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
+                                                        dropout_p=dropout_p, is_causal=is_causal)
+
+        upstream_grad = torch.rand_like(out, requires_grad=False)
+
+        out.backward(upstream_grad)
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+
+        # Use LP vs HP reference to establish tolerance
+        output_ref_tolerance = max(2 * torch.abs(out_ref.to(out_lp_ref.dtype) - out_lp_ref).max().item(), 5e-3)
+
+        grad_q_ref_tolerance = max(4 * torch.abs(query_ref.grad.to(query_ref_lp.dtype) - query_ref_lp.grad).max().item(), 5e-3)
+        grad_k_ref_tolerance = 4 * torch.abs(key_ref.to(key_ref_lp.dtype) - key_ref_lp.grad).max().item()
+        grad_v_ref_tolerance = 4 * torch.abs(value_ref.to(value_ref_lp.dtype) - value_ref_lp.grad).max().item()
+
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_tolerance, rtol=output_ref_tolerance)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_tolerance, rtol=grad_q_ref_tolerance)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_tolerance, rtol=grad_k_ref_tolerance)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_tolerance, rtol=grad_v_ref_tolerance)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
+    @parametrize("batch_size", [1, 8])
+    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("head_dim", [8, 16, 32, 64])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
