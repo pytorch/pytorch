@@ -29,10 +29,11 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
-from .bytecode_analysis import livevars_analysis
+from .bytecode_analysis import JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
     create_instruction,
+    create_jump_absolute,
     Instruction,
     is_generator,
     unique_id,
@@ -396,6 +397,14 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
+def is_none(x):
+    return x is None
+
+
+def is_not_none(x):
+    return x is not None
+
+
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
@@ -417,11 +426,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
-            if inst.opname in (
-                "JUMP_ABSOLUTE",
-                "POP_JUMP_IF_TRUE",
-                "POP_JUMP_IF_FALSE",
-            ):
+            if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
                 if jump_offset < cur_offset:
                     return True
@@ -551,8 +556,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
         self.output.add_output_instructions(
-            [create_instruction("JUMP_ABSOLUTE", target=continue_inst)]
-            + self.instructions
+            [create_jump_absolute(continue_inst)] + self.instructions
         )
 
     def run(self):
@@ -1481,6 +1485,27 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     INPLACE_AND = stack_op(operator.iand)
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
+
+    # 3.11 opcodes
+    # note: passed opcodes are intentional
+    def RESUME(self, inst):
+        pass
+
+    JUMP_BACKWARD = jump
+    JUMP_BACKWARD_NO_INTERRUPT = jump
+
+    POP_JUMP_FORWARD_IF_TRUE = generic_jump(operator.truth, False)
+    POP_JUMP_BACKWARD_IF_TRUE = generic_jump(operator.truth, False)
+    POP_JUMP_FORWARD_IF_FALSE = generic_jump(operator.not_, False)
+    POP_JUMP_BACKWARD_IF_FALSE = generic_jump(operator.not_, False)
+
+    POP_JUMP_FORWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
+    POP_JUMP_BACKWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
+    POP_JUMP_FORWARD_IF_NONE = generic_jump(is_none, False)
+    POP_JUMP_BACKWARD_IF_NONE = generic_jump(is_none, False)
+
+    def CACHE(self, inst):
+        pass
 
     def copy_graphstate(self) -> InstructionTranslatorGraphState:
         """Create a checkpoint of the current state by copying everything"""

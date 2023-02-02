@@ -18,7 +18,7 @@ class Instruction:
 
     opcode: int
     opname: str
-    arg: int
+    arg: Optional[int]
     argval: Any
     offset: Optional[int] = None
     starts_line: Optional[int] = None
@@ -55,6 +55,12 @@ def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     return Instruction(
         opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
+
+
+# Python 3.11 remaps
+def create_jump_absolute(target):
+    inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
+    return create_instruction(inst, target=target)
 
 
 def lnotab_writer(lineno, byteno=0):
@@ -181,6 +187,10 @@ def devirtualize_jumps(instructions):
                     inst.arg = int(
                         (target.offset - inst.offset - instruction_size(inst)) / 2
                     )
+                if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
+                    # jump distance is calculated as a forward jump, so flip
+                    # it if the instruction is a backward jump
+                    inst.arg = -inst.arg
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
