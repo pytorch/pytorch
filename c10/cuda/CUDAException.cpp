@@ -39,9 +39,9 @@ void c10_cuda_check_implementation(
         "Device-side assertions were explicitly omitted for this error check; the error probably arose while initializing the DSA handlers.");
   }
 
-  std::out << "BEGIN DEBUG" << std::endl;
-  std::out << check_message << std::endl;
-  std::out << "END DEBUG" << std::endl;
+  std::cout << "BEGIN DEBUG" << std::endl;
+  std::cout << check_message << std::endl;
+  std::cout << "END DEBUG" << std::endl;
 
   TORCH_CHECK(false, check_message);
 }
