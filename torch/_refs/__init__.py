@@ -746,9 +746,9 @@ def nan_to_num(
     if neginf is None:
         neginf = torch.finfo(a.dtype).min
 
-    result = torch.where(torch.isnan(a), nan, a)
-    result = torch.where(torch.isneginf(a), neginf, result)
-    result = torch.where(torch.isposinf(a), posinf, result)
+    result = torch.where(torch.isnan(a), nan, a)  # type: ignore[call-overload]
+    result = torch.where(torch.isneginf(a), neginf, result)  # type: ignore[call-overload]
+    result = torch.where(torch.isposinf(a), posinf, result)  # type: ignore[call-overload]
     return result
 
 
