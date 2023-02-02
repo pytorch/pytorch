@@ -16,6 +16,7 @@ from torch.fx.experimental.optimization import (
 from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
+from . import config
 
 from .fx_utils import matches_module_function_pattern
 
@@ -614,7 +615,8 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
-    gm = pack_module(gm)
+    if config.cpp.weight_prepack:
+        gm = pack_module(gm)
     return gm
 
 
@@ -632,6 +634,7 @@ def create_unary_module(node: torch.fx.node):
         F.gelu: nn.GELU,
         F.relu6: nn.ReLU6,
         F.silu: nn.SiLU,
+        F.hardsigmoid: nn.Hardsigmoid,
         torch.relu: nn.ReLU,
         torch.sigmoid: nn.Sigmoid,
         torch.tanh: nn.Tanh,
@@ -755,6 +758,9 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         if len(node.args[index_node].users) > 1:
                             continue
                         computation_node = modules[node.args[index_node].target]
+                        if computation_node.training:
+                            continue
+
                         # TODO: support padding str input("valid", "same").
                         if type(computation_node) in [nn.Conv2d] and isinstance(
                             computation_node.padding, str
@@ -804,6 +810,8 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     if node.args[1].args[0] == node.args[0]:
                         continue
                     computation_node = modules[node.args[1].target]
+                    if computation_node.training:
+                        continue
                     # TODO: support padding str input("valid", "same").
                     if type(computation_node) in [nn.Conv2d] and isinstance(
                         computation_node.padding, str
@@ -834,12 +842,19 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
+                if cur_module.training:
+                    continue
                 computation_node_input_meta = node.args[0].meta.get("tensor_meta")
                 if computation_node_input_meta.dtype != torch.float32:
                     continue
                 if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
                     continue
                 computation_node_input_size = computation_node_input_meta.shape
+                if (
+                    type(cur_module) in [torch.nn.Linear]
+                    and len(computation_node_input_size) < 2
+                ):
+                    continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
                 ):
@@ -876,6 +891,7 @@ unary_modules_map = {
     nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
     nn.ReLU6: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.SiLU: UnaryAttr("swish"),
+    nn.Hardsigmoid: UnaryAttr("hardsigmoid"),
 }
 
 unary_ops = [
@@ -889,6 +905,7 @@ unary_ops = [
     nn.GELU,
     nn.ReLU6,
     nn.SiLU,
+    nn.Hardsigmoid,
     # functional
     F.relu,
     F.sigmoid,
@@ -899,6 +916,7 @@ unary_ops = [
     F.gelu,
     F.relu6,
     F.silu,
+    F.hardsigmoid,
     torch.relu,
     torch.sigmoid,
     torch.tanh,
