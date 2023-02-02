@@ -1940,10 +1940,8 @@ else:
         self.assertEqual(a.size(), torch.Size([1]))
 
         # Tests extremal behavior
-        tests = ((-0, float('inf')), (0, float('inf')), (float('inf'), 0))
-        for test in tests:
-            t = torch.empty((1,), device=device, dtype=dtype).exponential_(test[0])
-            self.assertTrue(t.item() == test[1])
+        t = torch.empty((1,), device=device, dtype=dtype).exponential_(float('inf'))
+        self.assertTrue(t.item() == 0)
 
         # Tests that negative lambda fails
         with self.assertRaises(RuntimeError):

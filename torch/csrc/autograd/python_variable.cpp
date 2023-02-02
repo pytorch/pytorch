@@ -1100,7 +1100,7 @@ PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
     END_HANDLE_TH_ERRORS
   }
   const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.name() == "")
+  if (tensor.name().empty())
     Py_RETURN_NONE;
   return THPUtils_packString(tensor.name().c_str());
 }

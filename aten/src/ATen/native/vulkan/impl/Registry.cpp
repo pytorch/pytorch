@@ -1,7 +1,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Shader.h>
-#include <ATen/native/vulkan/ops/Registry.h>
+#include <ATen/native/vulkan/impl/Registry.h>
 #include <ATen/native/vulkan/spv.h>
 
 namespace at {
