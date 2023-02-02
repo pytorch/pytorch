@@ -320,7 +320,7 @@ def _insert_observer(
     return new_obs
 
 def _set_target_dtype_info_for_matched_node_pattern(
-    matched_node_pattern: List[Node],
+    matched_node_pattern: NodePattern,
     last_node: Node,
     qconfig: QConfigAny,
     backend_config: BackendConfig,
@@ -356,6 +356,8 @@ def _set_target_dtype_info_for_matched_node_pattern(
     # set target_dtype_info if matched_node_pattern is a Node
     # other types of matched object, e.g. int, float literals, are ignored
     elif isinstance(matched_node_pattern, Node):
+        # for pyre
+        assert isinstance(matched_node_pattern, Node)
         node = matched_node_pattern
         if node in processed_nodes:
             return
@@ -369,7 +371,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
         # and set output_obs_or_fq_ctr based on qconfig.output_act
         # this also requires we extend the structure of QConfig to support more fine
         # grained configurations
-        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = \
+        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = (
             _get_target_activation_dtype_for_node(
                 node,
                 qconfig,
@@ -381,6 +383,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
                 named_modules,
                 cache_for_no_tensor_check
             )
+        )
         node.meta["target_dtype_info"] = target_dtype_info
 
 def _get_target_activation_dtype_for_node(
@@ -1205,10 +1208,14 @@ def insert_observers_for_model(
 
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
-    processed_nodes: Set[List[Node]] = set()
+    processed_nodes: Set[Node] = set()
     # initalize target_dtype_info
-    DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO = \
-        QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32), weight=PlaceholderObserver.with_args(dtype=torch.float32))
+    DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO = (
+        QConfig(
+            activation=PlaceholderObserver.with_args(dtype=torch.float32),
+            weight=PlaceholderObserver.with_args(dtype=torch.float32)
+        )
+    )
     for node in model.graph.nodes:
         node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO.activation,
@@ -1339,6 +1346,7 @@ def insert_observers_for_model(
     outputs_seen_counter = 0
     results_node = None
 
+    # TODO: change this to insert obs/fq by pattern instead of by node
     for node in nodes_before_observation:
 
         if node.op == 'placeholder':
@@ -1349,8 +1357,9 @@ def insert_observers_for_model(
 
         elif node.op in ('call_module', 'call_method', 'call_function', 'output'):
             # check for matches
-            last_node, matched_node_pattern, pattern, qhandler, qconfig = node_name_to_match_result_with_qconfig.get(
-                node.name, (None, None, None, None, None))
+            last_node, matched_node_pattern, pattern, qhandler, qconfig = (
+                node_name_to_match_result_with_qconfig.get(node.name, (None, None, None, None, None))  # type: ignore[assignment]
+            )
             equalization_qconfig = equalization_config_map.get(node.name, None)
 
             this_node_dtype_info = node.meta["target_dtype_info"]
