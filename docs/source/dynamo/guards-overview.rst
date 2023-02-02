@@ -374,7 +374,7 @@ knowing whether or not things have changed in between invocations, and
 whether we can safely read from the code cache or not.
 
 The most common code paths for getting an instance of a guard are
-through ``make_guards`` on ``VariableTracker``.
+through ``make_guards`` on ``VariableBuilder``.
 ``make_guards``-> ``source.make_guard``-> ``return Guard(self.name(), self.guard_source(), fn)``
 
 Or, in a concrete example:
@@ -387,7 +387,7 @@ Or, in a concrete example:
        return RangeVariable(value=value, guards=guards)
 
 Since ``source`` was set at the construction time of this
-``VariableTracker``, all that was needed here was to provide the ``fn``,
+``VariableBuilder``, all that was needed here was to provide the ``fn``,
 ``GuardBuilder.EQUALS_MATCH`` to the ``create_fn`` field.
 
 This ``create_fn`` must be a method on ``GuardBuilder``. The reason for
