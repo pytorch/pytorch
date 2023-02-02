@@ -10,6 +10,14 @@ from .quantize_jit import *  # noqa: F403
 from .quantization_mappings import *  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 
+import warnings
+warnings.warn(
+    "The `torch.quantization` folder has moved to "
+    "`torch.ao.quantization`, please move your callsite over to the new "
+    "location. `torch.quantization` will be deleted in a future release "
+    "of PyTorch. Please see https://github.com/pytorch/pytorch/issues/81667 "
+    "for more context.")
+
 def default_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
