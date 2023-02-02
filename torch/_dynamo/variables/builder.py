@@ -161,12 +161,14 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
+        dynamic_spec=None,
     ):
         assert source is not None
         super(VariableBuilder, self).__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
+        self.dynamic_spec = dynamic_spec
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -249,9 +251,11 @@ class VariableBuilder:
             else:
                 guards = self.make_guards(GuardBuilder.LIST_LENGTH)
             output = [
-                VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
-                    item
-                ).add_guards(guards)
+                VariableBuilder(
+                    self.tx,
+                    GetItemSource(self.get_source(), i),
+                    dynamic_spec=self.dynamic_spec[i],
+                )(item).add_guards(guards)
                 for i, item in enumerate(value)
             ]
             result = self.list_type(value)(output, guards=guards)
@@ -307,12 +311,15 @@ class VariableBuilder:
                 else:
                     return key
 
+            # breakpoint()
             result = dict(
                 [
                     (
                         k,
                         VariableBuilder(
-                            self.tx, GetItemSource(self.get_source(), index_source(k))
+                            self.tx,
+                            GetItemSource(self.get_source(), index_source(k)),
+                            dynamic_spec=self.dynamic_spec.get(k, None),
                         )(value[k]).add_guards(guards),
                     )
                     for k in value.keys()
@@ -647,6 +654,12 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
+        # breakpoint()
+        if self.dynamic_spec and isinstance(
+            self.get_source(), (LocalInputSource, GetItemSource)
+        ):
+            self.tx.output.shape_env.tensor_specs[self.get_source()] = self.dynamic_spec
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
@@ -822,6 +835,7 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
+
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
@@ -962,9 +976,13 @@ class TrackedFake:
 
 
 def wrap_to_fake_tensor_and_record(
-    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
+    e,
+    tx,
+    ignore_subclass=False,
+    *,
+    source: Optional[Source],
+    is_tensor: bool,
 ):
-    # breakpoint()
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):

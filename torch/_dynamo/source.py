@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import enum
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 from torch._guards import GuardSource, Source
 
@@ -63,7 +63,8 @@ class LocalSource(Source):
 class LocalInputSource(LocalSource):
     pos: int
 
-    dynamic_spec: Optional[Tuple[Optional[str], ...]]  # e.g. ['batch', 'seq', None]
+    def __hash__(self):
+        return hash((self.local_name, self.pos))
 
 
 @dataclasses.dataclass
@@ -272,6 +273,8 @@ class GetItemSource(Source):
             else:
                 return f"{self.base.name()}[{self.index!r}]"
 
+    def __hash__(self):
+        return hash((self.base, self.index))
 
 @dataclasses.dataclass
 class TupleIteratorGetItemSource(GetItemSource):

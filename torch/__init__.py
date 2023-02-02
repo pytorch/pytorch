@@ -30,7 +30,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, List, Set, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -49,7 +49,9 @@ __all__ = [
     'is_deterministic_algorithms_warn_only_enabled',
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
-    'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
+    'set_warn_always', 'is_warn_always_enabled',
+    'TensorSpec',
+    'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
 ]
@@ -224,6 +226,8 @@ else:
 # torch._C module initialization code in C
 if TYPE_CHECKING:
     import torch._C as _C
+
+TensorSpec = List[Optional[str]]
 
 class SymInt:
     """
@@ -1328,7 +1332,7 @@ class _TorchCompileInductorWrapper:
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
             dynamic: builtins.bool = False,
-            dynamic_args = None,
+            dynamic_args: Optional[Dict[str, TensorSpec]] = None,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,

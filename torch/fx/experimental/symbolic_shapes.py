@@ -14,7 +14,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_int, sym_max, sym_min  # noqa: F401
+from torch import TensorSpec, SymInt, SymFloat, SymBool, sym_not, sym_float, sym_int, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 SymTypes = (SymInt, SymFloat, SymBool)
@@ -653,6 +653,8 @@ class ShapeEnv(object):
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
 
+        self.tensor_specs: Dict[Source, TensorSpec] = {}
+
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
 
@@ -671,27 +673,37 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
+    def create_symbolic_sizes_strides_storage_offset(
+        self,
+        ex: torch.Tensor,
+        source: Source,
+    ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        from torch._dynamo.source import TensorPropertySource, TensorProperty, LocalInputSource
+        from torch._dynamo.source import TensorPropertySource, TensorProperty, LocalInputSource, GetItemSource
+
+        dynamic_spec = None
+        if isinstance(source, (LocalInputSource, GetItemSource)):
+            dynamic_spec = self.tensor_specs.get(source, None)
 
         rank = len(ex.size())
 
-        if isinstance(source, LocalInputSource) and source.dynamic_spec:
-            assert len(source.dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
-
-            size = [None] * rank
+        # breakpoint()
+        size: List[sympy.Expr] = []
+        if dynamic_spec:
+            assert len(dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
             for i, val in enumerate(ex.size()):
-                if source.dynamic_spec[i]:
-                    size[i] = self.create_symbol(
-                        val, TensorPropertySource(source, TensorProperty.SIZE, i), name=source.dynamic_spec[i]
+                if dynamic_spec[i]:
+                    size.append(
+                        self.create_symbol(
+                            val, TensorPropertySource(source, TensorProperty.SIZE, i), name=dynamic_spec[i]
+                        )
                     )
                 else:
-                    size[i] = sympy.Integer(val)
+                    size.append(sympy.Integer(val))
         else:
             size = [
                 self.create_symbol(
@@ -778,9 +790,9 @@ class ShapeEnv(object):
 
         # Create a duck sized int if necessary
         if val not in self.val_to_var:
-            symbol_name = name or f"{len(self.var_to_val)}"
             # NB: inductor relies on the name being prefixed with 's'
-            sympy_expr = Symbol(f"s_{symbol_name}", positive=True, integer=True)
+            symbol_name = f"s_{name}" if name else f"s{len(self.var_to_val)}"
+            sympy_expr = Symbol(symbol_name, positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             self.val_to_var[val] = sympy_expr
 

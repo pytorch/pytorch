@@ -1751,6 +1751,76 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result = fn_with_kwargs(pos0, tuple0, *myargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_with_tensor_spec(self):
+        from functorch.compile import aot_module_simplified
+
+        def func(x: torch.Tensor, y: torch.Tensor, ts: List[torch.Tensor], **kwargs):
+            x = x.view([x.shape[0] * x.shape[1], x.shape[-1]])
+            y = y.view([y.shape[0] * y.shape[-1]])
+
+            ts0, ts1 = ts
+            ts0 = ts0.view([ts0.shape[0] * ts0.shape[1], ts0.shape[-1]])
+            ts1 = ts1.view([ts1.shape[0] * ts1.shape[-1]])
+
+            kw1 = kwargs["input0"]
+            kw2 = kwargs["input1"]
+            kw1 = kw1.view(kw1.shape[0] * kw1.shape[1], kw1.shape[-1])
+            kw2 = kw2.view(kw2.shape[0] * kw2.shape[-1])
+
+            return x, y, ts0, ts1, kw1, kw2
+
+        x = torch.empty(16, 32, 8)
+        y = torch.empty(4, 2)
+        ts = [torch.empty(16, 32, 8), torch.empty(4, 2)]
+        args = (x, y, ts,)
+        kwargs = {
+            "input0": torch.empty(16, 32, 8),
+            "input1": torch.empty(4, 2),
+        }
+        tensor_sepcs = {
+            'x': ('batch', 'seq', None),
+            'y': ('batch', None),
+            'ts': (('batch', None, None), ('batch', None),),
+            'kwargs': {
+                "input0": ('batch', 'seq', "hidden1"),
+                "input1": ('batch', "hidden2"),
+            }
+        }
+
+        torch._dynamo.reset()
+
+        def compiler(gm, sample_inputs):
+            def inner_compiler(gm, args):
+                x, y, ts0, ts1, kw1, kw2 = sample_inputs
+                self.assertEqual([str(dim) for dim in x.shape], ["s_batch", "s_seq", "8"])
+                self.assertEqual([str(dim) for dim in y.shape], ["s_batch", "2"])
+
+                self.assertEqual([str(dim) for dim in ts0.shape], ["s_batch", "32", "8"])
+                self.assertEqual([str(dim) for dim in ts1.shape], ["s_batch", "2"])
+
+                self.assertEqual([str(dim) for dim in kw1.shape], ["s_batch", "s_seq", "s_hidden1"])
+                self.assertEqual([str(dim) for dim in kw2.shape], ["s_batch", "s_hidden2"])
+
+                return gm.forward
+
+            return aot_module_simplified(
+                gm,
+                sample_inputs,
+                fw_compiler=inner_compiler,
+            )
+
+        opt_func = torch._dynamo.optimize(compiler, nopython=True, dynamic=True, dynamic_args=tensor_sepcs,)(func)
+        out = opt_func(*args, **kwargs)
+
+        # gm, gurad = torch._dynamo.export(
+        #     func, *args, aten_graph=True,
+        #     tracing_mode="symbolic",
+        #     dynamic_args=tensor_sepcs,
+        # )
+
+        # gm.print_readable()
+
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

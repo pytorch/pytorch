@@ -288,7 +288,6 @@ class FakeTensorConverter(object):
         ignore_subclass=False,
         source=None,
     ):
-        # breakpoint()
         return self.from_real_tensor(
             fake_mode,
             t,
@@ -1083,7 +1082,6 @@ class FakeTensorMode(TorchDispatchMode):
         ignore_subclass=False,
         source: Optional[Source] = None,
     ):
-        # breakpoint()
         if static_shapes:
             return self.fake_tensor_converter(
                 self, tensor, ignore_subclass=ignore_subclass, source=source

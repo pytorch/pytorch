@@ -1659,14 +1659,17 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         self.dynamic_args = dynamic_args or {}
 
+        # breakpoint()
+        # self.output.shape_env.tensor_specs = self.dynamic_spec
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
                 VariableBuilder(
                     self,
-                    LocalInputSource(k, code_options["co_varnames"].index(k), self.dynamic_args.get(k, None))
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
+                    dynamic_spec=self.dynamic_args.get(k, None),
                 )(f_locals[k]),
             )
             for k in vars
