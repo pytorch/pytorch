@@ -2968,7 +2968,7 @@
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
-# note(crcrpar): `torchgen/api/autograd` logic would replace substrings of `self` and `other` in function names.
+# note(crcrpar): `torchgen/api/autograd` logic would unwantedly replace substrings of `self` and `other` of function names.
 - name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
   self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
   other: div_tensor_other_backward(grads[i], self[i], other[i])
@@ -3003,6 +3003,15 @@
 - name: _foreach_maximum.List(Tensor[] self, Tensor[] other) -> Tensor[]
   self: at::where(self[i] == other[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < other[i], 0)
   other: at::where(self[i] == other[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > other[i], 0)
+
+- name: _foreach_lerp.List(Tensor[] self, Tensor[] tensors1, Tensor[] weights) -> Tensor[]
+  self: grads[i] * (1 - weights[i]).conj()
+  tensors1: grads[i] * weights[i].conj()
+  weights: grads[i] * (tensors1[i] - self[i]).conj()
+
+- name: _foreach_lerp.Scalar(Tensor[] self, Tensor[] tensors1, Scalar weight) -> Tensor[]
+  self: "weight.isComplex() ? grads[i] * (1 - weight.conj().toComplexDouble()) : grads[i] * (1 - weight.toDouble())"
+  tensors1: grads[i] * weight.conj()
 
 # note(crcrpar): following definitions seem necessary because the reference native functions
 # of `maximum` and `minimum` don't have the overload def with Scalar as their second argument.
