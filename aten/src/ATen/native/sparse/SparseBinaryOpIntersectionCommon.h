@@ -37,8 +37,6 @@
   }
 #define BOOL_TO_INDEX_TYPE1(b0, ...) \
   EXPAND(b0, 0, CALL(__VA_ARGS__))
-#define BOOL_TO_INDEX_TYPE2(b1, b0, ...) \
-  EXPAND(b1, 1, BOOL_TO_INDEX_TYPE1(b0, __VA_ARGS__))
 
 namespace at {
 namespace native {
@@ -152,8 +150,7 @@ TensorIterator make_value_selection_intersection_iter(
 template <
   template <typename func_t> class kernel_t,
   typename value_selection_intersection_kernel_t,
-  typename index_t = int64_t,
-  typename hash_t = int64_t>
+  typename index_t = int64_t>
 void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
@@ -259,20 +256,15 @@ void _sparse_binary_op_intersection_kernel_impl(
   // which is implicit in the definition of hash_coeffs,
   // it could be shown that the hash function is actually bijective and, hence,
   // is a perfect hash function (no collisions ever).
-  const auto kHash = std::is_same<hash_t, int64_t>::value ? kLong : kInt;
-  const auto hash_coeffs = [&]() -> Tensor {
+  const auto hash_coeffs = [&]() -> auto {
     const auto broadcasted_sparse_dim_shape = std::vector<int64_t>(
       broadcasted_shape.begin(),
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
     );
     auto strides = contiguous_strides(broadcasted_sparse_dim_shape);
-    auto strides_len = static_cast<int64_t>(strides.size());
-    auto hash_coeffs = at::from_blob(
-        strides.data(),
-        {strides_len},
-        probably_coalesced._indices().options().device(kCPU).dtype(kLong));
-    hash_coeffs = hash_coeffs.to(probably_coalesced.device(), kHash);
-    return hash_coeffs;
+    std::array<int64_t, c10::kDimVectorStaticSize> strides_as_array;
+    std::copy(strides.begin(), strides.end(), strides_as_array.begin());
+    return strides_as_array;
   }();
 
   const auto nnz_arange = at::arange(
@@ -293,10 +285,9 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto indices_nnz_stride = indices.stride(1);
 
     auto hash = at::empty({probably_coalesced._nnz()},
-        indices.options().dtype(kHash));
+        indices.options().dtype(kLong));
 
     auto iter = TensorIteratorConfig()
-      // Hash has hash_t type while probably_coalesced_nnz_arange is index_t.
       .check_all_same_dtype(false)
       .add_output(hash)
       .add_input(probably_coalesced_nnz_arange)
@@ -304,17 +295,15 @@ void _sparse_binary_op_intersection_kernel_impl(
 
     {
       const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
-      const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
 
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
-          [=] FUNCAPI (index_t nnz_idx) -> hash_t {
+          [=] FUNCAPI (index_t nnz_idx) -> int64_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-          auto hash = hash_t {0};
-          for (uint32_t dim = 0; dim < sdim; ++dim) {
-            // use only int32_t operations when hash_t == int32_t
-            const auto dim_hash_coeff = ptr_hash_coeffs[dim];
-            const auto dim_index = static_cast<hash_t>(ptr_indices_dim[dim * indices_dim_stride]);
+          auto hash = static_cast<int64_t>(0);
+          for (decltype(sdim) dim = 0; dim < sdim; ++dim) {
+            const auto dim_hash_coeff = *(hash_coeffs.begin() + dim);
+            const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
           }
           return hash;
@@ -378,9 +367,8 @@ void _sparse_binary_op_intersection_kernel_impl(
 
     {
       const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
-      const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
+      const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<int64_t>();
       const auto sorted_hash_len = sorted_hash.numel();
-      const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
       auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<int64_t>();
       auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<int64_t>();
 
@@ -390,22 +378,21 @@ void _sparse_binary_op_intersection_kernel_impl(
           [=] FUNCAPI (index_t nnz_idx) -> index_t {
           // Compute hash value
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-          auto hash = hash_t {0};
-          for (uint32_t dim = 0; dim < sdim; ++dim) {
-            // Use only int32_t operations when hash_t == int32_t.
-            const auto dim_hash_coeff = ptr_hash_coeffs[dim];
-            const auto dim_index = static_cast<hash_t>(ptr_indices_dim[dim * indices_dim_stride]);
+          auto hash = static_cast<int64_t>(0);
+          for (decltype(sdim) dim = 0; dim < sdim; ++dim) {
+            const auto dim_hash_coeff = *(hash_coeffs.begin() + dim);
+            const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
           }
 
           // Perform hash values intersection
-          const auto* RESTRICT lb = find_bound<const hash_t*, hash_t, /*is_lower=*/true>(
+          const auto* RESTRICT lb = find_bound<const int64_t*, int64_t, /*is_lower=*/true>(
               ptr_sorted_hash,
               ptr_sorted_hash + sorted_hash_len,
               hash
           );
 
-          const auto* RESTRICT ub = find_bound<const hash_t*, hash_t, /*is_lower=*/false>(
+          const auto* RESTRICT ub = find_bound<const int64_t*, int64_t, /*is_lower=*/false>(
               ptr_sorted_hash,
               ptr_sorted_hash + sorted_hash_len,
               hash
@@ -620,18 +607,10 @@ void _sparse_binary_op_intersection_kernel_out(
   }
 
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
-  // Optimization: use 32-bit hash values when possible.
-  const auto is_max_hash_32bits = max_hash_val <= std::numeric_limits<int>::max();
 
-  BOOL_TO_INDEX_TYPE2(is_32bit_indexing, is_max_hash_32bits, [&]() {
-      // Given 3 booleans b0, b1, b2, index_t<i> is defined as
-      // index_t<i> = int32_t if b<2 - i> is true else int64_t.
-      // The goal is to use int32_t whenever possible for better
-      // performance.
-      // NOTE: order of types given booleans is reversed.
-      using index_t = index_t1;
-      using hash_t = index_t0;
-      _sparse_binary_op_intersection_kernel_impl<kernel_t, value_selection_intersection_kernel_t, index_t, hash_t>(
+  BOOL_TO_INDEX_TYPE1(is_32bit_indexing, [&]() {
+      using index_t = index_t0;
+      _sparse_binary_op_intersection_kernel_impl<kernel_t, value_selection_intersection_kernel_t, index_t>(
           res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
   });
 }
