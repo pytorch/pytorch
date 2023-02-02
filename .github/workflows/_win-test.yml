@@ -82,15 +82,14 @@ jobs:
           }
 
           # Print all the processes for debugging
-          Get-WmiObject Win32_Process | Select-Object CommandLine, ProcessId | Format-List
+          Wmic Path Win32_Process Get Caption,Processid,Commandline | Format-List
 
-          # Try to clean up the workspace manually
           Try {
+            # Then try to clean up the workspace manually
             Get-ChildItem -Path $GITHUB_WORKSPACE -Recurse | Remove-Item -Force -Recurse
           }
           Catch {
-            # Better to write out whatever exception thrown to help debugging any
-            # potential issue
+            # Better to write out whatever exception thrown to help debugging any potential issue
             Write-Output $_
           }
 
