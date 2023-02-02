@@ -133,8 +133,10 @@ if(INTERN_BUILD_ATEN_OPS)
             ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
             WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
-  else() # Otherwise do not generate or include sources into build.
-    set(GEN_EDGE_OPS_sources "")
+    add_library(edge_ops_lib STATIC
+            ${GEN_EDGE_OPS_sources}
+            )
+    target_link_libraries(edge_ops_lib PUBLIC torch_cpu)
   endif()
 
   # Codegen unboxing
