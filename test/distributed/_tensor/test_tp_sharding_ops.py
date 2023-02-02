@@ -9,6 +9,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -68,6 +69,17 @@ class TPShardingOpsTest(DTensorTestBase):
         self.assertTrue(new_dt.placements[0].is_replicate())
         self.assertEqual(new_dt.to_local(), tensor.permute(1, 0, 2))
         self.assertEqual(new_dt.stride(), tensor.permute(1, 0, 2).stride())
+
+    @with_comms
+    def test_split_partial_tensor(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        tensor = torch.rand(3, 5, 6, device=self.device_type)
+        dist_tensor = DTensor.from_local(tensor, device_mesh, [_Partial()])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_Partial placement is not implemented",
+        ):
+            dist_tensor = dist_tensor.split(3)
 
 
 if __name__ == "__main__":

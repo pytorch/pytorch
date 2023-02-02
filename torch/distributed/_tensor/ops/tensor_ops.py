@@ -606,15 +606,25 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
     ndim = input_spec.ndim
     split_size_or_sections = op_schema.args_schema[1]
-    dim = 0
-    if len(op_schema.args_schema) > 2:
-        dim = cast(int, op_schema.args_schema[2])
+    dim = (
+        cast(int, op_schema.args_schema[2])
+        if len(op_schema.args_schema) > 2
+        else 0
+    )
     dim = normalize_dim(dim, ndim)
 
-    # TODO: just like slice op, split replicates before splitting
-    # on a sharded dimension
-    # TODO: shall we consider partial???
-    # TODO: consider splitting an empty tensor???
+    # TODO: tensor to split cannot have _Partial
+    # in its placements for now. Will need to
+    # support in future.
+    if input_spec.sums:
+        raise NotImplementedError(
+            f"splitting distributed tensor with "
+            f"_Partial placement is not implemented!\n"
+            f"DTensorSpec={input_spec}"
+        )
+
+    # TODO: just like slice op, split replicates before
+    # splitting on a sharded dimension
     need_reshard = False
     if is_tensor_dim_sharded(input_spec, dim=dim):
         need_reshard = True
@@ -632,7 +642,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
                 OpSchema(
                     func_schema=op_schema.func_schema,
                     args_schema=(input_spec,) + op_schema.args_schema[1:],
-                    kwargs_schema={},
+                    kwargs_schema=op_schema.kwargs_schema,
                 ),
             ]
         )
