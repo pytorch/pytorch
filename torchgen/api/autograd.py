@@ -394,8 +394,7 @@ Attempted to convert a derivative formula for a mutable operator
                 "_foreach_sub",
                 "_foreach_mul",
                 "_foreach_div",
-            ) and f.func.name.overload_name in ("List", "Scalar", "ScalarList")
-            _is_scalarlist_overload = f.func.name.overload_name == "ScalarList"
+            )
             if len(f.func.arguments.post_self_positional) > 0:
                 if not _is_foreach_add:
                     return None, False
@@ -422,7 +421,6 @@ Attempted to convert a derivative formula for a mutable operator
                     f.func.arguments.flat_non_out,
                     function_schema.arguments.flat_non_out,
                 ):
-                    assert ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
                     map_refarg2foreacharg[ref_arg.name] = arg.name
                     map_name2arg[arg.name] = arg
 
@@ -435,10 +433,6 @@ Attempted to convert a derivative formula for a mutable operator
                     modified_formula = derivative.original_formula.replace(
                         "grad", "grads[i]"
                     ).replace("result", "result[i]")
-                    assert len(f.func.returns) == len(function_schema.returns)
-                    assert f.func.arguments.self_arg is not None
-                    # if isinstance(f.func.arguments.self_arg.argument.type, ListType):
-                    #     modified_formula = modified_formula.replace("self", "self[i]")
 
                     saved_inputs, saved_outputs = [], []
                     with local.parametrize(
@@ -470,8 +464,6 @@ Attempted to convert a derivative formula for a mutable operator
                                     nctype=canonical_nctype, expr=mapped_name
                                 )
                             )
-                        if _is_scalarlist_overload:
-                            print(f"{saved_inputs = }")
                         for ref_output in derivative.saved_outputs:
                             if ref_output.nctype.name == "result":
                                 saved_outputs.append(
@@ -500,9 +492,6 @@ Attempted to convert a derivative formula for a mutable operator
                         saved_outputs=tuple(saved_outputs),
                         named_gradients=set(),
                     )
-                    if _is_foreach_add:
-                        print(f"  ref:     {derivative}")
-                        print(f"  foreach: {modified_derivative}")
                     modified_derivative_formulas.append(modified_derivative)
                 with local.parametrize(
                     use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
@@ -517,9 +506,6 @@ Attempted to convert a derivative formula for a mutable operator
                         )
                         for var in all_var_names
                     ]
-                assert len(modified_derivative_formulas) == len(
-                    ref_diff_info.derivatives
-                )
                 diff_info = DifferentiabilityInfo(
                     name=base_op_name.base,
                     func=f,

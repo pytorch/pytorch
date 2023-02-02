@@ -2968,6 +2968,7 @@
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
+# note(crcrpar): `torchgen/api/autograd` logic would replace substrings of `self` and `other` in function names.
 - name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
   self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
   other: div_tensor_other_backward(grads[i], self[i], other[i])
