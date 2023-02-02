@@ -2993,7 +2993,13 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (torch.randn([16, 16]),),
+            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
+            (
+                torch.randn(
+                    [16, 16],
+                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                ),
+            ),
             # Mismatched elements: 9 / 256 (3.5%)
             # Greatest absolute difference: 2.491354329061828e+28 at index (6, 6) (up to 1e-05 allowed)
             # Greatest relative difference: 2.9793410720160818e-05 at index (4, 5) (up to 1.3e-06 allowed)
