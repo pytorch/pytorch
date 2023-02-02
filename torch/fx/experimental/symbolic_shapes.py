@@ -816,13 +816,13 @@ class ShapeEnv(object):
         )
         return self.val_to_var[val]
 
-    # Generates a Python string which, when evaluated in a context that
+    # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
-    # on if the guards evaluated to True or not.  Primarily used by Dynamo,
+    # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()):
+                       source_ref=lambda n: n.name()) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
