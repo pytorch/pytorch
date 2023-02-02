@@ -23,22 +23,13 @@ def register_backend(
     tags: Sequence[str] = (),
 ):
     """
-    Decorator to add a given compiler to the registry to allow
-    calling `torch.compile` with string shorthand:
-
-        @register_backend
-        def my_backend(gm, inputs):
-            ...
-
-        torch.compile(..., backend="my_backend")
-
-    Note: for projects not imported by default, it might be easier to
-    pass a function directly as a backend and not use this:
-
-        torch.compile(..., backend=my_backend)
+    Decorator to add a given compiler to the registry to allow calling
+    `torch.compile` with string shorthand.  Note: for projects not
+    imported by default, it might be easier to pass a function directly
+    as a backend and not use a string.
 
     Args:
-        compiler_fn: callable taking a FX graph and fake tensor inputs
+        compiler_fn: Callable taking a FX graph and fake tensor inputs
         name: Optional name, defaults to `compiler_fn.__name__`
         tags: Optional set of string tags to categorize backend with
     """
