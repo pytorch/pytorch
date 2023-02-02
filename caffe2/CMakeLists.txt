@@ -1486,7 +1486,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT MSVC)
+  if(USE_KINETO OR MSVC)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
@@ -1502,9 +1502,6 @@ if(USE_CUDA)
     target_link_libraries(
         torch_cuda PRIVATE  caffe2::cudnn-private)
   endif()
-
-  # This is for CUDA 12 cudaSetDevice workaround
-  target_link_libraries(torch_cpu PRIVATE caffe2_nvrtc)
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
