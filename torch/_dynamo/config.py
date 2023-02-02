@@ -1,21 +1,20 @@
-import logging
 import os
 import sys
 from os.path import abspath, dirname
-from types import ModuleType
 
 import torch
-
 from . import external_utils
 
+from .logging import get_loggers_level, set_loggers_level
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
 # logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
-# NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
-log_level = logging.WARNING
+log_level = property(
+    lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
+)
 
 # log compiled function + graphs at level INFO
 output_code = False
@@ -139,8 +138,23 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
+# By default, we try to detect accuracy failure by running both forward
+# and backward of a torchdynamo produced graph (if you are using repro_after
+# 'dynamo').  This setting forces us to only test the forward graph and
+# not the backward graph.  This can be helpful if you're trying to debug
+# an inference only problem, but the minifier seems to be choking on the
+# backwards step
+# TODO: Detect this situation automatically so the user doesn't need
+# to manually configure this
+repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
+
+# The tolerance we should use when testing if a compiled graph
+# has diverged so that we should treat it as an accuracy failure
+repro_tolerance = 1e-3
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
+# This requires dynamic_shapes to be True.
 capture_scalar_outputs = False
 
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
@@ -183,24 +197,16 @@ debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
 DO_NOT_USE_legacy_non_fake_example_inputs = False
 
 
-class _AccessLimitingConfig(ModuleType):
-    def __setattr__(self, name, value):
-        if name not in _allowed_config_names:
-            raise AttributeError(f"{__name__}.{name} does not exist")
-        # automatically set logger level whenever config.log_level is modified
-        if name == "log_level":
-            from .logging import set_loggers_level
-
-            set_loggers_level(value)
-        return object.__setattr__(self, name, value)
+_save_config_ignore = {
+    "repro_after",
+    "repro_level",
+    # workaround: "cannot pickle PyCapsule"
+    "constant_functions",
+    # workaround: "cannot pickle module"
+    "skipfiles_inline_module_allowlist",
+}
 
 
-_allowed_config_names = {*globals().keys()}
-sys.modules[__name__].__class__ = _AccessLimitingConfig
+from .config_utils import install_config_module
 
-from .config_utils import get_config_serialization_fns
-
-save_config, load_config = get_config_serialization_fns(
-    sys.modules[__name__],
-    ignore_set={"repro_after", "repro_level"},
-)
+install_config_module(sys.modules[__name__])

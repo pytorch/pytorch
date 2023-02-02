@@ -1291,6 +1291,7 @@ class TritonScheduling:
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
         node_schedule = []
         current_loop_writes = set()
+        is_current_reductions = set()
         done = set()
 
         def fits_in_main_body(n):
@@ -1305,6 +1306,7 @@ class TritonScheduling:
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
+
             if current_loop_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
@@ -1317,6 +1319,7 @@ class TritonScheduling:
                     ):
                         done.add(node)
                         current_loop_writes.add(node.get_name())
+                        is_current_reductions.add(node.is_reduction())
                         node_schedule.append(node)
 
             if node_schedule and node_schedule[-1] is EnableReduction:
@@ -1326,17 +1329,29 @@ class TritonScheduling:
             yield
             node_schedule.append(EnableReduction)
             current_loop_writes.clear()
+            is_current_reductions.clear()
 
         for index, node in enumerate(nodes):
             if node in done:
                 continue
             done.add(node)
 
+            def requires_closing_previous_reduction(node, node_schedule):
+                if rnumel == 1:
+                    return False
+                if not current_loop_writes & node.recursive_predecessors:
+                    return False
+                assert node_schedule and not isinstance(
+                    node_schedule[-1], (EnableReduction, DisableReduction)
+                )
+                return True in is_current_reductions
+
             if fits_in_main_body(node):
-                if current_loop_writes & node.recursive_predecessors and rnumel != 1:
+                if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
                 current_loop_writes.add(node.get_name())
+                is_current_reductions.add(node.is_reduction())
                 node_schedule.append(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
