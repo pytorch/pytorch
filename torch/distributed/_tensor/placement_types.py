@@ -9,7 +9,6 @@ from torch.distributed._spmd.comm_tensor import CommTensor
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 
-
 class Placement(object):
     # base class Placement type
 
@@ -250,13 +249,7 @@ class _Partial(Placement):
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # out-of-place all_reduce to replicate, since the current partial DTensor
-        # might get used by other ops as well, so we can't inplace modify it
-        cloned_local = CommTensor(tensor.clone(memory_format=torch.contiguous_format))
-        mesh.all_reduce(
-            cloned_local, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
-        )
-        return cloned_local
+        return mesh.tracing_all_reduce(tensor, self.reduce_op, mesh_dim=mesh_dim)
 
     def _to_shard(
         self,
@@ -326,7 +319,7 @@ class DTensorSpec(object):
         For example, we have a dist tensor that have the shape of
         [18, 20, 30], and device_mesh([0, 1, 2, 3]), placements:
         [Shard(1)], the dim_map of this placement would be:
-        [-1, 1, -1]. This representation is pretty helpful during
+        [-1, 0, -1]. This representation is pretty helpful during
         sharding propagation where we could know exactly each
         tensor dimension is sharded or not.
 

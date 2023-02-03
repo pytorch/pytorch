@@ -14,7 +14,6 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.optimizations.normalize import normalize_ir
 from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
@@ -387,7 +386,6 @@ def compile_fx(
     functorch.compile.config.use_fake_tensor = True
 
     with overrides.patch_functions():
-        model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
