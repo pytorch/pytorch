@@ -626,6 +626,66 @@ class TestSymNumberMagicMethods(TestCase):
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
 class TestFloorDiv(TestCase):
+    @staticmethod
+    def python_floordiv(x, y):
+        return x // y
+
+    @staticmethod
+    def torch_floordiv(x, y):
+        # Note: we fully evaluate here since FloorDiv might not always do
+        # that.
+        shape_env = ShapeEnv()
+        return shape_env.evaluate_expr(FloorDiv(x, y))
+
+    @staticmethod
+    def yield_test_cases(values, negate=True):
+        for x, y in values:
+            yield (x, y)
+            if negate:
+                yield (-x, y)
+                yield (x, -y)
+                yield (-x, -y)
+
+    @skipIfNoSympy
+    def test_floordiv_float_int(self):
+        values = (
+            (2.5, 2.1),
+            (2.1, 2.5),
+            (2.0, 2.1),
+            (7, 2.5),
+            (2.1, 7),
+            (7, 2),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values):
+            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_zero_base(self):
+        values = (
+            (0, 2.5),
+            (0.0, 2.1),
+            (sympy.Symbol("s", zero=True), 2.3),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
+            if type(x) is not sympy.Symbol:
+                self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
+            else:
+                self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_div_by_one(self):
+        values = (
+            (2.5, 1),
+            (2.1, 1.0),
+            (2, 1.0),
+            (2, 1),
+        )
+
+        for x, y in TestFloorDiv.yield_test_cases(values):
+            self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
+
     @skipIfNoSympy
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables

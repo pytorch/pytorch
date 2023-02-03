@@ -297,8 +297,8 @@ if HAS_SYMPY:
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
+            if base.is_zero:
+                return sympy.S.Zero
             if base.is_integer and divisor == 1:
                 return base
             if base.is_real and divisor == 1:
