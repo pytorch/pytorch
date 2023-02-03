@@ -16,7 +16,6 @@ import builtins
 import math
 import warnings
 import inspect
-import types
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -515,8 +514,7 @@ class CodeGen(object):
             elif node.op == 'call_function':
                 assert callable(node.target)
                 # pretty print operators
-                if not isinstance(node.target, types.MethodDescriptorType) and \
-                   node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
+                if getattr(node.target, "__module__", "") == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{repr(node)}{maybe_type_annotation} = '
                                 f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
