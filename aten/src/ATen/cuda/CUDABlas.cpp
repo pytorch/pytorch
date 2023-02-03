@@ -736,20 +736,20 @@ void gemm_and_bias(
   int returnedResult = 0;
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  // TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-  //     ltHandle,
-  //     computeDesc.descriptor(),
-  //     Adesc.descriptor(),
-  //     Bdesc.descriptor(),
-  //     Cdesc.descriptor(),
-  //     Cdesc.descriptor(),
-  //     preference.descriptor(),
-  //     1,
-  //     &heuristicResult,
-  //     &returnedResult));
-  // if (returnedResult == 0) {
-  //   TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-  // }
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Cdesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  if (returnedResult == 0) {
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  }
 
   float beta_special = 0.0f;
   // opmath_t beta_val = 0; // bias is added in epilogue
