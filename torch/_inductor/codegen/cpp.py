@@ -1460,6 +1460,14 @@ class CppVecKernelChecker(CppVecKernel):
                 current_node: torch.fx.Node = V.interpreter.current_node
 
                 assert len(self.ranges) == len(self.itervars)
+                assert len(self.ranges) == len(self.itervars)
+                if not len(self.ranges) or not all(
+                    not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
+                    for range in self.ranges
+                ):
+                    # if the range value is sympy.Expr, we might could not deduce the accurate loop interval.
+                    self.simd_vec = False
+                    return self.cse.newvar()
 
                 def mod_indexing_rep(x, y, z):
                     if z.is_constant():
