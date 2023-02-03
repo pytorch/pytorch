@@ -297,6 +297,12 @@ public:
                                    sin_cos.x);                  //cos(b)           sin(b)
     return _mm512_mul_pd(exp, cos_sin);
   }
+  Vectorized<c10::complex<double>> exp2() const {
+    // Use identity 2**x = exp(log(2) * x)
+    const __m512d ln_2 = _mm512_set1_pd(c10::ln_2<double>);
+    Vectorized<c10::complex<double>> scaled_values = _mm512_mul_pd(values, ln_2);
+    return scaled_values.exp();
+  }
   Vectorized<c10::complex<double>> expm1() const {
     AT_ERROR("not supported for complex numbers");
   }
