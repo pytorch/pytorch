@@ -721,21 +721,29 @@ void gemm_and_bias(
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
   size_t workspaceSize = 1024 * 1024;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference.descriptor(),
-      CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-      &workspaceSize,
-      sizeof(workspaceSize)));
+  void* workspace_data_ptr;
 
-  auto workspace = at::empty(
-      {static_cast<int64_t>(workspaceSize)},
-      at::device({at::kCUDA, at::cuda::current_device()}).dtype(at::kByte));
+  if (std::is_same<Dtype, int8_t>::value) {
+    workspaceSize = 0;
+  }
+  if (workspaceSize > 0) {
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+        preference.descriptor(),
+        CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+        &workspaceSize,
+        sizeof(workspaceSize)));
+
+    auto workspace = at::empty(
+        {static_cast<int64_t>(workspaceSize)},
+        at::device({at::kCUDA, at::cuda::current_device()}).dtype(at::kByte));
+    workspace_data_ptr = workspace.data_ptr();
+  }
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+  auto heuristic_return_value = cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
       Adesc.descriptor(),
@@ -745,7 +753,8 @@ void gemm_and_bias(
       preference.descriptor(),
       1,
       &heuristicResult,
-      &returnedResult));
+      &returnedResult);
+  TORCH_CUDABLAS_CHECK(heuristic_return_value);
   if (returnedResult == 0) {
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
@@ -765,9 +774,9 @@ void gemm_and_bias(
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
-      NULL, // &heuristicResult.algo,
-      NULL, // workspace.data_ptr(),
-      0, // workspaceSize,
+      heuristic_return_value == CUBLAS_STATUS_SUCCESS ? &heuristicResult.algo : nullptr,
+      workspaceSize > 0 ? workspace_data_ptr : nullptr,
+      workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
