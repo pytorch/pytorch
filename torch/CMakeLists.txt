@@ -113,11 +113,6 @@ else()
       -Wno-strict-aliasing)
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
-endif()
-
 if(USE_ITT)
   list(APPEND TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/itt.cpp
