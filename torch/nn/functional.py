@@ -4859,20 +4859,6 @@ Shape legend:
 
 """)
 
-
-def _scaled_dot_product_attention(
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        attn_mask: Optional[Tensor] = None,
-        dropout_p: float = 0.0,
-        need_attn_weights: bool = False,
-        is_causal: bool = False):
-    r""" TODO This function is for merge purposes only and needs to be removed
-    """
-    warnings.warn("This function is deprecated please rebuild your models with the public version of sdpa.")
-    return torch._C._nn._scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
-
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
     # Verifies the expected shape for `query, `key`, `value`, `key_padding_mask` and `attn_mask`
@@ -5272,7 +5258,7 @@ def multi_head_attention_forward(
         k = k.view(bsz, num_heads, src_len, head_dim)
         v = v.view(bsz, num_heads, src_len, head_dim)
 
-        attn_output, _ = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, False, is_causal)
+        attn_output = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
         attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
