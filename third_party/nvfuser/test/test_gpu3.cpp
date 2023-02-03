@@ -6641,6 +6641,73 @@ TEST_F(NVFuserTest, FusionIssue2077_CUDA) {
 
 #endif
 
+TEST_F(NVFuserTest, FusionIssue2372_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tx = makeContigTensor(5, DataType::Float);
+  fusion.addInput(tx);
+  auto tmean = makeContigTensor(1, DataType::Float);
+  fusion.addInput(tmean);
+  auto tvar = makeContigTensor(1, DataType::Float);
+  fusion.addInput(tvar);
+  auto seps = IrBuilder::newScalar(DataType::Double);
+  fusion.addInput(seps);
+
+  auto tmean_bcast = broadcast(tmean, {true, true, true, true, false});
+  auto tmean_expand = expand_as(tmean_bcast, tx);
+  auto diff = sub(tx, tmean_expand);
+  auto regvar = add(tvar, seps);
+  auto invstd = rsqrt(regvar);
+  auto invstd_bcast = broadcast(invstd, {true, true, true, true, false});
+  auto invstd_expand = expand_as(invstd_bcast, tx);
+  auto x_normed = mul(diff, invstd_expand);
+
+  fusion.addOutput(x_normed);
+  // This output is not necessary for a normalization function, but should not
+  // cause compilation to fail
+  fusion.addOutput(tmean); // Contiguous even-size input added as output
+  fusion.addOutput(invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+
+  int C = 2;
+  at::Tensor x = at::randn({1, 5, 5, 5, C}, options);
+  at::Tensor mean = at::randn({C}, options);
+  at::Tensor var = at::rand({C}, options);
+  double eps = 1e-5;
+
+  std::vector<at::IValue> inputs = {x, mean, var, eps};
+
+  auto lparams = schedulePointwise(&fusion, inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs, lparams);
+  auto cg_outputs = fe.runFusion(inputs, lparams);
+
+  auto eager_diff = x - mean.view({1, 1, 1, 1, -1});
+  auto eager_invstd = at::rsqrt(var + eps);
+  auto eager_x_normed = eager_diff * eager_invstd.view({1, 1, 1, 1, -1});
+
+  ASSERT_TRUE(at::equal(cg_outputs[1], mean));
+
+  testValidate(
+      &fusion,
+      {
+          cg_outputs[0],
+          cg_outputs[2],
+      },
+      inputs,
+      {
+          eager_x_normed,
+          eager_invstd,
+      },
+      __LINE__,
+      __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionIssue2075_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();

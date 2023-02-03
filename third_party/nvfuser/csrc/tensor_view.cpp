@@ -1305,10 +1305,10 @@ TensorView* TensorView::cacheAfter(c10::optional<LoadStoreOpType> cache_op) {
 
   // Get all the uses for this Tensorview
   TORCH_CHECK(
-      !isFusionOutput(),
+      !uses().empty(),
       "Error adding cacheAfter ",
       this,
-      " we restrict using cacheAfter on an output.");
+      " we restrict using cacheAfter on tensors that have no further uses.");
 
   // Previously, caching computed-at tensors was allowed but was never
   // really robust. Make it an error unless it is really needed.
