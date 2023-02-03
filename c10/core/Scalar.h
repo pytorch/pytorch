@@ -152,7 +152,7 @@ class C10_API Scalar {
     return Tag::HAS_si == tag || Tag::HAS_sd == tag;
   }
 
-  C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) {
+  C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) noexcept {
     if (&other == this) {
       return *this;
     }

@@ -406,6 +406,34 @@ class TestShapeOps(TestCase):
             out_t = make_from_data([[3, 2, 1], [6, 5, 4]])
             yield in_t, dims, out_t
 
+            # vectorized NCHW cases (images)
+            if device == "cpu" and dtype != torch.bfloat16:
+                for mf in [torch.contiguous_format, torch.channels_last]:
+                    for c in [2, 3, 8, 16]:
+                        in_t = make_from_size((2, c, 32, 32)).contiguous(memory_format=mf)
+                        np_in_t = in_t.numpy()
+
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_t, 3, out_t
+
+                        np_out_t = np_in_t[:, :, ::-1, :].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_t, 2, out_t
+
+                        # non-contig cases
+                        in_tt = in_t[..., ::2, :]
+                        np_in_t = in_tt.numpy()
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_tt, 3, out_t
+
+                        in_tt = in_t[..., ::2]
+                        np_in_t = in_tt.numpy()
+                        np_out_t = np_in_t[:, :, :, ::-1].copy()
+                        out_t = torch.from_numpy(np_out_t)
+                        yield in_tt, 3, out_t
+
             # Noops (edge cases)
 
             # Size 0
