@@ -145,7 +145,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch._dynamo.optimize(torch._dynamo.backends.ipex.ipex_fp32)(model)
+        opt_model = torch._dynamo.optimize("ipex")(model)
         with torch.no_grad():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2))
