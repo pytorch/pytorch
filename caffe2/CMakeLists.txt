@@ -1524,9 +1524,6 @@ endif()
 
 
 target_link_libraries(torch_cpu PRIVATE flatbuffers)
-if(USE_CUDA)
-  target_link_libraries(torch_cpu PRIVATE caffe2_nvrtc)
-endif()
 
 # Note [Global dependencies]
 # Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
