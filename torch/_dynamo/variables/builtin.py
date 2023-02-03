@@ -185,6 +185,19 @@ class BuiltinVariable(VariableTracker):
                 tx, a, b, options, forward_name=forward_name, reverse_name=reverse_name
             ):
                 # Manually handle reversing logic if needed (e.g. call __radd__)
+
+                # TODO: If we expand this to handle tensor args, we need to manually
+                # handle cases like this:
+                #
+                # class A(int):
+                #     def __radd__(self, other):
+                #         print("woof")
+                # torch.randn(3) + A(3)
+                #
+                # In this example, A.__radd__() is not called -> nothing is printed, because
+                # Tensor.__add__ only does a subtype test against int and will ignore the subclass.
+                # To be fully correct, we should not call A.__radd__() here, and there may be
+                # other cases to reason about and add exceptions for.
                 if isinstance(a, UserDefinedVariable):
                     return a.call_method(tx, forward_name, [b], {})
                 else:
@@ -452,6 +465,7 @@ class BuiltinVariable(VariableTracker):
             return out
 
         # Handle functions that are reversible (e.g. __add__ / __radd__)
+        # NB: Tensor args are handled above and not here
         reversible_binops = self._reversible_binops()
         if self.fn in reversible_binops:
             assert len(kwargs) == 0 and len(args) == 2
