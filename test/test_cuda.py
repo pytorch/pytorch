@@ -5014,7 +5014,7 @@ class TestCudaComm(TestCase):
         # roundup_power2_divisions knob array syntax
         torch.cuda.memory.empty_cache()
         torch.cuda.memory._set_allocator_settings(
-            "garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,128:2,256:2,512:2,1024:1,>:1]")
+            "garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,128:2,1024:1,>:1]")
         start_mem = torch.cuda.memory_stats()[key]
         w = torch.rand(nelems, device='cuda')
 

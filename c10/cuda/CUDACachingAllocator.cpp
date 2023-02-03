@@ -548,11 +548,12 @@ size_t CachingAllocatorConfig::parseRoundUpPower2Divisions(
     const std::vector<std::string>& config,
     size_t i) {
   consumeToken(config, ++i, ':');
-  bool first_value = true;
 
   if (++i < config.size()) {
     if (config[i].compare("[") == 0) {
       size_t last_index = 0;
+      size_t last_value = 0;
+      bool first_value = true;
       while (++i < config.size() && config[i].compare("]") != 0) {
         std::string val1 = config[i];
         size_t val2 = 0;
@@ -565,8 +566,8 @@ size_t CachingAllocatorConfig::parseRoundUpPower2Divisions(
               false, "Error parsing roundup_power2_divisions value", "");
         }
         TORCH_CHECK(
-            llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 ",
+            llvm::isPowerOf2_64(val2) || val2 == 0,
+            "For roundups, the divisons has to be a power of 2 or zero",
             "");
 
         if (val1.compare(">") == 0) {
@@ -589,19 +590,27 @@ size_t CachingAllocatorConfig::parseRoundUpPower2Divisions(
           index = std::min(index, m_roundup_power2_divisions.size() - 1);
 
           if (first_value) {
-            std::fill(
-                m_roundup_power2_divisions.begin(),
-                std::next(
-                    m_roundup_power2_divisions.begin(),
-                    static_cast<std::vector<unsigned long>::difference_type>(
-                        index)),
-                val2);
+            last_value = val2;
             first_value = false;
           }
+
+          std::fill(
+              std::next(
+                  m_roundup_power2_divisions.begin(),
+                  static_cast<std::vector<unsigned long>::difference_type>(
+                      last_index)),
+              std::next(
+                  m_roundup_power2_divisions.begin(),
+                  static_cast<std::vector<unsigned long>::difference_type>(
+                      index)),
+              last_value);
+
           if (index < m_roundup_power2_divisions.size()) {
             m_roundup_power2_divisions[index] = val2;
           }
+
           last_index = index;
+          last_value = val2;
         }
 
         if (config[i + 1].compare("]") != 0) {
@@ -1274,9 +1283,6 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 divison.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
-      return size;
-    }
     if (llvm::isPowerOf2_64(size)) {
       return size;
     }
@@ -1299,7 +1305,7 @@ class DeviceCachingAllocator {
       return kMinBlockSize;
     } else {
       auto divisions = CachingAllocatorConfig::roundup_power2_divisions(size);
-      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
