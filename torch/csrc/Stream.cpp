@@ -21,7 +21,7 @@ static PyObject* THPStream_pynew(
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|KKK",
+          "|LLL",
           kwlist,
           &stream_id,
           &device_index,
@@ -48,10 +48,11 @@ static void THPStream_dealloc(THPStream* self) {
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(
-      c10::Stream::unpack3(
-          self->stream_id, self->device_index, self->device_type)
-          .device());
+  return THPDevice_New(c10::Stream::unpack3(
+                           self->stream_id,
+                           self->device_index,
+                           static_cast<c10::DeviceType>(self->device_type))
+                           .device());
   END_HANDLE_TH_ERRORS
 }
 
