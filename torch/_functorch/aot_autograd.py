@@ -896,7 +896,7 @@ def create_joint_forward_backward_functionalized(
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            with fx_traceback.override_stack_trace():
+            with fx_traceback.preserve_node_meta():
                 backward_out = torch.autograd.grad(
                     needed_outs,
                     grad_primals,
@@ -1049,7 +1049,10 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    # flat_args is used by make_fx and aot_config.fw_compiler
+    # clone flat_args to avoid flat_args shape changed by inplace ops (unsqueeze_)
+    tmp_flat_args = [torch._prims_common.clone_preserve_strides(x) for x in flat_args]
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_args)
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
@@ -2447,7 +2450,7 @@ def aot_module_simplified(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
                     )
