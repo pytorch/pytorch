@@ -632,6 +632,11 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
 
+    # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
+    # these new ISA features may not be supported on older compilers
+    set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
+    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
