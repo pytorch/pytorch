@@ -20,13 +20,13 @@ import sys
 import unittest
 import warnings
 import math
+import contextlib
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 from torch.utils.checkpoint import checkpoint
-from torch.autograd.graph import _ignore_disable_saved_tensor_hooks
 
 import functorch
 from functorch import (
@@ -2503,6 +2503,13 @@ class TestJvp(TestCase):
 
 
 class TestSavedTensorHooks(TestCase):
+    def setUp(self):
+        self.disable_saved_tensors_hooks = torch.autograd.graph.disable_saved_tensors_hooks
+        torch.autograd.graph.disable_saved_tensors_hooks = contextlib.nullcontext
+
+    def tearDown(self):
+        torch.autograd.graph.disable_saved_tensors_hooks = self.disable_saved_tensors_hooks
+
     @staticmethod
     def checkpoint(fn):
         def checkpointed_fn(*args, **kwargs):
@@ -2515,7 +2522,6 @@ class TestSavedTensorHooks(TestCase):
             return fn(x).sum()
         return fn_and_sum
 
-    @_ignore_disable_saved_tensor_hooks()
     def test_count_unpack_pack(self):
         # Tests several invariants about packing/unpacking + functorch. We note that:
         # - Number of pack calls is multiplied by the number of grads nested at the time
@@ -2621,7 +2627,6 @@ class TestSavedTensorHooks(TestCase):
                         pack_count[0],
                         (fw_count + bw_pack_count) * second_level_factor + bwbw_pack_count * first_level_factor)
 
-    @_ignore_disable_saved_tensor_hooks()
     def test_basic_single_order_checkpointing_correct(self):
         count = [0]
 
