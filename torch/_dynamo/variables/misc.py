@@ -6,7 +6,7 @@ from typing import Dict, List
 import torch._C
 from torch._guards import Guard, GuardSource
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -716,9 +716,7 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(
-                f"call {config.dynamo_import}.disable() wrapped function {self.value}"
-            )
+            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)
