@@ -106,7 +106,7 @@ std::vector<int64_t> compute_contiguous_strides(c10::IntArrayRef sizes) {
   if (n == 0) return strides;
 
   strides[n - 1] = 1;
-  for (int64_t i = n - 2; i >= 0; --i) {
+  for (int64_t i = n - 1; i >= 0; --i) {
     strides[i] = strides[i+1] * sizes[i];
   }
   return strides;
