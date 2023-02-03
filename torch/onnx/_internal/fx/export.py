@@ -230,7 +230,7 @@ def _create_onnx_friendly_decomposition_table() -> Dict[
 _ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
 
 
-def _retrieve_or_adapt_input(fx_node_arg, fx_name_to_onnxscipt_value):
+def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_value):
     """Map FX value to TorchScript value.
 
     When creating TorchScript graph from FX graph, we need a mapping from FX variable
@@ -249,7 +249,6 @@ def _retrieve_or_adapt_input(fx_node_arg, fx_name_to_onnxscipt_value):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
 
     return onnx_tensor
-
 
 def _filter_incompatible_kwargs(kwargs):
     """Filter out kwargs that are not supported by onnxscript."""
@@ -276,8 +275,10 @@ def _filter_incompatible_kwargs(kwargs):
 
 
 def _wrap_fx_args_as_onnxscript_args(
-    node, fx_name_to_onnxscipt_value
-) -> Tuple[tuple, dict]:
+    node: torch.fx.Node, fx_name_to_onnxscipt_value: Dict[
+        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+    ]
+) -> Tuple[tuple, dict, tuple, dict]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     # This function assumes the order of arguments in FX op is the
@@ -298,15 +299,20 @@ def _wrap_fx_args_as_onnxscript_args(
                     # Get default from schema.
                     complete_kwargs[expected_arg.name] = expected_arg.default_value
 
-    return (
-        tuple(
-            # (2) retrieve existing
-            _retrieve_or_adapt_input(arg, fx_name_to_onnxscipt_value)
-            for arg in complete_args
-        ),
-        _filter_incompatible_kwargs(complete_kwargs),
-    )
-
+    graph_args = tuple(_retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value) for arg in complete_args)
+    graph_kwargs = _filter_incompatible_kwargs(complete_kwargs)
+    # prepare torch format args and kwargs for op-level validation
+    torch_args = []
+    for arg in complete_args:
+        if isinstance(arg, torch.fx.Node):
+            # from fake tensor to real tensor tensor
+            from torch.utils._mode_utils import no_dispatch
+            with no_dispatch():
+                torch_args.append(torch.randn_like(arg.meta["val"]))
+        else:
+            torch_args.append(arg)
+    torch_kwargs = complete_kwargs
+    return (graph_args, graph_kwargs, tuple(torch_args), torch_kwargs)
 
 def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -391,12 +397,11 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             else:
                 raise RuntimeError(f"Unknown call_function target: {node.target}")
             # Only the latest opset version is only supported in atenlib for now
-            print("function:", exporter_key)
             symbolic_fn = _ATENLIB_FUNCTIONS.get(exporter_key)
             if symbolic_fn is None:
                 raise RuntimeError(f"Cannot find function for {exporter_key}")
             # Map FX inputs to ONNX inputs and fill optional inputs with default values.
-            onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
+            onnx_args, onnx_kwargs, torch_args, torch_kwargs = _wrap_fx_args_as_onnxscript_args(
                 node, fx_name_to_onnxscipt_value
             )
             with evaluator.default_as(tracer):
@@ -415,6 +420,13 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
                 output
             )
+            # op-level validation
+            with evaluator.default_as(evaluator.ORTEvaluator()):
+                expected_output = node.target(*torch_args, **torch_kwargs)
+                numpy_args = [arg.numpy() if isinstance(arg, torch.Tensor) else arg for arg in torch_args]
+                ort_output = symbolic_fn(*numpy_args, **torch_kwargs)
+                torch.testing.assert_close(expected_output.numpy(), ort_output)
+
             fx_name_to_onnxscipt_value[node.name] = output
             continue
         elif node.op == "output":
@@ -525,16 +537,14 @@ def _export(
         decomposition_table = torch._decomp.decomposition_table
     # Apply decomposition table to the input graph.
     decomposed_module = proxy_tensor.make_fx(module, decomposition_table)(*args)
-
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
-
+    print("node.target: ", [node.target for node in decomposed_module.graph.nodes])
     onnxscript_graph, initializers = _export_fx_to_onnxscript(
         decomposed_module, opset_version
     )
-    print(onnxscript_graph.torch_graph)
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = onnxscript_graph.to_model_proto(initializers, opset_version)
-    onnx.save_model(onnx_model, "gpt2.onnx")
+
     if use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()
