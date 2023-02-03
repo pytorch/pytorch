@@ -22,6 +22,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.symbolic_shapes import sym_sqrt
+from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
@@ -37,7 +38,7 @@ from .ir import (
     TensorBox,
     View,
 )
-from .utils import ceildiv, has_torchvision_roi_align, sympy_product
+from .utils import ceildiv, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -984,9 +985,12 @@ def register_onednn_fusion_ops():
                 b: TensorBox,
                 batch_size,
             ):
-                return TensorBox.create(
-                    ir.MKLPackedLinear.create(x, packed_w, orig_w, b, batch_size)
+                result = TensorBox.create(
+                    ir.MKLPackedLinear.create(x, packed_w, orig_w, batch_size)
                 )
+                if b is not None:
+                    result = add(result, b)
+                return result
 
     else:
         pass
@@ -1185,10 +1189,6 @@ def require_contiguous(_, *args, **kwargs):
     return args, kwargs
 
 
-if has_torchvision_roi_align():
-    make_fallback(torch.ops.torchvision.roi_align)
-
-
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
@@ -1203,6 +1203,9 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
+FALLBACK_ALLOW_LIST = {
+    "torchvision::roi_align",
+}
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -1734,6 +1737,13 @@ def new_empty_strided(
     return empty_strided(
         size, stride, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+
+@register_lowering(prims.copy_strided.default)
+def copy_strided(x, stride):
+    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride_order = sorted(range(len(stride)), key=stride.__getitem__)
+    return ir.ExternKernel.require_stride_order(x, stride_order)
 
 
 @register_lowering([torch.full, aten.full])
@@ -3760,18 +3770,7 @@ def _realize(x):
     return clone(x)
 
 
-def _import_kernels():
-    """
-    Need to make sure all these get registered in the lowers dict
-    """
-    import importlib
-    import os
+# populate lowerings defined in kernel/*
+from . import kernel
 
-    from . import kernel
-
-    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
-        if filename.endswith(".py") and filename[0] != "_":
-            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
-
-
-_import_kernels()
+import_submodule(kernel)
