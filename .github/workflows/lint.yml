@@ -249,11 +249,11 @@ jobs:
           cache-dependency-path: |
             **/requirements.txt
             **/requirements-flake8.txt
-            **/.circleci/docker/requirements-ci.txt
+            **/.ci/docker/requirements-ci.txt
             **/.github/requirements-gha-cache.txt
       - name: Install dependencies
         # mypy and boto3 versions copied from
-        # .circleci/docker/common/install_conda.sh
+        # .ci/docker/common/install_conda.sh
         run: |
           set -eux
           pip install -r requirements.txt
