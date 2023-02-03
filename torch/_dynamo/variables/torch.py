@@ -3,7 +3,6 @@ import logging
 import math
 import re
 import types
-from collections import OrderedDict
 from typing import Dict, List
 
 import torch._C
@@ -11,6 +10,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
+from torch._dynamo.variables import DynamicShapeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -458,6 +458,43 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
+            if self.value == torch._C._nn.scaled_dot_product_attention:
+                # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
+                # in pytorch/torch/_meta_registrations.py
+                fake_query = args[0].as_proxy().node.meta["example_value"]
+                fake_key = args[1].as_proxy().node.meta["example_value"]
+                fake_value = args[2].as_proxy().node.meta["example_value"]
+                # We look through the stack to find a cuda autocast context
+                # If we do we will convert the fake tensors to torch.float16
+                is_cuda_autocast_context = False
+                for block in tx.block_stack:
+                    if (
+                        isinstance(block.with_context, AutocastModeVariable)
+                        and block.with_context.target_values[0] == "cuda"
+                    ):
+                        is_cuda_autocast_context = True
+                        break
+
+                if is_cuda_autocast_context and fake_query.device.type == "cuda":
+                    amp_dtype = torch.float16
+                    fake_query = fake_query.clone().to(amp_dtype)
+                    fake_key = fake_key.clone().to(amp_dtype)
+                    fake_value = fake_value.clone().to(amp_dtype)
+
+                backend_choice = torch._fused_sdp_choice(
+                    fake_query, fake_key, fake_value
+                )
+                if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
+                    dropout_p = kwargs.get("dropout_p")
+                    # Lets see if they passed it in as not an arg
+                    if len(args) >= 5:
+                        dropout_p = args[4]
+
+                    if dropout_p is not None and dropout_p.value != 0.0:
+                        unimplemented(
+                            "FlashAttention with dropout is not supported in cuda graphs"
+                        )
+
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
@@ -478,7 +515,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 **options,
             )
 
-            if "out" in kwargs:
+            if "out" in kwargs and not (
+                isinstance(kwargs["out"], variables.ConstantVariable)
+                and kwargs["out"].as_python_constant() is None
+            ):
                 # out variants of torch operators like torch.sort and
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
@@ -488,13 +528,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
                     ]
                     for idx, name in enumerate(output_tensor_names):
-                        assert name in tx.symbolic_locals
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                        if name in tx.symbolic_locals:
+                            tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     name = tx.find_symbolic_locals_name(kwargs["out"])
-                    assert name in tx.symbolic_locals
-                    tx.symbolic_locals[name] = tensor_variable
+                    if name in tx.symbolic_locals:
+                        tx.symbolic_locals[name] = tensor_variable
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -710,9 +750,6 @@ class TorchPyOperator(VariableTracker):
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
-                    # Meh (problem is the nodes don't compare equal;
-                    # maybe nub out outputs only)
-                    name_to_input=OrderedDict(),
                     # Unused in branches
                     graphargs=[],
                 )
@@ -768,7 +805,9 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
+            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+                type(args[0])
+            )  # predicate
             assert isinstance(
                 args[1], (UserFunctionVariable, NestedUserFunctionVariable)
             ), str(
