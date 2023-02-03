@@ -17,11 +17,11 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             '_propagate_qconfig_helper',
             '_remove_activation_post_process',
             '_remove_qconfig',
-            'add_observer_',
+            '_add_observer_',
             'add_quant_dequant',
             'convert',
-            'get_observer_dict',
-            'get_unique_devices_',
+            '_get_observer_dict',
+            '_get_unique_devices_',
             '_is_activation_post_process',
             'prepare',
             'prepare_qat',
@@ -29,7 +29,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'quantize',
             'quantize_dynamic',
             'quantize_qat',
-            'register_activation_post_process_hook',
+            '_register_activation_post_process_hook',
             'swap_module',
         ]
         self._test_function_import('quantize', function_list)

@@ -97,6 +97,8 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_tf32()
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
+        elif name == "allow_bf16_reduced_precision_reduction":
+            return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
         raise AssertionError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
@@ -104,6 +106,8 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_tf32(value)
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
+        elif name == "allow_bf16_reduced_precision_reduction":
+            return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
         raise AssertionError("Unknown attribute " + name)
 
 _LinalgBackends = {

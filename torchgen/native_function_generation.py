@@ -73,6 +73,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "record_stream",  # no return
     "sparse_dim",  # returns an int
     "_nested_tensor_offsets",  # returns a vector of ints
+    "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
 ]
 
@@ -318,6 +319,7 @@ def generate_function(
             )
         }
     }
+    tags = set(["generated"]) | set(f.tags & {"nondeterministic_seeded", "view_copy"})
 
     return (
         NativeFunction(
@@ -346,7 +348,7 @@ def generate_function(
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
-            tags=set(["generated"]) | (f.tags & {"nondeterministic_seeded"}),
+            tags=tags,
             namespace=f.namespace,
         ),
         backend_metadata,

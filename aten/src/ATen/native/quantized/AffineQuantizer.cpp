@@ -97,6 +97,21 @@ void checkSameSize(
       " only works with Tensors with the same shape");
 }
 
+void checkPerChannelParamsSize(
+    const Tensor& rtensor,
+    int64_t axis,
+    const Tensor& scales,
+    const Tensor& zero_points
+) {
+  int64_t channel = rtensor.size(axis);
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel, expected ", channel, " got, ", scales.numel());
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel expected ", channel, " got, ", zero_points.numel());
+}
+
 } // anonymous namespace
 
 Tensor& quantize_tensor_per_tensor_affine(
@@ -156,13 +171,7 @@ Tensor& quantize_tensor_per_channel_affine(
       "Expected: [0, ",
       rtensor.dim(),
       ")");
-  int64_t channel = rtensor.size(axis);
-  TORCH_CHECK(
-      channel == int64_t(scales.numel()),
-      "length of scales must equal to channel");
-  TORCH_CHECK(
-      channel == int64_t(zero_points.numel()),
-      "length of zero_points must equal to channel");
+  checkPerChannelParamsSize(rtensor, axis, scales, zero_points);
 
   quantize_tensor_per_channel_affine_stub(
       rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
@@ -195,13 +204,7 @@ Tensor& quantize_tensor_per_channel_float_qparams(
       "Expected: [0, ",
       rtensor.dim(),
       ")");
-  int64_t channel = rtensor.size(axis);
-  TORCH_CHECK(
-      channel == int64_t(scales.numel()),
-      "length of scales must equal to channel");
-  TORCH_CHECK(
-      channel == int64_t(zero_points.numel()),
-      "length of zero_points must equal to channel");
+  checkPerChannelParamsSize(rtensor, axis, scales, zero_points);
 
   quantize_tensor_per_channel_float_qparams_stub(
       rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
@@ -260,13 +263,7 @@ Tensor& dequantize_tensor_per_channel_affine(
       " Expected: [0, ",
       qtensor.dim(),
       ")");
-  int64_t channel = qtensor.size(axis);
-  TORCH_CHECK(
-      channel == int64_t(scales.numel()),
-      "length of scales must equal to channel");
-  TORCH_CHECK(
-      channel == int64_t(zero_points.numel()),
-      "length of zero_points must equal to channel");
+  checkPerChannelParamsSize(rtensor, axis, scales, zero_points);
 
   dequantize_tensor_per_channel_affine_stub(
       qtensor.device().type(), qtensor, rtensor, scales, zero_points, axis);
@@ -297,13 +294,7 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
       " Expected: [0, ",
       qtensor.dim(),
       ")");
-  int64_t channel = qtensor.size(axis);
-  TORCH_CHECK(
-      channel == int64_t(scales.numel()),
-      "length of scales must equal to channel");
-  TORCH_CHECK(
-      channel == int64_t(zero_points.numel()),
-      "length of zero_points must equal to channel");
+  checkPerChannelParamsSize(rtensor, axis, scales, zero_points);
 
   dequantize_tensor_per_channel_float_qparams_stub(
       qtensor.device().type(), qtensor, rtensor, scales, zero_points, axis);

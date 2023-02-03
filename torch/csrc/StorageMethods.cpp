@@ -206,14 +206,17 @@ static PyObject* THPStorage_fromBuffer(
   size_t element_size = c10::elementSize(scalar_type);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  torch::utils::THPByteOrder byte_order;
+  bool do_byte_swap;
   if (scalar_type != at::kByte && scalar_type != at::kChar) {
     if (strcmp(byte_order_str, "native") == 0) {
-      byte_order = torch::utils::THP_nativeByteOrder();
+      do_byte_swap = false;
     } else if (strcmp(byte_order_str, "big") == 0) {
-      byte_order = torch::utils::THP_BIG_ENDIAN;
+      do_byte_swap =
+          (torch::utils::THP_LITTLE_ENDIAN ==
+           torch::utils::THP_nativeByteOrder());
     } else if (strcmp(byte_order_str, "little") == 0) {
-      byte_order = torch::utils::THP_LITTLE_ENDIAN;
+      do_byte_swap =
+          (torch::utils::THP_BIG_ENDIAN == torch::utils::THP_nativeByteOrder());
     } else {
       PyErr_Format(
           PyExc_ValueError,
@@ -282,34 +285,40 @@ static PyObject* THPStorage_fromBuffer(
     // we are trying to get a value which is not 0 or 1, we have to manually
     // convert original values to boolean ones.
     torch::utils::THP_decodeBoolBuffer(
-        storage->data<bool>(), src + offset, byte_order, count);
+        storage->data<bool>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(
-        storage->data<int16_t>(), src + offset, byte_order, count);
+        storage->data<int16_t>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kInt) {
     torch::utils::THP_decodeInt32Buffer(
-        storage->data<int32_t>(), src + offset, byte_order, count);
+        storage->data<int32_t>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kLong) {
     torch::utils::THP_decodeInt64Buffer(
-        storage->data<int64_t>(), src + offset, byte_order, count);
+        storage->data<int64_t>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kHalf) {
     torch::utils::THP_decodeHalfBuffer(
-        storage->data<c10::Half>(), src + offset, byte_order, count);
+        storage->data<c10::Half>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kBFloat16) {
     torch::utils::THP_decodeBFloat16Buffer(
-        storage->data<c10::BFloat16>(), src + offset, byte_order, count);
+        storage->data<c10::BFloat16>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(
-        storage->data<float>(), src + offset, byte_order, count);
+        storage->data<float>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kDouble) {
     torch::utils::THP_decodeDoubleBuffer(
-        storage->data<double>(), src + offset, byte_order, count);
+        storage->data<double>(), src + offset, do_byte_swap, count);
   } else if (scalar_type == at::kComplexFloat) {
     torch::utils::THP_decodeComplexFloatBuffer(
-        storage->data<c10::complex<float>>(), src + offset, byte_order, count);
+        storage->data<c10::complex<float>>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kComplexDouble) {
     torch::utils::THP_decodeComplexDoubleBuffer(
-        storage->data<c10::complex<double>>(), src + offset, byte_order, count);
+        storage->data<c10::complex<double>>(),
+        src + offset,
+        do_byte_swap,
+        count);
   } else {
     TORCH_CHECK(false, "Unknown type: ", scalar_type);
   }

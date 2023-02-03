@@ -93,7 +93,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE(view_as_real);
   VMAP_SUPPORT(view_as_complex, view_as_complex_batch_rule);
   VMAP_SUPPORT(clone, clone_batch_rule);
-  VMAP_SUPPORT(contiguous, contiguous_batch_rule);
   VMAP_SUPPORT2(to, device, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, device)));
   VMAP_SUPPORT2(to, dtype, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype)));
   VMAP_SUPPORT2(to, dtype_layout, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype_layout)));
@@ -163,25 +162,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   // torch.special.* functions
   UNARY_POINTWISE(special_entr);
-  UNARY_POINTWISE(special_erf);
-  UNARY_POINTWISE(special_erfc);
   UNARY_POINTWISE(special_erfcx);
-  UNARY_POINTWISE(special_erfinv);
-  UNARY_POINTWISE(special_expit);
-  UNARY_POINTWISE(special_expm1);
-  UNARY_POINTWISE(special_digamma);
-  UNARY_POINTWISE(special_psi);
-  UNARY_POINTWISE(special_exp2);
-  UNARY_POINTWISE(special_gammaln);
-  UNARY_POINTWISE(special_i0);
   UNARY_POINTWISE(special_i0e);
   UNARY_POINTWISE(special_i1);
   UNARY_POINTWISE(special_i1e);
-  UNARY_POINTWISE(special_log1p);
-  UNARY_POINTWISE(special_ndtr);
   UNARY_POINTWISE(special_ndtri);
-  UNARY_POINTWISE(special_round);
-  UNARY_POINTWISE(special_sinc);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
   UNARY_POINTWISE_ALL(elu);
