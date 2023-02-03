@@ -3,8 +3,7 @@
 from itertools import repeat
 import os
 import re
-import sys
-from typing import Union
+from typing import Union, get_args, get_origin
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -13,16 +12,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
-
-if sys.version_info >= (3, 8):
-    from typing import get_args, get_origin
-else:
-    def get_args(tp):
-        return tp.__args__
-
-    def get_origin(tp):
-        if hasattr(tp, "__origin__"):
-            return tp.__origin__
 
 try:
     import pytest

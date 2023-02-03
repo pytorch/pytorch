@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -114,7 +115,7 @@ void autogradNotImplementedFallbackImpl(
       stack_start,
       num_arguments);
 
-  const bool any_requires_grad = tensors_requiring_grad_on_stack.size() > 0;
+  const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
@@ -377,7 +378,8 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
               ? CreationMeta::INFERENCE_MODE
               : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT
                                             : CreationMeta::NO_GRAD_MODE));
-      stack->at(stack->size() - num_returns + aliased_output_idx) = result;
+      stack->at(stack->size() - num_returns + aliased_output_idx) =
+          std::move(result);
     }
   }
 }

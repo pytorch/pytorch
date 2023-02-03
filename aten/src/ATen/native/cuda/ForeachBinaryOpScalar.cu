@@ -18,7 +18,7 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 template<typename T, template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, const Scalar& scalar) {
@@ -142,4 +142,4 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, co
 FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_max, minimum, false);
 FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_min, maximum, false);
 
-}} // namespace at::native
+} // namespace at::native
