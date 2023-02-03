@@ -805,70 +805,6 @@ def try_script(model, example_inputs):
         return None
 
 
-def speedup_experiment_onnx(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of ONNXRT and TensorFlow.
-
-    Writes to ./baseline_onnx.csv
-    """
-    if current_device == "cpu":
-        m_onnxrt = backends.onnxrt_cpu(
-            try_script(model, example_inputs), example_inputs
-        )
-    else:
-        m_onnxrt = backends.onnxrt_cuda(
-            try_script(model, example_inputs), example_inputs
-        )
-
-    if current_name != "timm_resnest":
-        m_onnx2tf = backends.onnx2tf(try_script(model, example_inputs), example_inputs)
-    else:
-        # this one takes 8+ hours to finish
-        m_onnx2tf = None
-
-    return baselines(
-        [
-            ("eager", model),
-            ("onnxrt", m_onnxrt),
-            ("onnx2tf", m_onnx2tf),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
-
-
-def speedup_experiment_trt(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of TensorRT.
-
-    Writes to ./baseline_trt.csv
-    """
-    m_onnx2trt = backends.onnx2tensorrt(
-        try_script(model, example_inputs), example_inputs
-    )
-
-    m_torch2trt = backends.torch2trt(model, example_inputs)
-
-    if current_name != "opacus_cifar10":
-        m_fx2trt = backends.fx2trt(model, example_inputs)
-    else:
-        # fx2trt infinite loops on one model
-        m_fx2trt = None
-
-    return baselines(
-        [
-            ("eager", model),
-            ("onnx2trt", m_onnx2trt),
-            ("torch2trt", m_torch2trt),
-            ("fx2trt", m_fx2trt),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
-
-
 def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
@@ -1781,12 +1717,6 @@ def parse_args(args=None):
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
-        "--speedup-onnx", action="store_true", help=help(speedup_experiment_onnx)
-    )
-    group.add_argument(
-        "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
-    )
-    group.add_argument(
         "--speedup-dynamo-ts",
         action="store_true",
         help="TorchDynamo frontend with torchscript backend",
@@ -2073,12 +2003,6 @@ def run(runner, args, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.speedup_onnx:
-        experiment = speedup_experiment_onnx
-        output_filename = "baseline_onnx.csv"
-    elif args.speedup_trt:
-        experiment = speedup_experiment_trt
-        output_filename = "baseline_trt.csv"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
