@@ -291,7 +291,19 @@ void FusionExecutor::compileFusion(
   }
 
   kernel_code_ = codegen::generateCudaKernel(kernel, kernelName());
-  const auto structured_code = getStructuredCode(kernel_code_);
+
+  auto load_external_code = [](const char* external_code_path) {
+    std::cout << "--------> Compiling external cuda code: "
+              << external_code_path << std::endl;
+    std::ifstream cuda_src(external_code_path);
+    std::stringstream buffer;
+    buffer << cuda_src.rdbuf();
+    return buffer.str();
+  };
+  auto external_code_path = std::getenv("PYTORCH_NVFUSER_EXTERNAL_SRC");
+  const auto structured_code = external_code_path
+      ? load_external_code(external_code_path)
+      : getStructuredCode(kernel_code_);
 
   const auto& kernel_summary = kernel->summary();
 
