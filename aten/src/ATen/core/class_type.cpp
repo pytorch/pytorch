@@ -525,8 +525,8 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 
 void ClassType::addAttribute(ClassAttribute classAttribute) {
     AT_ASSERT(attributes_.size() == attributeTypes_.size());
-    attributeTypes_.push_back(classAttribute.getType());
-    attributes_.push_back(std::move(classAttribute));
+    attributeTypes_.emplace_back(classAttribute.getType());
+    attributes_.emplace_back(std::move(classAttribute));
 }
 
 size_t ClassType::addAttribute(
