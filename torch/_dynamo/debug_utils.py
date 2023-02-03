@@ -1110,7 +1110,9 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     gm.eval()
 
     # Check Accuracy
-    if backend_accuracy_fails(gm, example_inputs, compiler_fn):
+    if backend_accuracy_fails(
+        gm, example_inputs, compiler_fn, only_fwd=config.repro_forward_only
+    ):
         log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
@@ -1118,6 +1120,7 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
         fails_fn = functools.partial(
             backend_accuracy_fails,
             compiler_fn=compiler_fn,
+            only_fwd=config.repro_forward_only,
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         minifier(
