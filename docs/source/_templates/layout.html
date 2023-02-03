@@ -35,11 +35,8 @@
 {{ super() }}
 <script>
 
-//const re = new RegExp("/_[a-zA-Z0-9_]*.html")
-//const match = window.location.href.match(re)
-
-var match      = window.location.href.match(/\/_[a-zA-Z0-9_]*.html|_dynamo/gi);
-var url  = window.location.href.lastIndexOf(match[match.length-1]);
+var match = window.location.href.match(/\/_[a-zA-Z0-9_]*.html|_dynamo/gi);
+var url = window.location.href.lastIndexOf(match[match.length-1]);
 
 if (url)
   {
