@@ -629,11 +629,10 @@ class Kernel(CodeGen):
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
-            x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
         }
-        for x in sorted_symbols:
-            if x.name.startswith("ps"):
-                replacements[x] = self.args.precomputed_size(x)
         return sympy_subs(index, replacements)
 
     def create_cse_var(self, *args, **kwargs):

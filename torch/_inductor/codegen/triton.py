@@ -34,7 +34,6 @@ from .common import (
     index_prevent_reordering,
     Kernel,
     OpOverrides,
-    PrecomputedSizeArg,
     SizeArg,
     TensorArg,
 )
@@ -56,7 +55,7 @@ def signature_of(arg):
                 return new_tye
         else:
             return tye
-    if isinstance(arg, (SizeArg, PrecomputedSizeArg)):
+    if isinstance(arg, SizeArg):
         return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
@@ -67,7 +66,7 @@ def config_of(args):
     def is_aligned(x):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
-        if isinstance(x, (SizeArg, PrecomputedSizeArg)):
+        if isinstance(x, SizeArg):
             return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
@@ -578,9 +577,6 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
         self.reduction_hint = reduction_hint
-        # maps of dynamic sizes that have to be precomputed on the host to the kernel args
-        self.precomputed_sizes = {}
-        self.inv_precomputed_sizes = {}
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -608,13 +604,6 @@ class TritonKernel(Kernel):
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
             self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
-
-    def lookup_precomputed_size(self, expr):
-        if expr not in self.precomputed_sizes:
-            sym = sympy_symbol(f"ps{len(self.precomputed_sizes)}")
-            self.precomputed_sizes[expr] = sym
-            self.inv_precomputed_sizes[sym] = expr
-        return self.precomputed_sizes[expr]
 
     def disable_reduction(self):
         @contextlib.contextmanager
@@ -859,7 +848,7 @@ class TritonKernel(Kernel):
                 # and send the result as a kernel argument
                 replacements = {}
                 for ps in self.range_tree_nodes[sym].precomputed_args():
-                    replacements[ps] = self.lookup_precomputed_size(ps)
+                    replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
                     self.range_tree_nodes[sym].expr = sympy_subs(
                         self.range_tree_nodes[sym].expr, replacements
@@ -1108,11 +1097,14 @@ class TritonKernel(Kernel):
             )
 
         argdefs, _, signature = self.args.python_argdefs()
-        # maps actual expression to PrecomputedSizeArg
+        # maps actual expression to SizeArg if its in sizevars replacements
         for i, arg in enumerate(signature):
-            if isinstance(arg, PrecomputedSizeArg):
-                signature[i] = PrecomputedSizeArg(
-                    arg.name, self.inv_precomputed_sizes[arg.expr]
+            if (
+                isinstance(arg, SizeArg)
+                and arg.expr in V.graph.sizevars.inv_precomputed_replacements
+            ):
+                signature[i] = SizeArg(
+                    arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
                 )
 
         mutated_args = set()
@@ -1244,8 +1236,6 @@ class TritonKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
-        for sym, expr in self.inv_precomputed_sizes.items():
-            code.writeline(f"{sym} = {texpr(expr)}")
         call_args = ", ".join(call_args)
         stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
         code.writeline(
