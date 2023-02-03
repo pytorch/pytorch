@@ -88,16 +88,47 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
         result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
   }
 
-  // Adding the missing nodes to the current graph's `exec_info`.
-  // This is a workaround because the current `GraphTask::init_to_execute`
-  // does not traverse into CopySlices node.
+  // See Note [View + Inplace update for view tensor] For more details on this
+  // block Since the gradient edge for the 0th input is different between `this`
+  // and `fn`, make sure that the one from `fn` has the same metadata in the
+  // current GraphTask's exec_info as the one on `this`.
   const auto exec_info = get_current_graph_task_exec_info();
   if (exec_info && !exec_info->empty()) {
-    for (const auto& next : fn->next_edges()) {
-      if (next.is_valid()) {
-        add_node_to_current_graph_task_exec_info(next.function.get());
+    const auto& fn_edge = fn->next_edge(0);
+    const auto& this_edge = this->next_edge(0);
+    TORCH_INTERNAL_ASSERT(fn_edge.is_valid() == this_edge.is_valid());
+    if (fn_edge.is_valid()) {
+      const auto fn_next_node = fn_edge.function.get();
+      auto it = exec_info->find(fn_next_node);
+      if (it == exec_info->end()) {
+        // Node is not in the exec_info already
+        if (task_should_compute_output(0)) {
+          // And we need gradient for the corresponding output
+          add_node_to_current_graph_task_exec_info(fn_next_node);
+          // There is no need to remove this after execution because we are
+          // guaranteed that this->next_edge(0) must be in the history of
+          // fn->next_edge(0) (we cannot easily assert this as it might be far
+          // away if there were many chained views). This means that, since
+          // fn->next_edge(0) was not needed (no exec_info entry for it), we
+          // know that nothing downstream of fn->next_edge(0) is needed either
+          // (otherwise the whole path from that Node to this->next_edge(0)
+          // would be needed as well). This means that no other Node will ever
+          // look at fn->next_edge(0) metadata and thus there is no need to
+          // clean them up.
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            it->second.should_execute() == task_should_compute_output(0));
       }
     }
+  }
+
+  // Sanity check that the graph was never modified after the fact (it is
+  // read-only!)
+  TORCH_INTERNAL_ASSERT(num_outputs() == fn->num_outputs());
+  for (const auto i : c10::irange(1, this->num_outputs())) {
+    TORCH_INTERNAL_ASSERT(
+        fn->next_edge(i).function.get() == this->next_edge(i).function.get());
   }
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save

@@ -17,6 +17,7 @@ from torch.distributed.optim import _apply_optimizer_in_backward
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
 
+
 def _validate_params(params_list, fn):
     ref_params = params_list[0]
     for param_list in params_list[1:]:
@@ -25,7 +26,6 @@ def _validate_params(params_list, fn):
 
 
 class ApplyOverlappedOptimizerTest(unittest.TestCase):
-
     def _run_training_loop_and_validate(self, inp, models, optimizers):
         for i in range(6):
             for model in models:
@@ -60,13 +60,13 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
         _apply_optimizer_in_backward(
             torch.optim.SGD,
             [m.weight for m in model_with_opt_in_bwd],
-            optimizer_kwargs=weight_optimizer_kwargs
+            optimizer_kwargs=weight_optimizer_kwargs,
         )
 
         _apply_optimizer_in_backward(
             torch.optim.SGD,
             [m.bias for m in model_with_opt_in_bwd],
-            optimizer_kwargs=bias_optimizer_kwargs
+            optimizer_kwargs=bias_optimizer_kwargs,
         )
 
         _validate_params(

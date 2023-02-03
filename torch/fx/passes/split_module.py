@@ -210,7 +210,10 @@ def split_module(
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
         for input in partition.inputs:
-            placeholder = partition.graph.placeholder(input)
+            placeholder = partition.graph.placeholder(
+                input,
+                type_expr=orig_nodes[input].type,
+            )
             placeholder.meta = orig_nodes[input].meta.copy()
             partition.environment[orig_nodes[input]] = placeholder
 
@@ -248,7 +251,11 @@ def split_module(
             assert isinstance(gathered_args, tuple)
             assert isinstance(gathered_kwargs, dict)
             new_node = partition.graph.create_node(
-                op=node.op, target=target, args=gathered_args, kwargs=gathered_kwargs
+                op=node.op,
+                target=target,
+                args=gathered_args,
+                kwargs=gathered_kwargs,
+                type_expr=node.type,
             )
             new_node.meta = node.meta.copy()
             partition.environment[node] = new_node

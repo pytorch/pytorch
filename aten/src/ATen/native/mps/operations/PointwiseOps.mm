@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
@@ -34,7 +33,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
+    string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
@@ -114,5 +113,4 @@ TORCH_IMPL_FUNC(addcdiv_out_mps)
   mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, const_cast<Tensor&>(output), true, "addcdiv_out_mps");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

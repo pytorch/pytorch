@@ -5,10 +5,11 @@ from ._symbolic_trace import symbolic_trace
 from ._compatibility import compatibility
 
 import copy
+from dataclasses import dataclass
 from typing import Callable, Dict, List, NamedTuple, Optional, Set, Union
 import torch
 
-__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters']
+__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters', "ReplacedPatterns"]
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
@@ -17,6 +18,15 @@ class Match(NamedTuple):
     # Maps nodes in the pattern subgraph to nodes in the larger graph
     nodes_map: Dict[Node, Node]
 
+@compatibility(is_backward_compatible=False)
+@dataclass
+class ReplacedPatterns:
+    # Node from which the match was found
+    anchor: Node
+    # Maps nodes in the pattern subgraph to nodes in the larger graph
+    nodes_map: Dict[Node, Node]
+    # List of nodes that were added into the graph
+    replacements: List[Node]
 
 def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
     gm.delete_all_unused_submodules()
@@ -80,7 +90,6 @@ def replace_pattern(
         ``gm``: The GraphModule that wraps the Graph to operate on
         ``pattern``: The subgraph to match in ``gm`` for replacement
         ``replacement``: The subgraph to replace ``pattern`` with
-        ``match_filter``: A function that takes in (`InternalMatch`, original_graph, pattern_graph)
 
     Returns:
         List[Match]: A list of ``Match`` objects representing the places
@@ -184,7 +193,8 @@ def replace_pattern(
             add_2 = add_1 + max_2
             return add_2
     """
-    return _replace_pattern(gm, pattern, replacement)
+    match_and_replacements = _replace_pattern(gm, pattern, replacement)
+    return [Match(anchor=m.anchor, nodes_map=m.nodes_map) for m in match_and_replacements]
 
 
 # Experimental API, not backward compatible
@@ -194,14 +204,15 @@ def replace_pattern_with_filters(
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
     match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]],  # type: ignore[name-defined]
-) -> List[Match]:
+) -> List[ReplacedPatterns]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
 
     Args:
-        ``match_filter``: A function that takes in (match: InternalMatch, original_graph: Graph, pattern_graph: Graph)
-            and returns a boolean indicating whether the match satisfies the condition. See matcher_utils.py for
-            definition of InternalMatch.
+        ``match_filters``: A list of functions that take in
+            (match: InternalMatch, original_graph: Graph, pattern_graph: Graph) and return a boolean indicating
+            whether the match satisfies the condition.
+            See matcher_utils.py for definition of InternalMatch.
     """
 
     return _replace_pattern(gm, pattern, replacement, match_filters)
@@ -211,8 +222,8 @@ def _replace_pattern(
     gm: GraphModule,
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
-    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
-) -> List[Match]:
+    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+) -> List[ReplacedPatterns]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
 
@@ -248,6 +259,7 @@ def _replace_pattern(
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: Dict[Node, Node] = {}
 
+    match_and_replacements = []
     for match in _matches:
 
         # Build connecting between replacement graph's input and original graph input producer node
@@ -285,6 +297,20 @@ def _replace_pattern(
         if isinstance(copied_returning_nodes, Node):
             copied_returning_nodes = (copied_returning_nodes, )
 
+        # Get a list of nodes that have been replaced into the graph
+        replacement_nodes = []
+
+        def get_replacement_nodes(curr_node: Node):
+            nonlocal replacement_nodes
+            for arg in curr_node.args:
+                if isinstance(arg, Node):
+                    if arg not in val_map.values():
+                        get_replacement_nodes(arg)
+            replacement_nodes.append(curr_node)
+
+        for ret_node in copied_returning_nodes:
+            get_replacement_nodes(ret_node)
+
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
         assert len(match.returning_nodes) == len(copied_returning_nodes)
@@ -297,6 +323,14 @@ def _replace_pattern(
                 gn = match.nodes_map[node]
                 gm.graph.erase_node(gn)
 
+        match_and_replacements.append(
+            ReplacedPatterns(
+                anchor=match.anchors[0],
+                nodes_map=match.nodes_map,
+                replacements=replacement_nodes
+            )
+        )
+
     # Update the passed-in GraphModule to reflect the new state of
     # `original_graph`
     gm.recompile()
@@ -306,6 +340,4 @@ def _replace_pattern(
     if isinstance(replacement, torch.nn.Module):
         _replace_submodules(gm, replacement)
 
-    # Convert _matches: InternalMatch to Match to comply with backward compatibility of this function
-    matches: List[Match] = [Match(anchor=match.anchors[0], nodes_map=match.nodes_map) for match in _matches]
-    return matches
+    return match_and_replacements

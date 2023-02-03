@@ -16,8 +16,9 @@
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
+#include <torch/csrc/jit/serialization/import.h>
 
 namespace py = pybind11;
 
@@ -116,8 +117,8 @@ extern "C"
       "_get_module_info_from_flatbuffer", [](std::string flatbuffer_content) {
         py::gil_scoped_acquire acquire;
         py::dict result;
-        mobile::ModuleInfo minfo =
-            torch::jit::get_module_info_from_flatbuffer(&flatbuffer_content[0]);
+        mobile::ModuleInfo minfo = torch::jit::get_module_info_from_flatbuffer(
+            flatbuffer_content.data());
         result["bytecode_version"] = minfo.bytecode_version;
         result["operator_version"] = minfo.operator_version;
         result["function_names"] = minfo.function_names;

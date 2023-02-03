@@ -8,7 +8,7 @@ import warnings
 from pkg_resources import packaging
 
 MIN_CUDA_VERSION = packaging.version.parse("11.6")
-MIN_PYTHON_VERSION = (3, 7)
+MIN_PYTHON_VERSION = (3, 8)
 
 
 class VerifyDynamoError(BaseException):
@@ -93,6 +93,17 @@ def check_dynamo(backend, device, err_msg):
 
     try:
         import torch._dynamo as dynamo
+
+        if device == "cuda":
+            import torch._inductor.utils as utils
+
+            if not utils.has_triton():
+                print(
+                    f"WARNING: CUDA available but triton cannot be used. "
+                    f"Your GPU may not be supported. "
+                    f"Skipping CUDA check on {backend} backend\n"
+                )
+                return
 
         dynamo.reset()
 

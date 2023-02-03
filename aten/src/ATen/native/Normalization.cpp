@@ -48,8 +48,9 @@
 #include <ATen/ops/sqrt.h>
 #endif
 
-#include <vector>
 #include <c10/core/SymIntArrayRef.h>
+#include <utility>
+#include <vector>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -490,7 +491,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
     auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
-    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
+    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({std::move(num_features)}), options);
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
@@ -514,7 +515,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
+    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
   }
 
   const bool use_cudnn = (
@@ -672,7 +673,7 @@ Tensor instance_norm(
     at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
   }
   if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view_symint({ b, c }).mean(0, false));
+    at::alias(running_var).copy_(running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false));
   }
 
   return out.view_symint(input.sym_sizes());
@@ -786,6 +787,30 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
   }
   return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train, momentum, eps, output, save_mean, save_var);
 }
+
+
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cpu(
+    const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
+  return batch_norm_cpu(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
+    const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    bool train, double momentum, double eps) {
+  return batch_norm_cpu(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
+
+std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps, out, save_mean, save_var);
+}
+
+
+std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  return batch_norm_cpu_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps, out, save_mean, save_var);
+}
+
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
                                                            bool train, double eps, std::array<bool,3> grad_input_mask) {

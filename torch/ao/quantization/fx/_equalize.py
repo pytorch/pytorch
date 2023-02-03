@@ -806,7 +806,6 @@ def get_equalization_qconfig_dict(
     Args:
         layer_sqnr_dict: Dictionary mapping layer names to SQNR values (found
             when comparing an equalized model against a float model)
-        model_b: The equalized model used to construct the layer_sqnr_dict
         num_layers_to_equalize: Number of layers with the highest quantization
            errors to equalize
     """
