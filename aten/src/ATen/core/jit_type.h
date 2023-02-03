@@ -1001,8 +1001,8 @@ struct TORCH_API DictType : public SharedType {
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Dict[" << getKeyType()->annotation_str(printer) << ", "
-       << getValueType()->annotation_str(std::move(printer)) << "]";
+    ss << "Dict[" << getKeyType()->annotation_str(printer) << ", ";
+    ss << getValueType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 
