@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
@@ -9,9 +10,19 @@
 #endif
 
 #include <ATen/Parallel.h>
+#include <ATen/Utils.h>
 #include <c10/util/irange.h>
 
 #include <array>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/resize_native.h>
+#endif
 
 int register_embedding_params();
 
@@ -242,7 +253,7 @@ at::Tensor& embedding_bag_nbit_impl(
     } else {
       shape_arr[0] = output_size;
       shape_arr[1] = D;
-      shape = c10::IntArrayRef(&shape_arr[0], 2);
+      shape = c10::IntArrayRef(shape_arr.data(), 2);
     }
     at::native::resize_(output, shape, c10::nullopt);
   }
@@ -412,7 +423,7 @@ at::Tensor& embedding_bag_byte_impl(
     } else {
       shape_arr[0] = output_size;
       shape_arr[1] = D;
-      shape = c10::IntArrayRef(&shape_arr[0], 2);
+      shape = c10::IntArrayRef(shape_arr.data(), 2);
     }
     at::native::resize_(output, shape, c10::nullopt);
   }

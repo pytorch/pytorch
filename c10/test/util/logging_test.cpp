@@ -141,7 +141,7 @@ TEST(LoggingTest, Join) {
 
 TEST(LoggingTest, TestDanglingElse) {
   if (true)
-    DCHECK_EQ(1, 1);
+    TORCH_DCHECK_EQ(1, 1);
   else
     GTEST_FAIL();
 }

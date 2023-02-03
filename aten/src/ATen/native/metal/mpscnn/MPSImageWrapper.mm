@@ -23,6 +23,9 @@ using namespace at::native::metal;
 
 - (void)dealloc {
   _imageWrapper = nullptr;
+#if !__has_feature(objc_arc)
+  [super dealloc];
+#endif
 }
 
 - (void)beginSynchronization {

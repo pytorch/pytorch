@@ -28,8 +28,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& eye_out_cuda(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
@@ -290,10 +289,10 @@ Tensor tril_indices_cuda(
       cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
+    AT_DISPATCH_INDEX_TYPES(tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
+        tensor.data_ptr<index_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
@@ -368,10 +367,10 @@ Tensor triu_indices_cuda(
       cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
+    AT_DISPATCH_INDEX_TYPES(tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
+        tensor.data_ptr<index_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,
@@ -384,4 +383,4 @@ Tensor triu_indices_cuda(
   return tensor;
 }
 
-}} // namespace at::native
+} // namespace at::native

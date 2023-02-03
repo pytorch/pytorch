@@ -2,7 +2,7 @@
 
 #include "e2e_test_base.h"
 
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/torch.h>

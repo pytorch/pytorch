@@ -9,8 +9,7 @@
 
 #include <regex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -122,6 +121,7 @@ SourceImporterImpl::SourceImporterImpl(
       // actual value
       {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
       {"fork", SpecialFormValue::create(prim::fork)},
+      {"awaitable", SpecialFormValue::create(prim::awaitable)},
       {"annotate", SpecialFormValue::create(prim::annotate)},
       {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
       {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},
@@ -155,7 +155,7 @@ Function* SourceImporterImpl::findFunction(const QualifiedName& name) {
 
 void SourceImporterImpl::parseSourceIfNeeded(const std::string& qualifier) {
   // qualifier may be blank, for instance checking if __torch__ is a class.
-  if (qualifier == "" || loaded_sources_.count(qualifier)) {
+  if (qualifier.empty() || loaded_sources_.count(qualifier)) {
     return;
   }
   loaded_sources_.insert(qualifier);
@@ -316,6 +316,35 @@ c10::optional<Assign> SourceImporterImpl::
 
   // module demangled qualname -> ReplacementDescr
   static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
+      {"__torch__.torch.ao.nn.quantized.modules.linear.LinearPackedParams",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.modules.linear.Linear",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.dynamic.modules.linear.Linear",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.modules.conv.Conv2d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.modules.conv.Conv3d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+      // BC Stuff
       {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
        {"_packed_params",
         "Tensor",
@@ -324,15 +353,7 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
-       {"_packed_params",
-        "Tensor",
-        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
       {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
-       {"_packed_params",
-        "Tensor",
-        "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
-      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
@@ -340,10 +361,10 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
-      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+      {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
        {"_packed_params",
         "Tensor",
-        "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}}};
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
   static std::regex mangle_re("\\.___torch_mangle_\\d+");
   auto demangled_classname =
@@ -639,7 +660,7 @@ void SourceImporterImpl::importEnum(
             << ". Only Integers, Floats and Strings are supported.";
     }
 
-    names_values.emplace_back(std::make_pair(name, ivalue));
+    names_values.emplace_back(name, ivalue);
   }
 
   if (!value_type) {
@@ -773,5 +794,4 @@ void SourceImporter::LEGACY_import_methods(
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

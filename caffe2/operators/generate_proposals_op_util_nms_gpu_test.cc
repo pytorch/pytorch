@@ -691,7 +691,7 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
 //           list_nitems * sizeof(int),
 //           cudaMemcpyDeviceToHost,
 //           cuda_context.cuda_stream()));
-//       CUDA_CHECK(cudaStreamSynchronize(cuda_context.cuda_stream()));
+//       CUDA_CHECK(cudaStreamSynchronize(cuda_context.cuda_stream());
 
 //       ASSERT_EQ(keep.size(), gpu_keep.size());
 //       std::sort(keep.begin(), keep.end());

@@ -79,7 +79,7 @@ void checkChainingAndRun(
     net_def.set_num_workers(4);
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
-    CHECK_NOTNULL(dag);
+    TORCH_CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_EQ(chains, expected);
     testExecution(net, net_def.op().size());

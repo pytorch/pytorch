@@ -92,8 +92,8 @@ void SparseFtrlOp<T>::DoRun() {
   int64_t N = var->size(0);
   int64_t block_size = M / N;
   int64_t K = indices.numel();
-  DCHECK_EQ(M * 2, n_z->numel());
-  DCHECK_EQ(grad.numel(), K * block_size);
+  TORCH_DCHECK_EQ(M * 2, n_z->numel());
+  TORCH_DCHECK_EQ(grad.numel(), K * block_size);
   T* w = var->template mutable_data<T>();
   T* nz = n_z->template mutable_data<T>();
   const SIndex* idxs = indices.template data<SIndex>();

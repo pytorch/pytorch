@@ -14,6 +14,19 @@ Tensor max_quantized_cpu(const Tensor& self) {
   return std::get<0>(self.reshape({-1}).max(/*dim=*/0));
 }
 
+Tensor& max_quantized_unary_out(const Tensor& self, Tensor& out) {
+  // TODO this implementation is inefficient for now.
+  TORCH_CHECK(self.device() == out.device());
+
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(self.dtype()),
+      typeMetaToScalarType(out.dtype())));
+  Tensor temp = max_quantized_cpu(self);
+  at::native::resize_output(out, temp.sizes());
+  out.copy_(temp);
+  return out;
+}
+
 Tensor min_quantized_cpu(const Tensor& self) {
   return std::get<0>(self.reshape({-1}).min(/*dim=*/0));
 }

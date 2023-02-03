@@ -254,14 +254,13 @@ class Q8GEMMSparse : public benchmark::Fixture {
         colBlockSize(),
         sparsity(),
         kernel_zero_points.data());
-    bcsr_matrix_ =
-      qnnpack::generateBlockCSRMatrix(
-          k_.data(),
-          nc(),
-          kc(),
-          rowBlockSize(),
-          colBlockSize(),
-          kernel_zero_points.data());
+    bcsr_matrix_ = qnnpack::generateBlockCSRMatrix<uint32_t>(
+        k_.data(),
+        nc(),
+        kc(),
+        rowBlockSize(),
+        colBlockSize(),
+        kernel_zero_points.data());
     std::vector<float> dequantization_scales(num_zero_points_kernel, 0.75f);
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
@@ -466,13 +465,14 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon(
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data() + n,
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()) +
+                n,
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),
@@ -512,13 +512,14 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c8x1_prepacked__aarch32_neon, 4,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon(
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w32__aarch32_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data() + (n >> 3),
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()) +
+                (n >> 3),
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),
@@ -585,13 +586,13 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA__aarch64_neon(
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w32__aarch64_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data(),
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()),
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),
@@ -630,13 +631,13 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c8x1_prepacked__aarch64_neon, 8,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon(
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
             bcsr_matrix_->values.data(),
-            bcsr_matrix_->row_values.data(),
-            bcsr_matrix_->col_indices.data(),
+            static_cast<const uint32_t*>(bcsr_matrix_->row_values_data_ptr()),
+            static_cast<const uint32_t*>(bcsr_matrix_->col_indices_data_ptr()),
             b() + n,
             c() + m * nc() + n,
             nc(),

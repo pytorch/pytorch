@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type.h>
 
+#include <utility>
+
 namespace c10 {
 
 namespace {
@@ -253,7 +255,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
-  if (t.layout() == at::kStrided) {
+  if (t.layout() == at::kStrided && !t.is_nested()) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
@@ -416,7 +418,7 @@ VaryingShape<int64_t> TensorType::strides() const {
       ss[*s.stride_index_] = *s.stride_;
     }
   }
-  return VaryingShape<int64_t>(ss);
+  return VaryingShape<int64_t>(std::move(ss));
 }
 
 TensorType::TensorType(

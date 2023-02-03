@@ -18,6 +18,7 @@ else:
 
 __all__ = [
     'addmm',
+    'check_sparse_tensor_invariants',
     'mm',
     'sum',
     'softmax',
@@ -115,7 +116,6 @@ and :attr:`beta` are the scaling factors.
 
 .. note::
     :attr:`input` must be a sparse CSR tensor. :attr:`mat1` and :attr:`mat2` must be dense tensors.
-    This function is implemented only for tensors on CUDA devices.
 
 Args:
     input (Tensor): a sparse CSR matrix of shape `(m, n)` to be added and used to compute
@@ -179,6 +179,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                            torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
         >>> V = torch.randn(nnz, dims[2], dims[3])
         >>> size = torch.Size(dims)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
         tensor(indices=tensor([[2, 0, 3],
@@ -262,3 +263,202 @@ Args:
         performed. This is useful for preventing data type
         overflows. Default: None
 """)
+
+
+spdiags = _add_docstr(
+    _sparse._spdiags,
+    r"""
+sparse.spdiags(diagonals, offsets, shape, layout=None) -> Tensor
+
+Creates a sparse 2D tensor by placing the values from rows of
+:attr:`diagonals` along specified diagonals of the output
+
+The :attr:`offsets` tensor controls which diagonals are set.
+
+- If :attr:`offsets[i]` = 0, it is the main diagonal
+- If :attr:`offsets[i]` < 0, it is below the main diagonal
+- If :attr:`offsets[i]` > 0, it is above the main diagonal
+
+The number of rows in :attr:`diagonals` must match the length of :attr:`offsets`,
+and an offset may not be repeated.
+
+Args:
+    diagonals (Tensor): Matrix storing diagonals row-wise
+    offsets (Tensor): The diagonals to be set, stored as a vector
+    shape (2-tuple of ints): The desired shape of the result
+Keyword args:
+    layout (:class:`torch.layout`, optional): The desired layout of the
+        returned tensor. ``torch.sparse_coo``, ``torch.sparse_csc`` and ``torch.sparse_csr``
+        are supported. Default: ``torch.sparse_coo``
+
+Examples:
+
+Set the main and first two lower diagonals of a matrix::
+
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3))
+    >>> s
+    tensor(indices=tensor([[0, 1, 2, 1, 2, 2],
+                           [0, 1, 2, 0, 1, 0]]),
+           values=tensor([0, 1, 2, 3, 4, 6]),
+           size=(3, 3), nnz=6, layout=torch.sparse_coo)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+
+Change the output layout::
+
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
+    tensor([[0, 1, 2],[3, 4, 5], [6, 7, 8])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3), layout=torch.sparse_csr)
+    >>> s
+    tensor(crow_indices=tensor([0, 1, 3, 6]),
+           col_indices=tensor([0, 0, 1, 0, 1, 2]),
+           values=tensor([0, 3, 1, 6, 4, 2]), size=(3, 3), nnz=6,
+           layout=torch.sparse_csr)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+Set partial diagonals of a large output::
+
+    >>> diags = torch.tensor([[1, 2], [3, 4]])
+    >>> offsets = torch.tensor([0, -1])
+    >>> torch.sparse.spdiags(diags, offsets, (5, 5)).to_dense()
+    tensor([[1, 0, 0, 0, 0],
+            [3, 2, 0, 0, 0],
+            [0, 4, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
+
+.. note::
+
+    When setting the values along a given diagonal the index into the diagonal
+    and the index into the row of :attr:`diagonals` is taken as the
+    column index in the output. This has the effect that when setting a diagonal
+    with a positive offset `k` the first value along that diagonal will be
+    the value in position `k` of the row of :attr:`diagonals`
+
+Specifying a positive offset::
+
+    >>> diags = torch.tensor([[1, 2, 3], [1, 2, 3], [1, 2, 3]])
+    >>> torch.sparse.spdiags(diags, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
+    tensor([[1, 2, 3, 0, 0],
+            [0, 2, 3, 0, 0],
+            [0, 0, 3, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
+""")
+
+
+class check_sparse_tensor_invariants(object):
+    """A tool to control checking sparse tensor invariants.
+
+The following options exists to manage sparsr tensor invariants
+checking in sparse tensor construction:
+
+1. Using a context manager:
+
+   .. code:: python
+
+       with torch.sparse.check_sparse_tensor_invariants():
+           run_my_model()
+
+2. Using a procedural approach:
+
+   .. code:: python
+
+       prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+       torch.sparse.check_sparse_tensor_invariants.enable()
+
+       run_my_model()
+
+       if not prev_checks_enabled:
+           torch.sparse.check_sparse_tensor_invariants.disable()
+
+3. Using function decoration:
+
+   .. code:: python
+
+       @torch.sparse.check_sparse_tensor_invariants()
+       def run_my_model():
+           ...
+
+       run_my_model()
+
+4. Using ``check_invariants`` keyword argument in sparse tensor constructor call.
+   For example:
+
+   >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
+   Traceback (most recent call last):
+     File "<stdin>", line 1, in <module>
+   RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
+    """
+
+    @staticmethod
+    def is_enabled():
+        r"""Returns True if the sparse tensor invariants checking is enabled.
+
+.. note::
+
+    Use :func:`torch.sparse.check_sparse_tensor_invariants.enable` or
+    :func:`torch.sparse.check_sparse_tensor_invariants.disable` to
+    manage the state of the sparse tensor invariants checks.
+        """
+        return torch._C._check_sparse_tensor_invariants()
+
+    @staticmethod
+    def enable():
+        r"""Enable sparse tensor invariants checking in sparse tensor constructors.
+
+.. note::
+
+    By default, the sparse tensor invariants checks are disabled. Use
+    :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled` to
+    retrieve the current state of sparse tensor invariants checking.
+
+.. note::
+
+    The sparse tensor invariants check flag is effective to all sparse
+    tensor constructors, both in Python and ATen.
+
+    The flag can be locally overridden by the ``check_invariants``
+    optional argument of the sparse tensor constructor functions.
+        """
+        torch._C._set_check_sparse_tensor_invariants(True)
+
+    @staticmethod
+    def disable():
+        r"""Disable sparse tensor invariants checking in sparse tensor constructors.
+
+See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more information.
+        """
+        torch._C._set_check_sparse_tensor_invariants(False)
+
+    # context manager support
+    def __init__(self, enable=True):
+        self.state = enable
+        self.saved_state = self.is_enabled()
+
+    def __enter__(self):
+        torch._C._set_check_sparse_tensor_invariants(self.state)
+
+    def __exit__(self, type, value, traceback):
+        torch._C._set_check_sparse_tensor_invariants(self.saved_state)
+
+    # decorator support
+    def __call__(self, mth):
+
+        def test_mth(*args, **kwargs):
+            with type(self)(self.state):
+                return mth(*args, **kwargs)
+
+        return test_mth

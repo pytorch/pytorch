@@ -6,7 +6,6 @@
 
 
 from caffe2.proto import caffe2_pb2
-from future.utils import viewitems
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 
@@ -18,7 +17,9 @@ import numpy as np
 from six import integer_types, binary_type, text_type, string_types
 
 OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
+OPTIMIZER_ITERATION_LR_NAME = "optimizer_iteration_lr"
 ITERATION_MUTEX_NAME = "iteration_mutex"
+ITERATION_MUTEX_LR_NAME = "iteration_mutex_lr"
 
 
 def OpAlmostEqual(op_a, op_b, ignore_fields=None):
@@ -219,13 +220,13 @@ def TryReadProtoWithClass(cls, s):
 def GetContentFromProto(obj, function_map):
     """Gets a specific field from a protocol buffer that matches the given class
     """
-    for cls, func in viewitems(function_map):
+    for cls, func in function_map.items():
         if type(obj) is cls:
             return func(obj)
 
 
 def GetContentFromProtoString(s, function_map):
-    for cls, func in viewitems(function_map):
+    for cls, func in function_map.items():
         try:
             obj = TryReadProtoWithClass(cls, s)
             return func(obj)

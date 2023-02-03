@@ -3,19 +3,18 @@
 
 #include <torch/csrc/Types.h>
 
-#define THPStorageStr "torch._UntypedStorage"
-#define THPStorageBaseStr "StorageBase"
+#define THPStorageStr "torch.UntypedStorage"
 
 struct THPStorage {
-  PyObject_HEAD
-  c10::StorageImpl *cdata;
+  PyObject_HEAD c10::StorageImpl* cdata;
 };
 
-TORCH_PYTHON_API PyObject * THPStorage_New(c10::intrusive_ptr<c10::StorageImpl> ptr);
-extern PyObject *THPStorageClass;
+TORCH_PYTHON_API PyObject* THPStorage_New(
+    c10::intrusive_ptr<c10::StorageImpl> ptr);
+extern PyObject* THPStorageClass;
 
-bool THPStorage_init(PyObject *module);
-void THPStorage_postInit(PyObject *module);
+bool THPStorage_init(PyObject* module);
+void THPStorage_postInit(PyObject* module);
 
 extern PyTypeObject THPStorageType;
 

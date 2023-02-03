@@ -185,7 +185,7 @@ public:
     return _mm256_div_pd(log(), log10_);
   }
   Vectorized<c10::complex<double>> log1p() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::log1p);
   }
   Vectorized<c10::complex<double>> asin() const {
     // asin(x)
@@ -233,6 +233,12 @@ public:
     auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
                                    sin_cos.x, 0x0A);                  //cos(b)           sin(b)
     return _mm256_mul_pd(exp, cos_sin);
+  }
+  Vectorized<c10::complex<double>> exp2() const {
+    // Use identity 2**x = exp(log(2) * x)
+    const __m256d ln_2 = _mm256_set1_pd(c10::ln_2<double>);
+    Vectorized<c10::complex<double>> scaled_values = _mm256_mul_pd(values, ln_2);
+    return scaled_values.exp();
   }
   Vectorized<c10::complex<double>> expm1() const {
     AT_ERROR("not supported for complex numbers");

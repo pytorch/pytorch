@@ -8,6 +8,10 @@ from .. import functional as F
 from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
                             _ratio_3_t, _ratio_2_t, _size_any_opt_t, _size_2_opt_t, _size_3_opt_t)
 
+__all__ = ['MaxPool1d', 'MaxPool2d', 'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d',
+           'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'FractionalMaxPool2d', 'FractionalMaxPool3d', 'LPPool1d',
+           'LPPool2d', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d',
+           'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d']
 
 class _MaxPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
@@ -122,7 +126,7 @@ class MaxPool2d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides
+        padding: Implicit negative infinity padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool2d` later
@@ -196,7 +200,7 @@ class MaxPool3d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on all three sides
+        padding: Implicit negative infinity padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool3d` later
@@ -224,7 +228,7 @@ class MaxPool3d(_MaxPoolNd):
         >>> m = nn.MaxPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
 
     .. _link:
@@ -287,6 +291,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("do other tests modify the global state?")
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
         >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
@@ -519,8 +524,8 @@ class AvgPool1d(_AvgPoolNd):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
-        tensor([[[ 2.,  4.,  6.]]])
+        >>> m(torch.tensor([[[1., 2, 3, 4, 5, 6, 7]]]))
+        tensor([[[2., 4., 6.]]])
     """
 
     kernel_size: _size_1_t
@@ -683,7 +688,7 @@ class AvgPool3d(_AvgPoolNd):
         >>> m = nn.AvgPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
@@ -1038,7 +1043,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     Examples:
         >>> # target output size of 5x7
-        >>> m = nn.AdaptiveMaxPool2d((5,7))
+        >>> m = nn.AdaptiveMaxPool2d((5, 7))
         >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
@@ -1081,7 +1086,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     Examples:
         >>> # target output size of 5x7x9
-        >>> m = nn.AdaptiveMaxPool3d((5,7,9))
+        >>> m = nn.AdaptiveMaxPool3d((5, 7, 9))
         >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
@@ -1159,7 +1164,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Examples:
         >>> # target output size of 5x7
-        >>> m = nn.AdaptiveAvgPool2d((5,7))
+        >>> m = nn.AdaptiveAvgPool2d((5, 7))
         >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
@@ -1198,7 +1203,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     Examples:
         >>> # target output size of 5x7x9
-        >>> m = nn.AdaptiveAvgPool3d((5,7,9))
+        >>> m = nn.AdaptiveAvgPool3d((5, 7, 9))
         >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)

@@ -15,7 +15,7 @@ using namespace at::cuda::detail;
 // Kernel for fast unfold+copy on volumes
 template <typename T>
 __global__ void vol2col_kernel(
-    const int n,
+    const int64_t n,
     const T* data_vol,
     const int depth,
     const int height,
@@ -37,16 +37,16 @@ __global__ void vol2col_kernel(
     const int width_col,
     T* data_col) {
   CUDA_KERNEL_LOOP(index, n) {
-    int w_out = index % width_col;
+    auto w_out = index % width_col;
     index /= width_col;
-    int h_out = index % height_col;
+    auto h_out = index % height_col;
     index /= height_col;
-    int t_out = index % depth_col;
-    int channel_in = index / depth_col;
-    int channel_out = channel_in * ksize_t * ksize_h * ksize_w;
-    int t_in = t_out * stride_t - pad_t;
-    int h_in = h_out * stride_h - pad_h;
-    int w_in = w_out * stride_w - pad_w;
+    auto t_out = index % depth_col;
+    auto channel_in = index / depth_col;
+    auto channel_out = channel_in * ksize_t * ksize_h * ksize_w;
+    auto t_in = t_out * stride_t - pad_t;
+    auto h_in = h_out * stride_h - pad_h;
+    auto w_in = w_out * stride_w - pad_w;
     data_col +=
         ((channel_out * depth_col + t_out) * height_col + h_out) * width_col +
         w_out;
@@ -54,9 +54,9 @@ __global__ void vol2col_kernel(
     for (int i = 0; i < ksize_t; ++i) {
       for (int j = 0; j < ksize_h; ++j) {
         for (int k = 0; k < ksize_w; ++k) {
-          int t = t_in + i * dilation_t;
-          int h = h_in + j * dilation_h;
-          int w = w_in + k * dilation_w;
+          auto t = t_in + i * dilation_t;
+          auto h = h_in + j * dilation_h;
+          auto w = w_in + k * dilation_w;
           *data_col = (t >= 0 && h >= 0 && w >= 0 && t < depth && h < height &&
                        w < width)
               ? data_vol
@@ -126,7 +126,7 @@ void vol2col(
 
 template <typename T, typename accT>
 __global__ void vol2im_kernel(
-    const unsigned n,
+    const int64_t n,
     const T* data_col,
     const unsigned depth,
     const unsigned height,
@@ -150,30 +150,30 @@ __global__ void vol2im_kernel(
     T* data_vol) {
   CUDA_KERNEL_LOOP(index, n) {
     accT val = static_cast<accT>(0);
-    const unsigned w_im = index % width + pad_w;
-    const unsigned h_im = (index / width) % height + pad_h;
-    const unsigned t_im = (index / width / height) % depth + pad_t;
-    const unsigned c_im = index / (width * height * depth);
-    unsigned kernel_extent_w = (kernel_w - 1) * dilation_w + 1;
-    unsigned kernel_extent_h = (kernel_h - 1) * dilation_h + 1;
-    unsigned kernel_extent_t = (kernel_t - 1) * dilation_t + 1;
+    const auto w_im = index % width + pad_w;
+    const auto h_im = (index / width) % height + pad_h;
+    const auto t_im = (index / width / height) % depth + pad_t;
+    const auto c_im = index / (width * height * depth);
+    auto kernel_extent_w = (kernel_w - 1) * dilation_w + 1;
+    auto kernel_extent_h = (kernel_h - 1) * dilation_h + 1;
+    auto kernel_extent_t = (kernel_t - 1) * dilation_t + 1;
     // compute the start and end of the output
-    const unsigned w_col_start =
+    const auto w_col_start =
         (w_im < kernel_extent_w) ? 0 : (w_im - kernel_extent_w) / stride_w + 1;
-    const unsigned w_col_end = std::min(w_im / stride_w + 1, width_col);
-    const unsigned h_col_start =
+    const auto w_col_end = std::min(w_im / stride_w + 1, width_col);
+    const auto h_col_start =
         (h_im < kernel_extent_h) ? 0 : (h_im - kernel_extent_h) / stride_h + 1;
-    const unsigned h_col_end = std::min(h_im / stride_h + 1, height_col);
-    const unsigned t_col_start =
+    const auto h_col_end = std::min(h_im / stride_h + 1, height_col);
+    const auto t_col_start =
         (t_im < kernel_extent_t) ? 0 : (t_im - kernel_extent_t) / stride_t + 1;
-    const unsigned t_col_end = std::min(t_im / stride_t + 1, depth_col);
+    const auto t_col_end = std::min(t_im / stride_t + 1, depth_col);
     // TODO: use LCM of stride and dilation to avoid unnecessary loops
     for (unsigned t_col = t_col_start; t_col < t_col_end; t_col += 1) {
       for (unsigned h_col = h_col_start; h_col < h_col_end; h_col += 1) {
         for (unsigned w_col = w_col_start; w_col < w_col_end; w_col += 1) {
-          unsigned t_k = (t_im - t_col * stride_t);
-          unsigned h_k = (h_im - h_col * stride_h);
-          unsigned w_k = (w_im - w_col * stride_w);
+          uint64_t t_k = (t_im - t_col * stride_t);
+          uint64_t h_k = (h_im - h_col * stride_h);
+          uint64_t w_k = (w_im - w_col * stride_w);
           if (t_k % dilation_t == 0 && h_k % dilation_h == 0 &&
               w_k % dilation_w == 0) {
             t_k /= dilation_t;

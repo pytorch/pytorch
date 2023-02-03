@@ -30,16 +30,19 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerSpec,
     WorkerState,
 )
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
+from torch.distributed.elastic.agent.server.local_elastic_agent import (
+    LocalElasticAgent,
+    TORCHELASTIC_TIMER_FILE,
+)
 from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.rpc.backend_registry import BackendType
 from torch.testing._internal.common_utils import (
+    sandcastle_skip_if,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
-    sandcastle_skip_if,
 )
 
 
@@ -188,6 +191,13 @@ def _check_env_value(key: str, expected: str):
                 f"os.environ['{key}']={actual}"
                 f" does not equal the expected value: {expected}"
             )
+
+
+def _check_local_watchdog_setup(key: str, should_exist: bool):
+    if should_exist and key not in os.environ:
+        raise RuntimeError(f"Environment variable {key} not found in os.environ")
+    if not should_exist and key in os.environ:
+        raise RuntimeError(f"Environment variable {key} found in os.environ")
 
 
 def acquire_available_port():
@@ -504,6 +514,54 @@ class LocalElasticAgentTest(unittest.TestCase):
             )
         )
         self.assertFalse(res.is_failed())
+
+    def run_agent_local_watchdog_setup_enabled(self):
+        # Set the env for watchdog
+        watchdog_env_name = TORCHELASTIC_TIMER_FILE
+        watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+        os.environ[watchdog_env_name] = watchdog_file_path
+        # Run the agent
+        node_conf = Conf(entrypoint=_check_local_watchdog_setup, local_world_size=1, args=(TORCHELASTIC_TIMER_FILE, True))
+        spec = self.get_worker_spec(node_conf, max_restarts=2)
+        agent = self.get_agent(spec)
+        res = agent.run()
+        self.assertFalse(res.is_failed())
+
+    def run_agent_local_watchdog_setup_disabled(self):
+        # Do not set the env for watchdog
+        watchdog_env_name = TORCHELASTIC_TIMER_FILE
+        if watchdog_env_name in os.environ:
+            del os.environ[watchdog_env_name]
+        # Run the agent
+        node_conf = Conf(entrypoint=_check_local_watchdog_setup, local_world_size=1, args=(TORCHELASTIC_TIMER_FILE, False))
+        spec = self.get_worker_spec(node_conf, max_restarts=2)
+        agent = self.get_agent(spec)
+        res = agent.run()
+        self.assertFalse(res.is_failed())
+
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    def test_run_agent_local_watchdog_setup_enabled_etcd(self):
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_agent_local_watchdog_setup_enabled
+        )
+
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    def test_run_agent_local_watchdog_setup_enabled_c10d(self):
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.run_agent_local_watchdog_setup_enabled
+        )
+
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    def test_run_agent_local_watchdog_setup_disabled_etcd(self):
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_agent_local_watchdog_setup_disabled
+        )
+
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    def test_run_agent_local_watchdog_setup_disabled_c10d(self):
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.run_agent_local_watchdog_setup_disabled
+        )
 
     @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_check_env_function_etcd(self):

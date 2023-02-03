@@ -1,10 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <ATen/quantized/Quantizer.h>
-#include <torch/library.h>
 #include <c10/core/QScheme.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/eq.h>
+#include <ATen/ops/eq_native.h>
+#include <ATen/ops/ge.h>
+#include <ATen/ops/ge_native.h>
+#include <ATen/ops/gt.h>
+#include <ATen/ops/gt_native.h>
+#include <ATen/ops/le.h>
+#include <ATen/ops/le_native.h>
+#include <ATen/ops/lt.h>
+#include <ATen/ops/lt_native.h>
+#include <ATen/ops/ne.h>
+#include <ATen/ops/ne_native.h>
+#include <ATen/ops/resize_native.h>
+#endif
 
 namespace at {
 namespace native {

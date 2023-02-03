@@ -2,8 +2,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // A stringlike class backed by a vector of string_view
 // the string represented are logically the concatenation of  the string_views
@@ -19,7 +18,7 @@ StringCordView::StringCordView(
   accumulated_sizes_.push_back(0);
   size_t running_sum = 0;
   for (auto& s : pieces_) {
-    if (s.size() > 0) {
+    if (!s.empty()) {
       running_sum += s.size();
       accumulated_sizes_.push_back(running_sum);
     }
@@ -27,7 +26,7 @@ StringCordView::StringCordView(
 }
 
 size_t StringCordView::find(const std::string& tok, size_t start) const {
-  if (tok.size() == 0) {
+  if (tok.empty()) {
     return 0;
   }
 
@@ -217,6 +216,9 @@ void SourceRange::print_with_context(
   // determine CONTEXT line range
   size_t begin_line = start(); // beginning of lines to highlight
   size_t end_line = range_end;
+  if (begin_line > str.size()) {
+    return;
+  }
   while (begin_line > 0 && str[begin_line - 1] != '\n')
     --begin_line;
   while (end_line < str.size() && str[end_line] != '\n')
@@ -255,7 +257,7 @@ void SourceRange::print_with_context(
     size_t line, col;
     std::tie(filename, line, col) = *flc;
     out << "  File \"" << filename << "\", line " << line;
-    if (funcname != "") {
+    if (!funcname.empty()) {
       out << ", in " << funcname;
     }
     out << "\n";
@@ -330,5 +332,4 @@ void SourceRange::print_with_context(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

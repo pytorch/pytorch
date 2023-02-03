@@ -136,6 +136,21 @@ Node* addDummyClone(
       orig_data->type()->kind() == TypeKind::BoolType) {
     auto* noneNode = graph->create(prim::Constant);
     noneNode->output()->setType(NoneType::get());
+    // For scripting mode, aten::clone requires input to be a TensorType
+    // Hence if we encounter an IntType, FloatType, or BoolType,
+    // we set the input to the appropriate TensorType
+    if (orig_data->type()->kind() == TypeKind::IntType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromNumberType(*IntType::get()));
+    } else if (
+        orig_data->type()->kind() == TypeKind::FloatType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromNumberType(*FloatType::get()));
+    } else if (
+        orig_data->type()->kind() == TypeKind::BoolType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromBoolType());
+    }
     newNode = graph->create(aten::clone, /*num_outputs =*/1);
     newNode->addInput(orig_data);
     newNode->addInput(noneNode->output());
@@ -279,7 +294,7 @@ static std::pair<Value*, Value*> PrepareListDeleteForONNX(Node* n) {
 
 static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::insert || n->kind() == aten::append);
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
@@ -291,7 +306,7 @@ static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   // It seems the JIT does not always produce an output for _set_item.
   // In particular it seems to for list but not for dict.
   // So we add one if needed.
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
@@ -332,10 +347,12 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
             std::find(node->inputs().begin(), node->inputs().end(), input);
         if (it != node->inputs().end()) {
           int index = std::distance(node->inputs().begin(), it);
-          std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
-                    << node->kind().toQualString() << " on block input: '"
-                    << (*it)->debugName() << "'. This changes graph semantics."
-                    << std::endl;
+          TORCH_WARN(
+              "ONNX Preprocess - Removing mutation from node ",
+              node->kind().toQualString(),
+              " on block input: '",
+              (*it)->debugName(),
+              "'. This changes graph semantics.");
 
           Node* newNode =
               addDummyClone(b->owningGraph(), input, false, b->return_node());

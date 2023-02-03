@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Gamma']
 
 def _standard_gamma(concentration):
     return torch._standard_gamma(concentration)
@@ -16,6 +17,7 @@ class Gamma(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Gamma(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
         tensor([ 0.1046])
@@ -84,3 +86,8 @@ class Gamma(ExponentialFamily):
 
     def _log_normalizer(self, x, y):
         return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())
+
+    def cdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        return torch.special.gammainc(self.concentration, self.rate * value)

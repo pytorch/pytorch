@@ -316,8 +316,8 @@ Tensor& Module::register_parameter(
   if (!tensor.defined()) {
     if (requires_grad) {
       TORCH_WARN(
-        "An undefined tensor cannot require grad. ",
-        "Ignoring the `requires_grad=true` function parameter.");
+          "An undefined tensor cannot require grad. ",
+          "Ignoring the `requires_grad=true` function parameter.");
     }
   } else {
     tensor.set_requires_grad(requires_grad);

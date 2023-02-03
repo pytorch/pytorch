@@ -55,12 +55,8 @@ void unregister_fd(int fd) {
 }
 
 void print_init_message(const char* message) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t unused;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  unused = write(1, message, strlen(message));
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  unused = write(1, "\n", 1);
+  write(1, message, strlen(message));
+  write(1, "\n", 1);
 }
 
 bool object_exists(const char* name) {
@@ -117,12 +113,12 @@ int main(int argc, char* argv[]) {
   for (;;) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int nevents;
-    if (client_sessions.size() == 0)
+    if (client_sessions.empty())
       timeout = SHUTDOWN_TIMEOUT;
     SYSCHECK_ERR_RETURN_NEG1(
         nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;
-    if (nevents == 0 && client_sessions.size() == 0)
+    if (nevents == 0 && client_sessions.empty())
       break;
 
     for (auto& pfd : pollfds) {

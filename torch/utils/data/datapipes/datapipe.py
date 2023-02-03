@@ -3,6 +3,12 @@ import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+from torch.utils.data.datapipes.utils.common import (
+    _deprecation_warning,
+    _iter_deprecated_functional_names,
+    _map_deprecated_functional_names,
+)
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 try:
@@ -76,6 +82,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     Examples:
         General Usage:
+            >>> # xdoctest: +SKIP
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
             >>> dp = IterableWrapper(range(10))
             >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
@@ -105,10 +112,15 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
-    _restored: bool = False
+    _number_of_samples_yielded: int = 0
+    _snapshot_state: _SnapshotState = _SnapshotState.NotStarted
+    _fast_forward_iterator: Optional[Iterator] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
+            if attribute_name in _iter_deprecated_functional_names:
+                kwargs = _iter_deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(IterDataPipe.functions[attribute_name], self)
             return function
         else:
@@ -141,9 +153,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
+        state = self.__dict__
         if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        return self.__dict__
+            return IterDataPipe.getstate_hook(state)
+        return state
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
@@ -177,7 +190,11 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
-    def reset(self):
+    def __dir__(self):
+        # for auto-completion in a REPL (e.g. Jupyter notebook)
+        return list(super().__dir__()) + list(self.functions.keys())
+
+    def reset(self) -> None:
         r"""
         Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
         depending on their functionalities, they may want to override this method with implementations that
@@ -212,6 +229,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         DataPipe with non-integral indices/keys, a custom sampler must be provided.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
         >>> dp = SequenceWrapper(range(10))
         >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
@@ -232,6 +250,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
+            if attribute_name in _map_deprecated_functional_names:
+                kwargs = _map_deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(MapDataPipe.functions[attribute_name], self)
             return function
         else:
@@ -259,9 +280,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
+        state = self.__dict__
         if MapDataPipe.getstate_hook is not None:
-            return MapDataPipe.getstate_hook(self)
-        return self.__dict__
+            return MapDataPipe.getstate_hook(state)
+        return state
 
     def __reduce_ex__(self, *args, **kwargs):
         if MapDataPipe.reduce_ex_hook is not None:
@@ -295,6 +317,11 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
+    def __dir__(self):
+        # for auto-completion in a REPL (e.g. Jupyter notebook)
+        return list(super().__dir__()) + list(self.functions.keys())
+
+
 
 class _DataPipeSerializationWrapper:
     def __init__(self, datapipe):
@@ -322,15 +349,24 @@ class _DataPipeSerializationWrapper:
     def __len__(self):
         try:
             return len(self._datapipe)
-        except Exception:
+        except Exception as e:
             raise TypeError(
                 "{} instance doesn't have valid length".format(type(self).__name__)
-            )
+            ) from e
 
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
-    def __iter__(self):
-        yield from self._datapipe
+    def __init__(self, datapipe: IterDataPipe[T_co]):
+        super().__init__(datapipe)
+        self._datapipe_iter: Optional[Iterator[T_co]] = None
+
+    def __iter__(self) -> "_IterDataPipeSerializationWrapper":
+        self._datapipe_iter = iter(self._datapipe)
+        return self
+
+    def __next__(self) -> T_co:
+        assert self._datapipe_iter is not None
+        return next(self._datapipe_iter)
 
 
 class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):

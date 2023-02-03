@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/utils/pybind.h>
 #ifdef USE_CUDA
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #endif
@@ -15,8 +16,11 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-namespace torch {
-namespace jit {
+template <>
+struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
+    : public type_caster_base<torch::jit::tensorexpr::ArgValue> {};
+
+namespace torch::jit {
 using namespace torch::jit::tensorexpr;
 
 ArgValue convertPyToArgValue(py::handle inp) {
@@ -34,7 +38,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
     return ArgNone();
   } else if (py::isinstance<py::list>(inp)) {
     auto l = py::cast<py::list>(inp);
-    if (l.size() == 0) {
+    if (l.empty()) {
       return std::vector<BufHandle>();
     } else if (py::isinstance<py::int_>(l[0])) {
       return py::cast<IntList>(inp);
@@ -916,5 +920,5 @@ void initTensorExprBindings(PyObject* module) {
   });
 #endif
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

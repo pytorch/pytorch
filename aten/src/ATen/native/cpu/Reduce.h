@@ -69,8 +69,7 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (const auto j : c10::irange(n)) {
-    (void)j; //Suppress unused variable warning
+  for (const auto j C10_UNUSED : c10::irange(n)) {
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -218,7 +217,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
         for (const auto i : c10::irange(size)) {
-          acc = ops.reduce(acc, *(data_t*)in, begin + i);
+          acc = ops.reduce(acc, c10::load<data_t>(in), begin + i);
           in += stride;
         }
       }, {begin, end});

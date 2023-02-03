@@ -119,15 +119,7 @@ def shard_parameter(
     st = _shard_tensor(tensor, sharding_spec, src_rank, process_group)
 
     # Replace param with ShardedTensor.
-
-    # Need to delete the attribute first since param_name might be
-    # torch.nn.Parameter and can't be replaced with ShardedTensor which is
-    # not torch.nn.Parameter.
-    delattr(module, param_name)
-
-    # Now we can set the attribute appropriately.
-    setattr(module, param_name, st)
-
+    module.register_parameter(param_name, nn.Parameter(st))
 
 def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
     """
@@ -236,9 +228,9 @@ def shard_module(
     process_group=None
 ):
     """
-    Shards a given module according to the provided sharding_plan. This method
-    first shards all the parameters according to the given sharding_plan. Then if
-    `output_plan` and `return_local_tensor` are specified in the sharding_plan, it
+    Shards a given module according to the provided sharding `plan`. This method
+    first shards all the parameters according to the given sharding `plan`. Then if
+    `output_plan` and `return_local_tensor` are specified in the sharding `plan`, it
     will tag the output of modules according `output_plan`, convert the module's
     output back to data parallel according to `return_local_tensor`.
 
@@ -246,7 +238,7 @@ def shard_module(
 
     Args:
         module (:class:`torch.nn.Module`): The module to apply sharding to
-        sharding_plan (:class:`torch.distributed._shard.sharding_plan.ShardingPlan`):
+        plan (:class:`torch.distributed._shard.sharding_plan.ShardingPlan`):
             The ShardingPlan which specified param name to ShardingSpec to apply to
             each parameter.
 

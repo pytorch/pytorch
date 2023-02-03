@@ -5,7 +5,7 @@
 import logging
 
 from torch import nn
-from torch.ao.sparsity.sparsifier import utils
+from torch.ao.pruning.sparsifier import utils
 from torch.nn.utils import parametrize
 
 import torch

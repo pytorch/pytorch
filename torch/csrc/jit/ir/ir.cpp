@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <locale>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -22,8 +23,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace utils {
 std::string getNodesModuleHierarchy(const Node& n) {
@@ -317,6 +317,7 @@ std::ostream& Node::print(
   if (kind() == prim::PythonOp) {
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
+    printAttributes(out, /*ignore_subgraph=*/false);
     pyOp->writeScalars(out);
   } else if (hasAttribute(attr::Subgraph) && groups) {
     out << kind().toQualString() << "_" << groups->size();
@@ -472,28 +473,26 @@ void Node::lint() const {
   }
 
   for (auto o : outputs()) {
-    size_t i = 0;
     for (auto use : o->uses()) {
       // Use invariants
       // - Use is consistent with inputs
       // - Every user node is live (checked in Graph)
       AT_ASSERT(use.user->inputs_[use.offset] == o);
-      i++;
     }
   }
 
   // Node subclass invariants
   switch (kind()) {
     case prim::Constant:
-      AT_ASSERT(inputs_.size() == 0);
+      AT_ASSERT(inputs_.empty());
       break;
     case prim::Return:
       // Return uses is zero
-      AT_ASSERT(outputs().size() == 0);
+      AT_ASSERT(outputs().empty());
       break;
     case prim::Param:
       // Param inputs is zero
-      AT_ASSERT(inputs_.size() == 0);
+      AT_ASSERT(inputs_.empty());
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
@@ -836,7 +835,7 @@ std::string Value::debugNameBase() const {
 
 bool Value::isValidName(const std::string& name) {
   // Empty strings are legal
-  if (!name.size()) {
+  if (name.empty()) {
     return true;
   }
 
@@ -862,7 +861,7 @@ Value* Value::setDebugName(const std::string& name) {
   }
 
   // allow "" to clear the uniquename
-  if (name == "") {
+  if (name.empty()) {
     return this;
   }
 
@@ -891,6 +890,13 @@ Value* Value::setDebugName(const std::string& name) {
     std::string replacement_name;
     do {
       std::stringstream ss;
+#ifndef _WIN32
+      // Protect 12345 integer from becoming "1,2345" if some other process sets
+      // global locale For more details see
+      // https://github.com/pytorch/pytorch/issues/79583#issuecomment-1161260061
+      static std::locale c_locale("C");
+      ss.imbue(c_locale);
+#endif
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
@@ -1000,6 +1006,9 @@ Value* Node::namedInput(Symbol name) const {
 }
 
 bool Node::matches(const FunctionSchema& schema) const {
+  if (isBlockListedSchema(schema)) {
+    return false;
+  }
   // wrong name
   if (kind().toQualString() != schema.name()) {
     return false;
@@ -1115,7 +1124,7 @@ const Operator& Node::getOperator() const {
     er << *inputs()[i]->type();
   }
   const auto& candidates = getAllOperatorsFor(kind());
-  if (candidates.size() > 0) {
+  if (!candidates.empty()) {
     er << "\ncandidates were:\n";
     for (auto& candidate : candidates) {
       er << "  " << candidate->schema() << "\n";
@@ -1136,40 +1145,25 @@ Operation Node::getOperation() const {
 }
 
 bool Node::isNondeterministic() const {
-  static const OperatorSet nondeterministic_ops = {
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
-      "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
-      "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
-      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
-      "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
-      "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
-      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
-      "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
-      "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
-      "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
-      "aten::poisson(Tensor self, Generator? generator) -> Tensor",
-      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
-      "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
-
-  if (!isMemberOf(nondeterministic_ops)) {
+  const auto schema = maybeSchema();
+  if (!kind().is_aten()) {
     return false;
   }
-  // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, bool train) -> Tensor") &&
-      is_constant(attr::train) && !get<bool>(attr::train).value()) {
+  // All aten ops are expecte to have a schema. However this is left as a
+  // warning instead of an assert to ensure that previous use cases do not
+  // break.
+  if (!schema) {
+    TORCH_WARN("aten Schema not found.");
     return false;
   }
-  return true;
+  torch::utils::SchemaInfo schema_info(*schema);
+  if (hasNamedInput("train")) {
+    auto value = constant_as<bool>(namedInput("train"));
+    if (value.has_value()) {
+      schema_info.addArgumentValue("train", *value);
+    }
+  }
+  return schema_info.is_nondeterministic();
 }
 
 bool Node::hasSideEffects() const {
@@ -2115,7 +2109,7 @@ std::vector<Value*> inlineCallTo(
       module_instance_info = c10::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
     } else if (
-        to_replace->owningGraph()->inputs().size() > 0 &&
+        !to_replace->owningGraph()->inputs().empty() &&
         to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
@@ -2318,5 +2312,4 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   return false;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,12 +1,13 @@
-r"""Functional interface"""
+"""Functional interface"""
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
 
 import torch
 from torch import _VF
+from torch import sym_float as _sym_float, sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
-from torch._torch_docs import reproducibility_notes, tf32_notes
+from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -23,7 +24,6 @@ from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
-
 
 Tensor = torch.Tensor
 
@@ -1264,6 +1264,44 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
     return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
 
 
+def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
+    r"""
+    Randomly zero out entire channels (a channel is a 1D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 1D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
+
+    See :class:`~torch.nn.Dropout1d` for details.
+
+    Args:
+        p: probability of a channel to be zeroed. Default: 0.5
+        training: apply dropout if is ``True``. Default: ``True``
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(dropout1d, (input,), input, p=p, training=training, inplace=inplace)
+    if p < 0.0 or p > 1.0:
+        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+    inp_dim = input.dim()
+    if inp_dim not in (2, 3):
+        raise RuntimeError(f"dropout1d: Expected 2D or 3D input, but received a {inp_dim}D input. "
+                           "Note that dropout1d exists to provide channel-wise dropout on inputs with 1 "
+                           "spatial dimension, a channel dimension, and an optional batch dimension "
+                           "(i.e. 2D or 3D inputs).")
+
+    is_batched = inp_dim == 3
+    if not is_batched:
+        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+
+    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+
+    if not is_batched:
+        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+    return result
+
+
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""
     Randomly zero out entire channels (a channel is a 2D feature map,
@@ -1292,14 +1330,18 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs).")
         warnings.warn(warn_msg)
 
-    is_batched = inp_dim == 4
-    if not is_batched:
-        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+    # TODO: Properly support no-batch-dim inputs. For now, these are NOT supported; passing
+    # a 3D input will perform dropout1d behavior instead. This was done historically and the
+    # behavior is maintained here for now.
+    # See https://github.com/pytorch/pytorch/issues/77081
+    if inp_dim == 3:
+        warnings.warn("dropout2d: Received a 3D input to dropout2d and assuming that channel-wise "
+                      "1D dropout behavior is desired - input is interpreted as shape (N, C, L), where C "
+                      "is the channel dim. This behavior will change in a future release to interpret the "
+                      "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
+                      "channel-wise dropout behavior, please switch to using dropout1d instead.")
 
     result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
-
-    if not is_batched:
-        result = result.squeeze_(0) if inplace else result.squeeze(0)
 
     return result
 
@@ -1494,8 +1536,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Applies element-wise,
-    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
+    r"""Applies the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
@@ -1610,6 +1651,14 @@ Applies element-wise the function
 :math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
 learnable parameter.
 
+.. note::
+    `weight` is expected to be a scalar or 1-D tensor. If `weight` is 1-D,
+    its size must match the number of input channels, determined by
+    `input.size(1)` when `input.dim() >= 2`, otherwise 1.
+    In the 1-D case, note that when `input` has dim > 2, `weight` can be expanded
+    to the shape of `input` in a way that is not possible using normal
+    :ref:`broadcasting semantics<broadcasting-semantics>`.
+
 See :class:`~torch.nn.PReLU` for more details.
 """)
 
@@ -1664,8 +1713,10 @@ When the approximate argument is 'none', it applies element-wise the function
 
 where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-When the approximate argument is 'tanh', Gelu is estimated with:
-    :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+When the approximate argument is 'tanh', Gelu is estimated with
+
+.. math::
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
@@ -1904,7 +1955,6 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
-    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1915,7 +1965,6 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
-    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
@@ -1948,6 +1997,10 @@ linear(input, weight, bias=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
+This operation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
+
+{sparse_beta_warning}
+
 This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 Shape:
@@ -1957,7 +2010,7 @@ Shape:
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
-""")
+""".format(**sparse_support_notes))
 
 
 bilinear = _add_docstr(
@@ -2081,7 +2134,7 @@ def embedding(
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
         sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
@@ -2095,9 +2148,10 @@ def embedding(
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding(input, embedding_matrix)
         tensor([[[ 0.8490,  0.9625,  0.6753],
                  [ 0.9666,  0.7761,  0.6108],
@@ -2113,7 +2167,7 @@ def embedding(
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
-        >>> input = torch.tensor([[0,2,0,5]])
+        >>> input = torch.tensor([[0, 2, 0, 5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.5609,  0.5384,  0.8720],
@@ -2188,10 +2242,10 @@ def embedding_bag(
                                     Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
                                      Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+        mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
                                  Default: ``"mean"``
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
@@ -2233,8 +2287,9 @@ def embedding_bag(
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([1,2,4,5,4,3,2,9])
-        >>> offsets = torch.tensor([0,4])
+        >>> input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0, 4])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
@@ -2242,7 +2297,7 @@ def embedding_bag(
         >>> # example with padding_idx
         >>> embedding_matrix = torch.rand(10, 3)
         >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
-        >>> offsets = torch.tensor([0,4])
+        >>> offsets = torch.tensor([0, 4])
         >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
@@ -2469,6 +2524,8 @@ def group_norm(
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if input.dim() < 2:
+        raise RuntimeError(f"Expected at least 2 dimensions for input tensor but received {input.dim()}")
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2543,7 +2600,7 @@ def ctc_loss(
             Lengths of the targets
         blank (int, optional):
             Blank label. Default :math:`0`.
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
             then the mean over the batch is taken, ``'sum'``: the output will be
@@ -2559,7 +2616,7 @@ def ctc_loss(
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
         >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
-        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> target_lengths = torch.randint(10, 30, (16,), dtype=torch.long)
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
@@ -2613,7 +2670,7 @@ def nll_loss(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2626,7 +2683,7 @@ def nll_loss(
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
         >>> target = torch.tensor([1, 0, 4])
-        >>> output = F.nll_loss(F.log_softmax(input), target)
+        >>> output = F.nll_loss(F.log_softmax(input, dim=1), target)
         >>> output.backward()
     """
     if has_torch_function_variadic(input, target, weight):
@@ -2680,7 +2737,7 @@ def poisson_nll_loss(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2705,7 +2762,7 @@ def poisson_nll_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(reduction + " is not a valid value for reduction")
 
     ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
@@ -2730,7 +2787,7 @@ def gaussian_nll_loss(
             in the input (heteroscedastic), or a single one (homoscedastic).
         full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
         eps (float, optional): value added to var, for stability. Default: 1e-6.
-        reduction (string, optional): specifies the reduction to apply to the output:
+        reduction (str, optional): specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
             ``'sum'``: the output is the sum of all batch member losses.
@@ -2822,7 +2879,7 @@ def kl_div(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
             ``'none'``: no reduction will be applied
             ``'batchmean'``: the sum of the output will be divided by the batchsize
@@ -2888,12 +2945,12 @@ def cross_entropy(
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    r"""This criterion computes the cross entropy loss between input and target.
+    r"""This criterion computes the cross entropy loss between input logits and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : Predicted unnormalized scores (often referred to as logits);
+        input (Tensor) : Predicted unnormalized logits;
             see Shape section below for supported shapes.
         target (Tensor) : Ground truth class indices or class probabilities;
             see Shape section below for supported shapes.
@@ -2913,7 +2970,7 @@ def cross_entropy(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2998,7 +3055,7 @@ def binary_cross_entropy(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3068,7 +3125,7 @@ def binary_cross_entropy_with_logits(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3646,7 +3703,7 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
+        mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -3731,7 +3788,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
-            its length has to match `input.dim()`.
+            its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
@@ -3810,7 +3867,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             if len(size) != dim:
                 raise ValueError(
                     "Input and output must have the same number of spatial dimensions, but got "
-                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
 
@@ -3847,15 +3904,21 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
+        assert scale_factors is not None
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
                 (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
+        elif torch.jit.is_scripting():
+            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                           for i in range(dim)]
         else:
-            assert scale_factors is not None
-            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+            output_size = [
+                _sym_int(math.floor(_sym_float(input.size(i + 2)) * scale_factors[i]))
+                for i in range(dim)
+            ]
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
@@ -4532,24 +4595,43 @@ def triplet_margin_with_distance_loss(
             reduction=reduction,
         )
 
-    distance_function = distance_function if distance_function is not None else pairwise_distance
+    # Check validity of reduction mode
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError(f"{reduction} is not a valid value for reduction")
 
-    positive_dist = distance_function(anchor, positive)
-    negative_dist = distance_function(anchor, negative)
+    # Check dimensions
+    a_dim = anchor.ndim
+    p_dim = positive.ndim
+    n_dim = negative.ndim
+    if not (a_dim == p_dim and p_dim == n_dim):
+        raise RuntimeError(
+            (f"The anchor, positive, and negative tensors are expected to have "
+             f"the same number of dimensions, but got: anchor {a_dim}D, "
+             f"positive {p_dim}D, and negative {n_dim}D inputs"))
 
+    # Calculate loss
+    if distance_function is None:
+        distance_function = torch.pairwise_distance
+
+    dist_pos = distance_function(anchor, positive)
+    dist_neg = distance_function(anchor, negative)
+    # The distance swap is described in the paper "Learning shallow
+    # convolutional feature descriptors with triplet losses" by V. Balntas, E.
+    # Riba et al.  If True, and if the positive example is closer to the
+    # negative example than the anchor is, swaps the positive example and the
+    # anchor in the loss computation.
     if swap:
-        swap_dist = distance_function(positive, negative)
-        negative_dist = torch.min(negative_dist, swap_dist)
+        dist_swap = distance_function(positive, negative)
+        dist_neg = torch.minimum(dist_neg, dist_swap)
+    loss = torch.clamp_min(margin + dist_pos - dist_neg, 0)
 
-    output = torch.clamp(positive_dist - negative_dist + margin, min=0.0)
-
-    reduction_enum = _Reduction.get_enum(reduction)
-    if reduction_enum == 1:
-        return output.mean()
-    elif reduction_enum == 2:
-        return output.sum()
-    else:
-        return output
+    # Apply reduction
+    if reduction == "sum":
+        return torch.sum(loss)
+    elif reduction == "mean":
+        return torch.mean(loss)
+    else:  # reduction == "none"
+        return loss
 
 
 def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
@@ -4611,16 +4693,7 @@ def unfold(
         return handle_torch_function(
             unfold, (input,), input, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 4:
-        msg = "{} must be int or 2-tuple for 4D input"
-        assert_int_or_pair(kernel_size, "kernel_size", msg)
-        assert_int_or_pair(dilation, "dilation", msg)
-        assert_int_or_pair(padding, "padding", msg)
-        assert_int_or_pair(stride, "stride", msg)
-
-        return torch._C._nn.im2col(input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride))
-    else:
-        raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
+    return torch._C._nn.im2col(input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride))
 
 
 def fold(
@@ -4642,20 +4715,9 @@ def fold(
         return handle_torch_function(
             fold, (input,), input, output_size, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 3 or input.dim() == 2:
-        msg = "{} must be int or 2-tuple for 3D input"
-        assert_int_or_pair(output_size, "output_size", msg)
-        assert_int_or_pair(kernel_size, "kernel_size", msg)
-        assert_int_or_pair(dilation, "dilation", msg)
-        assert_int_or_pair(padding, "padding", msg)
-        assert_int_or_pair(stride, "stride", msg)
-
-        return torch._C._nn.col2im(
-            input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
-        )
-    else:
-        raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
-                                  f"are supported (got {input.dim()}D)")
+    return torch._C._nn.col2im(
+        input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
+    )
 
 #
 # multihead attention
@@ -4769,54 +4831,46 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
+scaled_dot_product_attention = _add_docstr(
+    torch._C._nn.scaled_dot_product_attention, r"""
+Computes scaled dot product attention on query, key and value tensors, using
+an optional attention mask if passed, and applying dropout if a probability
+greater than 0.0 is specified.
+
+Args:
+     query (Tensor): Query tensor; shape (N, ..., L, E)
+     key (Tensor): Key tensor; shape (N, ..., S, E)
+     value (Tensor): Value tensor; shape (N, ..., S, E)
+     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
+         is supported, where a value of True indicates that the element *should* take part in attention.
+     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+     is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
+
+
+Returns a tuple containing:
+    output (Tensor): Attention output; shape (N, ..., L, E)
+
+Shape legend:
+    N: Batch size
+    ...: Any number of other batch dimensions (optional)
+    S: Source sequence length
+    L: Target sequence lengthE: Embedding dimension
+
+""")
+
 
 def _scaled_dot_product_attention(
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    attn_mask: Optional[Tensor] = None,
-    dropout_p: float = 0.0,
-) -> Tuple[Tensor, Tensor]:
-    r"""
-    Computes scaled dot product attention on query, key and value tensors, using
-    an optional attention mask if passed, and applying dropout if a probability
-    greater than 0.0 is specified.
-    Returns a tensor pair containing attended values and attention weights.
-
-    Args:
-        q, k, v: query, key and value tensors. See Shape section for shape details.
-        attn_mask: optional tensor containing mask values to be added to calculated
-            attention. May be 2D or 3D; see Shape section for details.
-        dropout_p: dropout probability. If greater than 0.0, dropout is applied.
-
-    Shape:
-        - q: :math:`(B, Nt, E)` where B is batch size, Nt is the target sequence length,
-            and E is embedding dimension.
-        - key: :math:`(B, Ns, E)` where B is batch size, Ns is the source sequence length,
-            and E is embedding dimension.
-        - value: :math:`(B, Ns, E)` where B is batch size, Ns is the source sequence length,
-            and E is embedding dimension.
-        - attn_mask: either a 3D tensor of shape :math:`(B, Nt, Ns)` or a 2D tensor of
-            shape :math:`(Nt, Ns)`.
-
-        - Output: attention values have shape :math:`(B, Nt, E)`; attention weights
-            have shape :math:`(B, Nt, Ns)`
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attn_mask: Optional[Tensor] = None,
+        dropout_p: float = 0.0,
+        need_attn_weights: bool = False,
+        is_causal: bool = False):
+    r""" TODO This function is for merge purposes only and needs to be removed
     """
-    B, Nt, E = q.shape
-    q = q / math.sqrt(E)
-    # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-    if attn_mask is not None:
-        attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
-    else:
-        attn = torch.bmm(q, k.transpose(-2, -1))
-
-    attn = softmax(attn, dim=-1)
-    if dropout_p > 0.0:
-        attn = dropout(attn, p=dropout_p)
-    # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
-    output = torch.bmm(attn, v)
-    return output, attn
-
+    warnings.warn("This function is deprecated please rebuild your models with the public version of sdpa.")
+    return torch._C._nn._scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
@@ -4865,6 +4919,41 @@ def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
 
     return is_batched
 
+def _canonical_mask(
+        mask: Optional[Tensor],
+        mask_name: str,
+        other_type: Optional[DType],
+        other_name: str,
+        target_type: DType,
+        check_other: bool = True,
+) -> Optional[Tensor]:
+
+    if mask is not None:
+        _mask_dtype = mask.dtype
+        _mask_is_float = torch.is_floating_point(mask)
+        if _mask_dtype != torch.bool and not _mask_is_float:
+            raise AssertionError(
+                f"only bool and floating types of {mask_name} are supported")
+        if check_other and other_type is not None:
+            if _mask_dtype != other_type:
+                warnings.warn(
+                    f"Support for mismatched {mask_name} and {other_name} "
+                    "is deprecated. Use same type for both instead."
+                )
+        if not _mask_is_float:
+            mask = (
+                torch.zeros_like(mask, dtype=target_type)
+                .masked_fill_(mask, float("-inf"))
+            )
+    return mask
+
+def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
+    if input is None:
+        return None
+    elif isinstance(input, torch.Tensor):
+        return input.dtype
+    raise RuntimeError("input to _none_or_dtype() must be None or torch.Tensor")
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -4890,6 +4979,7 @@ def multi_head_attention_forward(
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
+    is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -4910,6 +5000,9 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        is_causal: If specified, applies a causal mask as attention mask, and ignores
+            attn_mask for computing scaled dot product attention.
+            Default: ``False``.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -4929,14 +5022,13 @@ def multi_head_attention_forward(
         - value: :math:`(S, E)` or :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(S)` or :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a ByteTensor is provided, the non-zero positions will be ignored while the zero positions
-          will be unchanged. If a BoolTensor is provided, the positions with the
+          If a FloatTensor is provided, it will be directly added to the value.
+          If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          positions. If a BoolTensor is provided, positions with ``True``
           are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -4950,7 +5042,7 @@ def multi_head_attention_forward(
         - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
           attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
     tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)
@@ -4975,6 +5067,7 @@ def multi_head_attention_forward(
             key_padding_mask=key_padding_mask,
             need_weights=need_weights,
             attn_mask=attn_mask,
+            is_causal=is_causal,
             use_separate_proj_weight=use_separate_proj_weight,
             q_proj_weight=q_proj_weight,
             k_proj_weight=k_proj_weight,
@@ -5000,6 +5093,18 @@ def multi_head_attention_forward(
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
     src_len, _, _ = key.shape
+
+    key_padding_mask = _canonical_mask(
+        mask=key_padding_mask,
+        mask_name="key_padding_mask",
+        other_type=_none_or_dtype(attn_mask),
+        other_name="attn_mask",
+        target_type=query.dtype
+    )
+
+    if is_causal:
+        attn_mask = None
+
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
     if isinstance(embed_dim, torch.Tensor):
@@ -5032,13 +5137,17 @@ def multi_head_attention_forward(
         q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
     # prep attention mask
+
+    attn_mask = _canonical_mask(
+        mask=attn_mask,
+        mask_name="attn_mask",
+        other_type=_none_or_dtype(key_padding_mask),
+        other_name="key_padding_mask",
+        target_type=q.dtype,
+        check_other=False,
+    )
+
     if attn_mask is not None:
-        if attn_mask.dtype == torch.uint8:
-            warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-            attn_mask = attn_mask.to(torch.bool)
-        else:
-            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
-                f"Only float, byte, and bool types are supported for attn_mask, not {attn_mask.dtype}"
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
             correct_2d_size = (tgt_len, src_len)
@@ -5051,11 +5160,6 @@ def multi_head_attention_forward(
                 raise RuntimeError(f"The shape of the 3D attn_mask is {attn_mask.shape}, but should be {correct_3d_size}.")
         else:
             raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
-
-    # prep key padding mask
-    if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
-        warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-        key_padding_mask = key_padding_mask.to(torch.bool)
 
     # add bias along batch dimension (currently second)
     if bias_k is not None and bias_v is not None:
@@ -5115,16 +5219,8 @@ def multi_head_attention_forward(
             expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
         if attn_mask is None:
             attn_mask = key_padding_mask
-        elif attn_mask.dtype == torch.bool:
-            attn_mask = attn_mask.logical_or(key_padding_mask)
         else:
-            attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
-
-    # convert mask to float
-    if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
-        new_attn_mask.masked_fill_(attn_mask, float("-inf"))
-        attn_mask = new_attn_mask
+            attn_mask = attn_mask + key_padding_mask
 
     # adjust dropout probability
     if not training:
@@ -5133,12 +5229,24 @@ def multi_head_attention_forward(
     #
     # (deep breath) calculate attention and out projection
     #
-    attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
     if need_weights:
+        B, Nt, E = q.shape
+        q_scaled = q / math.sqrt(E)
+        if attn_mask is not None:
+            attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
+        else:
+            attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+        attn_output_weights = softmax(attn_output_weights, dim=-1)
+        if dropout_p > 0.0:
+            attn_output_weights = dropout(attn_output_weights, p=dropout_p)
+
+        attn_output = torch.bmm(attn_output_weights, v)
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
         # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
@@ -5150,6 +5258,24 @@ def multi_head_attention_forward(
             attn_output_weights = attn_output_weights.squeeze(0)
         return attn_output, attn_output_weights
     else:
+        # attn_mask can be either (L,S) or (N*num_heads, L, S)
+        # if attn_mask's shape is (1, L, S) we need to unsqueeze to (1, 1, L, S)
+        # in order to match the input for SDPA of (N, num_heads, L, S)
+        if attn_mask is not None:
+            if attn_mask.size(0) == 1 and attn_mask.dim() == 3:
+                attn_mask = attn_mask.unsqueeze(0)
+            else:
+                attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
+
+        q = q.view(bsz, num_heads, tgt_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, head_dim)
+        v = v.view(bsz, num_heads, src_len, head_dim)
+
+        attn_output, _ = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, False, is_causal)
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
         if not is_batched:
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)

@@ -55,7 +55,7 @@ class function_ref<Ret(Params...)> {
           typename std::remove_reference<Callable>::type,
           function_ref>::value>::type* = nullptr,
       typename std::enable_if<std::is_convertible<
-          typename std::result_of<Callable && (Params && ...)>::type,
+          typename c10::invoke_result_t<Callable, Params...>,
           Ret>::value>::type* = nullptr)
       : callback(callback_fn<typename std::remove_reference<Callable>::type>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}

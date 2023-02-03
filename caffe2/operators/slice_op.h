@@ -137,10 +137,10 @@ bool SliceImpl(
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
           dst_offset_bytes + i * dst_block_size_bytes;
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(src_bytes + src_nbytes));
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(dst_bytes + dst_nbytes));
       context->CopyItemsSameDevice(
@@ -183,10 +183,10 @@ bool SliceImpl(
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
           dst_offset_bytes + i * dst_block_size_bytes;
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           local_src_offset_bytes + src_block_size_bytes,
           src_bytes + src_nbytes);
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           local_dst_offset_bytes + src_block_size_bytes,
           dst_bytes + dst_nbytes);
       context->CopyItemsSameDevice(

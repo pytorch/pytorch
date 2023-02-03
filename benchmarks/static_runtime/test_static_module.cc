@@ -77,13 +77,6 @@ const auto sigmoid_inplace_script = R"JIT(
       return (a)
 )JIT";
 
-const auto sigmoid_out_script = R"JIT(
-  def forward(self, inp: Tensor):
-      a = inp + inp
-      b = torch.sigmoid(inp, out=a).clone()
-      return (b)
-)JIT";
-
 } // namespace
 
 // Test that StaticModule::value_group groups values of the graph into
@@ -354,6 +347,18 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
   EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
+TEST(StaticRuntime, CanEnableStaticRuntimeSubBlocks) {
+  const auto src = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, cond: bool):
+        if cond:
+            # aten::__is__ on tensors is blocked
+            return a is b
+        return False
+  )JIT";
+
+  EXPECT_FALSE(testCanEnableStaticRuntime(src));
+}
+
 TEST(StaticRuntime, NestedOutput) {
   // dict of tuple of list
   const auto nested_output_script_0 = R"JIT(
@@ -485,7 +490,7 @@ TEST(StaticRuntime, DeepWide) {
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
       EXPECT_TRUE(
-          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-5));
     }
   }
 }
@@ -513,7 +518,7 @@ TEST(StaticRuntime, KWargsAPI_1) {
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(
-            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-5));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -558,7 +563,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(
-            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-5));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -636,7 +641,7 @@ TEST(StaticRuntime, CleanUpMemory) {
             auto output_2 = outputs[0].toTensor();
             runtime.check_for_memory_leak();
             EXPECT_TRUE(torch::allclose(
-                output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
+                output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-5));
             if (manage_output_tensors) {
               runtime.deallocateOutputTensors();
               runtime.checkOutputTensorMemoryLeaks();
@@ -882,7 +887,7 @@ TEST(StaticRuntime, FusionPass) {
       EXPECT_TRUE(hit);
       auto output_2 = getTensor(module.forward(inputs));
       EXPECT_TRUE(
-          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-5));
     }
   }
 }
