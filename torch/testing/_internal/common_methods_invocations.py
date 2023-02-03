@@ -5744,7 +5744,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
             if "ignore_index" in kwargs and torch.all(target == kwargs["ignore_index"]):
                 # make sure at least one item in target is not ignored
-                target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
+                target[0] = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
 
         yield SampleInput(input, target, **kwargs)
 
