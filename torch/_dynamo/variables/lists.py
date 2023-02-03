@@ -1,3 +1,4 @@
+import functools
 import operator
 from typing import Dict, List, Optional
 
@@ -104,6 +105,7 @@ class BaseListVariable(VariableTracker):
     @staticmethod
     def generic_list_compare(left, tx, op, right, **options):
         from .builtin import BuiltinVariable
+        from .tensor import DynamicShapeVariable
 
         assert not (
             left.is_python_constant() and right.is_python_constant()
@@ -125,7 +127,6 @@ class BaseListVariable(VariableTracker):
         comps = []
         for l, r in zip(left.items, right.items):
             comp = BuiltinVariable(op).call_function(tx, [l, r], {})
-            list_type = type(comp)
             comps.append(comp)
 
         return functools.reduce(
