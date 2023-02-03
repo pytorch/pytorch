@@ -2007,25 +2007,6 @@ def run(runner, args, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedup_dynamo_ts.csv"
-    elif args.speedup_fx2trt:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.fx2trt_compiler, nopython=args.nopython
-        )
-        experiment = speedup_experiment_fx2trt
-        output_filename = "speedups_fx2trt.csv"
-        runner.skip_models.update(runner.failing_fx2trt_models)
-        args.float32 = True
-        args.float16 = False
-        args.cosine = True
-    elif args.speedup_fx2trt_fp16:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.fx2trt_compiler_fp16, nopython=args.nopython
-        )
-        experiment = speedup_experiment_fx2trt
-        output_filename = "speedups_fx2trt_fp16.csv"
-        args.float32 = False
-        args.float16 = True
-        args.cosine = True
     elif args.prims_nvfuser:
         optimize_ctx = torch._dynamo.optimize("prims_nvfuser", nopython=args.nopython)
         experiment = speedup_experiment
