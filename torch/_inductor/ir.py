@@ -417,7 +417,16 @@ class Loops(IRNode):
 
 @dataclasses.dataclass
 class Pointwise(Loops):
-    jagged_offsets: List[Expr]
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: List[Expr],
+        ranges: List[Expr],
+        jagged_offsets: Expr = None,
+    ):
+        super().__init__(device, dtype, inner_fn, ranges)
+        self.jagged_offsets = jagged_offsets
 
     def make_loader(self):
         return self.inner_fn
@@ -3960,7 +3969,7 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
-        if self.data.jagged_offsets is not None:
+        if isinstance(self.data, Pointwise) and self.data.jagged_offsets is not None:
             self.data = ComputedBuffer(
                 name=None,
                 layout=FixedJaggedLayout(
