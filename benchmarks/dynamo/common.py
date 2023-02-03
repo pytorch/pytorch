@@ -27,7 +27,6 @@ import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._dynamo.optimizations import backends
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
@@ -2026,18 +2025,7 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         output_filename = "nothing.csv"
     elif args.backend:
-        if args.backend == "ipex":
-            if args.bfloat16:
-                optimize_ctx = torch._dynamo.optimize(
-                    backends.ipex_bf16, nopython=args.nopython
-                )
-            else:
-                assert args.float32, "IPEX only supports fp32 and bf16 for now."
-                optimize_ctx = torch._dynamo.optimize(
-                    backends.ipex_fp32, nopython=args.nopython
-                )
-        else:
-            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"

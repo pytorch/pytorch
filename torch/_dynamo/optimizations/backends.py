@@ -37,10 +37,6 @@ def create_backend(fn):
     return register_backend(inner)
 
 
-def _raise_timeout(signum, frame):
-    raise TimeoutError()
-
-
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
     if jit_mod is None:
         return None
@@ -237,42 +233,3 @@ def tvm_compile_inner(
     except Exception:
         log.exception("tvm error")
         return jit_mod  # explicit fall back to eager
-
-
-@create_backend
-def ipex(subgraph):
-    try:
-        import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
-    except ImportError:
-        log.exception(
-            "Unable to import Intel Extension for PyTorch (IPEX). "
-            "Please install the right version of IPEX that matches the PyTorch version being used. "
-            "Refer to https://github.com/intel/intel-extension-for-pytorch for details."
-        )
-        raise
-
-    from torch.utils._mode_utils import no_dispatch
-
-    model = subgraph.model
-    inputs = subgraph.example_inputs
-    with no_dispatch():
-        static_inputs = []
-        for x in inputs:
-            if x._has_symbolic_sizes_strides:
-                size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
-                stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
-                static_inputs.append(
-                    torch.as_strided(
-                        torch.zeros(size, dtype=x.dtype, device=x.device), size, stride
-                    )
-                )
-            else:
-                static_inputs.append(torch.zeros_like(x))
-    try:
-        with torch.no_grad():
-            traced_model = torch.jit.trace(model.eval(), static_inputs)
-            traced_model = torch.jit.freeze(traced_model)
-        return traced_model
-    except Exception:
-        log.warning("JIT trace failed during the 'ipex' optimize process.")
-        return model
