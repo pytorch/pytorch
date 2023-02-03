@@ -1473,6 +1473,13 @@ class TestSDPA(NNTestCase):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        if isSM86Device:
+            # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+            size = (2, 2, 4, 128)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False))
 
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
             size = (2, 3, 4)
@@ -1483,13 +1490,6 @@ class TestSDPA(NNTestCase):
                                    lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
-        if isSM86Device:
-            with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-                # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-                size = (2, 2, 4, 128)
-                q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
 
         if SM80OrLater:
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):

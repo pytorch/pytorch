@@ -358,7 +358,8 @@ inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
   if (is_sm86 && (params.query.size(-1) == 128)) {
     if (debug) {
       TORCH_WARN(
-        "Memory Efficient Attention is throwing a cuda illegal memory error on sm86 when head_dim is 128.");
+        "Memory Efficient Attention does not currently support head_dim == 128 on sm86",
+        "because it is throwing a cuda illegal memory error on sm86 when head_dim is 128.");
     }
     return false;
   }
