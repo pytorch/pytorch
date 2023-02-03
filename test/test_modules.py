@@ -7,6 +7,7 @@ import tempfile
 from operator import methodcaller
 
 import torch
+from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
@@ -361,6 +362,9 @@ class TestModule(TestCase):
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
+                continue
+            # TODO adapt the test below to support this case
+            if any(isinstance(x, PackedSequence) for x in module_input.forward_input.args):
                 continue
 
             input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
