@@ -197,7 +197,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER "Build NVFUSER" ON
     "USE_CUDA OR USE_ROCM" OFF)
-option(NVFUSER_SOURCE_DIR "third_party/nvfuser" "directory where nvfuser source code is")
+option(NVFUSER_SOURCE_DIR "directory where nvfuser source code is" CACHE STRING "third_party/nvfuser")
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
