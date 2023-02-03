@@ -10,6 +10,14 @@ from .quantize_jit import *  # noqa: F403
 from .quantization_mappings import *  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 
+from .observer import _deprecated_names as _observer_deprecated_names
+from torch.utils._migration_utils import (
+    _get_ao_migration_warning_str,
+    _AO_MIGRATION_DEPRECATED_NAME_PREFIX,
+)
+
+import warnings
+
 def default_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
@@ -60,3 +68,12 @@ __all__ = [
     # module transformations
     'fuse_modules',
 ]
+
+# TODO(this PR): also add from all the other submodules
+_deprecated_names = _observer_deprecated_names
+
+def __getattr__(name):
+    if name in _deprecated_names:
+        warnings.warn(_get_ao_migration_warning_str(__name__, name))
+        return globals()[f"{_AO_MIGRATION_DEPRECATED_NAME_PREFIX}_{name}"]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
