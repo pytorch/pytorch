@@ -28,7 +28,6 @@ import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.optimizations import backends
-from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
@@ -117,7 +116,10 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
-    "xcit_large_24_p8_224",  # fp64_OOM
+    "xcit_large_24_p8_224",  # fp64_OOM,
+    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
@@ -140,6 +142,8 @@ CI_SKIP[CI("inductor", training=False)] = [
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
+    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -174,6 +178,9 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     "vision_maskrcnn",  # cannot determine truth value of Relational
     # timm_models
     "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
+    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -550,6 +557,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     # Use higher tolerance for XLA since XLA cause numerical unstability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
+    torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -1176,7 +1184,8 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
-    def run_n_iterations(self, mod, inputs, n=2):
+    def run_n_iterations(self, mod, inputs):
+        n = self.args.iterations
         for _ in range(n - 1):
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
@@ -1609,6 +1618,9 @@ def parse_args(args=None):
     )
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
     parser.add_argument(
+        "--iterations", type=int, default=2, help="how many iterations to run"
+    )
+    parser.add_argument(
         "--batch-size-file", type=str, help="String to load batch size from"
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
@@ -1918,11 +1930,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
-        # We only have a CI skip list for aot_eager right now.  When inductor
-        # comes online, add that skip list too.
-        assert (
-            args.backend == "aot_eager"
-        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
@@ -2113,7 +2120,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
     elif args.speedup_dynamo_ts:
-        optimize_ctx = torch._dynamo.optimize(backends.ts, nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedup_dynamo_ts.csv"
     elif args.speedup_fx2trt:
@@ -2171,11 +2178,6 @@ def run(runner, args, original_dir=None):
             output_filename = f"accuracy_{args.backend}.csv"
         else:
             output_filename = f"speedup_{args.backend}.csv"
-    elif args.log_conv_args:
-        optimize_ctx = torch._dynamo.optimize(
-            conv_args_analysis, nopython=args.nopython
-        )
-        output_filename = "log_conv_args.csv"
     elif args.recompile_profiler:
         output_filename = "recompile_profiler_log.csv"
         experiment = recompile_profiler_experiment
