@@ -104,11 +104,14 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch._dynamo.optimize(torch._dynamo.backends.ipex.ipex_fp32)(model)
-        with torch.no_grad():
-            r2 = opt_model(input)
-        self.assertTrue(same(r1, r2))
-        self.assertEqual(r2.dtype, torch.float32)
+        for dynamic_shapes in [True, False]:
+            torch._dynamo.reset()
+            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
+            with torch.no_grad():
+                for _ in range(3):
+                    r2 = opt_model(input)
+            self.assertTrue(same(r1, r2))
+            self.assertEqual(r2.dtype, torch.float32)
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
     def test_ipex_bf16(self):
@@ -117,11 +120,14 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch._dynamo.optimize(torch._dynamo.backends.ipex.ipex_bf16)(model)
-        with torch.no_grad(), torch.cpu.amp.autocast():
-            r2 = opt_model(input)
-        self.assertTrue(same(r1, r2.float(), tol=0.1))
-        self.assertEqual(r2.dtype, torch.bfloat16)
+        for dynamic_shapes in [True, False]:
+            torch._dynamo.reset()
+            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
+            with torch.no_grad(), torch.cpu.amp.autocast():
+                for _ in range(3):
+                    r2 = opt_model(input)
+            self.assertTrue(same(r1, r2.float(), tol=0.1))
+            self.assertEqual(r2.dtype, torch.bfloat16)
 
     def _check_backend_works(self, backend):
         model = Seq().eval()
