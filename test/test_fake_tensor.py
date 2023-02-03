@@ -22,6 +22,8 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+import torch._functorch.config
+from unittest.mock import patch
 
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -485,6 +487,17 @@ class FakeTensorTest(TestCase):
             self.assertEqual(ten.dtype, torch.float)
             self.checkType(ten, "cpu", [2])
 
+    def test_allow_meta(self):
+        def run_meta():
+            with FakeTensorMode():
+                x = torch.rand([4], device="meta")
+                return x + x
+
+        self.checkType(run_meta(), "meta", [4])
+
+        with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
+            self.assertRaises(Exception, run_meta)
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -540,7 +553,7 @@ class FakeTensorConstHandling(TestCase):
             return tensors[0].new_full(batch_shape, 0.0)
 
         with self.assertRaises(torch._subclasses.fake_tensor.DataDependentOutputException):
-            with torch._subclasses.fake_tensor.FakeTensorMode(throw_on_data_dependent_ops=True):
+            with torch._subclasses.fake_tensor.FakeTensorMode():
                 a = torch.randn(3, 800, 1199)
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]

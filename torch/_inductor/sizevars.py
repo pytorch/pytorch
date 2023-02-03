@@ -46,6 +46,9 @@ class SizeVarAllocator(object):
         self.var_to_val = self.shape_env.var_to_val
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
+        # maps of dynamic sizes that have to be precomputed on the host to the kernel args
+        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
+        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
@@ -425,6 +428,13 @@ class SizeVarAllocator(object):
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
+    def lookup_precomputed_size(self, expr: Expr):
+        if expr not in self.precomputed_replacements:
+            sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
+            self.precomputed_replacements[expr] = sym
+            self.inv_precomputed_replacements[sym] = expr
+        return self.precomputed_replacements[expr]
+
     def codegen(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
         if self.need_seed:
@@ -470,6 +480,12 @@ class SizeVarAllocator(object):
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
+
+    def codegen_precomputed_sizes(self, code: IndentedBuffer):
+        from .codegen.wrapper import pexpr
+
+        for sym, expr in self.inv_precomputed_replacements.items():
+            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr
