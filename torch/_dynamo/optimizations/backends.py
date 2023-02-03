@@ -147,27 +147,6 @@ def onnxrt(subgraph):
         return onnxrt_cpu(subgraph)
 
 
-@create_backend
-def ipex(subgraph, **kwargs):
-    import intel_extension_for_pytorch as ipex  # type: ignore[import]
-
-    inputs = subgraph.example_inputs
-    model = subgraph.model
-    with torch.no_grad():
-        model.eval()
-        if kwargs["datatype"] == "bf16":
-            model = ipex.optimize(model, dtype=torch.bfloat16)
-        else:
-            model = ipex.optimize(model, dtype=torch.float32)
-        try:
-            traced_model = torch.jit.trace(model, inputs).eval()
-            traced_model = torch.jit.freeze(traced_model)
-            return traced_model
-        except Exception:
-            log.warning("JIT trace failed during the 'ipex' optimize process.")
-            return model
-
-
 def _raise_timeout(signum, frame):
     raise TimeoutError()
 
@@ -539,14 +518,43 @@ def tvm_compile_inner(
         return jit_mod  # explicit fall back to eager
 
 
-def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": "fp32"}
-    return ipex(gm, example_inputs, **kwargs_ipex)
+@create_backend
+def ipex(subgraph):
+    try:
+        import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
+    except ImportError:
+        log.exception(
+            "Unable to import Intel Extension for PyTorch (IPEX). "
+            "Please install the right version of IPEX that matches the PyTorch version being used. "
+            "Refer to https://github.com/intel/intel-extension-for-pytorch for details."
+        )
+        raise
 
+    from torch.utils._mode_utils import no_dispatch
 
-def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": "bf16"}
-    return ipex(gm, example_inputs, **kwargs_ipex)
+    model = subgraph.model
+    inputs = subgraph.example_inputs
+    with no_dispatch():
+        static_inputs = []
+        for x in inputs:
+            if x._has_symbolic_sizes_strides:
+                size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
+                stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
+                static_inputs.append(
+                    torch.as_strided(
+                        torch.zeros(size, dtype=x.dtype, device=x.device), size, stride
+                    )
+                )
+            else:
+                static_inputs.append(torch.zeros_like(x))
+    try:
+        with torch.no_grad():
+            traced_model = torch.jit.trace(model.eval(), static_inputs)
+            traced_model = torch.jit.freeze(traced_model)
+        return traced_model
+    except Exception:
+        log.warning("JIT trace failed during the 'ipex' optimize process.")
+        return model
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
