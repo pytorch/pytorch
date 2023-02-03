@@ -1,5 +1,6 @@
 import copy
 import functools
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -11,6 +12,7 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -23,7 +25,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _FSDPState,
-    _get_module_fsdp_state_if_comm_module,
+    _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
     _module_handles,
     clean_tensor_name,
@@ -972,7 +974,9 @@ def _rekey_sharded_optim_state_dict(
         if isinstance(key, str):
             rekeyed_osd_state[key] = param_state
             continue
-        flat_param_key = unflat_param_names_to_flat_param_key[key.unflat_param_names]
+        flat_param_key = unflat_param_names_to_flat_param_key.get(
+            key.unflat_param_names, key.unflat_param_names
+        )
         rekeyed_osd_state[flat_param_key] = param_state
 
     rekeyed_osd_param_groups: List[Dict[str, Any]] = []
@@ -1082,6 +1086,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         model,
         module_fn,
         return_fn,
+        [fqn for fqn, _ in model.named_parameters()],
         flat_param_to_fqn_ret,
     )
 
@@ -1231,7 +1236,10 @@ def _map_param_key_to_optim_keys(
         fqns = param_to_fqns[param]
         is_fsdp_managed = isinstance(param, FlatParameter)
         if is_fsdp_managed:
-            assert fqns[0] in fqn_to_fsdp_param_info
+            assert fqns[0] in fqn_to_fsdp_param_info, (
+                fqns[0],
+                list(fqn_to_fsdp_param_info.keys()),
+            )
         is_fsdp_managed = fqns[0] in fqn_to_fsdp_param_info
         optim_state_key = _OptimStateKey(
             unflat_param_names=tuple(fqns),
@@ -1454,8 +1462,18 @@ def _optim_state_dict(
                 continue
             if key in param_key_to_param:
                 continue
-            # This key is not a parameter state. It is a user-defined state.
-            fsdp_osd_state[key] = copy.copy(value)
+            # This key is not recognized by FSDP. It may be a user-defined state
+            # or some parameters state that FSDP is unable to map from
+            # ``optim.param_groups``.
+            warnings.warn(
+                f"Found a optim state, {key}, that FSDP cannot process. FSDP "
+                "will directly copy everything to the returned state_dict. In "
+                "most cases, this is a user-defined state that is not "
+                "associated with any particular parameter. Another possible "
+                "case is this state is managed by DMP. Otherwise, there may "
+                " be a mismatched assumption of optim_state_dict of this mode."
+            )
+            fsdp_osd_state[key] = value
 
         fsdp_osd["param_groups"] = _unflatten_param_groups(
             optim_state_dict, param_key_to_param, param_to_fqns
@@ -1473,7 +1491,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     """
 
     def module_fn(module, prefix, fqn_to_param_info):
-        fsdp_state = _get_module_fsdp_state_if_comm_module(module)
+        fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         if fsdp_state is None:
             return
         _lazy_init(fsdp_state, module)
@@ -1500,6 +1518,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         model,
         module_fn,
         return_fn,
+        [fqn for fqn, _ in model.named_parameters()],
         fqn_to_param_info,
     )
 
@@ -1551,18 +1570,26 @@ def _all_gather_optim_state(
     all_tensor_states = sorted(
         list(set([n for state in object_list for n in state.tensors.keys()]))
     )
+    empty_ranks: Set[int] = set()
     for name in all_tensor_states:
         numels = []
         dtype = torch.float
-        for object_state in object_list:
+        _empty_ranks: Set[int] = set()
+        for rank, object_state in enumerate(object_list):
             numels.append(0)
             info = object_state.tensors.get(name, None)
             if info is not None:
                 numels[-1] = info.shape.numel()
                 dtype = info.dtype
+            if numels[-1] == 0:
+                _empty_ranks.add(rank)
+
         empty_func = functools.partial(
             torch.empty, dtype=dtype, device=fsdp_state.compute_device
         )
+        if empty_ranks:
+            assert empty_ranks == _empty_ranks
+        empty_ranks = _empty_ranks
         local_state = optim_state.get(name, empty_func(0))
         local_state = local_state.to(fsdp_state.compute_device)
         tensors = [
@@ -1574,7 +1601,9 @@ def _all_gather_optim_state(
         )
         gathered_state[name] = AllGatherInfo(tensors, numels, work)
 
-    for object_state in object_list:
+    for rank, object_state in enumerate(object_list):
+        if rank in empty_ranks:
+            continue
         for name, non_tensor_value in object_state.non_tensors.items():
             curr_non_tensor_value = gathered_state.get(name, None)
             assert (

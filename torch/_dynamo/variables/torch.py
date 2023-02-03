@@ -458,6 +458,43 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
+            if self.value == torch._C._nn.scaled_dot_product_attention:
+                # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
+                # in pytorch/torch/_meta_registrations.py
+                fake_query = args[0].as_proxy().node.meta["example_value"]
+                fake_key = args[1].as_proxy().node.meta["example_value"]
+                fake_value = args[2].as_proxy().node.meta["example_value"]
+                # We look through the stack to find a cuda autocast context
+                # If we do we will convert the fake tensors to torch.float16
+                is_cuda_autocast_context = False
+                for block in tx.block_stack:
+                    if (
+                        isinstance(block.with_context, AutocastModeVariable)
+                        and block.with_context.target_values[0] == "cuda"
+                    ):
+                        is_cuda_autocast_context = True
+                        break
+
+                if is_cuda_autocast_context and fake_query.device.type == "cuda":
+                    amp_dtype = torch.float16
+                    fake_query = fake_query.clone().to(amp_dtype)
+                    fake_key = fake_key.clone().to(amp_dtype)
+                    fake_value = fake_value.clone().to(amp_dtype)
+
+                backend_choice = torch._fused_sdp_choice(
+                    fake_query, fake_key, fake_value
+                )
+                if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
+                    dropout_p = kwargs.get("dropout_p")
+                    # Lets see if they passed it in as not an arg
+                    if len(args) >= 5:
+                        dropout_p = args[4]
+
+                    if dropout_p is not None and dropout_p.value != 0.0:
+                        unimplemented(
+                            "FlashAttention with dropout is not supported in cuda graphs"
+                        )
+
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.

@@ -827,7 +827,7 @@ def _maybe_insert_output_observer_for_node(
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    matches: Dict[str, _MatchResultWithQConfig],
+    node_name_to_match_result_with_qconfig: Dict[str, _MatchResultWithQConfig],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
     is_qat: bool,
@@ -838,7 +838,7 @@ def _maybe_insert_output_observer_for_node(
 
     If `node` does not need an output observer, returns None.
     """
-    root_node, _, pattern, qhandler, qconfig = matches.get(
+    root_node, _, pattern, qhandler, qconfig = node_name_to_match_result_with_qconfig.get(
         node.name, (None, None, None, None, None))
 
     if qhandler is None:
@@ -967,7 +967,7 @@ def _maybe_insert_observers_before_graph_output(
 def _maybe_propagate_dtype_for_node(
     node: Node,
     target_dtype: Union[torch.dtype, type],
-    matches: Dict[str, _MatchResultWithQConfig],
+    node_name_to_match_result_with_qconfig: Dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
     Assigns `target_dtype` to `node`, setting `is_dynamic` to False. If `node`
@@ -977,18 +977,18 @@ def _maybe_propagate_dtype_for_node(
     node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"] = None
     node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"] = None
     # if this is a copy node, propagate to first arg
-    root_node, _, pattern, qhandler, qconfig = matches.get(
+    root_node, _, pattern, qhandler, qconfig = node_name_to_match_result_with_qconfig.get(
         node.name, (None, None, None, None, None))
     # TODO: probably need to remove `is_general_tensor_value_op`
     if qhandler is not None and qhandler.is_general_tensor_value_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             _maybe_propagate_dtype_for_node(
-                prev_node, target_dtype, matches)
+                prev_node, target_dtype, node_name_to_match_result_with_qconfig)
 
 def propagate_dtypes_for_known_nodes(
     graph: Graph,
-    matches: Dict[str, _MatchResultWithQConfig],
+    node_name_to_match_result_with_qconfig: Dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
     Currently we assume that inputs to the graph are either `torch.float` or
@@ -1020,7 +1020,7 @@ def propagate_dtypes_for_known_nodes(
                     # hard coded arguments show up but aren't `Node` typed and do not need dtype propgated
                     if isinstance(cur_arg, torch.fx.node.Node):
                         _maybe_propagate_dtype_for_node(
-                            cur_arg, arg_type, matches)
+                            cur_arg, arg_type, node_name_to_match_result_with_qconfig)
 
 def _maybe_make_input_output_share_observers(
     node: Node,
@@ -1324,11 +1324,6 @@ def insert_observers_for_model(
                 cache_for_no_tensor_check,
                 processed_nodes
             )
-
-
-    # for debugging
-    # for n in model.graph.nodes:
-    #     print(f"node: {node.format_node()}, meta: {node.meta['target_dtype_info']}")
 
     # After this point, the current node and all of its arguments
     # have a target_dtype_info assigned. Now, we insert observers for inputs
