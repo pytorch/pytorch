@@ -3491,6 +3491,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
+    def test_int_neg(self):
+        def int_neg(a, b):
+            x = a.shape[0]
+            y = b.shape[0]
+            return -x * -y * a * b
+
+        torch._dynamo.testing.standard_test(self, int_neg, 2)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
