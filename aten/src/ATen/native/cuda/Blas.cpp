@@ -128,14 +128,14 @@ enum class Activation {
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
     case Activation::RELU:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_RELU;
     case Activation::GELU:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_GELU;
     default:
       TORCH_CHECK(false);
-      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
   }
 }
 #endif
@@ -328,7 +328,7 @@ Tensor& addmm_out_cuda_impl(
               // path until we confirm which version it's working in.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
-              : cuda::blas::GEMMAndBiasActivationEpilogue::None
+              : cuda::blas::GEMMAndBiasActivationEpilogue::BIAS
 #endif
           );
         });
@@ -692,10 +692,11 @@ Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const S
 
   // std::cout << "Calling _int_addmm_out_cuda" << std::endl;
   Tensor result = at::empty({mat1.size(0), mat2.size(1)}, mat1.options().dtype(at::kInt));
-  Tensor bias = at::empty({mat2.size(1)}, mat1.options());
+  // Tensor bias = at::empty({mat2.size(1)}, mat1.options());
   // result.fill_(0);
   // bias.fill_(0);
 
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   bool transpose_result;
@@ -721,7 +722,7 @@ Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const S
 
   // addmm_out_cuda_impl(result, self, mat1, mat2, 1.0, 1.0);
 
-  at::cuda::blas::gemm_and_bias<int8_t, int32_t>(
+  at::cuda::blas::gemm_and_bias<int8_t, int32_t, nullptr_t>(
       transpose_mat1,
       transpose_mat2,
       m,
@@ -733,10 +734,15 @@ Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const S
       mat2_->data_ptr<int8_t>(),
       mat2_ld,
       // self.data_ptr<scalar_t>(),
-      bias.data_ptr<int8_t>(),
+      // bias.data_ptr<int8_t>(),
+      nullptr,
       // nullptr,
       result_->data_ptr<int32_t>(),
-      result_ld);
+      result_ld,
+      cuda::blas::GEMMAndBiasActivationEpilogue::NONE);
+#else
+  TORCH_CHECK(false, "_int_addmm_out_cuda not compiled for this platform.");
+#endif
 
   return result;
 }

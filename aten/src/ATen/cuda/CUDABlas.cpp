@@ -619,7 +619,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 } // namespace
 
-template <typename Dtype, typename RDtype>
+template <typename Dtype, typename RDtype, typename BDtype>
 void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -631,13 +631,12 @@ void gemm_and_bias(
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
-    const Dtype* bias,
+    const BDtype* bias,
     RDtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
 //  std::cout << " GEMM AN DBIAS " << std::endl;
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = 0; // bias is added in epilogue
 
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
@@ -663,8 +662,11 @@ void gemm_and_bias(
     cType = CUDA_R_32I;
     computeType = CUBLAS_COMPUTE_32I;
     scaleType = CUDA_R_32I;
-    // TORCH_CHECK(std::is_same<RDtype, int32_t>::value);
-//    std::cout << "USING THEM INT DTYPES" << std::endl;
+    bool valid_rdtype = std::is_same<RDtype, int32_t>::value;
+    TORCH_CHECK(valid_rdtype, "Expected int32_t for result Tensor if given int8_t mat1, mat2.");
+  } else {
+    bool valid_rdtype = std::is_same<RDtype, Dtype>::value;
+    TORCH_CHECK(valid_rdtype, "Expected result and input dtypes to match.");
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -680,24 +682,35 @@ void gemm_and_bias(
       CUBLASLT_MATMUL_DESC_TRANSB,
       &transb,
       sizeof(transb)));
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
-  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
+
+  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_DEFAULT;
+  if (activation == GEMMAndBiasActivationEpilogue::BIAS) {
+    epilogue = CUBLASLT_EPILOGUE_BIAS;
+  }
+  if (activation == GEMMAndBiasActivationEpilogue::BIAS_RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
-  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+  }
+  if (activation == GEMMAndBiasActivationEpilogue::BIAS_GELU) {
 #if CUDA_VERSION >= 11040
-    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+      epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+#else
+      TORCH_CHECK(false, "CUBLASLT_EPILOGUE_GELU_BIAS is an unsupported feature for CUDA version ", CUDA_VERSION);
 #endif
   }
-//  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-//      computeDesc.descriptor(),
-//      CUBLASLT_MATMUL_DESC_EPILOGUE,
-//      &epilogue,
-//      sizeof(epilogue)));
-//  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-//      computeDesc.descriptor(),
-//      CUBLASLT_MATMUL_DESC_BIAS_POINTER,
-//      &bias,
-//      sizeof(Dtype*)));
+  if (activation == GEMMAndBiasActivationEpilogue::NONE) {
+    TORCH_CHECK(bias == nullptr, "Expected bias to be a nullptr.");
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+        computeDesc.descriptor(),
+        CUBLASLT_MATMUL_DESC_EPILOGUE,
+        &epilogue,
+        sizeof(epilogue)));
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+        computeDesc.descriptor(),
+        CUBLASLT_MATMUL_DESC_BIAS_POINTER,
+        &bias,
+        sizeof(Dtype*)));
+  }
 
   CuBlasLtMatrixLayout Adesc(
       abType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
@@ -739,6 +752,7 @@ void gemm_and_bias(
   // }
 
   float beta_special = 0.0f;
+  // opmath_t beta_val = 0; // bias is added in epilogue
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -861,7 +875,7 @@ template void gemm_and_bias(
     int64_t mat1_ld,
     const int8_t* mat2_ptr,
     int64_t mat2_ld,
-    const int8_t* bias,
+    const nullptr_t* bias,
     int32_t* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
