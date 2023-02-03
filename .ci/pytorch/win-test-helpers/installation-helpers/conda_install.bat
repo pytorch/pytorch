@@ -4,6 +4,7 @@ if "%BUILD_ENVIRONMENT%"=="" (
   set CONDA_PARENT_DIR=C:\Jenkins
 )
 
+set PATH=%CONDA_PARENT_DIR%\Miniconda3\Library\bin;%CONDA_PARENT_DIR%\Miniconda3;%CONDA_PARENT_DIR%\Miniconda3\Scripts;%PATH%
 
 set tmp_dir_win=%1
 set conda_parent_dir=%2
