@@ -13,6 +13,9 @@ if [ -n "$CLANG_VERSION" ]; then
     sudo apt-get install  -y --no-install-recommends gpg-agent
     wget --no-check-certificate -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add  -
     apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-${CLANG_VERSION} main"
+  elif [[ $UBUNTU_VERSION == 22.04 ]]; then
+    # work around ubuntu apt-get conflicts
+    sudo apt-get -y -f install
   fi
 
   sudo apt-get update

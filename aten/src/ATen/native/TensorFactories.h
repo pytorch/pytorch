@@ -1,10 +1,9 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
-#include <ATen/Utils.h>
+#include <ATen/EmptyTensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
-#include <c10/core/TensorOptions.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

@@ -3,6 +3,7 @@ from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
+__all__ = ['LogNormal']
 
 class LogNormal(TransformedDistribution):
     r"""
@@ -14,6 +15,7 @@ class LogNormal(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = LogNormal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # log-normal distributed with mean=0 and stddev=1
         tensor([ 0.1046])
@@ -52,7 +54,8 @@ class LogNormal(TransformedDistribution):
 
     @property
     def variance(self):
-        return (self.scale.pow(2).exp() - 1) * (2 * self.loc + self.scale.pow(2)).exp()
+        scale_sq = self.scale.pow(2)
+        return scale_sq.expm1() * (2 * self.loc + scale_sq).exp()
 
     def entropy(self):
         return self.base_dist.entropy() + self.loc

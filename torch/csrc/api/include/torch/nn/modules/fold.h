@@ -19,9 +19,9 @@ namespace nn {
 ///
 /// Example:
 /// ```
-/// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2));
+/// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2,
+/// 1}).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FoldImpl : public torch::nn::Cloneable<FoldImpl> {
  public:
   FoldImpl(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
@@ -59,7 +59,6 @@ TORCH_MODULE(Fold);
 /// ```
 /// Unfold model(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API UnfoldImpl : public Cloneable<UnfoldImpl> {
  public:
   UnfoldImpl(ExpandingArray<2> kernel_size)
@@ -79,9 +78,9 @@ class TORCH_API UnfoldImpl : public Cloneable<UnfoldImpl> {
 
 /// A `ModuleHolder` subclass for `UnfoldImpl`.
 /// See the documentation for `UnfoldImpl` class to learn what methods it
-/// provides, and examples of how to use `Unfold` with `torch::nn::UnfoldOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Unfold` with
+/// `torch::nn::UnfoldOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Unfold);
 
 } // namespace nn

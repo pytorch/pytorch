@@ -7,6 +7,7 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+__all__ = ['Bernoulli']
 
 class Bernoulli(ExponentialFamily):
     r"""
@@ -18,6 +19,7 @@ class Bernoulli(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
         tensor([ 0.])
@@ -113,7 +115,7 @@ class Bernoulli(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (torch.log(self.probs / (1 - self.probs)), )
+        return (torch.logit(self.probs), )
 
     def _log_normalizer(self, x):
-        return torch.log(1 + torch.exp(x))
+        return torch.log1p(torch.exp(x))

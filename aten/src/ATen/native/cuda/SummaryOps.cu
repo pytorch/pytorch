@@ -15,7 +15,7 @@
 #include <ATen/ops/bincount_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/histc_native.h>
-#include <ATen/ops/zeros_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at {
@@ -271,7 +271,7 @@ bool CUDA_tensor_histogram(
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
   Tensor partial_output;
   if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
-    partial_output = native::zeros(
+    partial_output = at::zeros(
         {grid.x, nbins},
         optTypeMetaToScalarType(a.options().dtype_opt()),
         a.options().layout_opt(),
@@ -313,7 +313,7 @@ Tensor _bincount_cuda_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
-    return native::zeros(
+    return at::zeros(
         {minlength},
         kLong,
         c10::nullopt /* layout */,
@@ -327,8 +327,8 @@ Tensor _bincount_cuda_template(
   }
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.size(0) != self.size(0)) {
-    AT_ERROR("input and weights should have the same length");
+  if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
+    AT_ERROR("weights should be 1-d and have the same length as input");
   }
 
   const int64_t nbins =
@@ -342,7 +342,7 @@ Tensor _bincount_cuda_template(
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
-    output = native::zeros(
+    output = at::zeros(
         {nbins},
         optTypeMetaToScalarType(weights.options().dtype_opt()),
         weights.options().layout_opt(),
@@ -351,7 +351,7 @@ Tensor _bincount_cuda_template(
     cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, minvalue, maxvalue);
   } else {
-    output = native::zeros(
+    output = at::zeros(
         {nbins},
         kLong,
         c10::nullopt /* layout */,
@@ -373,7 +373,7 @@ Tensor _histc_cuda_template(
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
-  Tensor output = native::zeros(
+  Tensor output = at::zeros(
       {nbins},
       self.scalar_type(),
       c10::nullopt /* layout */,

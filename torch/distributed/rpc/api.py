@@ -58,7 +58,6 @@ logger = logging.getLogger(__name__)
 _ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
 
-
 @contextlib.contextmanager
 def _use_rpc_pickler(rpc_pickler):
     r"""
@@ -148,6 +147,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 
 _thread_local_var = threading.local()
 
+
 @contextlib.contextmanager
 def _wait_all():
     r"""
@@ -157,6 +157,7 @@ def _wait_all():
 
 
     Example::
+        >>> # xdoctest: +SKIP("distributed")
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -175,6 +176,7 @@ def _wait_all():
         finally:
             del _thread_local_var.future_list
 
+
 @_require_initialized
 def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
@@ -189,7 +191,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
             _ALL_WORKER_NAMES is not None
         ), "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
         worker_names = _ALL_WORKER_NAMES
-    leader_name = sorted(worker_names)[0]
+    leader_name = min(worker_names)
 
     self_name = _get_current_rpc_agent().get_worker_info().name
 
@@ -236,7 +238,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
     # Leader's signal is the first to be unblocked, after receiving all
     # followers' data objects.
     if is_leader:
-        worker_name_to_response_future_dict = dict()
+        worker_name_to_response_future_dict = {}
         for follower_name in worker_names - {leader_name}:
             fut = rpc_async(
                 follower_name,
@@ -283,6 +285,7 @@ def _barrier(worker_names):
         logger.error(
             f"Failed to complete barrier, got error {ex}"
         )
+
 
 @_require_initialized
 def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
@@ -331,11 +334,12 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -374,6 +378,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     else:
         _finalize_shutdown()
 
+
 def _finalize_shutdown():
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -393,6 +398,7 @@ def _finalize_shutdown():
         # resolved.
         _cleanup_python_rpc_handler()
         _reset_current_rpc_agent()
+
 
 @_require_initialized
 def get_worker_info(worker_name=None):
@@ -449,7 +455,6 @@ def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT, blocking=True):
         return fut.wait()
     else:
         return fut
-
 
 
 T = TypeVar("T")
@@ -528,7 +533,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
-        func (callable): a callable function, such as Python callables, builtin
+        func (Callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -574,15 +579,17 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         raised as they have not yet been handled.
 
     Example::
+
         Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -665,6 +672,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     return rref
 
+
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RPC_TIMEOUT):
     if not callable(func):
         raise TypeError("function should be callable.")
@@ -736,7 +744,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
-        func (callable): a callable function, such as Python callables, builtin
+        func (Callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -759,11 +767,12 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -810,7 +819,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
     Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
-        func (callable): a callable function, such as Python callables, builtin
+        func (Callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -850,11 +859,12 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDR=localhost
-        >>> export MASTER_PORT=5678
+        export MASTER_ADDR=localhost
+        export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -894,14 +904,16 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         _thread_local_var.future_list.append(fut)
     return fut
 
+
 def _get_should_profile():
     # Legacy profiler should be enabled. RPC profiling is not supported with
     # Kineto profiler.
-    ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+    ActiveProfilerType = torch._C._profiler.ActiveProfilerType
     return (
         torch.autograd._profiler_enabled() and
         torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
     )
+
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
     ctx_manager = contextlib.suppress()

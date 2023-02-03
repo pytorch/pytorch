@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 
-import os
 import argparse
+import os
 import sys
 
 sys.path.append(
@@ -80,6 +80,7 @@ includes = [
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
+    "third_party/nvfuser/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",
@@ -113,10 +114,16 @@ ignores = [
     "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
-    "torch/csrc/jit/codegen/cuda/codegen.cpp",
-    "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
-    "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
-    "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
+    # Correct path to generate HIPConfig.h:
+    #   CUDAConfig.h.in -> (amd_build) HIPConfig.h.in -> (cmake) HIPConfig.h
+    "aten/src/ATen/cuda/CUDAConfig.h",
+    "third_party/nvfuser/csrc/codegen.cpp",
+    "third_party/nvfuser/runtime/block_reduction.cu",
+    "third_party/nvfuser/runtime/block_sync_atomic.cu",
+    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
+    "third_party/nvfuser/runtime/broadcast.cu",
+    "third_party/nvfuser/runtime/grid_reduction.cu",
+    "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     # generated files we shouldn't frob
@@ -157,7 +164,7 @@ if os.path.exists(gloo_cmake_file):
     do_write = False
     with open(gloo_cmake_file, "r") as sources:
         lines = sources.readlines()
-    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIBRARY_PATH") for line in lines]
+    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIB_PATH") for line in lines]
     if lines == newlines:
         print("%s skipped" % gloo_cmake_file)
     else:

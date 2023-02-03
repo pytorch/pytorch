@@ -4,12 +4,13 @@
 #include <torch/csrc/python_headers.h>
 
 struct THPStream {
-  PyObject_HEAD
-  uint64_t cdata;
+  PyObject_HEAD int64_t stream_id;
+  int64_t device_type;
+  int64_t device_index;
 };
-extern PyTypeObject *THPStreamClass;
+extern PyTypeObject* THPStreamClass;
 
-void THPStream_init(PyObject *module);
+void THPStream_init(PyObject* module);
 
 inline bool THPStream_Check(PyObject* obj) {
   return THPStreamClass && PyObject_IsInstance(obj, (PyObject*)THPStreamClass);

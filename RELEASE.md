@@ -11,15 +11,17 @@
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
+    - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
-  - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
+  - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
     - [Open Google Colab issue](#open-google-colab-issue)
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
     - [Triage](#triage)
+    - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
@@ -93,6 +95,7 @@ them:
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
+  * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
@@ -148,6 +151,16 @@ Release candidates are currently stored in the following places:
 
 Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://s3.console.aws.amazon.com/s3/buckets/pytorch-backup?region=us-east-1&tab=objects)
 
+### Release Candidate health validation
+
+Validate the release jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
+
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
+
 ### Cherry Picking Fixes
 
 Typically within a release cycle fixes are necessary for regressions, test fixes, etc.
@@ -175,7 +188,7 @@ Promotion should occur in two steps:
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
-## Additonal Steps to prepare for release day
+## Additional Steps to prepare for release day
 
 The following should be prepared for the release day
 
@@ -223,6 +236,18 @@ Patch releases should be considered if a regression meets the following criteria
 3. Triage reviewers will then add the issue / pull request to the related milestone (i.e. `1.9.1`) if the regressions if found to be within the [Patch Release Criteria](#patch-release-criteria)
     * ![adding to milestone](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
 
+### Issue Tracker for Patch releases
+
+For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority Github issue or a CI failure from previous RC. An example of this would look like:
+* https://github.com/pytorch/pytorch/issues/51886
+
+Only following issues are accepted:
+1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
+2. Low risk critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
+3. Fixes to new features being introduced in this release
+4. Documentation improvements
+5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers)
+
 ### Building a release schedule / cherry picking
 
 > Main POC: Patch Release Managers
@@ -253,7 +278,7 @@ For versions of Python that we support we follow the [NEP 29 policy](https://num
 
 ## Accelerator Software
 
-For acclerator software like CUDA and ROCm we will typically use the following criteria:
+For accelerator software like CUDA and ROCm we will typically use the following criteria:
 * Support latest 2 minor versions
 
 ### Special support cases
@@ -270,7 +295,7 @@ need to support these particular versions of software.
 
 In the event a submodule cannot be fast forwarded and a patch must be applied we can take two different approaches:
 
-* (preferred) Fork the said repository under the pytorch Github organization, apply the patches we need there, and then switch our submodule to accept our fork.
+* (preferred) Fork the said repository under the pytorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
 * Get the dependencies maintainers to support a release branch for us
 
 Editing submodule remotes can be easily done with: (running from the root of the git repository)

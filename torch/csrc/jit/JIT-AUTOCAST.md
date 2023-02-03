@@ -17,6 +17,7 @@
     - [Mixing eager mode and scripting autocast](#mixing-eager-mode-and-scripting-autocast)
     - [Mixing tracing and scripting autocast (script calling traced)](#mixing-tracing-and-scripting-autocast-script-calling-traced)
     - [Mixing tracing and scripting autocast (traced calling script)](#mixing-tracing-and-scripting-autocast-traced-calling-script)
+    - [Disabling eager autocast with scripted autocast](#disabling-eager-autocast-with-scripted-autocast)
 - [References](#references)
 
 <!-- /code_chunk_output -->
@@ -167,6 +168,25 @@ def traced(a, b):
 
 # running TorchScript with Autocast enabled is not supported
 torch.jit.trace(traced, (x, y))
+```
+
+#### Disabling eager autocast with scripted autocast
+
+If eager-mode autocast is enabled and we try to disable autocasting from
+within a scripted function, autocasting will still occur.
+
+```python
+@torch.jit.script
+def fn(a, b):
+    with autocast(enabled=False):
+        return torch.mm(a, b)
+
+x = torch.rand((2, 2), device='cuda', dtype=torch.float)
+y = torch.rand((2, 2), device='cuda', dtype=torch.float)
+
+# this will print half-precision dtype
+with autocast(enabled=True):
+    print(fn(x, y).dtype)
 ```
 
 ## References

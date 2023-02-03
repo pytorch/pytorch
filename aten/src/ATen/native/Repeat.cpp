@@ -1,7 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Repeat.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/repeat_interleave.h>
+#include <ATen/ops/repeat_interleave_native.h>
+#endif
 
 template <typename index_t>
 static void compute_cpu(
@@ -64,11 +75,11 @@ Tensor repeat_interleave(
   }
 
   Tensor repeats_ = repeats;
-  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.size(0) == 1)) {
-    repeats_ = repeats.reshape({1}).expand({input.size(dim.value())});
+  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.sym_size(0) == 1)) {
+    repeats_ = repeats.reshape({1}).expand_symint({input.sym_size(dim.value())});
   } else if (repeats.dim() == 1) {
     TORCH_CHECK(
-        repeats.size(0) == input.size(dim.value()),
+        repeats.sym_size(0) == input.sym_size(dim.value()),
         "repeats must have the same size as input along dim")
   } else {
     AT_ERROR("repeats must be 0-dim or 1-dim tensor");
@@ -91,10 +102,17 @@ Tensor repeat_interleave(
     int64_t repeats,
     c10::optional<int64_t> dim,
     c10::optional<int64_t> output_size) {
-  at::Tensor repeats_ =
-      at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
+  at::Tensor repeats_ = at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
   return at::native::repeat_interleave(self, repeats_, dim, output_size);
 }
+
+Tensor repeat_interleave_symint(
+    const Tensor& self,
+    c10::SymInt repeats,
+    c10::optional<int64_t> dim,
+    c10::optional<int64_t> output_size) {
+    return at::native::repeat_interleave(self, repeats.guard_int(__FILE__, __LINE__), dim, output_size);
+  }
 
 } // namespace native
 } // namespace at

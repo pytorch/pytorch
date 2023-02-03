@@ -1,4 +1,4 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at {

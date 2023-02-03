@@ -45,6 +45,7 @@ enum class Backend {
   XLA,
   Vulkan,
   Metal,
+  Meta,
   QuantizedCPU,
   QuantizedCUDA,
   QuantizedXPU,
@@ -53,6 +54,7 @@ enum class Backend {
   MPS,
   HPU,
   Lazy,
+  MTIA,
   PrivateUse1,
   NumOptions
 };
@@ -80,6 +82,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::Vulkan;
   } else if (t == DispatchKey::Metal) {
     return Backend::Metal;
+  } else if (t == DispatchKey::Meta) {
+    return Backend::Meta;
   } else if (t == DispatchKey::SparseCPU) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDA) {
@@ -108,6 +112,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
+  } else if (t == DispatchKey::MTIA) {
+    return Backend::MTIA;
   } else if (t == DispatchKey::PrivateUse1) {
     return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
@@ -159,6 +165,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::Vulkan;
     case Backend::Metal:
       return DispatchKey::Metal;
+    case Backend::Meta:
+      return DispatchKey::Meta;
     case Backend::QuantizedCPU:
       return DispatchKey::QuantizedCPU;
     case Backend::QuantizedCUDA:
@@ -169,6 +177,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MPS;
     case Backend::HPU:
       return DispatchKey::HPU;
+    case Backend::MTIA:
+      return DispatchKey::MTIA;
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
     default:
@@ -221,10 +231,14 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::Vulkan;
     case Backend::Metal:
       return DeviceType::Metal;
+    case Backend::Meta:
+      return DeviceType::Meta;
     case Backend::MPS:
       return DeviceType::MPS;
     case Backend::HPU:
       return DeviceType::HPU;
+    case Backend::MTIA:
+      return DeviceType::MTIA;
     case Backend::PrivateUse1:
       return DeviceType::PrivateUse1;
     case Backend::Undefined:
@@ -279,6 +293,8 @@ static inline const char* toString(Backend b) {
       return "Vulkan";
     case Backend::Metal:
       return "Metal";
+    case Backend::Meta:
+      return "Meta";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
     case Backend::QuantizedCUDA:
@@ -287,6 +303,8 @@ static inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::HPU:
       return "HPU";
+    case Backend::MTIA:
+      return "MTIA";
     case Backend::PrivateUse1:
       return "PrivateUseOne";
     default:

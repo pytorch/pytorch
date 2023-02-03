@@ -491,7 +491,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 struct KernelWithDictOutput final : OperatorKernel {
@@ -546,7 +546,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTupleInput_with
   std::tuple<string, int64_t, float> tup{"foobar", 123, 420.1337};
   auto outputs = callOp(*op, tup);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("foobar", outputs[0].toString()->string());
+  EXPECT_EQ("foobar", outputs[0].toStringRef());
 }
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCacheIsKeptCorrectly) {
@@ -774,7 +774,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
   EXPECT_EQ(3, outputs.size());
   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
-  EXPECT_EQ("text", outputs[2].toString()->string());
+  EXPECT_EQ("text", outputs[2].toStringRef());
 
   outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(3, outputs.size());

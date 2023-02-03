@@ -1,10 +1,40 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cdist_backward_native.h>
+#include <ATen/ops/_cdist_forward.h>
+#include <ATen/ops/_cdist_forward_native.h>
+#include <ATen/ops/_euclidean_dist.h>
+#include <ATen/ops/_euclidean_dist_native.h>
+#include <ATen/ops/_pdist_backward_native.h>
+#include <ATen/ops/_pdist_forward.h>
+#include <ATen/ops/_pdist_forward_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cdist_native.h>
+#include <ATen/ops/cosine_similarity_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/norm.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/pairwise_distance_native.h>
+#include <ATen/ops/pdist_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+
+#include <utility>
+#endif
 
 namespace at { namespace native {
 
@@ -39,8 +69,8 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   Tensor x1_pad = at::ones_like(x1_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor x2_norm = x2.pow(2).sum(-1, true);
   Tensor x2_pad = at::ones_like(x2_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor x1_ = at::cat({x1.mul(-2), x1_norm, x1_pad}, -1);
-  Tensor x2_ = at::cat({x2, x2_pad, x2_norm}, -1);
+  Tensor x1_ = at::cat({x1.mul(-2), std::move(x1_norm), std::move(x1_pad)}, -1);
+  Tensor x2_ = at::cat({x2, std::move(x2_pad), std::move(x2_norm)}, -1);
   Tensor result = x1_.matmul(x2_.mT());
   result.clamp_min_(0).sqrt_();
   return result;
@@ -94,7 +124,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   Tensor tensor1_expanded = x1.expand(tensor1_expand_size).contiguous().view(tensor1_view);
   Tensor tensor2_expanded = x2.expand(tensor2_expand_size).contiguous().view(tensor2_view);
 
-  std::vector<int64_t> output_shape(expand_batch_portion);
+  std::vector<int64_t> output_shape(std::move(expand_batch_portion));
   output_shape.insert(output_shape.end(), {r1, r2});
 
   Tensor result;

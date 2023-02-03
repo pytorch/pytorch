@@ -78,7 +78,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
@@ -92,6 +92,10 @@ endif()
 if(MSVC)
   # skip unwanted includes from windows.h
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+
+  # Windows SDK broke compatibility since version 25131, but introduced this define for backward compatibility.
+  add_definitions(-D_UCRT_LEGACY_INFINITY)
+
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
@@ -183,22 +187,22 @@ if(BLAS STREQUAL "Eigen")
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS cblas)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenBLAS_LIB})
   set(BLAS_INFO "open")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${OpenBLAS_LIB})
 elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLIS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
@@ -225,19 +229,24 @@ elseif(BLAS STREQUAL "MKL")
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
   set(BLAS_INFO "veclib")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
 elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  find_library(BLAS_LIBRARIES blas)
+  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+    set(GENERIC_BLAS "blas")
+  else()
+    set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
+  endif()
+  find_library(BLAS_LIBRARIES NAMES ${GENERIC_BLAS})
   message("-- Using BLAS: ${BLAS_LIBRARIES}")
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
   set(GENERIC_BLAS_FOUND TRUE)
   set(BLAS_INFO "generic")
   set(BLAS_FOUND 1)
@@ -817,8 +826,9 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
-        # See https://github.com/pytorch/pytorch/issues/74352
-        target_compile_options(asmjit PRIVATE -Wno-deprecated-copy -Wno-unused-but-set-variable)
+      # See https://github.com/pytorch/pytorch/issues/74352
+      target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
+      target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     endif()
   endif()
 
@@ -949,6 +959,19 @@ if(USE_FFMPEG)
   else()
     message("Not compiling with FFmpeg. Suppress this warning with -DUSE_FFMPEG=OFF")
     caffe2_update_option(USE_FFMPEG OFF)
+  endif()
+endif()
+
+if(USE_ITT)
+  find_package(ITT)
+  if(ITT_FOUND)
+    include_directories(SYSTEM ${ITT_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${ITT_LIBRARIES})
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ITT_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with ITT. Suppress this warning with -DUSE_ITT=OFF")
+    set(USE_ITT OFF CACHE BOOL "" FORCE)
+    caffe2_update_option(USE_ITT OFF)
   endif()
 endif()
 
@@ -1095,7 +1118,7 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(USE_SYSTEM_BIND11)
+if(USE_SYSTEM_PYBIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
@@ -1225,6 +1248,16 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
+# ---[ Kernel asserts
+# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
+# For ROCm, it can be enabled by setting ROCM_FORCE_ENABLE_GPU_ASSERTS
+if(USE_ROCM AND ROCM_FORCE_ENABLE_GPU_ASSERTS)
+  message(STATUS "Forcefully enabling kernel asserts on ROCM")
+elseif(USE_ROCM AND NOT ROCM_FORCE_ENABLE_GPU_ASSERTS)
+  message(STATUS "Disabling kernel asserts for ROCm")
+  caffe2_update_option(TORCH_DISABLE_GPU_ASSERTS ON)
+endif()
+
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
@@ -1247,6 +1280,21 @@ endif()
 
 # ---[ HIP
 if(USE_ROCM)
+  # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
+  # Currently only active for Ubuntu 20.04 and greater versions.
+  if(UNIX AND EXISTS "/etc/os-release")
+    file(STRINGS /etc/os-release OS_RELEASE)
+    string(REGEX REPLACE "NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
+    string(REGEX REPLACE ".*VERSION_ID=\"([0-9\.]+).*" "\\1" OS_VERSION ${OS_RELEASE})
+    if(OS_DISTRO STREQUAL "Ubuntu" AND OS_VERSION VERSION_GREATER_EQUAL "20.04")
+      find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
+      if(LIBTINFO_LOC)
+        get_filename_component(LIBTINFO_LOC_PARENT ${LIBTINFO_LOC} DIRECTORY)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath-link,${LIBTINFO_LOC_PARENT}")
+      endif()
+    endif()
+  endif()
+
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -1273,7 +1321,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -std=c++14)
+    list(APPEND HIP_CXX_FLAGS -std=c++17)
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1317,7 +1365,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
@@ -1349,6 +1397,16 @@ if(USE_NCCL)
   elseif(USE_ROCM)
     include(${CMAKE_CURRENT_LIST_DIR}/External/rccl.cmake)
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
+  endif()
+endif()
+
+# ---[ UCC
+if(USE_UCC)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(WARNING "UCC is currently only supported under Linux.")
+    caffe2_update_option(USE_UCC OFF)
+  else()
+    include(${CMAKE_CURRENT_LIST_DIR}/External/ucc.cmake)
   endif()
 endif()
 
@@ -1409,6 +1467,11 @@ if(USE_GLOO)
       if(USE_DISTRIBUED AND USE_TENSORPIPE)
         get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
         set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
+      if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
+        # Tell Gloo build system to use bundled NCCL, see
+        # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
+        set(NCCL_EXTERNAL ON)
       endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
@@ -1522,6 +1585,9 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+    if(NOT MSVC)
+      set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
+    endif()
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
@@ -1568,10 +1634,8 @@ function(add_onnx_tensorrt_subdir)
   set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
   set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
   set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
-  if(FIND_CUDA_MODULE_DEPRECATED)
-    # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
-    set(CMAKE_VERSION "3.9.0")
-  endif()
+  # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
+  set(CMAKE_VERSION "3.9.0")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
   set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
 endfunction()
@@ -1617,19 +1681,7 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
-  if(NOT MSVC)
-    if(CMAKE_VERSION VERSION_LESS "3.1")
-      set(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-    else()
-      set(CMAKE_C_STANDARD 11)
-    endif()
-  endif()
-
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 14)
-  endif()
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
@@ -1637,16 +1689,12 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 
-  if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
-                                   " -D__CUDA_NO_HALF_OPERATORS__"
-                                   " -D__CUDA_NO_HALF_CONVERSIONS__"
-                                   " -D__CUDA_NO_HALF2_OPERATORS__"
-                                   " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-  else()
-    message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
-  endif()
+  message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                                 " -D__CUDA_NO_HALF_OPERATORS__"
+                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
+                                 " -D__CUDA_NO_HALF2_OPERATORS__"
+                                 " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
   string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
@@ -1742,7 +1790,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
-  set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1758,11 +1805,11 @@ if(NOT INTERN_BUILD_MOBILE)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       if(BUILD_CAFFE2_OPS)
-        set(CAFFE2_USE_MKLDNN ON)
-        list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)
+        list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
       endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
+      caffe2_update_option(USE_MKLDNN OFF)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
@@ -1894,6 +1941,7 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
+        ${CUDA_SOURCE_DIR}/lib
         ${CUDA_SOURCE_DIR}/lib64
         NO_DEFAULT_PATH)
 
@@ -1956,6 +2004,11 @@ if(USE_KINETO)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
+  endif()
+  if(LIBKINETO_NOROCTRACER)
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOROCTRACER")
+  endif()
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
     message(STATUS "Configured Kineto (CPU)")
   else()
     message(STATUS "Configured Kineto")

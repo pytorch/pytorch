@@ -9,9 +9,6 @@ namespace mps {
   void MPSGuardImpl::createEvent(
     mpsEvent_t* event,
     const EventFlag flag) const {
-    id<MTLDevice> mtl_device = MPSDevice::getInstance()->device();
-    // when static casting we already create an _event object.
-    auto mps_event = static_cast<mpsEvent_t>(*event);
   }
 
   void MPSGuardImpl::destroyEvent(
@@ -38,7 +35,7 @@ namespace mps {
 
     auto mps_event = static_cast<mpsEvent_t>(*event);
     MPSStream mps_stream{stream};
-    mps_event->recordEvent(&mps_stream);
+    mps_event->recordEvent(true);
   }
 
   void MPSGuardImpl::block(
@@ -48,7 +45,7 @@ namespace mps {
     auto mps_event = static_cast<mpsEvent_t>(event);
     MPSStream mps_stream{stream};
 
-    mps_event->waitForEvent(&mps_stream);
+    mps_event->waitForEvent(true);
   }
 
   bool MPSGuardImpl::queryEvent(void* event) const {

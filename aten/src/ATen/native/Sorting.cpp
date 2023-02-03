@@ -1,14 +1,49 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/argsort_native.h>
+#include <ATen/ops/broadcast_tensors.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/kthvalue.h>
+#include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/masked_fill.h>
+#include <ATen/ops/median.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/msort_native.h>
+#include <ATen/ops/nanmedian.h>
+#include <ATen/ops/nanmedian_native.h>
+#include <ATen/ops/nanquantile_native.h>
+#include <ATen/ops/quantile_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/sort.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/topk_native.h>
+#endif
 
 #include <utility>
 
@@ -29,7 +64,7 @@ TORCH_META_FUNC(topk)
   // Build the output size, which is the dim being selected set to
   // size k
   DimVector topKSize(self.sizes().vec());
-  if (topKSize.size() > 0) {
+  if (!topKSize.empty()) {
     topKSize[dim] = k;
   }
   set_output_raw_strided(0, topKSize, {}, self.options());
@@ -225,9 +260,9 @@ Tensor quantile_compute(
   // NOTE: this check is only performed when running on the CPU to avoid
   // synchronizing an accelerator with the CPU
   if (self.device().is_cpu()) {
-    TORCH_CHECK(
-        q.ge(0).logical_and_(q.le(1)).all().item<bool>(),
-        "quantile() q values must be in the range [0, 1]");
+    auto all_q_in_range = q.ge(0).logical_and_(q.le(1)).all();
+    TORCH_CHECK(at::is_scalar_tensor_true(all_q_in_range),
+                "quantile() q values must be in the range [0, 1]");
   }
 
   // Flatten input if no dim provided else move dim to reduce as last dimension.
@@ -263,7 +298,16 @@ Tensor quantile_compute(
     // For nanquantile, compute ranks based on number of non-nan values.
     // If all values are nan, set rank to 0 so the quantile computed is nan.
     ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
-    ranks.masked_fill_(ranks < 0, 0);
+    // For Composite Compliance,
+    // if `ranks` is `CCT` but it's tangent is a regular Tensor,
+    // then while computing jvp, we end calling `masked_fill_`
+    // on a regular Tensor with CCT args, so we call
+    // `masked_fill` instead.
+    if (isTensorSubclassLike(ranks) && ranks._fw_grad(/*level=*/0).defined()) {
+      ranks = ranks.masked_fill(ranks < 0, 0);
+    } else {
+      ranks.masked_fill_(ranks < 0, 0);
+    }
   } else {
     // For quantile, compute ranks based on reduction size. If there is nan
     // set rank to last index so the quantile computed will be nan.
@@ -296,7 +340,23 @@ Tensor quantile_compute(
     // Interpolate to compute quantiles and store in values_below
     Tensor ranks_above = ranks.ceil_().toType(kLong);
     Tensor values_above = sorted.gather(-1, ranks_above);
-    values_below.lerp_(values_above, weights);
+    // For Composite Compliance,
+    // if either `values_below`, `values_above` or `weights` are a CCT
+    // or tangents of `value_above` and `weights` are a CCT,
+    // but if the tangent of `value_below` is a regular Tensor,
+    // then while computing jvp, we will end-up copying a `CCT`,
+    // into regular Tensor. So we use out-of-place variant of `lerp`
+    auto is_primal_cct =
+        areAnyTensorSubclassLike({values_below, values_above, weights});
+    auto is_tangent_cct = areAnyTensorSubclassLike(
+        {values_above._fw_grad(/*level=*/0), weights._fw_grad(/*level=*/0)});
+    if ((is_primal_cct || is_tangent_cct) &&
+        values_below._fw_grad(/*level=*/0).defined() &&
+        !isTensorSubclassLike(values_below._fw_grad(/*level=*/0))) {
+      values_below = values_below.lerp(values_above, weights);
+    } else {
+      values_below.lerp_(values_above, weights);
+    }
   }
 
   if (q.dim() == 0) {
@@ -334,7 +394,7 @@ void quantile_out_impl(
   resize_output(out, out_shape);
 
   auto quantile = quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
   out.copy_(quantile);
 }
 
@@ -352,7 +412,7 @@ Tensor quantile_impl(
   auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
 
   return quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
@@ -888,20 +948,13 @@ TORCH_IMPL_FUNC(sort_stable_out)
  bool descending,
  const Tensor& values,
  const Tensor& indices) {
+  values.copy_(self);
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
-    values.copy_(self);
     indices.zero_();
   } else {
-    // compare on acc type for reduced precision
-    if (self.scalar_type() == kBFloat16) {
-      Tensor values_acc = self.toType(kFloat);
-      sort_stub(self.device().type(), self, values_acc, indices, dim, descending, stable.value());
-      values.copy_(values_acc);
-    } else {
-      values.copy_(self);
-      sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
-    }
+    dim = maybe_wrap_dim(dim, self.dim());
+    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
   }
 }
 
@@ -933,6 +986,10 @@ Tensor msort(const Tensor& self) {
 
 Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
+}
+
+Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+  return std::get<1>(at::sort(self, stable, dim, descending));
 }
 
 

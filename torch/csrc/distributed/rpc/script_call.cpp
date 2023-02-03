@@ -143,7 +143,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
   auto symbol = at::Symbol::fromQualString(schema.name());
 
   for (auto op : torch::jit::getAllOperatorsFor(symbol)) {
-    if (toString(op->schema()).compare(str_schema) == 0) {
+    if (toString(op->schema()) == str_schema) {
       return op;
     }
   }

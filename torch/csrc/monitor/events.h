@@ -4,8 +4,8 @@
 #include <string>
 #include <unordered_map>
 
-#include <c10/util/variant.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/variant.h>
 
 namespace torch {
 namespace monitor {

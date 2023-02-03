@@ -41,6 +41,7 @@
 
 namespace c10{
 template<class T> class List;
+template<class T> class IListRef;
 }
 namespace at {
 struct Generator;
@@ -65,6 +66,7 @@ namespace at {
 class OptionalTensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+using ITensorList = c10::IListRef<Tensor>;
 
 using Stream = c10::Stream;
 
@@ -122,16 +124,23 @@ class TORCH_API Tensor: public TensorBase {
   Tensor conj() const {
     if (!this->is_complex()) {
       return *this;
-    } else {
-      if (this->is_sparse()) {
+    }
+
+    switch (this->layout()) {
+      case at::kSparse:
+      case at::kSparseCsr:
+      case at::kSparseCsc:
+      case at::kSparseBsr:
+      case at::kSparseBsc:
         return this->conj_physical();
-      }
-      return this->_conj();
+      default:
+        return this->_conj();
     }
   }
 
   // Aliased by Dimname overloads, so need explicit using
   using TensorBase::size;
+  using TensorBase::sym_size;
   using TensorBase::stride;
 
   /// Should be used if *this can reasonably be expected to be contiguous and
@@ -187,7 +196,7 @@ class TORCH_API Tensor: public TensorBase {
     impl_ = x.getIntrusivePtr();
     return *this;
   }
-  Tensor& operator=(TensorBase&& x) & {
+  Tensor& operator=(TensorBase&& x) & noexcept {
     impl_ = x.unsafeReleaseIntrusivePtr();
     return *this;
   }
@@ -195,11 +204,11 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator=(const Tensor &x) & {
     return operator=(static_cast<const TensorBase&>(x));
   }
-  Tensor& operator=(Tensor &&x) & {
+  Tensor& operator=(Tensor &&x) & noexcept {
     return operator=(static_cast<TensorBase&&>(x));
   }
 
-  Tensor& operator=(Scalar v) && {
+  Tensor& operator=(const Scalar &v) && {
     return fill_(v);
   }
   Tensor& operator=(const Tensor &rhs) && {
@@ -257,25 +266,25 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator+=(const Tensor & other) {
     return add_(other);
   }
-  Tensor& operator+=(Scalar other) {
+  Tensor& operator+=(const Scalar & other) {
     return add_(other);
   }
   Tensor& operator-=(const Tensor & other) {
     return sub_(other);
   }
-  Tensor& operator-=(Scalar other) {
+  Tensor& operator-=(const Scalar & other) {
     return sub_(other);
   }
   Tensor& operator*=(const Tensor & other) {
     return mul_(other);
   }
-  Tensor& operator*=(Scalar other) {
+  Tensor& operator*=(const Scalar & other) {
     return mul_(other);
   }
   Tensor& operator/=(const Tensor & other) {
     return div_(other);
   }
-  Tensor& operator/=(Scalar other) {
+  Tensor& operator/=(const Scalar & other) {
     return div_(other);
   }
   Tensor& operator&=(const Tensor & other) {
@@ -287,13 +296,13 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator^=(const Tensor & other) {
     return bitwise_xor_(other);
   }
-  Tensor operator[](Scalar index) const {
+  Tensor operator[](const Scalar & index) const {
     if (!index.isIntegral(false)) {
       TORCH_CHECK_INDEX(false, "Can only index tensors with integral scalars");
     }
     return this->operator[](index.toLong());
   }
-  Tensor operator[](Tensor index) const {
+  Tensor operator[](const Tensor & index) const {
     // These properties are checked in the Scalar constructor, but we already
     // check them here to provide more useful diagnostics for the user.
     if (!index.defined()) {
@@ -568,9 +577,9 @@ class TORCH_API Tensor: public TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
 
   /// Registers a backward hook.
   ///

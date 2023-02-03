@@ -23,6 +23,7 @@ PropagateGradientsReq::PropagateGradientsReq(
 c10::intrusive_ptr<Message> PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
+  ivalues.reserve(grads_.size() + 3);
   for (const auto& grad : grads_) {
     ivalues.emplace_back(grad);
   }
@@ -73,12 +74,12 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
 
   // Retrieve the gradient tensors.
   std::vector<Variable> grads(tupleElements.size() - 3);
-  for(const auto i : c10::irange(tupleElements.size() - 3)) {
+  for (const auto i : c10::irange(tupleElements.size() - 3)) {
     grads[i] = tupleElements[i].toTensor();
   }
 
   return std::make_unique<PropagateGradientsReq>(
-    autogradMetadata, grads, retainGraph);
+      autogradMetadata, grads, retainGraph);
 }
 
 const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {

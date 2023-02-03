@@ -17,6 +17,7 @@
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 
+#include <c10/util/Logging.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
@@ -249,9 +250,9 @@ class FullyConnectedPruneGradientOp : public Operator<Context> {
     auto& thres = Input(6);
     // TODO(wyiming): check comp_lb is a float
     auto& comp_lb = Input(7);
-    DCHECK_GE(X.dim(), 1);
-    DCHECK_GE(W.dim(), 2);
-    DCHECK_LE(dY.dim(), 2);
+    TORCH_DCHECK_GE(X.dim(), 1);
+    TORCH_DCHECK_GE(W.dim(), 2);
+    TORCH_DCHECK_LE(dY.dim(), 2);
     // batch size
     int M = X.dim() > 1 ? X.dim32(0) : 1;
     // Feature dimension
@@ -263,17 +264,17 @@ class FullyConnectedPruneGradientOp : public Operator<Context> {
     // TODO(wyiming): this threshold should be
     // based on distribution of the layer weight
     float thr = 0.01;
-    DCHECK_EQ(Mask.dim32(0), W.dim32(0));
-    DCHECK_EQ(Mask.dim32(1), W.dim32(1));
-    DCHECK_EQ(Ag_dW.dim32(0), W.dim32(0));
-    DCHECK_EQ(Ag_dW.dim32(1), W.dim32(1));
-    DCHECK_EQ(K, W.numel() / W.dim32(0));
+    TORCH_DCHECK_EQ(Mask.dim32(0), W.dim32(0));
+    TORCH_DCHECK_EQ(Mask.dim32(1), W.dim32(1));
+    TORCH_DCHECK_EQ(Ag_dW.dim32(0), W.dim32(0));
+    TORCH_DCHECK_EQ(Ag_dW.dim32(1), W.dim32(1));
+    TORCH_DCHECK_EQ(K, W.numel() / W.dim32(0));
     if (dY.dim() > 1) {
-      DCHECK_EQ(M, dY.dim32(0));
-      DCHECK_EQ(N, dY.dim32(1));
+      TORCH_DCHECK_EQ(M, dY.dim32(0));
+      TORCH_DCHECK_EQ(N, dY.dim32(1));
     } else {
-      DCHECK_EQ(X.dim(), 1);
-      DCHECK_EQ(N, dY.numel());
+      TORCH_DCHECK_EQ(X.dim(), 1);
+      TORCH_DCHECK_EQ(N, dY.numel());
     }
 
     auto* dW = Output(0, W.sizes(), at::dtype<T>());

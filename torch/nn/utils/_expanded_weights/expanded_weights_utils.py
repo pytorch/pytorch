@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 from .expanded_weights_impl import ExpandedWeight
 
@@ -22,12 +24,10 @@ def forward_helper(func, expanded_args, expanded_kwargs):
 
     Args:
         func: The function to be called
-        ctx: The context from the autograd.Function object. Will be used to save
-          computed state from the forward pass
         expanded_args: Arguments to be passed to :attr:`func`. Will include arguments
           that need to be unpacked because they are ExpandedWeights
-        num_true_outs: The number of outputs seen by the user since some functions
-          return auxillary data that is only used in the backward pass
+        expanded_kwargs: Keyword arguments to be passed to :attr:`func`.
+          Similar to :attr:`expanded_args`.
     '''
     unexpanded_args, unexpanded_kwargs = _check_and_unexpand_args(func, expanded_args, expanded_kwargs)
     return func(*unexpanded_args, **unexpanded_kwargs)
@@ -52,18 +52,34 @@ def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
             raise RuntimeError("Expected ExpandedWeights to have batch size matching input but got "
                                f"input batch size of {batch_size} with ExpandedWeight of batch size {arg.batch_size}")
 
+    loss_reduction: Optional[str] = None
+    for arg in expanded_args + tuple(expanded_kwargs.values()):
+        if isinstance(arg, ExpandedWeight):
+            if loss_reduction is None:
+                loss_reduction = arg.loss_reduction
+            elif loss_reduction != arg.loss_reduction:
+                raise RuntimeError("Expected ExpandedWeights to all have the same loss_reduction argument but got one"
+                                   f"with {loss_reduction} and one with {arg.loss_reduction}")
+
     unexpanded_args = tuple(arg.orig_weight if isinstance(arg, ExpandedWeight) else arg for arg in expanded_args)
     unexpanded_kwargs = {name: arg.orig_weight if isinstance(arg, ExpandedWeight) else arg
                          for (name, arg) in expanded_kwargs.items()}
     return unexpanded_args, unexpanded_kwargs
 
+def maybe_scale_by_batch_size(grad_sample, expanded_weight):
+    if expanded_weight.loss_reduction == "mean":
+        return grad_sample * expanded_weight.batch_size
+    else:
+        return grad_sample
+
 def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
+        grad_sample_contribution = maybe_scale_by_batch_size(per_sample_grad_fn(unpacked), maybe_expanded_weight)
         if hasattr(unpacked, "grad_sample") and unpacked.grad_sample is not None:
-            unpacked.grad_sample = unpacked.grad_sample + per_sample_grad_fn(unpacked)
+            unpacked.grad_sample = unpacked.grad_sample + grad_sample_contribution
         else:
-            unpacked.grad_sample = per_sample_grad_fn(unpacked)
+            unpacked.grad_sample = grad_sample_contribution
 
 def unpack_expanded_weight_or_tensor(maybe_expanded_weight, func=lambda x: x):
     if isinstance(maybe_expanded_weight, ExpandedWeight):

@@ -30,7 +30,7 @@ class Stream(torch._C._CudaStreamBase):
 
     def __new__(cls, device=None, priority=0, **kwargs):
         # setting device manager is expensive, so we avoid it unless necessary
-        if device is None or "_cdata" in kwargs:
+        if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
         else:
             with torch.cuda.device(device):
@@ -134,7 +134,7 @@ class ExternalStream(Stream):
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
         with torch.cuda.device(device):
-            return super(Stream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
+            return super(ExternalStream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
 class Event(torch._C._CudaEventBase):

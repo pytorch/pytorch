@@ -48,25 +48,33 @@
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 
-#include <ATen/ATen.h>
 #include <ATen/TracerMode.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace cpp_custom_type_hack {
 
 template <typename T>
-[[deprecated("Use custom classes instead: "
-  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
-bool isa(const Tensor& packed) {
+[[deprecated(
+    "Use custom classes instead: "
+    "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]] bool
+isa(const Tensor& packed) {
   return (packed.scalar_type() == kByte) &&
       (packed.storage().data_ptr().get_deleter() ==
        caffe2::TypeMeta::Make<T>().deleteFn());
 }
 
 template <typename T>
-[[deprecated("Use custom classes instead: "
-  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
-T& cast(const Tensor& packed) {
+[[deprecated(
+    "Use custom classes instead: "
+    "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]] T&
+cast(const Tensor& packed) {
   TORCH_CHECK(
       packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
   TORCH_CHECK(
@@ -78,11 +86,12 @@ T& cast(const Tensor& packed) {
 }
 
 template <typename T>
-[[deprecated("Use custom classes instead: "
-  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
-Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
+[[deprecated(
+    "Use custom classes instead: "
+    "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]] Tensor
+create(std::unique_ptr<T> ptr, TensorOptions options) {
   // None of this should trace, so turn off Tracer dispatching
-  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   // We store this instance away in a Tensor and register a deleter function
