@@ -78,7 +78,6 @@ fi
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
-TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 _UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
 _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 
@@ -86,18 +85,6 @@ _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
-    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
-    CUDNN_VERSION=8
-    TENSORRT_VERSION=8.0.1.6
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    CONDA_CMAKE=yes
-    ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
@@ -124,8 +111,21 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     ;;
+  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.8.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    ;;
   pytorch-linux-focal-py3-clang7-asan)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -133,7 +133,7 @@ case "$image" in
     CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
@@ -150,8 +150,18 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-bionic-py3.7-clang9)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-bionic-py3.8-clang9)
+    ANACONDA_PYTHON_VERSION=3.8
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    VULKAN_SDK_VERSION=1.2.162.1
+    SWIFTSHADER=yes
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-bionic-py3.11-clang9)
+    ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -168,37 +178,7 @@ case "$image" in
     VISION=yes
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.7
-    CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
-    CUDA_VERSION=10.2
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-focal-rocm5.2-py3.8)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=5.2
-    NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
-    ;;
-  pytorch-linux-focal-rocm5.3-py3.8)
+  pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
@@ -208,8 +188,18 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-focal-py3.7-gcc7)
-    ANACONDA_PYTHON_VERSION=3.7
+  pytorch-linux-focal-rocm-n-py3)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.4.2
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-focal-py3.8-gcc7)
+    ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -229,6 +219,15 @@ case "$image" in
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.7
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.8
     CUDNN_VERSION=8
     CLANG_VERSION=12
     PROTOBUF=yes
@@ -273,12 +272,6 @@ case "$image" in
   ;;
 esac
 
-# Set Jenkins UID and GID if running Jenkins
-if [ -n "${JENKINS:-}" ]; then
-  JENKINS_UID=$(id -u jenkins)
-  JENKINS_GID=$(id -g jenkins)
-fi
-
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 #when using cudnn version 8 install it separately from cuda
@@ -295,17 +288,12 @@ fi
 docker build \
        --no-cache \
        --progress=plain \
-       --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "THRIFT=${THRIFT:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
-       --build-arg "EC2=${EC2:-}" \
-       --build-arg "JENKINS=${JENKINS:-}" \
-       --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
-       --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \

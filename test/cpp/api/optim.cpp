@@ -435,8 +435,7 @@ TEST(OptimTest, ZeroGrad) {
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(parameter.grad().defined());
-    ASSERT_EQ(parameter.grad().sum().item<float>(), 0);
+    ASSERT_FALSE(parameter.grad().defined());
   }
 }
 

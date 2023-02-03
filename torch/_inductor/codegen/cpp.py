@@ -6,7 +6,6 @@ import sys
 from copy import copy, deepcopy
 from pathlib import Path
 from typing import Dict, List
-from unittest.mock import patch
 
 import sympy
 
@@ -179,7 +178,7 @@ class CppPrinter(ExprPrinter):
             x = f"({x} / {div})"
         return f"{x} % {mod}"
 
-    def _print_IndexingDiv(self, expr):
+    def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
@@ -223,6 +222,16 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def exp(x):
         return f"{x}.exp()"
+
+    @staticmethod
+    def exp2(x):
+        return f"{x}.exp2()"
+
+    @staticmethod
+    def expm1(x):
+        # decompose for a better performance
+        vec_one = f"decltype({x})(1)"
+        return f"{x}.exp() - {vec_one}"
 
     @staticmethod
     def erf(x):
@@ -299,6 +308,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
+
+    @staticmethod
+    def tan(a):
+        return f"{a}.tan()"
 
     @staticmethod
     def tanh(a):
@@ -391,10 +404,6 @@ class CppVecOverrides(OpOverrides):
         return f"({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"{x}.expm1()"
-
-    @staticmethod
     def log1p(x):
         return f"{x}.log1p()"
 
@@ -425,6 +434,14 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def exp2(x):
+        return f"std::exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def erf(x):
         return f"std::erf({x})"
 
@@ -441,8 +458,8 @@ class CppOverrides(OpOverrides):
         return f"std::log1p({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"std::expm1({x})"
+    def tan(x):
+        return f"std::tan({x})"
 
     @staticmethod
     def tanh(x):
@@ -526,6 +543,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if dtype in (torch.float16, torch.bfloat16):
+            # Since load promotes all half-precision inputs to float, constants
+            # must be promoted as well
+            dtype = torch.float32
+
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -543,26 +565,29 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
-        var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
-        elif other == float("inf"):
-            code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
-        elif isinstance(other, bool):
-            if other:
-                code.writeline(f"auto {var} = true;")
-            else:
-                code.writeline(f"auto {var} = false;")
-        elif isinstance(other, float):
-            code.writeline(f"float {var} = {other};")
-        else:
-            code.writeline(f"auto {var} = {other!r};")
-        code.writeline(f"if({mask})")
+
+        # Write masked operation into a lambda
+        body_var = V.kernel.cse.newvar()
+        code.writeline(f"auto {body_var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            code.writeline(f"{var} = {result};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        # Use the lambda's return type as the type of other
+        type = f"decltype({body_var}())"
+
+        if other == float("-inf"):
+            other_code = f"-std::numeric_limits<{type}>::infinity()"
+        elif other == float("inf"):
+            other_code = "std::numeric_limits<{type}>::infinity()"
+        elif isinstance(other, bool):
+            other_code = f"static_cast<{type}>({str(other).lower()})"
+        else:
+            other_code = f"static_cast<{type}>({repr(other)})"
+
+        return f"{mask} ? {body_var}() : {other_code}"
 
     @staticmethod
     def logical_and(a, b):
@@ -1399,7 +1424,7 @@ class CppKernelProxy(CppKernel):
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
-        with patch.object(torch._inductor.config, "inplace_buffers", False):
+        with torch._inductor.config.patch(inplace_buffers=False):
 
             with CppVecKernelChecker(
                 deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
@@ -1673,7 +1698,7 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
+            main_loop_range = ir.FloorDiv(self.size, sympy_factor)
             main_loop = LoopLevel(self.var, main_loop_range)
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
@@ -1710,10 +1735,12 @@ class LoopLevel:
 
     def clone(self):
         loop = copy(self)
+        loop.inner = []
         if self.inner:
-            for idx, inner_loop in enumerate(self.inner):
-                loop.inner[idx] = inner_loop.clone()
-                loop.inner[idx].parent = loop
+            for inner_loop in self.inner:
+                inner_loop_clone = inner_loop.clone()
+                inner_loop_clone.parent = loop
+                loop.inner.append(inner_loop_clone)
         loop.kernel = deepcopy(self.kernel)
         return loop
 

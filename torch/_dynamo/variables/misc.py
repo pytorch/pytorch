@@ -6,7 +6,7 @@ from typing import Dict, List
 import torch._C
 from torch._guards import Guard, GuardSource
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -306,6 +306,8 @@ class ContextWrappingVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         assert len(args) == 1
+        if isinstance(args[0], NestedUserFunctionVariable):
+            args[0] = UserFunctionVariable(args[0].get_function())
         assert isinstance(args[0], UserMethodVariable) or isinstance(
             args[0], UserFunctionVariable
         )
@@ -548,6 +550,16 @@ class BlackHoleVariable(VariableTracker):
         )
 
 
+class AutogradFunctionContextVariable(VariableTracker):
+    """
+    A autograd.function context used after graph break in forward.
+    Any call method on this context object will be graph break.
+    The is different from BlackHoleVariable which is only used in inference mode.
+    """
+
+    pass
+
+
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
         super(LambdaVariable, self).__init__(**kwargs)
@@ -570,8 +582,12 @@ class GetAttrVariable(VariableTracker):
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
+    @staticmethod
+    def create_getattr_proxy(base_proxy: torch.fx.Proxy, attr):
+        return getattr(base_proxy, attr)
+
     def as_proxy(self):
-        return getattr(self.obj.as_proxy(), self.name)
+        return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
@@ -700,9 +716,7 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(
-                f"call {config.dynamo_import}.disable() wrapped function {self.value}"
-            )
+            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)
