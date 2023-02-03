@@ -12,6 +12,7 @@ import torch.jit._trace
 import torch.serialization
 from torch.onnx import _constants, _exporter_states, errors
 from torch.onnx._internal import _beartype, jit_utils, registration
+import dataclasses
 
 
 @_beartype.beartype
@@ -287,3 +288,20 @@ def _find_onnxscript_op(
                 else None,
             )
     return onnx_function_list, included_node_func
+
+def _update_option_with_kwargs(options, kwargs):
+    """
+
+    Move options arguments from keyword arguments to option object to reduce argument passing complexity.
+
+    """
+    names = set([f.name for f in dataclasses.fields(options)])
+    keywords_to_pop = []
+    for k, v in kwargs.items():
+        if k in names:
+            setattr(options, k, v)
+            keywords_to_pop.append(k)
+    for k in keywords_to_pop:
+        kwargs.pop(k)
+
+    return options, kwargs

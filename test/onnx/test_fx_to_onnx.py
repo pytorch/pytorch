@@ -19,7 +19,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             z = y.relu()
             return (y, z)
 
-        onnx_model = fx_onnx.export(func, self.opset_version, torch.randn(1, 1, 2))
+        onnx_model = fx_onnx.export(func, torch.randn(1, 1, 2), opset_version=self.opset_version)
         onnx.checker.check_model(onnx_model)
 
     def test_mnist(self):
@@ -45,7 +45,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_model = fx_onnx.export(MNISTModel(), self.opset_version, tensor_x)
+        onnx_model = fx_onnx.export(MNISTModel(), tensor_x, opset_version=self.opset_version)
         onnx.checker.check_model(onnx_model, full_check=True)
 
 

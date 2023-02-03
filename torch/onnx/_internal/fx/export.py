@@ -8,6 +8,8 @@ import operator
 import os
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import dataclasses
+from torch.onnx._internal import onnx_proto_utils
 
 try:
     import onnx
@@ -314,7 +316,7 @@ def _fill_tensor_types(
 
 
 @_beartype.beartype
-def _export_fx_to_ts(fx_module_with_metadata, opset_version):
+def _export_fx_to_ts(fx_module_with_metadata, options: ExportOptions):
     # TODO(wechi): To get rid of TorchScript dependency,
     # "g" should just be onnx.GraphProto or an equivalent
     # data structure in ONNXScript.
@@ -361,7 +363,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                     exporter_key
                 )
                 assert symbolic_function_group is not None
-                symbolic_fn = symbolic_function_group.get(opset_version)
+                symbolic_fn = symbolic_function_group.get(options.opset_version)
                 assert symbolic_fn is not None
                 # TODO(wechi): current type checking throws when feeding torch._C.Graph
                 # to symbolic_opset*.py functions, so we need the following wrapper.
@@ -369,7 +371,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 graph_context = jit_utils.GraphContext(
                     graph=g,
                     block=g.block(),  # Pointless. Just make linter happy.
-                    opset=opset_version,
+                    opset=options.opset_version,
                     original_node=g.insertPoint(),  # Pointless. Just make linter happy.
                     params_dict={},  # Pointless. Just make linter happy.
                     env={},  # Pointless. Just make linter happy.
@@ -402,12 +404,12 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                         "aten::__getitem_"
                     )
                     assert symbolic_function_group is not None
-                    symbolic_fn = symbolic_function_group.get(opset_version)
+                    symbolic_fn = symbolic_function_group.get(options.opset_version)
                     assert symbolic_fn is not None
                     graph_context = jit_utils.GraphContext(
                         graph=g,
                         block=g.block(),  # Pointless. Just make linter happy.
-                        opset=opset_version,
+                        opset=options.opset_version,
                         original_node=g.insertPoint(),  # Pointless. Just make linter happy.
                         params_dict={},  # Pointless. Just make linter happy.
                         env={},  # Pointless. Just make linter happy.
@@ -493,7 +495,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
 
     torch._C._jit_pass_onnx_scalar_type_analysis(
-        g, lowprecision_cast=True, opset_version=opset_version
+        g, lowprecision_cast=True, opset_version=options.opset_version
     )
 
     # When replace aten with onnx ops, the node-level shape type inference uses
@@ -503,7 +505,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     # node-level shape type inference should be also deprecated as well in g.op
     if ONNX_GLOBALS.onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
-            g, params_dict={}, opset_version=opset_version
+            g, params_dict={}, opset_version=options.opset_version
         )
 
     return g, ts_name_to_real_tensor
@@ -513,11 +515,11 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
 def _ts_graph_to_onnx_model_in_protobuf(
     ts_graph: torch._C.Graph,
     ts_name_to_real_tensor: Dict[str, torch.Tensor],
-    opset_version: int,
+    options: ExportOptions,
 ) -> Union["onnx.ModelProto", bytes]:
     proto, _, _, _ = ts_graph._export_onnx(  # type: ignore[attr-defined]
         initializers=ts_name_to_real_tensor,
-        onnx_opset_version=opset_version,
+        onnx_opset_version=options.opset_version,
         dynamic_axes={},
         defer_weight_export=False,
         operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
@@ -593,20 +595,17 @@ def _rename_placeholder_targets(
 @_beartype.beartype
 def _export(
     module: torch.fx.GraphModule,
-    opset_version: int = None,
     *args,
-    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
-    use_binary_format: bool = True,
+    **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
+    options = ExportOptions()
+    options, kwargs = onnx_proto_utils._update_option_with_kwargs(options, kwargs)
     # Export FX graph to ONNX ModelProto.
-    if decomposition_table is None:
-        # Use default decomposition table.
-        decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
     decomposed_module = proxy_tensor.make_fx(
         module,
-        decomposition_table=decomposition_table,
+        decomposition_table=options.decomposition_table,
         tracing_mode="fake",
         _allow_non_fake_inputs=True,
     )(*args)
@@ -624,12 +623,12 @@ def _export(
     # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
-        ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module, opset_version)
+        ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module, options)
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = _ts_graph_to_onnx_model_in_protobuf(
-            ts_graph, ts_initializers, opset_version
+            ts_graph, ts_initializers, options
         )
-    if use_binary_format:
+    if options.use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model
     # Return ModelProto in readable format (printable).
@@ -640,8 +639,8 @@ def _export(
 @_beartype.beartype
 def export(
     fn: Union[torch.nn.Module, Callable],
-    opset_version,
     *args,
+    opset_version: int = ONNX_GLOBALS.export_onnx_opset_version,
     use_binary_format: bool = True,
 ) -> Union["onnx.ModelProto", bytes]:
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
@@ -651,25 +650,35 @@ def export(
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
-    graph_module, graph_guard = torch._dynamo.export(fn, *args, aten_graph=True)
+    graph_module, _ = torch._dynamo.export(fn, *args, aten_graph=True)
     # Export FX graph to ONNX ModelProto.
     #
     # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
     # to _export.
     return _export(
         graph_module,
-        opset_version,
         *args,
+        opset_version=opset_version,
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
 
+@dataclasses.dataclass
+class ExportOptions:
+    """Options for FX-ONNX export.
+    Attributes:
+        opset_version: The export ONNX version.
+        use_binary_format: Whether to Return ModelProto in binary format.
+    """
+    opset_version: int = ONNX_GLOBALS.export_onnx_opset_version
+    use_binary_format: bool = True
+    decomposition_table: Dict[torch._ops.OpOverload, Callable] = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
 
 @_beartype.beartype
 def export_without_kwargs(
     fn: Union[torch.nn.Module, Callable],
-    opset_version,
     *args,
+    opset_version: int = ONNX_GLOBALS.export_onnx_opset_version,
     use_binary_format: bool = True,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
@@ -720,9 +729,9 @@ def export_without_kwargs(
     # Export FX graph to ONNX ModelProto.
     return _export(
         compiler.captured_graph,
-        opset_version,
         # Function optimized by _dynamo doesn't have None in args.
         *tuple(arg for arg in bound_args if arg is not None),
+        opset_version=opset_version,
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
@@ -881,9 +890,9 @@ def export_without_parameters_and_buffers(
     return (
         _export(
             graph_module,
-            opset_version,
             *bound_args,
             *replaced_attrs,
+            opset_version=opset_version,
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
         ),

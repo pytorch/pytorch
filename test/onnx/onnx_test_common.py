@@ -11,6 +11,7 @@ import pytorch_test_common
 
 import torch
 from torch.onnx import _constants, verification
+from torch.onnx._internal import onnx_proto_utils
 
 onnx_model_dir = os.path.join(
     os.path.dirname(os.path.realpath(__file__)),
@@ -40,14 +41,7 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     if hasattr(test_suite, "check_dtype"):
         options.check_dtype = test_suite.check_dtype
 
-    names = set([f.name for f in dataclasses.fields(options)])
-    keywords_to_pop = []
-    for k, v in kwargs.items():
-        if k in names:
-            setattr(options, k, v)
-            keywords_to_pop.append(k)
-    for k in keywords_to_pop:
-        kwargs.pop(k)
+    options, kwargs = onnx_proto_utils._update_option_with_kwargs(options, kwargs)
 
     return verification.verify(*args, options=options, **kwargs)
 
@@ -65,14 +59,7 @@ def run_model_test_with_fx_to_onnx_exporter(
     if hasattr(test_suite, "check_dtype"):
         options.check_dtype = test_suite.check_dtype
 
-    names = set(f.name for f in dataclasses.fields(options))
-    keywords_to_pop = []
-    for k, v in kwargs.items():
-        if k in names:
-            setattr(options, k, v)
-            keywords_to_pop.append(k)
-    for k in keywords_to_pop:
-        kwargs.pop(k)
+    options, kwargs = onnx_proto_utils._update_option_with_kwargs(options, kwargs)
 
     return verification.verify_model_with_fx_to_onnx_exporter(
         *args, options=options, **kwargs
