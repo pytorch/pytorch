@@ -8,6 +8,7 @@ from torch.distributed._shard.sharded_tensor.utils import (
 )
 from torch.distributed._shard._utils import narrow_tensor
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as distributed_c10d
 from typing import List, Union, TYPE_CHECKING
 from ._internals import (
     get_chunked_dim_size,
@@ -113,6 +114,12 @@ class ChunkShardingSpec(ShardingSpec):
 
 
     def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+        """
+        Args:
+            src_rank: group rank relative to ``process_group``
+
+            N.B. If ``process_group`` is None, ``src_rank`` is a global rank.
+        """
         # relative imports to avoid circular dependency
         from torch.distributed._shard.sharded_tensor import (
             ShardedTensor
@@ -166,10 +173,15 @@ class ChunkShardingSpec(ShardingSpec):
         assert local_metadata is not None
 
         # Scatter the shards to all ranks in the pg
+        # scatter takes the global rank as ``src``
+        src_for_scatter = src_rank
+        if process_group is not None and process_group is not distributed_c10d._get_default_group():
+            src_for_scatter = distributed_c10d.get_global_rank(process_group, src_for_scatter)
+
         dist.scatter(
             local_tensor,
             scatter_list=tensors_to_scatter if current_rank == src_rank else None,
-            src=src_rank,
+            src=src_for_scatter,
             group=process_group
         )
 

@@ -25,6 +25,8 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <utility>
+
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
     torch_jit_disable_cat,
@@ -80,6 +82,7 @@ static const OperatorSet& supported_non_eltwise_set() {
   static const OperatorSet supported_non_eltwise_set{
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
@@ -94,7 +97,7 @@ bool isSupported(Node* node) {
 
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
@@ -319,9 +322,10 @@ void insertTypeGuard(
       continue;
     }
     inputs_to_check.push_back(input);
-    guard_types.push_back(type_converter(input->type()->expect<TensorType>()));
+    guard_types.emplace_back(
+        type_converter(input->type()->expect<TensorType>()));
   }
-  if (!inputs_to_check.size()) {
+  if (inputs_to_check.empty()) {
     return;
   }
 
@@ -338,7 +342,7 @@ void insertTypeGuard(
       guarded_node->owningGraph()
           ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
           ->insertBefore(guarded_node);
-  typecheck_node->tys_(attr::types, guard_types);
+  typecheck_node->tys_(attr::types, std::move(guard_types));
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
 
   std::unordered_map<Value*, Value*> typechecked_inputs;
@@ -465,6 +469,23 @@ class TensorExprFuser {
     }
 
     for (Node* n : subgraph->nodes()) {
+      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
+        return v->type()->isSubtypeOf(*TensorType::get());
+      });
+      GRAPH_DEBUG("Building sizes for ", getHeader(n));
+      bool all_inputs_have_sizes = true;
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        all_inputs_have_sizes &= shape_of.count(v);
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+      });
+      if (!all_inputs_have_sizes) {
+        GRAPH_DEBUG(
+            "Not all tensor arguments have sizes available to compute the broadcasted size",
+            getHeader(n));
+        continue;
+      }
+
       if (n->kind() == prim::ConstantChunk) {
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
@@ -493,23 +514,6 @@ class TensorExprFuser {
         continue;
       }
 
-      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(*TensorType::get());
-      });
-      GRAPH_DEBUG("Building sizes for ", getHeader(n));
-      bool all_inputs_have_sizes = true;
-      auto shapes = fmap(tensor_inputs, [&](Value* v) {
-        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
-        all_inputs_have_sizes &= shape_of.count(v);
-        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
-      });
-
-      if (!all_inputs_have_sizes) {
-        GRAPH_DEBUG(
-            "Not all tensor arguments have sizes available to compute the broadcasted size",
-            getHeader(n));
-        continue;
-      }
       shape_of.emplace(
           n->output(),
           shapes.size() == 1 ? shapes[0]
@@ -689,7 +693,7 @@ class TensorExprFuser {
     }
 
     Node* prev_fusion_group =
-        initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
+        !initial_fusion_groups.empty() ? initial_fusion_groups[0] : nullptr;
 
     for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
       // Try merging the just created fusion group into the previous one.
@@ -897,6 +901,7 @@ class TensorExprFuser {
     };
     static const OperatorSet cpu_compute_heavy_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
     static const OperatorSet gpu_only_operator_set{
@@ -934,10 +939,14 @@ class TensorExprFuser {
         // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
         // additionally disable it until we either move to a more stable version
         // or find workarounds.
-        if ((*st == c10::ScalarType::Half ||
-             *st == c10::ScalarType::BFloat16) &&
-            *device == c10::kCPU) {
+        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
           return false;
+        }
+
+        if (*st == c10::ScalarType::BFloat16 && *device == c10::kCPU) {
+#ifndef TORCH_ENABLE_LLVM
+          return false;
+#endif
         }
 
         // These operators only support floats, because integer divisors need to
@@ -1033,6 +1042,40 @@ class TensorExprFuser {
         }
       }
 
+      bool is_reduced_precision =
+          node->kind() == aten::_autocast_to_reduced_precision;
+      bool is_full_precision =
+          node->kind() == aten::_autocast_to_full_precision;
+      auto self_tensor = node->inputs()[0]; // input tensor
+
+      if (auto const& tt = self_tensor->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st.has_value()) {
+          return false;
+        }
+
+        auto device = tt->device();
+        if (!device.has_value()) {
+          return false;
+        }
+
+        bool is_cpu = device->is_cpu();
+
+        if (*st != at::kFloat && is_reduced_precision && is_cpu) {
+          // Regarding CPU, aten would do nothing if the data type is
+          // float. Then the aten performance is better than NNC. So NNC
+          // does not pull it into its fusion group.
+          return false;
+        }
+
+        if (*st != at::kBFloat16 && is_full_precision && is_cpu) {
+          // Regarding CPU, aten would do nothing if the data type is
+          // BFloat16. Then the aten performance is better than NNC. So NNC
+          // does not pull it into its fusion group.
+          return false;
+        }
+      }
+
       if (has_unsupported_pin_memory(node)) {
         return false;
       }
@@ -1045,8 +1088,13 @@ class TensorExprFuser {
       }
     }
 
-    if (node->kind() == aten::conv2d) {
-      if (!tensorexpr::conv2dIsSupportedJit(node)) {
+    if (node->kind() == aten::_convolution && !tensorexpr::isConv2d(node)) {
+      GRAPH_DEBUG("This aten::_convolution node is not a 2D conv");
+      return false;
+    }
+    if (node->kind() == aten::_convolution || node->kind() == aten::conv2d) {
+      if (!tensorexpr::conv2dIsSupportedJit(node) &&
+          !tensorexpr::mkldnnPrepackedConvIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
         return false;
       }
@@ -1267,7 +1315,7 @@ class TensorExprFuser {
 
     std::string line;
     while (std::getline(in_ss, line, ':')) {
-      if (line.size() == 0) {
+      if (line.empty()) {
         continue;
       }
       operators_not_to_fuse.insert(c10::Symbol::aten(line));

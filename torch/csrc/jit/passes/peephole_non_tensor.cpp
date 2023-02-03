@@ -15,7 +15,7 @@ namespace {
  * constant int value if there exists one.
  *
  * @pre node is integer arithmetic.
- * @post if there's one constant in two oprands, then the second operand is
+ * @post if there's one constant in two operands, then the second operand is
  *       constant.
  */
 c10::optional<int64_t> checkArithNode(Node& node) {

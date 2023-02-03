@@ -54,6 +54,19 @@ if(USE_CUDA)
       install(TARGETS c10d_cuda_test DESTINATION lib)
     endif()
   endif()
+  if(USE_UCC AND USE_C10D_UCC)
+    # UCC is a private dependency of libtorch, but the tests include some
+    # private headers of libtorch, which in turn include UCC. As a hacky
+    # alternative to making UCC a public dependency of libtorch, we make it
+    # a private dependency of the tests as well.
+    c10d_add_test(
+      ProcessGroupUCCTest.cpp
+      torch_cpu c10d_cuda_test gtest_main __caffe2_ucc)
+    if(INSTALL_TEST)
+      install(TARGETS ProcessGroupUCCTest DESTINATION bin)
+      install(TARGETS c10d_cuda_test DESTINATION lib)
+    endif()
+  endif()
 else()
   if(USE_GLOO AND USE_C10D_GLOO)
     c10d_add_test(ProcessGroupGlooTest.cpp torch_cpu gtest_main)
@@ -72,7 +85,7 @@ if(USE_MPI AND USE_C10D_MPI)
   endif()
 endif()
 
-if(LINUX)
+if(LINUX AND USE_GLOO AND USE_C10D_GLOO)
   add_executable(example_allreduce example/allreduce.cpp)
   target_include_directories(example_allreduce PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   target_link_libraries(example_allreduce pthread torch_cpu)

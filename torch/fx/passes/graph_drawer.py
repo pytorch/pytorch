@@ -9,6 +9,7 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
 from itertools import chain
 
+__all__ = ['FxGraphDrawer']
 try:
     import pydot
     HAS_PYDOT = True
@@ -65,12 +66,13 @@ if HAS_PYDOT:
             graph_module: torch.fx.GraphModule,
             name: str,
             ignore_getattr: bool = False,
+            ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
         ):
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
-                    graph_module, name, ignore_getattr, skip_node_names_in_args
+                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args
                 )
             }
 
@@ -87,6 +89,7 @@ if HAS_PYDOT:
                     leaf_node,
                     f"{name}_{node.target}",
                     ignore_getattr,
+                    ignore_parameters_and_buffers,
                     skip_node_names_in_args,
                 )
 
@@ -137,12 +140,16 @@ if HAS_PYDOT:
 
         def _typename(self, target: Any) -> str:
             if isinstance(target, torch.nn.Module):
-                return torch.typename(target)
+                ret = torch.typename(target)
+            elif isinstance(target, str):
+                ret = target
+            else:
+                ret = _get_qualified_name(target)
 
-            if isinstance(target, str):
-                return target
-
-            return _get_qualified_name(target)
+            # Escape "{" and "}" to prevent dot files like:
+            # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
+            # which triggers `Error: bad label format (...)` from dot
+            return ret.replace("{", r"\{").replace("}", r"\}")
 
         def _get_node_label(
             self,
@@ -258,10 +265,13 @@ if HAS_PYDOT:
             graph_module: torch.fx.GraphModule,
             name: str,
             ignore_getattr: bool,
+            ignore_parameters_and_buffers: bool,
             skip_node_names_in_args: bool,
         ) -> pydot.Dot:
             """
-            Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph
+            Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph.
+            If ignore_parameters_and_buffers is True, the parameters and buffers
+            created with the module will not be added as nodes and edges.
             """
             dot_graph = pydot.Dot(name, rankdir="TB")
 
@@ -296,7 +306,7 @@ if HAS_PYDOT:
                 if node.op == "call_module":
                     leaf_module = self._get_leaf_node(graph_module, node)
 
-                    if not isinstance(leaf_module, torch.fx.GraphModule):
+                    if not ignore_parameters_and_buffers and not isinstance(leaf_module, torch.fx.GraphModule):
                         get_module_params_or_buffers()
 
             for node in graph_module.graph.nodes:

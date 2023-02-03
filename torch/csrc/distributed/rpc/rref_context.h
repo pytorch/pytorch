@@ -39,6 +39,9 @@ class TORCH_API RRefContext {
 
   static void handleException(const JitFuture& jitFuture);
 
+  // handle exception without throw ::c10::Error again
+  static void handleExceptionSilent(const JitFuture& jitFuture);
+
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
   void operator=(const RRefContext&) = delete;
@@ -300,7 +303,7 @@ class TORCH_API RRefContext {
   std::atomic<int64_t> numPendingFutures_{0};
 
   std::mutex destroyedMutex_;
-  bool destroyed_;
+  bool destroyed_{false};
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.

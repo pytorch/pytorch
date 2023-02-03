@@ -11,6 +11,7 @@
 #include <string>
 
 using c10::AliasInfo;
+using c10::AwaitType;
 using c10::BoolType;
 using c10::CapsuleType;
 using c10::ComplexType;
@@ -40,8 +41,7 @@ using c10::TupleType;
 using c10::UnionType;
 using c10::VarType;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -82,7 +82,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (text.size() > 0 && islower(text[0])) {
+    if (!text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
@@ -169,7 +169,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     return c10::Device(at::kCPU);
   }
 
-  if (dev == "cuda") {
+  if (dev == "cuda" || dev == "hpu") {
     c10::DeviceIndex device_idx = -1;
     if (L.cur().kind == ':') {
       L.expect(':');
@@ -178,7 +178,11 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       std::string::size_type num_len;
       device_idx = c10::stoi(num, &num_len);
     }
-    return c10::Device(at::kCUDA, device_idx);
+    if (dev == "cuda") {
+      return c10::Device(at::kCUDA, device_idx);
+    } else {
+      return c10::Device(at::kHPU, device_idx);
+    }
   }
 
   throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
@@ -336,6 +340,14 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Await") {
+    L.next(); // Await
+    L.expect('(');
+    auto p = parseType();
+    auto subtype = std::move(p.first);
+    auto subalias = std::move(p.second);
+    L.expect(')');
+    fake_value = real_value = c10::TypeFactory::create<AwaitType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -407,7 +419,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     real_value = parseBaseType();
     if (real_value->kind() == ScalarTypeType::Kind ||
         real_value->kind() == MemoryFormatType::Kind ||
-        real_value->kind() == LayoutType::Kind) {
+        real_value->kind() == LayoutType::Kind ||
+        real_value->kind() == SymIntType::Kind) {
       fake_value = c10::TypeFactory::get<IntType>();
     } else {
       fake_value = real_value;
@@ -421,7 +434,11 @@ SchemaTypeParser::parseFakeAndRealType() {
       fake_value = c10::TypeFactory::create<ListType>(fake_value);
       real_value = c10::TypeFactory::create<ListType>(real_value);
       auto container = parseAliasAnnotation();
-      if (container && alias_info) {
+      if (alias_info) {
+        if (!container) {
+          container = c10::optional<AliasInfo>(AliasInfo());
+          container->setIsWrite(alias_info->isWrite());
+        }
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
@@ -453,5 +470,4 @@ void SchemaTypeParser::parseList(
     L.expect(end);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

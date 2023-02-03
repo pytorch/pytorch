@@ -1,5 +1,6 @@
 #include <c10/util/Exception.h>
 #include <ATen/ATen.h>
+#include <ATen/Functions.h>
 
 namespace at {
 namespace native {
@@ -15,6 +16,14 @@ Tensor gelu_quantized_cuda(const Tensor& qx, c10::string_view approximate) {
   auto x_fp32 = at::dequantize(qx);
   auto result_fp32 = at::gelu(x_fp32);
   return at::quantize_per_tensor(result_fp32, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
+}
+
+Tensor relu_quantized_cuda(const Tensor& self) {
+  auto zero_point = self.q_zero_point();
+  auto int_repr = self.int_repr();
+  auto mask = (int_repr > zero_point);
+  const auto relu_int_repr = at::where(mask, int_repr, zero_point);
+  return at::_make_per_tensor_quantized_tensor(relu_int_repr, self.q_scale(), zero_point);
 }
 
 }  // namespace at::native

@@ -18,8 +18,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename scalar_t, typename IndexType>
 #if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
@@ -135,8 +134,9 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
 
   auto total_dims = in_tensor.dim();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      at::ScalarType::ComplexHalf,
       in_tensor.scalar_type(), "roll_cuda",
       [&] {
         roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -151,4 +151,4 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   return out_tensor;
 }
 
-}} // namespace at::native
+} // namespace at::native

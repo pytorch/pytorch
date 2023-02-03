@@ -28,6 +28,7 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
     get_chunk_sharding_params,
+    validate_non_overlapping_shards_metadata,
 )
 
 from torch.testing._internal.common_utils import (
@@ -390,6 +391,71 @@ class TestShardingSpec(TestCase):
             self._infer_chunk_sharding_spec_case(spec.placements, 2, [4, 18, 15])
             self._infer_chunk_sharding_spec_case(spec.placements, 3, [7, 12, 16, 37])
             self._infer_chunk_sharding_spec_case(spec.placements, 4, [50, 4, 18, 15, 77])
+
+    def test_check_overlapping(self):
+        shards = [
+            ShardMetadata(
+                shard_offsets=[0, 0], shard_sizes=[5, 5], placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0], shard_sizes=[5, 5], placement="cuda:1",
+            )
+        ]
+        validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[0, 0], shard_sizes=[5, 5], placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[4, 0], shard_sizes=[5, 5], placement="cuda:1",
+            )
+        ]
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[0, 0], shard_sizes=[5, 5], placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 4], shard_sizes=[5, 5], placement="cuda:1",
+            )
+        ]
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[5, 0, 5], shard_sizes=[5, 5, 5], placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5, 5], shard_sizes=[5, 5, 5], placement="cuda:1",
+            )
+        ]
+        validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[5, 0, 5], shard_sizes=[5, 5, 5], placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 4, 5], shard_sizes=[5, 5, 5], placement="cuda:1",
+            )
+        ]
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[5, 0, 5], shard_sizes=[5, 5, 5], placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 4, 9], shard_sizes=[5, 5, 5], placement="cuda:1",
+            )
+        ]
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            validate_non_overlapping_shards_metadata(shards)
 
 # Custom ShardingSpec, an simple example to do grid sharding
 @dataclass

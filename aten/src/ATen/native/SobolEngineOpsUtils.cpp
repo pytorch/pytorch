@@ -1,4 +1,5 @@
 /// This file contains tensor-agnostic SoboleEngine constants
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SobolEngineOpsUtils.h>
 
 /*

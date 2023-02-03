@@ -9,13 +9,16 @@
 #include <ATen/native/PointwiseOps.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
-const char addcmul_name[] = "addcmul";
+constexpr char addcmul_name[] = "addcmul";
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  auto dtype = iter.dtype();
+  auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
-    #if AT_USE_JITERATOR()
+    // When using Jiterator, addcmul and addcdiv kernels get stuck during a
+    // promotion test on CUDA 11.3, so only enable that from CUDA 11.5:
+    // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
+    #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcmul_cuda", [&]() {
         auto alpha = value.to<scalar_t>();
         static const auto addcmul_string = jiterator_stringify(
@@ -53,11 +56,14 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 // return a + alpha * (b / static_cast<accscalar_t>(c));
-const char addcdiv_name[] = "addcdiv";
+constexpr char addcdiv_name[] = "addcdiv";
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  auto dtype = iter.dtype();
+  auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
-    #if AT_USE_JITERATOR()
+    // When using Jiterator, addcmul and addcdiv kernels get stuck during a
+    // promotion test on CUDA 11.3, so only enable that from CUDA 11.5:
+    // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
+    #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
         auto alpha = value.to<scalar_t>();
         static const auto addcdiv_string =
@@ -142,4 +148,4 @@ REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
-}} // namespace at::native
+} // namespace at::native

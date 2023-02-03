@@ -1,6 +1,7 @@
 _pandas = None
 _WITH_PANDAS = None
 
+
 def _try_import_pandas() -> bool:
     try:
         import pandas  # type: ignore[import]
@@ -17,6 +18,7 @@ def _with_pandas() -> bool:
     if _WITH_PANDAS is None:
         _WITH_PANDAS = _try_import_pandas()
     return _WITH_PANDAS
+
 
 class PandasWrapper:
     @classmethod
@@ -41,7 +43,7 @@ class PandasWrapper:
     def iterate(cls, data):
         if not _with_pandas():
             raise Exception("DataFrames prototype requires pandas to function")
-        for d in data:
+        for d in data.itertuples(index=False):
             yield d
 
     @classmethod
@@ -54,7 +56,7 @@ class PandasWrapper:
     def get_item(cls, data, idx):
         if not _with_pandas():
             raise Exception("DataFrames prototype requires pandas to function")
-        return data[idx : idx + 1]
+        return data[idx: idx + 1]
 
     @classmethod
     def get_len(cls, df):
@@ -62,9 +64,16 @@ class PandasWrapper:
             raise Exception("DataFrames prototype requires pandas to function")
         return len(df.index)
 
+    @classmethod
+    def get_columns(cls, df):
+        if not _with_pandas():
+            raise Exception("DataFrames prototype requires pandas to function")
+        return list(df.columns.values.tolist())
+
 
 # When you build own implementation just override it with dataframe_wrapper.set_df_wrapper(new_wrapper_class)
 default_wrapper = PandasWrapper
+
 
 def get_df_wrapper():
     return default_wrapper
@@ -83,6 +92,11 @@ def create_dataframe(data, columns=None):
 def is_dataframe(data):
     wrapper = get_df_wrapper()
     return wrapper.is_dataframe(data)
+
+
+def get_columns(data):
+    wrapper = get_df_wrapper()
+    return wrapper.get_columns(data)
 
 
 def is_column(data):

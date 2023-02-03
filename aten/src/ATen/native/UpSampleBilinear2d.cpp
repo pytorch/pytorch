@@ -1,10 +1,25 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_bilinear2d_aa.h>
+#include <ATen/ops/_upsample_bilinear2d_aa_backward.h>
+#include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_bilinear2d_aa_native.h>
+#include <ATen/ops/upsample_bilinear2d.h>
+#include <ATen/ops/upsample_bilinear2d_backward.h>
+#include <ATen/ops/upsample_bilinear2d_backward_native.h>
+#include <ATen/ops/upsample_bilinear2d_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -154,18 +169,6 @@ Tensor upsample_bilinear2d(
   return at::upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w);
 }
 
-Tensor upsample_bilinear2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_bilinear2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
-}
-
 Tensor _upsample_bilinear2d_aa(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
@@ -175,18 +178,6 @@ Tensor _upsample_bilinear2d_aa(
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return at::_upsample_bilinear2d_aa(input, osize, align_corners, scale_h, scale_w);
-}
-
-Tensor _upsample_bilinear2d_aa_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::_upsample_bilinear2d_aa_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_bilinear2d_kernel);

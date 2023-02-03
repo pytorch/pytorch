@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/utils/Factory.h>
 #include <c10/core/CPUAllocator.h>

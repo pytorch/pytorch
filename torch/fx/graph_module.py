@@ -16,6 +16,8 @@ from pathlib import Path
 import os
 import warnings
 
+__all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
@@ -116,7 +118,7 @@ def reduce_package_graph_module(
 def reduce_deploy_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
-    ns = dict()
+    ns = {}
     ns["__builtins__"] = importer.patched_builtins
     fn_src = body.get('_code')
     assert fn_src is not None
@@ -378,6 +380,9 @@ class GraphModule(torch.nn.Module):
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
 
+        # Dictionary to store metadata
+        self.meta : Dict[str, Any] = {}
+
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
@@ -419,8 +424,11 @@ class GraphModule(torch.nn.Module):
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
         tab = " " * 4
+        custom_builtins = '\n'.join([v.import_str for v in _custom_builtins.values()])
         model_str = f"""
 import torch
+{custom_builtins}
+
 from torch.nn import *
 class {module_name}(torch.nn.Module):
     def __init__(self):
@@ -696,16 +704,47 @@ class {module_name}(torch.nn.Module):
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
+        res = type(self).__new__(type(self))
+        memo[id(self)] = res
         fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, fake_mod.__dict__['_graph'])
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
+        GraphModule.__init__(res, fake_mod, fake_mod.__dict__['_graph'])
+        res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
+        return res
+
 
     def __copy__(self):
-        return GraphModule(self, self.graph)
+        res = GraphModule(self, self.graph)
+        res.meta = getattr(self, 'meta', {})
+        return res
+
+    @compatibility(is_backward_compatible=False)
+    def print_readable(self, print_output=True):
+        """
+        Return the Python code generated for current GraphModule and its children GraphModules
+        """
+        verbose_python_code = self._graph.python_code(root_module='self', verbose=True)
+        module_code = verbose_python_code.src
+        module_code = module_code.lstrip('\n')
+        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
+        module_code = _addindent(module_code, 4)
+
+        submodule_code_list = [""]
+        for submodule in self.children():
+            if isinstance(submodule, GraphModule):
+                submodule_code_list.append(submodule.print_readable(print_output=False))
+        submodule_code = "\n".join(submodule_code_list)
+        submodule_code = _addindent(submodule_code, 4)
+
+        output = module_code + submodule_code
+        if print_output:
+            print(module_code + submodule_code)
+        return output
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        print_readable_reminder = "# To see more debug info, please use `graph_module.print_readable()`"
+        return '\n'.join([orig_str, self._code, print_readable_reminder])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()

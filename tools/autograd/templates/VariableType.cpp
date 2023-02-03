@@ -3,8 +3,11 @@
 #include "torch/csrc/autograd/FunctionsManual.h"
 
 #include <ATen/RedispatchFunctions.h>
-#include <ATen/core/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <ATen/core/TorchDispatchUtils.h>
 #include <torch/library.h>
+
+#include <ATen/SparseCsrTensorUtils.h>
 
 
 // ${generated_comment}
@@ -48,9 +51,6 @@ namespace{
 
 namespace {
 
-bool torch_dispatch_set() {
-  return static_cast<bool>(at::impl::TorchDispatchModeTLS::get_state());
-}
 
 ${type_derived_method_definitions}
 }
@@ -58,9 +58,7 @@ ${type_derived_method_definitions}
 
 namespace {
 
-TORCH_LIBRARY_IMPL(aten, Autograd, m) {
-  ${wrapper_registrations}
-}
+${wrapper_registrations}
 
 }
 

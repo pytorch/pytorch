@@ -2,6 +2,8 @@
 
 #include <ATen/core/ivalue.h>
 
+#include <utility>
+
 namespace c10 {
 
 struct EnumType;
@@ -83,7 +85,7 @@ struct TORCH_API EnumType : public NamedType {
       : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),
         value_type_(std::move(value_type)),
         enum_names_values_(std::move(enum_names_values)),
-        cu_(cu) {}
+        cu_(std::move(cu)) {}
 
   std::string annotation_str_impl(
       TypePrinter printer = nullptr) const override {

@@ -35,9 +35,6 @@ if [[ -z "${GITHUB_ACTIONS}" ]]; then
   trap "docker logout ${registry}" EXIT
 fi
 
-# export EC2=1
-# export JENKINS=1
-
 # Try to pull the previous image (perhaps we can reuse some layers)
 # if [ -n "${last_tag}" ]; then
 #   docker pull "${image}:${last_tag}" || true
@@ -48,7 +45,12 @@ fi
 
 # Only push if `DOCKER_SKIP_PUSH` = false
 if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
-  docker push "${image}:${tag}"
+  # Only push if docker image doesn't exist already.
+  # ECR image tags are immutable so this will avoid pushing if only just testing if the docker jobs work
+  # NOTE: The only workflow that should push these images should be the docker-builds.yml workflow
+  if ! docker manifest inspect "${image}:${tag}" >/dev/null 2>/dev/null; then
+    docker push "${image}:${tag}"
+  fi
 fi
 
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then

@@ -18,6 +18,13 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/_empty_affine_quantized.h>
+#endif
+
 #include <unordered_map>
 
 namespace at {
@@ -64,10 +71,10 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
       qa.qscheme() == kPerTensorAffine,
-      "Only per tensor quantization is suported in Add.");
+      "Only per tensor quantization is supported in Add.");
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
-      "Both inputs to Add must have the same quantization shceme.");
+      "Both inputs to Add must have the same quantization scheme.");
   TORCH_CHECK(
       qa.scalar_type() == qb.scalar_type(),
       "Add operands should have same data type.");

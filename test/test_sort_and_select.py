@@ -119,6 +119,13 @@ class TestSortAndSelect(TestCase):
             # Test that we still have proper sorting with duplicate keys
             self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
+            # Test argument sorting with and without stable
+            x = torch.tensor([1, 10, 2, 2, 3, 7, 7, 8, 9, 9] * 3)
+            self.assertEqual(torch.argsort(x, stable=True), torch.sort(x, stable=True).indices)
+            self.assertEqual(torch.argsort(x, stable=False), torch.sort(x, stable=False).indices)
+            self.assertEqual(torch.argsort(x), torch.sort(x).indices)
+
+
             # Test sorting with NaNs
             x = torch.rand(4, SIZE, device=device)
             x[1][2] = float('NaN')
@@ -349,6 +356,23 @@ class TestSortAndSelect(TestCase):
         )
         for shape in shapes:
             test(shape)
+
+    @dtypes(torch.float)
+    def test_sort_expanded_tensor(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/91420
+        data = torch.scalar_tensor(True, device=device, dtype=dtype)
+        data = data.expand([1, 1, 1])
+        ref = torch.Tensor([[[True]]])
+        out = torch.sort(data, stable=True, dim=1, descending=True)
+        expected = torch.sort(ref, stable=True, dim=1, descending=True)
+        self.assertEqual(out, expected)
+
+        data = torch.randn(4, 1, 10, device=device, dtype=dtype)
+        data = data.expand([4, 8, 10])
+        ref = data.contiguous()
+        out = torch.sort(data, stable=True, dim=1, descending=True)
+        expected = torch.sort(ref, stable=True, dim=1, descending=True)
+        self.assertEqual(out, expected)
 
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):

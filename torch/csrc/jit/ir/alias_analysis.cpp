@@ -11,8 +11,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <fstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -105,7 +104,7 @@ class MutableTypePtrHelper {
                 (*maybe_inner_types).end());
           }
         }
-        if (mutable_types.size() == 0) {
+        if (mutable_types.empty()) {
           return c10::nullopt;
         }
         return mutable_types;
@@ -124,6 +123,14 @@ class MutableTypePtrHelper {
         }
         return c10::nullopt;
       }
+      case TypeKind::AwaitType: {
+        if (auto maybe_mut_types = mapTypeToAliasTypeSet(
+                type->castRaw<AwaitType>()->getElementType())) {
+          return {
+              AliasTypeSet{AwaitType::create(*toSingleType(*maybe_mut_types))}};
+        }
+        return c10::nullopt;
+      }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
         for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
@@ -134,7 +141,7 @@ class MutableTypePtrHelper {
                 (*maybe_inner_types).end());
           }
         }
-        if (mutable_types.size() == 0) {
+        if (mutable_types.empty()) {
           return c10::nullopt;
         }
         return {AliasTypeSet{TupleType::create(mutable_types)}};
@@ -632,6 +639,11 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::awaitable:
+    case prim::awaitable_nowait:
+      return analyzeAwaitable(node);
+    case prim::awaitable_wait:
+      return analyzeAwaitableWait(node);
     case prim::rpc_async:
     case prim::rpc_sync:
     case prim::rpc_remote:
@@ -737,7 +749,7 @@ void AliasDb::analyzeImpl(Node* node) {
       // run into lifetime issues with the graph
       std::vector<std::shared_ptr<Graph>>& graphs =
           function_call_copies_[graph.get()];
-      if (graphs.size() == 0) {
+      if (graphs.empty()) {
         graphs.push_back(graph);
         analyzeSubgraph(node, graph);
       } else {
@@ -815,6 +827,7 @@ void AliasDb::analyzeImpl(Node* node) {
   for (const auto i : c10::irange(schema.arguments().size())) {
     const at::AliasInfo* formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
+
     // Skip if there's no alias annotation
     if (!formal) {
       continue;
@@ -827,11 +840,17 @@ void AliasDb::analyzeImpl(Node* node) {
 
     // Do sanity checks on the alias annotation
     TORCH_INTERNAL_ASSERT(
-        formal->containedTypes().size() == 0,
+        formal->containedTypes().size() <= 1,
         "Composite types for alias analysis not yet supported");
     TORCH_INTERNAL_ASSERT(
         !formal->isWildcardBefore(),
         "Doesn't make sense for a input value to begin as a wildcard");
+    // This is a special case where we have alias info before [] but not after,
+    // such as `Tensor(a!)[]`
+    if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
+      // Use the first containedType in alias info.
+      formal = &(formal->containedTypes()[0]);
+    }
 
     const auto& formalAlias = formal->beforeSet();
 
@@ -878,10 +897,13 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     TORCH_INTERNAL_ASSERT(
-        formal->containedTypes().size() == 0,
+        formal->containedTypes().size() <= 1,
         "Composite types for alias analysis not yet supported");
     TORCH_INTERNAL_ASSERT(formal->beforeSets() == formal->afterSets());
-
+    if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
+      // Use the first containedType in alias info.
+      formal = &(formal->containedTypes()[0]);
+    }
     if (formal->isWildcardBefore()) {
       TORCH_INTERNAL_ASSERT(
           formal->beforeSets().size() == 1,
@@ -891,25 +913,22 @@ void AliasDb::analyzeImpl(Node* node) {
       continue;
     }
 
+    bool inputs_has_alias = false;
     for (const auto& formalAlias : formal->beforeSets()) {
-      // If we encounter an alias annotation that wasn't in the inputs:
-      if (!formalToActual.count(formalAlias)) {
-        // If this alias is not seen elsewhere and is the only annotation on
-        // the output, it's equivalent to being fresh:
-        //   e.g. foo(Tensor(a) self) -> Tensor(b)
-        if (formal->beforeSets().size() == 1) {
-          giveFreshAlias(actual);
-        }
-        // Or it is the form of a|fresh, which we can ignore, taking the
-        // conservative assumption that the output must alias `a`, e.g
-        //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
-
-        // Don't assign an alias set in that case.
-        continue;
+      if (formalToActual.count(formalAlias)) {
+        inputs_has_alias = true;
+        auto toAlias = formalToActual.at(formalAlias);
+        makePointerTo(actual, toAlias);
       }
-
-      auto toAlias = formalToActual.at(formalAlias);
-      makePointerTo(actual, toAlias);
+    }
+    // If all the alias annotation that we encounter weren't in the inputs:
+    //   e.g. foo(Tensor(a) self) -> Tensor(b)
+    //   or foo(Tensor(a) self) -> Tensor(b|c)
+    // Otherwise it is the form of a|fresh, which we can ignore, taking the
+    // conservative assumption that the output must alias `a`, e.g
+    //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
+    if (!inputs_has_alias && !formal->beforeSets().empty()) {
+      giveFreshAlias(actual);
     }
 
     // Record writes
@@ -1041,6 +1060,27 @@ void AliasDb::analyzeWait(Node* node) {
   }
   // the forked subgraph that `wait` is waiting on may write to any of its
   // inputs. We don't have a reliable way of recovering the fork inputs, so
+  // for safety we just register a write to every wildcard.
+  writeRegistry_->registerWriteToAllWildcards(node);
+}
+
+void AliasDb::analyzeAwaitable(Node* node) {
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+}
+
+void AliasDb::analyzeAwaitableWait(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == prim::awaitable_wait);
+  for (const auto output : node->outputs()) {
+    setWildcard(output);
+  }
+  // the awaitable subgraph that `wait` is waiting on may write to any of its
+  // inputs. We don't have a reliable way of recovering the awaitable inputs, so
   // for safety we just register a write to every wildcard.
   writeRegistry_->registerWriteToAllWildcards(node);
 }
@@ -1379,9 +1419,8 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   auto a_elems = getElements(a);
-  return a_elems.size() == 0
-      ? false
-      : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+  return a_elems.empty() ? false
+                         : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
@@ -1389,7 +1428,7 @@ bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
     return false;
   }
   auto b_elems = getElements(b);
-  return b_elems.size() == 0
+  return b_elems.empty()
       ? false
       : memoryDAG_->mayContainAlias(elementMap_.at(a), b_elems);
 }
@@ -1974,5 +2013,4 @@ void Lint(const AliasDb* db) {
   // - All container values have contained elements
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
