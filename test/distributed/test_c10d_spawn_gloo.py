@@ -35,8 +35,9 @@ if sys.version_info < (3, 9):
             # set process group backends manually
             c10d.init_process_group(backend="gloo", store=store, rank=rank, world_size=world_size)
             pg = c10d.distributed_c10d._get_default_group()
-            pg._set_backend(torch.device("cpu"), c10d.Backend.GLOO, backend)
-            pg._set_backend(torch.device("cuda"), c10d.Backend.GLOO, backend)
+            pg._register_backend(torch.device("cpu"), c10d.ProcessGroup.BackendType.GLOO, backend)
+            pg._register_backend(torch.device("cuda"), c10d.ProcessGroup.BackendType.GLOO, backend)
+
             return pg
 
         @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")

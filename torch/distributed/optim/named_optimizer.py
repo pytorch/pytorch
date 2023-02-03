@@ -144,14 +144,14 @@ class _NamedOptimizer(optim.Optimizer):
 
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
-    def step(self):
+    def step(self, closure: Any = None) -> None:
         """
         Performs a single optimization step.
 
         This will call :meth:`torch.optim.Optimizer.step` on the wrapped
         optimizer.
         """
-        self._optimizer.step()
+        self._optimizer.step(closure=closure)
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
@@ -284,16 +284,30 @@ class _NamedOptimizer(optim.Optimizer):
         # Update param_groups from optimizer.
         self.param_groups = self._optimizer.param_groups
 
+    def init_state(self) -> None:
+        """
+        Runs a dummy optimizer step, which allows to initialize optimizer state
+        because we do lazy init for most optimizers.
+
+        This allows doing in-place loading of optimizer state from a checkpoint.
+        """
+        for _, param in self.named_parameters.items():
+            if param.requires_grad:
+                t = torch.zeros_like(param)
+                param.grad = torch.autograd.Variable(t)
+        # Calling ``step`` will load the initial state for optimizer states.
+        self.step(closure=None)
+
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            return FSDP._load_optim_state_dict_pre_hook(
+            return FSDP.load_optim_state_dict_pre_hook(
                 self.module, self._optimizer, state_dict
             )
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+            FSDP.optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
         return state_dict
 
 
