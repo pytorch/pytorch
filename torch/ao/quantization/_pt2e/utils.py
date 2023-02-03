@@ -30,7 +30,19 @@ def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
     assert node.op == "get_attr"
-    return getattr(m, node.target)
+    obj = m
+    for attr in node.target.split("."):
+        obj = getattr(obj, attr)
+    return obj
+
+def _set_module_attr(m, attr_name, attr_val):
+    attr_name_toks = attr_name.split(".")
+    attr = attr_name_toks[-1]
+    mod_path = attr_name_toks[:-1]
+    obj_m = m
+    for path in mod_path:
+        obj_m = getattr(obj_m, path)
+    setattr(obj_m, attr, attr_val)
 
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
@@ -65,7 +77,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
         conv_args = list(conv_op.args)
         # calling data since the fused_weight and fused_bias are nn.Parameter
         weight_attr_name = conv_args[1].target
-        setattr(m, weight_attr_name, fused_weight)
+        _set_module_attr(m, weight_attr_name, fused_weight)
         if conv_args[2] is not None:
             bias_attr_name = conv_args[2].target
         else:
@@ -73,7 +85,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             with m.graph.inserting_before(conv_op):
                 get_bias_node = m.graph.get_attr(bias_attr_name)
             conv_args[2] = get_bias_node
-        setattr(m, bias_attr_name, fused_bias)
+        _set_module_attr(m, bias_attr_name, fused_bias)
         conv_op.args = tuple(conv_args)
 
         # native_batch_norm has 3 outputs, we expect getitem calls on the output

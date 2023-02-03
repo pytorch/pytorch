@@ -547,6 +547,9 @@ class Tracer(TracerBase):
         # will likely not contain the actual parameters we care about, so unwrap
         # the function to get to the innermost callable.
         fn_for_analysis = inspect.unwrap(root_fn)
+        if isinstance(fn_for_analysis, torch.nn.Module):
+            fn_for_analysis = getattr(fn_for_analysis, self.traced_func_name)
+            is_module = True
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         orig_args = list(co.co_varnames)
@@ -704,7 +707,13 @@ class Tracer(TracerBase):
                 self.root_module_name = root._get_name()
                 self.submodule_paths = {mod: name for name, mod in root.named_modules()}
             else:
-                self.root = torch.nn.Module()
+                unwrapped = inspect.unwrap(root)
+                if isinstance(unwrapped, torch.nn.Module):
+                    self.root = unwrapped
+                    self.root_module_name = unwrapped._get_name()
+                    self.submodule_paths = {mod: name for name, mod in self.root.named_modules()}
+                else:
+                    self.root = torch.nn.Module()
                 fn = root
 
             tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)

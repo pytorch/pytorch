@@ -458,6 +458,9 @@ def wrap_key(f, tensors, tracer):
     @functools.wraps(f)
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
+        if len(flat_proxies) == len(flat_tensors) + 1:
+            assert isinstance(flat_proxies[0], torch.nn.Module)
+            flat_proxies = flat_proxies[1:]
         assert len(flat_proxies) == len(flat_tensors)
         assert isinstance(_get_current_dispatch_mode(), ProxyTorchDispatchMode)
         with _pop_mode_temporarily():
@@ -698,12 +701,16 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         }
         args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
-        if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
-            # FX doesn't support varargs, so we gotta fake up a wrapper
-            # TODO: Would be nice to fix this at the source...
-            func = fake_signature(f, len(phs))
-        else:
+        unwrapped = inspect.unwrap(f)
+        if isinstance(unwrapped, torch.nn.Module):
             func = f
+        else:
+            if not hasattr(unwrapped, '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
+                # FX doesn't support varargs, so we gotta fake up a wrapper
+                # TODO: Would be nice to fix this at the source...
+                func = fake_signature(f, len(phs))
+            else:
+                func = f
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
