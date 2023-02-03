@@ -83,14 +83,6 @@ def quantize_per_tensor_tensor(
     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
     return quantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
 
-@impl(quantized_decomposed_lib, "quantize_per_tensor.tensor", "Meta")
-def quantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
-    assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
-    return torch.empty_like(input, dtype=dtype)
-
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
 # the signature as metadata for the input Tensor, this might be useful for pattern
 # matching in the future
@@ -163,17 +155,6 @@ def dequantize_per_tensor_tensor(
     assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
     return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
-
-@impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor", "Meta")
-def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
-    assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
-    assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
-    if dtype in [torch.uint8, torch.int8, torch.int32]:
-        return torch.empty_like(input, dtype=torch.float32)
-    else:
-        raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
-
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "

@@ -2773,6 +2773,17 @@ def quantize_per_tensor(
     inv_scale = 1.0 / scale
     return torch.clamp(torch.round(input * inv_scale) + zero_point, quant_min, quant_max).to(dtype)
 
+@register_decomposition(torch.ops.quantized_decomposed.dequantize_per_tensor)
+def dequantize_per_tensor(
+        input: torch.Tensor,
+        scale: float,
+        zero_point: int,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

@@ -896,7 +896,7 @@ def create_joint_forward_backward_functionalized(
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            with fx_traceback.override_stack_trace():
+            with fx_traceback.preserve_node_meta():
                 backward_out = torch.autograd.grad(
                     needed_outs,
                     grad_primals,
@@ -2447,7 +2447,7 @@ def aot_module_simplified(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
                     )
