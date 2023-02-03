@@ -2,6 +2,8 @@
 
 --------------------------------------------------------------------------------
 
+[![](https://img.shields.io/badge/Wheel%20files-Download%20-brightgreen?style=for-the-badge&logo=python)](https://download.pytorch.org/whl/torch_stable.html)
+
 PyTorch is a Python package that provides two high-level features:
 - Tensor computation (like NumPy) with strong GPU acceleration
 - Deep neural networks built on a tape-based autograd system
