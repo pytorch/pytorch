@@ -150,7 +150,9 @@ TensorIterator make_value_selection_intersection_iter(
 template <
   template <typename func_t> class kernel_t,
   typename value_selection_intersection_kernel_t,
-  typename index_t = int64_t>
+  typename index_t = int64_t,
+  bool use_dynamic_shapes = true,
+  int64_t max_static_len = 0>  // only relevant when use_dynamic_shapes is false.
 void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
@@ -256,15 +258,36 @@ void _sparse_binary_op_intersection_kernel_impl(
   // which is implicit in the definition of hash_coeffs,
   // it could be shown that the hash function is actually bijective and, hence,
   // is a perfect hash function (no collisions ever).
-  const auto hash_coeffs = [&]() -> auto {
+
+  // Need owning storage in case of the Tensor class.
+  const auto hash_coeffs_storage = [&]() -> auto {
     const auto broadcasted_sparse_dim_shape = std::vector<int64_t>(
       broadcasted_shape.begin(),
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
     );
-    const auto strides = c10::contiguous_strides(broadcasted_sparse_dim_shape);
-    std::array<int64_t, c10::kDimVectorStaticSize> strides_as_array;
-    std::copy(strides.begin(), strides.end(), strides_as_array.begin());
-    return strides_as_array;
+    auto strides = c10::contiguous_strides(broadcasted_sparse_dim_shape);
+
+    if constexpr (!use_dynamic_shapes) {
+      std::array<int64_t, max_static_len> strides_as_array;
+      std::copy(strides.begin(), strides.end(), strides_as_array.begin());
+      return strides_as_array;
+    } else {
+      auto strides_len = static_cast<int64_t>(strides.size());
+      auto hash_coeffs = at::from_blob(
+          strides.data(),
+          {strides_len},
+          probably_coalesced._indices().options().device(kCPU).dtype(kLong));
+      hash_coeffs = hash_coeffs.to(probably_coalesced.device(), kLong, /*non_blocking=*/false, /*copy=*/true);
+      return hash_coeffs;
+    }
+  }();
+
+  const auto hash_coeffs = [&]() -> auto {
+    if constexpr (!use_dynamic_shapes) {
+      return hash_coeffs_storage;
+    } else {
+      return hash_coeffs_storage.template data_ptr<int64_t>();
+    }
   }();
 
   const auto nnz_arange = at::arange(
@@ -601,10 +624,21 @@ void _sparse_binary_op_intersection_kernel_out(
 
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
+  // 10 sparse dims should be more than enough?
+  constexpr auto max_sparse_dims = 2 * c10::kDimVectorStaticSize;
+
   BOOL_TO_INDEX_TYPE1(is_32bit_indexing, [&]() {
       using index_t = index_t0;
-      _sparse_binary_op_intersection_kernel_impl<kernel_t, value_selection_intersection_kernel_t, index_t>(
-          res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
+
+      if (max_sparse_dims > x.sparse_dim()) {
+        _sparse_binary_op_intersection_kernel_impl<
+          kernel_t, value_selection_intersection_kernel_t, index_t, /*use_dynamic_shapes=*/false, max_sparse_dims>(
+            res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
+      } else {
+        _sparse_binary_op_intersection_kernel_impl<
+          kernel_t, value_selection_intersection_kernel_t, index_t, /*use_dynamic_shapes=*/true>(
+            res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
+      }
   });
 }
 
