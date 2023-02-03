@@ -636,7 +636,6 @@ void gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
 //  std::cout << " GEMM AN DBIAS " << std::endl;
-  using opmath_t = at::opmath_type<Dtype>;
 
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
@@ -751,8 +750,8 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  float beta_special = 0.0f;
   // opmath_t beta_val = 0; // bias is added in epilogue
+  std::conditional_t<std::is_same<BDtype, nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -761,7 +760,7 @@ void gemm_and_bias(
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      &beta_special, // &beta_val,
+      &beta_val,
       result_ptr,
       Cdesc.descriptor(),
       result_ptr,
