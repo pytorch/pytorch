@@ -2959,3 +2959,6 @@
 - name: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
+
+- name: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int stride) -> Tensor
+  self: grad

@@ -2724,4 +2724,9 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
+@register_meta(aten.all_reduce)
+def all_reduce_meta(self, reduceOp, tag, rankset, stride):
+    return torch.empty_like(self)
+
+
 activate_meta()

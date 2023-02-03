@@ -9,7 +9,6 @@ from torch.distributed._spmd.comm_tensor import CommTensor
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 
-
 class Placement(object):
     # base class Placement type
 
@@ -250,13 +249,7 @@ class _Partial(Placement):
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # out-of-place all_reduce to replicate, since the current partial DTensor
-        # might get used by other ops as well, so we can't inplace modify it
-        cloned_local = CommTensor(tensor.clone(memory_format=torch.contiguous_format))
-        mesh.all_reduce(
-            cloned_local, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
-        )
-        return cloned_local
+        return mesh.tracing_all_reduce(tensor, self.reduce_op, mesh_dim=mesh_dim)
 
     def _to_shard(
         self,
