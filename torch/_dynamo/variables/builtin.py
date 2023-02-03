@@ -278,6 +278,8 @@ class BuiltinVariable(VariableTracker):
                         need_unwrap=need_unwrap,
                         **options,
                     )
+                elif all(isinstance(x, DynamicShapeVariable) for x in args):
+                    return DynamicShapeVariable.create(tx, proxy, None, **options)
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
