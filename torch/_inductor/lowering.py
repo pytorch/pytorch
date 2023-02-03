@@ -1432,6 +1432,7 @@ make_fallback(torch.ops.prims.shift_right_arithmetic.default)
 
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
+
 @register_lowering(aten.convolution)
 def convolution(
     x: TensorBox,
