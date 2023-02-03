@@ -1472,9 +1472,9 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
   auto result = grad.new_zeros_symint(self.sym_sizes());
-  // for composite compliance, use out-of-place variant of
-  // `scatter_add` if index tensor is a Tensor Subclass.
-  if (isTensorSubclassLike(index)) {
+  // for composite, vmap and inductor compliance, use out-of-place variant of
+  // `scatter_add` if index or grad tensors is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({index, grad})) {
     return result.scatter_add(dim, index, grad);
   }
   result.scatter_add_(dim, index, grad);
