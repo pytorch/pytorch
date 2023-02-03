@@ -658,10 +658,6 @@ if(USE_CUDA)
   )
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-  if(MSVC)
-    target_link_libraries(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp caffe2_nvrtc)
-    target_link_libraries(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp caffe2_nvrtc)
-  endif()
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
@@ -1566,6 +1562,10 @@ endif()
 
 
 target_link_libraries(torch_cpu PRIVATE flatbuffers)
+
+if(USE_CUDA AND MSVC)
+  target_link_libraries(torch_cpu PUBLIC ${CUDA_CUDA_LIB})
+endif()
 
 # Note [Global dependencies]
 # Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
