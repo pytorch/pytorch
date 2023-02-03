@@ -167,7 +167,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         fd = fusion
     else:
         fusion = Fusion()
-        fd = FusionDefinition(fs)
+        fd = FusionDefinition(fusion)
 
     with fd:
 
