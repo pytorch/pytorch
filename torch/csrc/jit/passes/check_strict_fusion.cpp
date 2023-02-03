@@ -98,7 +98,7 @@ void checkForUnfusedOps(Node* enter_node) {
       unfused_nodes_not_used_in_guard.push_back(unfused);
     }
   }
-  if (unfused_nodes_not_used_in_guard.size()) {
+  if (!unfused_nodes_not_used_in_guard.empty()) {
     std::stringstream ss;
     ss << "Found unfused operators: \n";
     for (Node* unfused : unfused_nodes_not_used_in_guard) {

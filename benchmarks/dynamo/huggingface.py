@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main
+from common import BenchmarkRunner, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -89,6 +89,8 @@ assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
 SKIP = {
+    # Difficult to setup accuracy test because .eval() not supported
+    "Reformer",
     # Fails deepcopy
     "BlenderbotForConditionalGeneration",
     "GPTNeoForCausalLM",
@@ -124,7 +126,7 @@ BATCH_SIZE_DIVISORS = {
     "GPT2ForSequenceClassification": 2,
     # "GPTJForCausalLM" : 2,
     # "GPTJForQuestionAnswering" : 2,
-    # "GPTNeoForCausalLM" : 2,
+    # "GPTNeoForCausalLM" : 32,
     # "GPTNeoForSequenceClassification" : 2,
     "GoogleFnet": 2,
     "LayoutLMForMaskedLM": 2,
@@ -152,6 +154,15 @@ BATCH_SIZE_DIVISORS = {
     "XLNetLMHeadModel": 2,
     "YituTechConvBert": 2,
 }
+
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine.
+    "DebertaV2ForMaskedLM",
+    "BlenderbotForCausalLM",
+}
+
+REQUIRE_HIGHER_TOLERANCE = set("MT5ForConditionalGeneration")
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -366,6 +377,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
+        reset_rng_state()
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -423,8 +435,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.init_optimizer(device, model.parameters())
-
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 
@@ -440,10 +450,17 @@ class HuggingfaceRunner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in SKIP
             ):
                 continue
             yield model_name
+
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard or self.args.accuracy:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
 
     def pick_grad(self, name, is_training):
         if is_training:
@@ -454,18 +471,22 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            return 1e-2, cosine
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                return 2e-2, cosine
+            else:
+                return 1e-2, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):
         return pred[0]
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(**inputs)
+        with self.autocast():
+            return mod(**inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)

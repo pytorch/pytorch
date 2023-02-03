@@ -1333,7 +1333,9 @@ def unconvertible_ops(
             # eliminated in the conversion passes. Users may still see errors caused
             # by prim ops even though they don't show up in the list.
             continue
-        if not registration.registry.is_registered_op(domain_op, opset_version):
+        if not registration.registry.is_registered_op(
+            domain_op.rstrip("_"), opset_version
+        ):
             # We consider all registered ops supported, even though some of them are
             # only partially supported, because there is not yet a good way to check
             # if an op is fully supported.
@@ -1618,7 +1620,7 @@ def _export(
                 try:
                     _C._check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
-                    raise errors.CheckerError(e)
+                    raise errors.CheckerError(e) from e
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False

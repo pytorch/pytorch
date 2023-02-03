@@ -1,9 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
+from typing import Iterable, List, Sequence, Union
 
 import torch
-from typing import List, Union, Sequence, Iterable
 from torch.distributed._tensor.api import DTensor
 
 
@@ -33,12 +33,14 @@ def register_impl(func):
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
-def register_prop_rule(func):
+def register_prop_rule(op):
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def wrapper(impl):
-        DTensor._op_to_rules[func] = impl
+        overloads = op if isinstance(op, list) else [op]
+        for overload in overloads:
+            DTensor._propagator.register_sharding_prop_rule(overload, impl)
         return impl
 
     return wrapper
@@ -51,9 +53,7 @@ def as_list(
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.
-    if type(x) is list or isinstance(
-        x, torch.fx.immutable_collections.immutable_list
-    ):
+    if type(x) is list or isinstance(x, torch.fx.immutable_collections.immutable_list):
         return x
     else:
         return [x]

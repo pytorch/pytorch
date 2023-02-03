@@ -9,7 +9,7 @@
 #include <cmath>
 #include <limits>
 
-namespace at { namespace native {
+namespace at::native {
 
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -34,4 +34,4 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
       });
 }
 
-}} // namespace at::native
+} // namespace at::native

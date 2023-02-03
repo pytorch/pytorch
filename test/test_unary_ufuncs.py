@@ -1094,6 +1094,61 @@ class TestUnaryUfuncs(TestCase):
             rtol=rtol,
         )
 
+    @dtypes(torch.complex64, torch.complex128)
+    def test_log1p_complex(self, device, dtype):
+        # The output values here were obtained using arbitrary precision math (mpmath)
+        # and double checked with WolframAlpha.
+        # Not using numpy's log1p here because by the time of writing this,
+        # np.log1p has precision problems for small complex input values, see here:
+        # https://github.com/numpy/numpy/issues/22609
+        inouts = [
+            (0.2 + 0.3j, 0.21263386770217202 + 0.24497866312686414j),
+            (1e-19 + 1e-18j, 1e-19 + 1e-18j),
+            (1e-18 + 0.1j, 0.00497517 + 0.0996687j),
+            (0.1 + 1e-18j, 0.0953102 + 9.090909090909090909e-19j),
+            (0.5 + 0j, 0.40546510810816 + 0j),
+            (0.0 + 0.5j, 0.111571776 + 0.463647609j),
+            (2.0 + 1.0j, 1.151292546497023 + 0.3217505543966422j),
+            (-1.0 + 2.0j, 0.6931471805599453 + 1.570796326794897j),
+            (2.0j, 0.80471895621705014 + 1.1071487177940904j),
+            (-2.0j, 0.80471895621705014 - 1.1071487177940904j),
+        ]
+        # test the extreme values
+        if dtype == torch.complex128:
+            inouts += [
+                (-1 + 1e250j, 575.6462732485114 + 1.5707963267948966j),
+                (1e250 + 1j, 575.6462732485114 + 1e-250j),
+                (1e250 + 1e250j, 575.9928468387914 + 0.7853981633974483j),
+                (1e-250 + 1e250j, 575.6462732485114 + 1.5707963267948966j),
+                (1e-250 + 2e-250j, 1e-250 + 2e-250j),
+                (1e250 + 1e-250j, 575.6462732485114 + 0.0j),
+            ]
+        elif dtype == torch.complex64:
+            inouts += [
+                (-1 + 1e30j, 69.07755278982137 + 1.5707963267948966j),
+                (1e30 + 1j, 69.07755278982137 + 1e-30j),
+                (1e30 + 1e30j, 69.42412638010134 + 0.7853981633974483j),
+                (1e-30 + 1e30j, 69.07755278982137 + 1.5707963267948966j),
+                (1e-30 + 2e-30j, 1e-30 + 2e-30j),
+                (1e30 + 1e-30j, 69.07755278982137 + 0.0j),
+            ]
+
+        # test the log1p individually
+        for inp, out in inouts:
+            res = torch.log1p(torch.tensor(inp, dtype=dtype, device=device))
+            self.assertFalse(torch.any(torch.isnan(res)))
+            # setting up atol == 0.0 because some part has very small values
+            self.assertEqual(res.real, out.real, atol=0.0, rtol=1e-6)
+            self.assertEqual(res.imag, out.imag, atol=0.0, rtol=1e-6)
+
+        # test the log1p in tensor
+        inp_lst, out_lst = [list(elmt) for elmt in zip(*inouts)]
+        inp_tens = torch.tensor(inp_lst, dtype=dtype, device=device)
+        out_tens = torch.tensor(out_lst, dtype=dtype, device=device)
+        res_tens = torch.log1p(inp_tens)
+        self.assertEqual(res_tens.real, out_tens.real, atol=0.0, rtol=1e-6)
+        self.assertEqual(res_tens.imag, out_tens.imag, atol=0.0, rtol=1e-6)
+
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
     @dtypes(*get_all_math_dtypes("cpu"))

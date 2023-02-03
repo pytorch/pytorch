@@ -128,9 +128,9 @@ class TestDtypeBase(JitTestCase):
         inputs = [self.get_rand_tensor(s, d) for s, d in zip(in_shapes, in_dtypes)]
         try:
             self.assert_dtype_equal_custom_args(fn, inputs)
-        except Exception:
+        except Exception as e:
             fail_text = f"Failed for shapes {in_shapes}, and dtypes {in_dtypes}"
-            raise AssertionError(fail_text)
+            raise AssertionError(fail_text) from e
 
     def assert_dtype_equal_custom_args(self, fn, args):
         try:
