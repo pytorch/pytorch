@@ -39,6 +39,7 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(Meta, extra)                                \
+  _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)

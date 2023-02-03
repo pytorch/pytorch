@@ -70,7 +70,7 @@ class Exponential(ExponentialFamily):
         return 1 - torch.exp(-self.rate * value)
 
     def icdf(self, value):
-        return -torch.log(1 - value) / self.rate
+        return -torch.log1p(-value) / self.rate
 
     def entropy(self):
         return 1.0 - torch.log(self.rate)

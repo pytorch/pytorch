@@ -488,7 +488,7 @@ std::vector<Shape> compute_shape_index_select(
 
   auto self_sizes = self.sizes();
   std::vector<int64_t> output_sizes(self_sizes.begin(), self_sizes.end());
-  TORCH_CHECK(output_sizes.size() > 0, "Empty output_sizes is not supported.");
+  TORCH_CHECK(!output_sizes.empty(), "Empty output_sizes is not supported.");
   output_sizes[dim] = index_size;
 
   return {Shape(self.scalar_type(), output_sizes)};
@@ -512,7 +512,7 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   for (auto& tensor : tensors) {
     extended_dim_shape += tensor.sizes()[dim];
   }
-  TORCH_CHECK(out_shape.size() > 0, "Scalar tensors are not supported in cat.");
+  TORCH_CHECK(!out_shape.empty(), "Scalar tensors are not supported in cat.");
   TORCH_CHECK(
       extended_dim_shape <= std::numeric_limits<int64_t>::max(),
       "Size overflow");
@@ -1113,7 +1113,7 @@ TORCH_API std::vector<Shape> compute_shape_clone(
 }
 
 std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
+  TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
   auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
 
   // Copied from 'check_stack_inputs' in TensorShape.cpp

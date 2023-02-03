@@ -4,8 +4,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace cpublas {
 namespace {
 
@@ -248,4 +247,4 @@ REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
 REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl);
 REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl);
 
-}}  // namespace at::native
+}  // namespace at::native
