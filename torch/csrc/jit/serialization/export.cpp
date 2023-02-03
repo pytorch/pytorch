@@ -35,8 +35,7 @@ C10_DIAGNOSTIC_POP()
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void writeArchiveAndTensors(
     const std::string& archive_name,
@@ -1394,5 +1393,4 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

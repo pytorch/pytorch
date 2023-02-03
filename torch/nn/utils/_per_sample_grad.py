@@ -1,7 +1,6 @@
 import functools
 
 import torch
-from torch.nn.utils.stateless import functional_call
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 from torch.utils._pytree import tree_flatten
@@ -103,5 +102,5 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", 
             wrapper_batch_size = compute_batch_size(*args, **kwargs)
 
         params = {name: maybe_build_expanded_weight(value, wrapper_batch_size) for (name, value) in module.named_parameters()}
-        return functional_call(module, params, args, kwargs)
+        return torch.func.functional_call(module, params, args, kwargs)
     return wrapper

@@ -16,8 +16,7 @@
 #include <ATen/ops/multi_margin_loss_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 constexpr int MULTIMARGIN_THREADS = 128;
 
@@ -392,4 +391,4 @@ Tensor multi_margin_loss_cuda_backward(
   return grad_input;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

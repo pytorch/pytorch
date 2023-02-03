@@ -6,11 +6,13 @@ import itertools
 import types
 from typing import Dict, List
 
+import torch
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import istensor, make_cell
+from ..utils import istensor, istype, make_cell
 from .base import typestr, VariableTracker
 
 
@@ -39,7 +41,9 @@ def wrap_bound_arg(tx, val, options, source=None):
             **options,
         )
 
-    if variables.ConstantVariable.is_literal(val):
+    if variables.ConstantVariable.is_literal(val) or istype(
+        val, (torch.Size, torch.device, torch.dtype)
+    ):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
         return variables.UserFunctionVariable(val, source=source, **options)
@@ -274,14 +278,16 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if (
-            isinstance(self.obj, variables.NNModuleVariable)
-            and getattr(self.fn, "__module__", "").startswith("torch.nn.")
-            or self.is_constant
-        ):
-            return self.obj.call_method(
-                tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-            ).add_options(self)
+        if isinstance(self.obj, variables.NNModuleVariable):
+            module_attr = getattr(self.fn, "__module__", "")
+            if (
+                module_attr is not None
+                and module_attr.startswith("torch.nn.")
+                or self.is_constant
+            ):
+                return self.obj.call_method(
+                    tx, self.fn.__name__, args, kwargs, constant=self.is_constant
+                ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
