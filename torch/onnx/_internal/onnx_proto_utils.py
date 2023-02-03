@@ -1,5 +1,7 @@
 """Utilities for manipulating the onnx and onnx-script dependencies and ONNX proto."""
+from __future__ import annotations
 
+import dataclasses
 import glob
 import io
 import os
@@ -12,7 +14,6 @@ import torch.jit._trace
 import torch.serialization
 from torch.onnx import _constants, _exporter_states, errors
 from torch.onnx._internal import _beartype, jit_utils, registration
-import dataclasses
 
 
 @_beartype.beartype
@@ -43,10 +44,10 @@ def export_as_test_case(
     """
     try:
         import onnx
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "Export test case to ONNX format failed: Please install ONNX."
-        )
+        ) from err
 
     test_case_dir = os.path.join(dir, "test_" + name)
     os.makedirs(test_case_dir, exist_ok=True)
@@ -98,10 +99,10 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     try:
         import onnx
         from onnx import numpy_helper
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "Load test case from ONNX format failed: Please install ONNX."
-        )
+        ) from err
 
     with open(os.path.join(dir, "model.onnx"), "rb") as f:
         model_bytes = f.read()
@@ -134,8 +135,10 @@ def export_data(data, value_info_proto, f: str) -> None:
     """
     try:
         from onnx import numpy_helper
-    except ImportError:
-        raise ImportError("Export data to ONNX format failed: Please install ONNX.")
+    except ImportError as err:
+        raise ImportError(
+            "Export data to ONNX format failed: Please install ONNX."
+        ) from err
 
     with open(f, "wb") as opened_file:
         if value_info_proto.type.HasField("map_type"):
@@ -288,6 +291,7 @@ def _find_onnxscript_op(
                 else None,
             )
     return onnx_function_list, included_node_func
+
 
 def _update_option_with_kwargs(options, kwargs):
     """

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -8,7 +9,7 @@ import operator
 import os
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import dataclasses
+
 from torch.onnx._internal import onnx_proto_utils
 
 try:
@@ -663,6 +664,7 @@ def export(
         use_binary_format=use_binary_format,
     )
 
+
 @dataclasses.dataclass
 class ExportOptions:
     """Options for FX-ONNX export.
@@ -670,9 +672,13 @@ class ExportOptions:
         opset_version: The export ONNX version.
         use_binary_format: Whether to Return ModelProto in binary format.
     """
+
     opset_version: int = ONNX_GLOBALS.export_onnx_opset_version
     use_binary_format: bool = True
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
+    decomposition_table: Dict[
+        torch._ops.OpOverload, Callable
+    ] = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
+
 
 @_beartype.beartype
 def export_without_kwargs(
@@ -853,7 +859,7 @@ def export_without_parameters_and_buffers(
     *args,
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
-    opset_version: int = None,
+    opset_version: int = ONNX_GLOBALS.export_onnx_opset_version,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
