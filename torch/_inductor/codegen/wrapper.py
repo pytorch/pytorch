@@ -509,6 +509,10 @@ class WrapperCodeGen(CodeGen):
                 # these lines will be pointless
                 self.lines.pop()
 
+            for name, value in V.graph.graph_inputs.items():
+                if isinstance(value.data, ir.ReinterpretView):
+                    self.wrapper_call.writeline(value.data.codegen_reference_mutation())
+
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
             for i in range(len(self.lines)):
@@ -575,6 +579,8 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
+                if isinstance(value.data, ir.ReinterpretView):
+                    value = value.data.data
                 shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                 stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
                 add_fake_input(
