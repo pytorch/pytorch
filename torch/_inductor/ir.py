@@ -3953,6 +3953,15 @@ class InterpreterShim(torch.fx.Interpreter):
         self.env = {}
         self.fetch_attr = submodules.__getitem__
         self.name = "InterpreterShim"
+        self.current_node = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        self.current_node = n
+        return super().run_node(n)
+
+    def run(self, *args, **kwargs):
+        with V.set_interpreter_handler(self):
+            return super().run(*args, **kwargs)
 
 
 class LoopBody:
