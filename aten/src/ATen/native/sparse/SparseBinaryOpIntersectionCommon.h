@@ -273,12 +273,12 @@ void _sparse_binary_op_intersection_kernel_impl(
       return strides_as_array;
     } else {
       auto strides_len = static_cast<int64_t>(strides.size());
-      auto hash_coeffs = at::from_blob(
+      auto strides_as_tensor = at::from_blob(
           strides.data(),
           {strides_len},
           probably_coalesced._indices().options().device(kCPU).dtype(kLong));
-      hash_coeffs = hash_coeffs.to(probably_coalesced.device(), kLong, /*non_blocking=*/false, /*copy=*/true);
-      return hash_coeffs;
+      strides_as_tensor = strides_as_tensor.to(probably_coalesced.device(), kLong, /*non_blocking=*/false, /*copy=*/true);
+      return strides_as_tensor;
     }
   }();
 
