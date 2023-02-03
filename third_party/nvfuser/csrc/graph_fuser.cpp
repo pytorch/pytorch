@@ -1042,7 +1042,7 @@ struct CudaGraphFuser {
         shape_of.emplace(n->output(1), shape_of.at(n->input(0)));
         continue;
       }
-      if (n->kind() == prim::unsqueeze_copy) {
+      if (n->kind() == aten::unsqueeze_copy) {
         TORCH_INTERNAL_ASSERT(
             shape_of.count(n->input(0)) > 0,
             "buildShapeExpressions failed at accessing input shapes");
@@ -1060,13 +1060,13 @@ struct CudaGraphFuser {
         shape_of.emplace(n->output(), size);
         continue;
       }
-      if (n->kind() == prim::squeeze_copy) {
+      if (n->kind() == aten::squeeze_copy) {
         TORCH_INTERNAL_ASSERT(
             shape_of.count(n->input(0)) > 0,
             "buildShapeExpressions failed at accessing input shapes");
         TORCH_INTERNAL_ASSERT(
             n->inputs().size() == 2 || n->inputs().size() == 1,
-            "prim::squeeze_copy expects one or two inputs");
+            "aten::squeeze_copy expects one or two inputs");
         std::vector<Value*> inputs = {shape_of.at(n->input(0))};
 
         if (n->inputs().size() == 2) {
@@ -1674,19 +1674,19 @@ void guardFusionGroup(
                      Symbol::attr("profiled_view_size"))) {
         // TODO: Add support for dynamic split to view guard
 
-        // Path from profile-ivalue to prim::view_copy operation
+        // Path from profile-ivalue to aten::view_copy operation
         // profile-ivalue -> Constant -> CudaFusionGroup
         // Get argument position in CudaFusionGroup
         // Get argument in subgraph for CudaFusionGroup
-        // CudaFusionGroup argument -> Constant List -> prim::view_copy
+        // CudaFusionGroup argument -> Constant List -> aten::view_copy
         auto subgraph_arg = fusion_graph->inputs()[offset];
         auto constant = subgraph_arg->uses().front().user->output();
 
         TORCH_INTERNAL_ASSERT(!constant->uses().empty());
         auto view = constant->uses().front().user;
         TORCH_INTERNAL_ASSERT(
-            view->kind() == prim::view_copy ||
-            view->kind() == prim::reshape_copy);
+            view->kind() == aten::view_copy ||
+            view->kind() == aten::_reshape_copy);
 
         ivalue_check = guardView(
             fusion,
@@ -2170,16 +2170,16 @@ void decomposeLinearOps(Block* block) {
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
-      {{aten::expand, prim::expand_copy},
+      {{aten::expand, aten::expand_copy},
        {aten::expand_as, prim::expand_as_copy},
-       {aten::view, prim::view_copy},
-       {aten::reshape, prim::reshape_copy},
-       {aten::squeeze, prim::squeeze_copy},
-       {aten::unsqueeze, prim::unsqueeze_copy},
+       {aten::view, aten::view_copy},
+       {aten::reshape, aten::_reshape_copy},
+       {aten::squeeze, aten::squeeze_copy},
+       {aten::unsqueeze, aten::unsqueeze_copy},
        {aten::flatten, prim::flatten_copy},
-       {aten::permute, prim::permute_copy},
-       {aten::transpose, prim::transpose_copy},
-       {aten::t, prim::t_copy}});
+       {aten::permute, aten::permute_copy},
+       {aten::transpose, aten::transpose_copy},
+       {aten::t, aten::t_copy}});
 
   std::vector<Node*> maybe_safe_alias_nodes;
   for (Node* n : block->nodes()) {
@@ -2224,16 +2224,16 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
-      {{prim::expand_copy, aten::expand},
+      {{aten::expand_copy, aten::expand},
        {prim::expand_as_copy, aten::expand_as},
-       {prim::view_copy, aten::view},
+       {aten::view_copy, aten::view},
        {prim::flatten_copy, aten::flatten},
-       {prim::reshape_copy, aten::reshape},
-       {prim::squeeze_copy, aten::squeeze},
-       {prim::unsqueeze_copy, aten::unsqueeze},
-       {prim::permute_copy, aten::permute},
-       {prim::transpose_copy, aten::transpose},
-       {prim::t_copy, aten::t}});
+       {aten::_reshape_copy, aten::reshape},
+       {aten::squeeze_copy, aten::squeeze},
+       {aten::unsqueeze_copy, aten::unsqueeze},
+       {aten::permute_copy, aten::permute},
+       {aten::transpose_copy, aten::transpose},
+       {aten::t_copy, aten::t}});
 
   std::vector<Node*> alias_copy_ops;
   for (Node* n : block->nodes()) {
@@ -2382,7 +2382,7 @@ void separateNestedViews(Node* cuda_fusion_group) {
 
   auto isView = [](Node* node) {
     static std::unordered_set<Symbol> alias_op_set(
-        {prim::view_copy, prim::reshape_copy});
+        {aten::view_copy, aten::_reshape_copy});
     return alias_op_set.find(node->kind()) != alias_op_set.end();
   };
 

@@ -3692,10 +3692,10 @@ class TestCudaFuser(JitTestCase):
             # prohibit fusing when view_shape contains an inferred dimension
             # TODO: Revisit
             self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
-            self.assertGraphContainsExactly(graph, 'prim::view_copy', 0)
+            self.assertGraphContainsExactly(graph, 'aten::view_copy', 0)
         else:
             self.assertGraphContains(graph, FUSION_GUARD)
-            self.assertGraphContains(graph, 'prim::view_copy', True)
+            self.assertGraphContains(graph, 'aten::view_copy', True)
 
     def _alias_bias_view_relu_helper(self, shape, output_shape, dtype, device, error):
         class BiasViewRelu(torch.nn.Module):
@@ -3727,7 +3727,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, bias, output_shape)
         self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
-        self.assertGraphContainsExactly(graph, 'prim::view_copy', 0)
+        self.assertGraphContainsExactly(graph, 'aten::view_copy', 0)
 
     # generate random view given original view
     def _random_view(self, original_view, max_len=8, max_views=10000):
@@ -3971,7 +3971,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x)
         self.assertGraphContains(graph, FUSION_GUARD)
-        self.assertGraphContains(graph, 'prim::view_copy', True)
+        self.assertGraphContains(graph, 'aten::view_copy', True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -4003,7 +4003,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, bias)
         self.assertGraphContains(graph, FUSION_GUARD)
-        self.assertGraphContains(graph, 'prim::squeeze_copy', True)
+        self.assertGraphContains(graph, 'aten::squeeze_copy', True)
 
     def _alias_bias_squeeze_relu_helper(self, shape, dtype, device, error):
         class BiasSqueezeRelu(torch.nn.Module):
@@ -4029,7 +4029,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, bias)
         self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
-        self.assertGraphContainsExactly(graph, 'prim::squeeze_copy', 0)
+        self.assertGraphContainsExactly(graph, 'aten::squeeze_copy', 0)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -4086,7 +4086,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, bias)
         self.assertGraphContains(graph, FUSION_GUARD)
-        self.assertGraphContains(graph, 'prim::unsqueeze_copy', True)
+        self.assertGraphContains(graph, 'aten::unsqueeze_copy', True)
 
     def _alias_bias_unsqueeze_relu_helper(self, shape, dtype, device, error):
         class BiasUnsqueezeRelu(torch.nn.Module):
@@ -4112,7 +4112,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, bias)
         self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
-        self.assertGraphContainsExactly(graph, 'prim::unsqueeze_copy', 0)
+        self.assertGraphContainsExactly(graph, 'aten::unsqueeze_copy', 0)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
