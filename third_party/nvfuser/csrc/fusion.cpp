@@ -226,13 +226,6 @@ void Fusion::addOutput(Val* output) {
   // unfortunately would call addOutput after we marked io_alias_ map.
   // TORCH_CHECK(io_alias_.count(output) == 0,
   //     "can't register aliased output as real output");
-  if (output->isFusionInput() && io_alias_.find(output) == io_alias_.end()) {
-    // If explicitly adding an input as an output, replace with call to
-    // aliasOutputToInput
-    aliasOutputToInput(output, output);
-    return;
-  }
-
   assertInContainer(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
