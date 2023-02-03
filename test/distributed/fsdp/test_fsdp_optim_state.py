@@ -1594,6 +1594,12 @@ class TestFSDPOptimState(FSDPTest):
         # Train one batch and see if optim_state_dict are the same.
         batch = torch.rand(5, 8)
         for model, optim in zip(models, optims):
+            # Eagerly initialize the states
+            for param in model.parameters():
+                if param.requires_grad:
+                    t = torch.zeros_like(param)
+                    param.grad = torch.autograd.Variable(t)
+            optim.step()
             loss = model(batch).sum()
             loss.backward()
             optim.step()

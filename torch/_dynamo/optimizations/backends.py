@@ -1,41 +1,15 @@
-import copy
 import functools
 import logging
 import os
 import tempfile
 
-from typing import Dict, Optional
-
 import torch
-from ..output_graph import CompilerFn
+
+from ..backends.registry import register_backend
 
 from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
-BACKENDS: Dict[str, CompilerFn] = dict()
-
-
-def register_backend(compiler_fn: CompilerFn = None, name: Optional[str] = None):
-    """
-    Decorator to add a given compiler to the BACKENDS registry to allow
-    calling `torch.compile` with string shorthand:
-
-        torch.compile(..., backend="name")
-
-    Note: for projects not imported by default, it might be easier to
-    pass a function directly as a backend and not use this:
-
-        torch.compile(..., backend=compiler_fn)
-
-    Args:
-        compiler_fn: callable taking a FX graph and fake tensor inputs
-        name: Optional name, defaults to `compiler_fn.__name__`
-    """
-    if compiler_fn is None:
-        # @register_backend(name="") syntax
-        return functools.partial(register_backend, name=name)
-    BACKENDS[name or compiler_fn.__name__] = compiler_fn
-    return compiler_fn
 
 
 def create_backend(fn):
@@ -60,26 +34,7 @@ def create_backend(fn):
         except KeyboardInterrupt:
             raise
 
-    BACKENDS[fn.__name__] = inner
-    return inner
-
-
-@register_backend
-def inductor(*args, **kwargs):
-    # do import here to avoid loading inductor into memory when it is not used
-    from torch._inductor.compile_fx import compile_fx
-
-    return compile_fx(*args, **kwargs)
-
-
-@register_backend
-def eager(gm, fake_tensor_inputs):
-    return gm
-
-
-@register_backend(name="ts")
-def torchscript(gm, fake_tensor_inputs):
-    return torch.jit.script(gm)
+    return register_backend(inner)
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
@@ -584,79 +539,19 @@ def tvm_compile_inner(
         return jit_mod  # explicit fall back to eager
 
 
-@functools.lru_cache(None)
-def _init_ltc():
-    try:
-        import torch._lazy.extract_compiled_graph
-        from torch._lazy.ts_backend import init as init_ts_backend
-
-        # hopefully changing this line to sth like _ltc_init_xla_backend in future
-        # will enable XLA
-        init_ts_backend()
-
-        return torch._lazy
-    except ModuleNotFoundError as e:
-        print(f"ltc backend fails. Can not import {e.name}")
-        raise
-
-
-def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs):
-    ltc = _init_ltc()
-    return ltc.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
-
-
-def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
-    ltc = _init_ltc()
-    lazy_model = copy.deepcopy(gm).to(device="lazy")
-    ltc.extract_compiled_graph.force_lazy_device(lazy_model)
-
-    def ltc_model(*inputs):
-        orig_device = inputs[0].device if len(inputs) > 0 else "cuda"
-        lazy_inputs = tuple(inp.to(device="lazy") for inp in inputs)
-
-        lazy_out = lazy_model(*lazy_inputs)
-        out = tuple(out.to(device=orig_device) for out in lazy_out)
-        return out
-
-    return ltc_model
-
-
-@create_backend
-def torchxla_trivial(subgraph):
-    return subgraph.model
-
-
-@create_backend
-def torchxla_trace_once(subgraph):
-    import torch_xla.core.dynamo_bridge as bridge  # type: ignore[import]
-
-    compiled_graph = None
-    model = subgraph.model
-
-    def fwd(*args):
-        nonlocal subgraph
-        nonlocal compiled_graph
-        if compiled_graph is None:
-            compiled_graph = bridge.extract_compiled_graph(model, args)
-            del subgraph
-        return compiled_graph(*args)
-
-    return fwd
-
-
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "fp32"}
-    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+    return ipex(gm, example_inputs, **kwargs_ipex)
 
 
 def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "bf16"}
-    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+    return ipex(gm, example_inputs, **kwargs_ipex)
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": True}
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
+    trt_compiled = fx2trt(gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
@@ -668,7 +563,7 @@ def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": False}
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
+    trt_compiled = fx2trt(gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
