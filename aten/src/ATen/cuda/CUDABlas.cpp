@@ -15,8 +15,7 @@
 #include <cublasLt.h>
 #endif
 
-// hipblaslt was introduced in ROCm MAJOR.minor
-#if defined(USE_ROCM)
+#if defined(ROCM_VERSION) && ROCM_VERSION >= 50500
 #include <hipblaslt.h>
 #endif
 
@@ -300,7 +299,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 #endif // USE_ROCM
 }
 
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if (defined(ROCM_VERSION) && ROCM_VERSION >= 50500) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   // See Note [Writing Nondeterministic Operations]
@@ -332,7 +331,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
     TORCH_CHECK(false, "CUDA BFloat16 bgemm requires CUDA 11 or later");
   #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
-#endif // USE_ROCM
+#endif // ROCM_VERSION || CUDA_VERSION
 
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
@@ -566,7 +565,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 }
 #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
+#if (defined(ROCM_VERSION) && ROCM_VERSION >= 50500) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
 
 
 namespace {
@@ -856,7 +855,7 @@ template void gemm_and_bias(
     at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
-#endif // defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
+#endif // (defined(ROCM_VERSION) && ROCM_VERSION >= 50500) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
@@ -1084,7 +1083,7 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
       'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
 }
 
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if (defined(ROCM_VERSION) && ROCM_VERSION >= 50500) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
   bool trans_bool = (_cublasOpFromChar(trans) != CUBLAS_OP_N);

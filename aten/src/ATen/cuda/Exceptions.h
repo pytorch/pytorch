@@ -12,7 +12,7 @@
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
 
-#ifdef USE_ROCM
+#ifdef defined(ROCM_VERSION) && ROCM_VERSION >= 50500
 #include <hipblas.h>
 #endif
 
@@ -45,7 +45,7 @@ class CuDNNError : public c10::Error {
 
 namespace at { namespace cuda { namespace blas {
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
-#ifdef USE_ROCM
+#ifdef defined(ROCM_VERSION) && ROCM_VERSION >= 50500
 C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error);
 #endif
 }}} // namespace at::cuda::blas
