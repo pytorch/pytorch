@@ -491,6 +491,8 @@ def _get_target_activation_dtype_for_node(
         }
 
     elif node.op == 'output':
+        # Note: creating placeholder observer here is temporary, it will be moved
+        # to the new programmable API when that is ready
         if output_node_to_output_index[node] in output_quantized_idxs:
             return {
                 "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
