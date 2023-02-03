@@ -685,6 +685,11 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 }
 
 Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(mat1.size(0) > 16, "mat1.size(0) needs to be greater than 16, but got ", mat1.size(0));
+  TORCH_CHECK(mat1.size(1) > 0 && mat1.size(1) % 8 == 0, "mat1.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat1.size(1));
+  TORCH_CHECK(mat1.size(1) == mat2.size(0), "mat1.size(1) needs to match mat2.size(0) but got ", mat1.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
+
   // std::cout << "Calling _int_addmm_out_cuda" << std::endl;
   Tensor result = at::empty({mat1.size(0), mat2.size(1)}, mat1.options().dtype(at::kInt));
   Tensor bias = at::empty({mat2.size(1)}, mat1.options());
