@@ -7,20 +7,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Tuple,
-    Union,
-)
-
-from typing_extensions import Protocol
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch.nn
 from torch import fx
@@ -34,13 +21,20 @@ from torch._guards import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
+from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
+from .source import (
+    ConstantSource,
+    is_constant_source,
+    LocalInputSource,
+    LocalSource,
+    ShapeEnvSource,
+)
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -48,6 +42,7 @@ from .utils import (
     clone_inputs,
     count_calls,
     counters,
+    dynamo_timed,
     format_graph_tabular,
     same,
 )
@@ -63,15 +58,6 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 
 
-# TODO: I think this accepts int arguments too
-class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        ...
-
-
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
-
-
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
     tracked_fakes: List[TrackedFake]
@@ -79,7 +65,6 @@ class OutputGraphState(NamedTuple):
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
-    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -196,7 +181,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         fake_mode = torch._subclasses.FakeTensorMode(
-            throw_on_data_dependent_ops=True,
             shape_env=ShapeEnv() if config.dynamic_shapes else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
@@ -241,6 +225,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        # Maps the source arg position to the grapharg position
+        self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -285,7 +271,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
-            self.name_to_input.copy(),
         )
         self.timestamp += 1
         return state
@@ -299,7 +284,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.nn_modules,
             self.side_effects,
             self.timestamp,
-            self.name_to_input,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
@@ -314,6 +298,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.real_value_cache.pop(node, None)
                 removed_nodes += 1
         log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
+
+    def add_grapharg(self, arg: GraphArg):
+        curr_pos = len(self.graphargs)
+        self.graphargs.append(arg)
+        if isinstance(arg.source, LocalInputSource):
+            self.pos_to_arg[arg.source.pos] = curr_pos
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -624,7 +614,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
+    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        tot = 0
+        for node in gm.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                tot += 1
+        torch._dynamo.utils.increment_op_count(tot)
         try:
             name = (
                 self.compiler_fn.__name__
@@ -739,8 +735,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
-        # Clear cache for conversion of real -> fake tensors
-        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
@@ -756,6 +750,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
+        self.side_effects.keepalive = []
 
     def create_proxy(
         self,
@@ -777,6 +772,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

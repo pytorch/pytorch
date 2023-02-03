@@ -1573,25 +1573,7 @@ cc_library(
 )
 
 # torch
-py_binary(
-    name = "stringify_file",
-    srcs = ["torch/csrc/jit/codegen/cuda/tools/stringify_file.py"],
-)
-
-generated_nvfuser_hdrs = ["generated_" + hdr for hdr in libtorch_nvfuser_generated_headers]
-
-[
-    genrule(
-        name = name,
-        srcs = [src],
-        outs = ["nvfuser_resources/{}".format(hdr)],
-        cmd = "$(location :stringify_file) -i $< -o $@",
-        tools = [":stringify_file"],
-    )
-    for name, src, hdr in zip(generated_nvfuser_hdrs, libtorch_nvfuser_runtime_sources, libtorch_nvfuser_generated_headers)
-]
-
-torch_cuda_headers = glob(["torch/csrc/cuda/*.h"]) + generated_nvfuser_hdrs
+torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 
 cc_library(
     name = "torch_headers",
