@@ -41,7 +41,7 @@ const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(
 }
 
 int64_t TorchDispatchModeTLS::stack_len() {
-  return torchDispatchModeState.stack_.size();
+  return static_cast<int64_t>(torchDispatchModeState.stack_.size());
 }
 
 const TorchDispatchModeTLS& TorchDispatchModeTLS::get_state() {
