@@ -69,3 +69,12 @@ void flag_to_float(const T* src, float* dst, int64_t n) {
     dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
   }
 }
+
+template <typename T>
+void flag_to_float(T src, float* dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    uint32_t* dst_u32 = (uint32_t*)dst;
+    dst_u32[i] = src ? 0xFFFFFFFF : 0;
+  }
+}
