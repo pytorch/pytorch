@@ -6060,7 +6060,6 @@ if HAS_CPU:
                     )
                 ]
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                config.dynamic_shapes = dynamic_shapes
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
                 with torch.no_grad():
                     out = fn(*args)
@@ -6085,7 +6084,6 @@ if HAS_CPU:
                     )
                 ]
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                config.dynamic_shapes = dynamic_shapes
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
                 with torch.no_grad():
                     out = fn(*args)
@@ -6109,7 +6107,6 @@ if HAS_CPU:
                     )
                 ]
                 args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                config.dynamic_shapes = dynamic_shapes
                 torch._dynamo.config.dynamic_shapes = dynamic_shapes
                 with torch.no_grad():
                     fn(*args)
