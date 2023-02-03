@@ -673,7 +673,7 @@ def make_fast_binary_impl(slow_ref):
             return FakeTensor(
                 mode,
                 torch.empty(
-                    shape,
+                    final_shape,
                     dtype=common_dtype,
                     device="meta",
                     memory_format=torch.channels_last,
