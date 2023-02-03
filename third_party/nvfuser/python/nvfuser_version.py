@@ -9,7 +9,7 @@ class NvfuserVersion(str):
     def _convert_to_version(cls, ver: Any) -> Version:
         if isinstance(ver, str):
             return Version(ver.split('+')[0])
-        elif isinstance(ver, Version.get_cls()):
+        elif isinstance(ver, Version):
             return ver
         else:
             raise ValueError("can't convert {} to Version".format(ver))
