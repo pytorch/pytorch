@@ -19,9 +19,9 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.utils._pytree import tree_flatten, tree_map
-from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -2761,28 +2761,33 @@ def upsample_bicubic2d_vec(
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
+
 @register_decomposition(torch.ops.quantized_decomposed.quantize_per_tensor)
 def quantize_per_tensor(
-        input: torch.Tensor,
-        scale: float,
-        zero_point: int,
-        quant_min: int,
-        quant_max: int,
-        dtype: torch.dtype
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
 ) -> torch.Tensor:
     inv_scale = 1.0 / scale
-    return torch.clamp(torch.round(input * inv_scale) + zero_point, quant_min, quant_max).to(dtype)
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
 
 @register_decomposition(torch.ops.quantized_decomposed.dequantize_per_tensor)
 def dequantize_per_tensor(
-        input: torch.Tensor,
-        scale: float,
-        zero_point: int,
-        quant_min: int,
-        quant_max: int,
-        dtype: torch.dtype
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
+
 
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)

@@ -199,7 +199,6 @@ class TestQuantizePT2E(QuantizationTestCase):
                 # conv op
                 ns.call_function(torch.ops.aten.convolution.default),
             ]
-            print(m)
             self.checkGraphModuleNodes(
                 m,
                 expected_node_list=node_list,
