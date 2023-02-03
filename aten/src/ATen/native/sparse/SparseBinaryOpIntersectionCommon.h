@@ -274,8 +274,6 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   // non-const because of gcc-5/clang-5 issues
   auto sparse_dim = probably_coalesced.sparse_dim();
-  // non-const because of gcc-5/clang-5 issues
-  auto sdim = static_cast<uint32_t>(sparse_dim);
 
   // Apply the hash function to probably_coalesced.indices
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
@@ -301,7 +299,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           [=] FUNCAPI (index_t nnz_idx) -> int64_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = static_cast<int64_t>(0);
-          for (decltype(sdim) dim = 0; dim < sdim; ++dim) {
+          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
@@ -379,7 +377,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           // Compute hash value
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = static_cast<int64_t>(0);
-          for (decltype(sdim) dim = 0; dim < sdim; ++dim) {
+          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
@@ -510,7 +508,7 @@ void _sparse_binary_op_intersection_kernel_impl(
             // res_indices = source._indices().index_select(1, selected_source)
             // The code below fuses this computation with forming
             // selected_source and selected_probably_coalesced.
-            for (uint32_t d = 0; d < sdim; ++d) {
+            for (int64_t d = 0; d < sparse_dim; ++d) {
               ptr_selected_source_sparse_indices_out[d * selected_source_sparse_indices_dim_stride]
                 = ptr_source_sparse_indices_in[d * source_sparse_indices_dim_stride];
             }
