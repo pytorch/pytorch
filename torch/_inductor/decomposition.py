@@ -28,9 +28,8 @@ inductor_decompositions = get_decompositions(
         aten.lcm,
         aten.gcd,
         aten.clamp_min_,
-        aten.bitwise_right_shift,
-        aten.bitwise_left_shift,
         aten.sin_,
+        aten.bitwise_right_shift,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}

@@ -22,6 +22,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
+    IS_MACOS,
+    IS_X86,
     run_tests,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -147,6 +149,9 @@ inductor_skips["cpu"] = {
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
 }
+
+if IS_MACOS and IS_X86:
+    inductor_skips["cpu"]["rsqrt"] = {b8}
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
@@ -438,6 +443,9 @@ class TestInductorOpInfo(TestCase):
     @skipIfCrossRef
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+    @torch._inductor.config.patch(
+        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+    )
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():

@@ -1424,9 +1424,8 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.expand_copy)
 make_fallback(aten.zeros)
 
-make_fallback(torch.ops.prims.amin)
 make_fallback(torch.ops.prims.gcd.default)
-make_fallback(torch.ops.prims.shift_left.default)
+make_fallback(torch.ops.prims.amin)
 make_fallback(torch.ops.prims.shift_right_arithmetic.default)
 
 
@@ -3789,6 +3788,8 @@ register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
+register_pointwise(aten.bitwise_left_shift)
+# register_pointwise(aten.bitwise_right_shift)
 register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
