@@ -268,6 +268,29 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
+        self.write_header()
+
+        self.write_prefix()
+
+        for name, value in V.graph.constants.items():
+            # include a hash so our code cache gives different constants different files
+            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            self.header.writeline(f"{name} = None  # {hashed}")
+
+        self.allocated = set()
+        self.freed = set()
+        self.write_get_cuda_stream = functools.lru_cache(None)(
+            self.write_get_cuda_stream
+        )
+
+        @functools.lru_cache(None)
+        def add_import_once(line):
+            self.header.writeline(line)
+
+        self.add_import_once = add_import_once
+        self._metas = {}
+
+    def write_header(self):
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -302,26 +325,6 @@ class WrapperCodeGen(CodeGen):
                     from {config.inductor_import}.triton_ops.autotune import conv_heuristics
                     """
                 )
-
-        self.write_prefix()
-
-        for name, value in V.graph.constants.items():
-            # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
-
-        self.allocated = set()
-        self.freed = set()
-        self.write_get_cuda_stream = functools.lru_cache(None)(
-            self.write_get_cuda_stream
-        )
-
-        @functools.lru_cache(None)
-        def add_import_once(line):
-            self.header.writeline(line)
-
-        self.add_import_once = add_import_once
-        self._metas = {}
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -573,8 +576,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(self, name: str, kernel: str):
-        
-        self.header.splice(f"\n\n{name} = {kernel}")
+        self.header.splice(f"{kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return
@@ -597,7 +599,6 @@ class WrapperCodeGen(CodeGen):
 
     def writeline(self, line):
         self.lines.append(line)
-
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
@@ -785,7 +786,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
 
+
 class AOTCppWrapperCodeGen(CppWrapperCodeGen):
+    def write_header(self):
+        pass
+
     def write_prefix(self):
         pass
 
@@ -796,3 +801,18 @@ class AOTCppWrapperCodeGen(CppWrapperCodeGen):
 
     def generate_end(self, result):
         pass
+
+    def generate_return(self, output_refs):
+        pass
+
+    def add_benchmark_harness(self, output):
+        pass
+
+    def write_allocate_line(self, buffer):
+        pass
+        # self.writeline(CppAllocateLine(buffer))
+
+    def write_del_line(self, name):
+        pass
+        # self.writeline(f"{name}.reset();")
+        # return

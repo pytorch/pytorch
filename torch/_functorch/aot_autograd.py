@@ -1018,7 +1018,18 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
         guard = torch._C._DisableAutocast()
     try:
         if hasattr(f, "_boxed_call"):
-            out = normalize_as_list(f(args))
+            if "ctypes.CDLL.__init__.<locals>._FuncPtr" in str(type(f)):
+                # Lol
+                out_tensor = torch.clone(args[0])
+                args = [x.data_ptr() for x in args]
+                args.append(out_tensor.data_ptr())
+                out = normalize_as_list(f(*args))
+                # Out is error code now, muahaha, check it then reassign
+                out = out_tensor
+                print(out_tensor)
+            else:
+                breakpoint()
+                out = normalize_as_list(f(*args))
         else:
             # TODO: Please remove soon
             # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
@@ -1031,6 +1042,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
     finally:
         if disable_amp:
             del guard
+    breakpoint()
     return out
 
 

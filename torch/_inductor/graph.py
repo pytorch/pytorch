@@ -18,7 +18,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen, AOTCppWrapperCodeGen
+from .codegen.wrapper import AOTCppWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -492,7 +492,7 @@ class GraphLowering(torch.fx.Interpreter):
             if self._can_use_cpp_wrapper:
                 self.sizevars = CppSizeVarAllocator(self._shape_env)
                 if config.aot:
-                    self.wrapper_code = AOTCppWrapperCodeGen()    
+                    self.wrapper_code = AOTCppWrapperCodeGen()
                     return
                 self.wrapper_code = CppWrapperCodeGen()
                 return
@@ -553,12 +553,16 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_timed
     def compile_to_module(self):
-        from .codecache import PyCodeCache
+        from .codecache import CppCodeCache, PyCodeCache
 
         code = self.codegen()
         if config.debug:
             print(code)
 
+        if config.aot:
+            return CppCodeCache.load(code).kernel
+
+        code = self.codegen()
         mod = PyCodeCache.load(code)
         for name, value in self.constants.items():
             setattr(mod, name, value)
@@ -570,7 +574,7 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        return self.compile_to_module().call
+        return self.compile_to_module()
 
     def get_output_names(self):
         assert self.graph_outputs is not None

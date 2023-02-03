@@ -1477,7 +1477,7 @@ class CppScheduling:
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def get_kernel_group(self):
-        from .wrapper import CppWrapperCodeGen, AOTCppWrapperCodeGen
+        from .wrapper import AOTCppWrapperCodeGen, CppWrapperCodeGen
 
         if isinstance(V.graph.wrapper_code, AOTCppWrapperCodeGen):
             self.kernel_group = AOTCppWrapperKernelGroup()
@@ -1578,7 +1578,7 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        breakpoint()
+        # breakpoint()
         wrapper.define_kernel(kernel_name, codecache_str)
         wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
@@ -1632,9 +1632,10 @@ class AOTCppWrapperKernelGroup(CppWrapperKernelGroup):
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        breakpoint()
+        # breakpoint()
         wrapper.define_kernel(kernel_name, codecache_str)
         # generate the code to call this
+
 
 class WorkSharing:
     def __init__(self, code):

@@ -485,7 +485,19 @@ class CppCodeCache:
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
 
+        # breakpoint()
         return cls.cache[key]
+
+
+class AOTCPPCodeCache:
+    pass
+    # @classmethod
+    # def load(cls, source_code):
+    #     dll = CppCodeCache.load(source_code)
+    #     key = dll.key
+
+    #     breakpoint()
+    #     return cls.cache[key]
 
 
 class PyCodeCache:

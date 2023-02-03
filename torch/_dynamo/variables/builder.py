@@ -385,7 +385,7 @@ class VariableBuilder:
                         guards=make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
                 # Okay, its not one of these, and we are indeed an int or a float, and we are not specializing
-                # So, let's wrap the literal in a tensor 
+                # So, let's wrap the literal in a tensor
                 else:
                     return self.wrap_unspecialized_primitive(value)
             else:
