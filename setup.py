@@ -175,6 +175,9 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   NVFUSER_SOURCE_DIR
+#     specify nvfuser root directory
+#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #

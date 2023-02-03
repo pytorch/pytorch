@@ -197,7 +197,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER "Build NVFUSER" ON
     "USE_CUDA OR USE_ROCM" OFF)
-option(NVFUSER_SOURCE_DIR "directory where nvfuser source code is" CACHE STRING "third_party/nvfuser")
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -1164,7 +1163,11 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  add_subdirectory(${NVFUSER_SOURCE_DIR} nvfuser)
+  if ($ENV{NVFUSER_ROOT_DIR})
+    add_subdirectory(${NVFUSER_SOURCE_DIR} nvfuser)
+  else
+    add_subdirectory(third_party/nvfuser nvfuser)
+  endif()
 endif()
 
 include(cmake/Summary.cmake)
