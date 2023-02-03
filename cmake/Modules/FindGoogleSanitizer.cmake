@@ -11,9 +11,11 @@ get_property(languages GLOBAL PROPERTY ENABLED_LANGUAGES)
 
 set(_source_code
     [==[
-  #include <stdio.h>
-  int main() {
-  printf("hello world!");
+  #include <stdlib.h>
+  int main(int argc, char *argv[]) {
+  int idx = argc > 1 ? atoi(argv) : 1;
+  int return_codes[] = {0, 1, 2};
+  return return_codes[idx];
   return 0;
   }
   ]==])
