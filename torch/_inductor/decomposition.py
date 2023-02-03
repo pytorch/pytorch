@@ -14,10 +14,10 @@ from . import config, utils
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
-log = logging.getLogger(__name__)
 
 inductor_decompositions = get_decompositions(
     [
+        aten.arange,
         aten.flip,
         aten.linalg_vector_norm,
         aten.std_mean.correction,
