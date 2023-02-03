@@ -39,6 +39,7 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings = {}
+# sometimes we would need fallbacks for nested on ops that actually have lowerings
 nested_lowerings = {}
 layout_constraints = {}
 fallbacks = set()
@@ -46,7 +47,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 needs_realized_inputs = set()
 # can do something fancy like register this in register_pointwise
-nested_whitelist = {aten.relu.default, aten.tanh.default}
+nested_whitelist = {aten.relu.default, aten.tanh.default, aten.add.Tensor}
 
 
 def add_needs_realized_inputs(fn):

@@ -300,8 +300,8 @@ class GraphLowering(torch.fx.Interpreter):
         with ir.IRNode.current_origins(gather_origins(args, kwargs)):
             if target is operator.getitem and isinstance(args[0], (list, tuple)):
                 return super().call_function(target, args, kwargs)
-            # print("\n\n")
-            # print(f"target: {target}\n args: {args}\n kwargs: {kwargs}\n\n\n")
+            print("\n\n")
+            print(f"target: {target}\n args: {args}\n kwargs: {kwargs}\n\n\n")
 
             if target not in lowerings:
                 # print(f"target not in lowerings {target}")
@@ -328,7 +328,9 @@ class GraphLowering(torch.fx.Interpreter):
                 args_flat, _ = pytree.tree_flatten(args)
                 has_jagged = any(
                     [
-                        isinstance(arg.data.data, MultiOutput)
+                        isinstance(arg, TensorBox)
+                        and isinstance(arg.data, StorageBox)
+                        and isinstance(arg.data.data, MultiOutput)
                         and isinstance(arg.data.data.layout, JaggedLayout)
                         for arg in args_flat
                     ]

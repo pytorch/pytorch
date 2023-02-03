@@ -989,11 +989,11 @@ class FakeTensorMode(TorchDispatchMode):
                 # [5, 3]])), **{})
                 # what is happening here is backward for nested_to_padded is
                 # at::_nested_from_padded(grad, self._nested_tensor_size())
-                # if not self.allow_non_fake_inputs:
-                #     raise Exception(
-                #         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                #         f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
-                #     )
+                if not self.allow_non_fake_inputs:
+                    raise Exception(
+                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                        f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
+                    )
 
                 return converter(self, x)
             return x
