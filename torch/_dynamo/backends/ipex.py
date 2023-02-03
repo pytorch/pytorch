@@ -4,34 +4,45 @@ import logging
 import torch
 
 from torch._dynamo import register_backend
-from torch._dynamo.backends.common import dtype_from_inputs, fake_tensor_unsupported
 
 log = logging.getLogger(__name__)
 
 
 @register_backend
-@fake_tensor_unsupported
-def ipex(model, inputs, *, dtype=None):
-    import intel_extension_for_pytorch as ipex  # type: ignore[import]
+def ipex(model, inputs):
+    try:
+        import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
+    except ImportError:
+        log.exception(
+            "Unable to import Intel Extension for PyTorch (IPEX). "
+            "Please install the right version of IPEX that matches the PyTorch version being used. "
+            "Refer to https://github.com/intel/intel-extension-for-pytorch for details."
+        )
+        raise
 
-    with torch.no_grad():
-        model.eval()
-        model = ipex.optimize(model, dtype=dtype or dtype_from_inputs(inputs))
-        try:
-            traced_model = torch.jit.trace(model, inputs).eval()
+    from torch.utils._mode_utils import no_dispatch
+
+    with no_dispatch():
+        static_inputs = []
+        for x in inputs:
+            if x._has_symbolic_sizes_strides:
+                size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
+                stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
+                static_inputs.append(
+                    torch.as_strided(
+                        torch.zeros(size, dtype=x.dtype, device=x.device), size, stride
+                    )
+                )
+            else:
+                static_inputs.append(torch.zeros_like(x))
+    try:
+        with torch.no_grad():
+            traced_model = torch.jit.trace(model.eval(), static_inputs)
             traced_model = torch.jit.freeze(traced_model)
-            return traced_model
-        except Exception:
-            log.warning("JIT trace failed during the 'ipex' optimize process.")
-            return model
-
-
-def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
-    return ipex(gm, example_inputs, dtype=torch.float32)
-
-
-def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
-    return ipex(gm, example_inputs, dtype=torch.bfloat16)
+        return traced_model
+    except Exception:
+        log.warning("JIT trace failed during the 'ipex' optimize process.")
+        return model
 
 
 def has_ipex():
