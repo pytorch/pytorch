@@ -878,6 +878,12 @@ def wrap_fx_proxy_cls(
         specialized_props["specialized_value"] = specialized_value
 
         options.update(specialized_props)
+        if example_value in torch._dynamo.dummy_poc_tag_map:
+            if "tags" not in proxy.node.meta:
+                proxy.node.meta["tags"] = []
+            proxy.node.meta["tags"].extend(
+                torch._dynamo.dummy_poc_tag_map[example_value]
+            )
         return target_cls(proxy, **options)
     elif (
         hasattr(proxy.node.target, "__name__")
@@ -1002,6 +1008,9 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
+        if e in torch._dynamo.dummy_poc_tag_map:
+            torch._dynamo.dummy_poc_tag_map[fake_e] = torch._dynamo.dummy_poc_tag_map[e]
+            del torch._dynamo.dummy_poc_tag_map[e]
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

@@ -623,6 +623,8 @@ def export(
             arg = next(self.old_args_gen)
             if "val" in self.current_node.meta:
                 arg.node.meta["val"] = self.current_node.meta["val"]
+            if "tags" in self.current_node.meta:
+                arg.node.meta["tags"] = self.current_node.meta["tags"]
             return arg
 
         def output(self, target, args, kwargs):
