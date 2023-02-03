@@ -9447,6 +9447,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
+    @onlyCPU  # CUDA implementation is not yet supporting uint8
     def test_upsamplingBiLinear2d_consistency(self, device, memory_format, antialias, align_corners, num_channels, output_size):
         mode = "bilinear"
         # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
