@@ -48,13 +48,6 @@ else
   export BUILD_TYPE="release"
 fi
 
-if [ $BUILD_ENVIRONMENT == "1" ]
-then
-  export CONDA_PARENT_DIR=${(dirname $0)}"\win-test-helpers"
-else
-  export CONDA_PARENT_DIR="C:\Jenkins"
-fi
-
 export INSTALLER_DIR=${SCRIPT_HELPERS_DIR}"\installation-helpers"
 
 export CMAKE_INCLUDE_PATH=${TMP_DIR_WIN}"\mkl\include"

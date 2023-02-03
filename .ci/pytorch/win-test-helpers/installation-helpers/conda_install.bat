@@ -1,3 +1,10 @@
+if "%BUILD_ENVIRONMENT%"=="" (
+  set CONDA_PARENT_DIR=%CD%
+) else (
+  set CONDA_PARENT_DIR=C:\Jenkins
+)
+
+
 set tmp_dir_win=%1
 set conda_parent_dir=%2
 
