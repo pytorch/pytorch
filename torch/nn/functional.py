@@ -4762,7 +4762,10 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            return linear(q, w, b).chunk(3, dim=-1)
+            proj = linear(q, w, b)
+            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+            proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4770,7 +4773,11 @@ def _in_projection_packed(
                 b_q = b_kv = None
             else:
                 b_q, b_kv = b.split([E, E * 2])
-            return (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
+            q_proj = linear(q, w_q, b_q)
+            kv_proj = linear(k, w_kv, b_kv)
+            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
+            kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:
@@ -5165,9 +5172,9 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make em batch first
     #
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5176,7 +5183,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \
@@ -5237,7 +5244,7 @@ def multi_head_attention_forward(
         # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
-            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+            attn_output_weights = attn_output_weights.mean(dim=1)
 
         if not is_batched:
             # squeeze the output if input was unbatched
