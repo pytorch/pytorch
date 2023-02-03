@@ -87,7 +87,8 @@ requires_multigpu = functools.partial(
 slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 
 config.triton.autotune_pointwise = False  # too slow
-
+# make sure we get errors if we don't have explicit fallback
+config.implicit_fallbacks = False
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
