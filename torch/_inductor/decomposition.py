@@ -389,12 +389,6 @@ def bernoulli(self, *, generator=None):
     return torch.rand_like(self, dtype=torch.float32) < self
 
 
-@register_decomposition([aten.bernoulli.p])
-def bernoulli_p(self, p=0.5, *, generator=None):
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < p
-
-
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
@@ -411,6 +405,12 @@ register_extra_random_decomp = functools.partial(
 @register_extra_random_decomp([aten.bernoulli_])
 def bernoulli_(self, p=0.5):
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+
+
+@register_extra_random_decomp([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 @functools.lru_cache(None)
