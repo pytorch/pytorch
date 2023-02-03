@@ -74,9 +74,9 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge" },
           { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -289,6 +289,13 @@ jobs:
           { config: "functorch", shard: 1, num_shards: 1, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
+
+  linux-bionic-cuda11_6-py3_10-gcc7-bazel-test:
+    name: linux-bionic-cuda11.6-py3.10-gcc7-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
   linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
     name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
