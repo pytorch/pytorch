@@ -236,6 +236,11 @@ def fetch_tensor_proxy(tracer):
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
 def proxy_call(proxy_mode, func, args, kwargs):
+    # `__torch_dispatch__` is only called on torch ops, which must subclass `OpOverload`
+    # We treat all other functions as an `external_call`, for instance, a function decorated
+    # with `@torch.tx.wrap`
+    external_call = not isinstance(func, torch._ops.OpOverload)
+
     def can_handle_tensor(x):
         return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
 
@@ -244,16 +249,16 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
         return NotImplemented
 
-    if func in CURRENT_DECOMPOSITION_TABLE:
+    if not external_call:
+        if func in CURRENT_DECOMPOSITION_TABLE:
+            with proxy_mode:
+                r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
         with proxy_mode:
-            r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
+            r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
                 return r
-
-    with proxy_mode:
-        r = func.decompose(*args, **kwargs)
-        if r is not NotImplemented:
-            return r
 
     tracer = proxy_mode.tracer
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
@@ -267,8 +272,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
         # this can happen
         and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
     )
-
-    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
+    if not external_call and torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
         if all_constant:
             const_args, const_kwargs = pytree.tree_map_only(
@@ -331,20 +335,23 @@ def proxy_call(proxy_mode, func, args, kwargs):
     # If there are any fx.Proxy object!
     # isinstance(arg, fx.Proxy)?
     if any(map(lambda arg: not isinstance(arg, torch.Tensor), f_args)):
-        proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
-                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
-
-    # This makes DCE marginally less likely to DCE inplace operations.
-    # It is not strictly necessary
-    # Kind of a hacky way to test if an op is in-place or not
-    if func.overloadpacket.__name__[-1] == "_" and func.overloadpacket.__name__[0] != "_":
-        if isinstance(args[0], List):
-            # e.g., c10d::allreduce_ returns a list of tensors as the first element
-            # in the output.
-            for i, a in enumerate(args[0]):
-                a.proxy = proxy_out[0][i]
+        if external_call:
+            proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs, name=func.__name__)
         else:
-            args[0].proxy = proxy_out
+            proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
+                                                    name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
+
+        # This makes DCE marginally less likely to DCE inplace operations.
+        # It is not strictly necessary
+        # Kind of a hacky way to test if an op is in-place or not
+        if func.overloadpacket.__name__[-1] == "_" and func.overloadpacket.__name__[0] != "_":
+            if isinstance(args[0], List):
+                # e.g., c10d::allreduce_ returns a list of tensors as the first element
+                # in the output.
+                for i, a in enumerate(args[0]):
+                    a.proxy = proxy_out[0][i]
+            else:
+                args[0].proxy = proxy_out
 
     out = func(*args, **kwargs)
 
@@ -380,7 +387,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
         with maybe_disable_fake_tensor_mode():
             constant = args[0].clone()
     elif (
-        torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
+        (external_call or torch.Tag.nondeterministic_seeded not in func.tags)  # type: ignore[attr-defined]
         and all_constant
         and any_constant
         and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
@@ -719,8 +726,12 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
+        #
+        # We also disable tracing by any other tensor proxy-based tracers except the current. The
+        # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
+        # thus irrelevant to any external functional trace.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
+             sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing(enable_current=True):
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
@@ -743,18 +754,21 @@ def get_innermost_proxy_mode():
 
 
 @contextlib.contextmanager
-def disable_proxy_modes_tracing():
-    # TODO: This probably doesn't correctly also disable ProxySymDispatchMode
+def disable_proxy_modes_tracing(enable_current=False):
     modes = get_torch_dispatch_modes()
     proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
-    olds = [m.enable_tracing for m in proxy_tensor_modes]
+    if enable_current:
+        proxy_tensor_modes = proxy_tensor_modes[:-1]
+    olds = [(m.enable_tracing, m.sym_mode.enable_tracing) for m in proxy_tensor_modes]
     for proxy_mode in proxy_tensor_modes:
         proxy_mode.enable_tracing = False
+        proxy_mode.sym_mode.enable_tracing = False
     try:
         yield
     finally:
-        for proxy_mode, old in zip(proxy_tensor_modes, olds):
+        for proxy_mode, (old, old_sym) in zip(proxy_tensor_modes, olds):
             proxy_mode.enable_tracing = old
+            proxy_mode.sym_mode.enable_tracing = old_sym
 
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):
