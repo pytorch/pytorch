@@ -12,6 +12,17 @@ namespace cuda {
 
 namespace {
 
+#define GROUP_REDUCTION_CHECK(error_on_failure, condition, ...) \
+  do {                                                          \
+    if (error_on_failure) {                                     \
+      TORCH_CHECK(condition, ##__VA_ARGS__);                    \
+    } else {                                                    \
+      if (!(condition)) {                                       \
+        return false;                                           \
+      }                                                         \
+    }                                                           \
+  } while (0)
+
 // Return if ref and other are transformed in the same way.
 bool hasMatchingTransformations(TensorView* ref, TensorView* other) {
   std::unordered_map<IterDomain*, IterDomain*> ref_2_other;
@@ -35,9 +46,10 @@ bool hasMatchingTransformations(TensorView* ref, TensorView* other) {
 }
 
 // Validate grouping of reductions and return a new max producer position
-void validateReductionGrouping(
+bool validateReductionGrouping(
     const std::vector<Val*>& inputs,
-    const std::vector<Val*>& outputs) {
+    const std::vector<Val*>& outputs,
+    bool error_on_failure) {
   TORCH_INTERNAL_ASSERT(inputs.size() == outputs.size());
   TORCH_INTERNAL_ASSERT(!inputs.empty());
 
@@ -67,7 +79,8 @@ void validateReductionGrouping(
     if (ref_tv == output_tv) {
       continue;
     }
-    TORCH_INTERNAL_ASSERT(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         output_domain.size() == num_root_dims,
         "Invalid grouped reduction due to mismatched number of root dimensions. "
         "Expected: ",
@@ -76,7 +89,8 @@ void validateReductionGrouping(
         output_domain.size(),
         ". Invalid output tensor: ",
         output_tv->toString());
-    TORCH_INTERNAL_ASSERT(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         output_tv->nDims() == num_dims,
         "Invalid grouped reduction due to mismatched number of dimensions. "
         "Expected: ",
@@ -91,7 +105,8 @@ void validateReductionGrouping(
       // If an IterDomain is broadcast, require the other
       // corresponding IterDomains are also broadcast. This may not be
       // necessary but not completely certain.
-      TORCH_INTERNAL_ASSERT(
+      GROUP_REDUCTION_CHECK(
+          error_on_failure,
           ref_id->isBroadcast() == output_id->isBroadcast(),
           "Invalid grouped reduction due to mismatched broadcast root domains. ",
           "Reference domain: ",
@@ -103,7 +118,8 @@ void validateReductionGrouping(
       if (ref_id->isBroadcast()) {
         continue;
       }
-      TORCH_INTERNAL_ASSERT(
+      GROUP_REDUCTION_CHECK(
+          error_on_failure,
           ref_id->isReduction() == output_id->isReduction(),
           "Invalid grouped reduction due to mismatched reduction root domains. ",
           "Reference domain: ",
@@ -112,7 +128,8 @@ void validateReductionGrouping(
           output_id->toString(),
           ". Invalid tensor: ",
           output_tv->toString());
-      TORCH_INTERNAL_ASSERT(
+      GROUP_REDUCTION_CHECK(
+          error_on_failure,
           exact_map.areMapped(ref_id, output_id) || ref_id->sameAs(output_id),
           "Invalid grouped reduction due to mismatched root domains. ",
           "Reference domain: ",
@@ -123,7 +140,8 @@ void validateReductionGrouping(
           output_tv->toString());
     }
 
-    TORCH_INTERNAL_ASSERT(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         hasMatchingTransformations(ref_tv, output_tv),
         "Invalid grouped reduction due to mismatched transformations. ",
         "Reference tensor: ",
@@ -132,7 +150,8 @@ void validateReductionGrouping(
         output_tv->toString());
 
     // Must have the same computeAt position
-    TORCH_INTERNAL_ASSERT(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         output_tv->getComputeAtPosition() == ref_ca_pos,
         "Invalid grouped reduction due to mismatched computeAt position. ",
         "Reference tensor: ",
@@ -141,7 +160,8 @@ void validateReductionGrouping(
         output_tv->toString());
 
     // Must have the same computeWith position
-    TORCH_INTERNAL_ASSERT(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         output_tv->getComputeWithPosition() == ref_cw_pos,
         "Invalid grouped reduction due to mismatched computeWith position. ",
         "Reference tensor: ",
@@ -151,7 +171,8 @@ void validateReductionGrouping(
 
     if (ref_tv->hasComputeWith()) {
       // Must have the same computeWith consumers
-      TORCH_INTERNAL_ASSERT(
+      GROUP_REDUCTION_CHECK(
+          error_on_failure,
           output_tv->uses() == uses_of_ref,
           "Invalid grouped reduction due to mismatched consumers. ",
           "Reference tensor: ",
@@ -170,13 +191,17 @@ void validateReductionGrouping(
     for (auto val : all_dep_vals) {
       ss << " " << val->toString();
     }
-    TORCH_INTERNAL_ASSERT(all_dep_vals.empty(), ss.str());
+    GROUP_REDUCTION_CHECK(error_on_failure, all_dep_vals.empty(), ss.str());
   }
+
+  return true;
 }
 
 } // namespace
 
-void groupReductions(const std::vector<TensorView*>& reduction_outputs) {
+bool groupReductions(
+    const std::vector<TensorView*>& reduction_outputs,
+    bool error_on_failure) {
   TORCH_CHECK(!reduction_outputs.empty(), "No tensor is given");
 
   auto container = reduction_outputs[0]->container();
@@ -190,13 +215,15 @@ void groupReductions(const std::vector<TensorView*>& reduction_outputs) {
 
   for (const auto i : c10::irange(num_reductions)) {
     auto reduction_out = reduction_outputs.at(i);
-    TORCH_CHECK(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         reduction_out->definition() != nullptr,
         "Invalid tensor to group: ",
         reduction_out->toString(),
         ". Definition not found");
     auto rop = dynamic_cast<ReductionOp*>(reduction_out->definition());
-    TORCH_CHECK(
+    GROUP_REDUCTION_CHECK(
+        error_on_failure,
         rop != nullptr,
         "Invalid tensor to group: ",
         reduction_out->toString(),
@@ -212,7 +239,9 @@ void groupReductions(const std::vector<TensorView*>& reduction_outputs) {
     inputs.at(i) = rop->in();
   }
 
-  validateReductionGrouping(inputs, outputs);
+  if (!validateReductionGrouping(inputs, outputs, error_on_failure)) {
+    return false;
+  }
 
   IrBuilder::create<GroupedReductionOp>(
       container, op_types, init_vals, outputs, inputs);
@@ -220,7 +249,11 @@ void groupReductions(const std::vector<TensorView*>& reduction_outputs) {
   for (auto output : ir_utils::filterByType<TensorView>(outputs)) {
     output->updateMaxProducerPosition();
   }
+
+  return true;
 }
+
+#undef GROUP_REDUCTION_CHECK
 
 } // namespace cuda
 } // namespace fuser

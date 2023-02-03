@@ -32,8 +32,11 @@ namespace cuda {
 //! welford ops. Unclear how common it would be in practice, though.
 //!
 //! \param reduction_outputs Tensors produced by ReductionOp
-TORCH_CUDA_CU_API void groupReductions(
-    const std::vector<TensorView*>& reduction_outputs);
+//! \param error_on_failure Throw an exception if an error is detected
+//! \return True if successfully grouped
+TORCH_CUDA_CU_API bool groupReductions(
+    const std::vector<TensorView*>& reduction_outputs,
+    bool error_on_failure = true);
 
 } // namespace cuda
 } // namespace fuser

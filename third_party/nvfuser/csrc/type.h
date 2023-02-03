@@ -430,7 +430,7 @@ const char* const kMagicZeroName = "nvfuser_zero";
 
 //! Maximum number of reductions that can be grouped together. The
 //! limit can be increased by extending struct Tuple define in tuple.cu.
-static constexpr int kMaxNumGroupedReductions = 8;
+static constexpr int kMaxNumGroupedReductions = 16;
 
 } // namespace cuda
 } // namespace fuser

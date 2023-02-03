@@ -237,6 +237,114 @@ struct Tuple<T0, T1, T2, T3, T4, T5, T6, T7> {
   }
 };
 
+template <
+    typename T0,
+    typename T1,
+    typename T2,
+    typename T3,
+    typename T4,
+    typename T5,
+    typename T6,
+    typename T7,
+    typename T8,
+    typename T9,
+    typename T10,
+    typename T11,
+    typename T12,
+    typename T13,
+    typename T14,
+    typename T15>
+struct Tuple<
+    T0,
+    T1,
+    T2,
+    T3,
+    T4,
+    T5,
+    T6,
+    T7,
+    T8,
+    T9,
+    T10,
+    T11,
+    T12,
+    T13,
+    T14,
+    T15> {
+  T0 val0;
+  T1 val1;
+  T2 val2;
+  T3 val3;
+  T4 val4;
+  T5 val5;
+  T6 val6;
+  T7 val7;
+  T8 val8;
+  T9 val9;
+  T10 val10;
+  T11 val11;
+  T12 val12;
+  T13 val13;
+  T14 val14;
+  T15 val15;
+
+  Tuple() = default;
+
+  __device__ Tuple(
+      T0 _val0,
+      T1 _val1,
+      T2 _val2,
+      T3 _val3,
+      T4 _val4,
+      T5 _val5,
+      T6 _val6,
+      T7 _val7,
+      T8 _val8,
+      T9 _val9,
+      T10 _val10,
+      T11 _val11,
+      T12 _val12,
+      T13 _val13,
+      T14 _val14,
+      T15 _val15)
+      : val0(_val0),
+        val1(_val1),
+        val2(_val2),
+        val3(_val3),
+        val4(_val4),
+        val5(_val5),
+        val6(_val6),
+        val7(_val7),
+        val8(_val8),
+        val9(_val9),
+        val10(_val10),
+        val11(_val11),
+        val12(_val12),
+        val13(_val13),
+        val14(_val14),
+        val15(_val15) {}
+
+  // Only valid when instantiated for pointer types
+  __device__ void operator+=(nvfuser_index_t offset) {
+    TUPLE_INCREMENT_PTR(0);
+    TUPLE_INCREMENT_PTR(1);
+    TUPLE_INCREMENT_PTR(2);
+    TUPLE_INCREMENT_PTR(3);
+    TUPLE_INCREMENT_PTR(4);
+    TUPLE_INCREMENT_PTR(5);
+    TUPLE_INCREMENT_PTR(6);
+    TUPLE_INCREMENT_PTR(7);
+    TUPLE_INCREMENT_PTR(8);
+    TUPLE_INCREMENT_PTR(9);
+    TUPLE_INCREMENT_PTR(10);
+    TUPLE_INCREMENT_PTR(11);
+    TUPLE_INCREMENT_PTR(12);
+    TUPLE_INCREMENT_PTR(13);
+    TUPLE_INCREMENT_PTR(14);
+    TUPLE_INCREMENT_PTR(15);
+  }
+};
+
 #undef TUPLE_INCREMENT_PTR
 
 // Accessor for Tuple
@@ -264,6 +372,14 @@ DEFINE_TUPLE_GET(4);
 DEFINE_TUPLE_GET(5);
 DEFINE_TUPLE_GET(6);
 DEFINE_TUPLE_GET(7);
+DEFINE_TUPLE_GET(8);
+DEFINE_TUPLE_GET(9);
+DEFINE_TUPLE_GET(10);
+DEFINE_TUPLE_GET(11);
+DEFINE_TUPLE_GET(12);
+DEFINE_TUPLE_GET(13);
+DEFINE_TUPLE_GET(14);
+DEFINE_TUPLE_GET(15);
 #undef DEFINE_TUPLE_GET
 
 template <typename DstType, typename SrcType>
@@ -650,6 +766,27 @@ struct MakeLocalTuple<8, Type> {
   using type = LocalTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
 };
 
+template <typename Type>
+struct MakeLocalTuple<16, Type> {
+  using type = LocalTuple<
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type>;
+};
+
 template <int NumVals, typename Type>
 struct MakeRefTuple;
 
@@ -691,6 +828,27 @@ struct MakeRefTuple<7, Type> {
 template <typename Type>
 struct MakeRefTuple<8, Type> {
   using type = RefTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<16, Type> {
+  using type = RefTuple<
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type>;
 };
 
 template <int NumVals, typename Type>
@@ -736,6 +894,27 @@ struct MakeConstRefTuple<8, Type> {
   using type = ConstRefTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
 };
 
+template <typename Type>
+struct MakeConstRefTuple<16, Type> {
+  using type = ConstRefTuple<
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type>;
+};
+
 template <int NumVals, typename Type>
 struct MakeVolatilePtrTuple;
 
@@ -777,6 +956,27 @@ struct MakeVolatilePtrTuple<7, Type> {
 template <typename Type>
 struct MakeVolatilePtrTuple<8, Type> {
   using type = VolatilePtrTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<16, Type> {
+  using type = VolatilePtrTuple<
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type,
+      Type>;
 };
 
 // Utility definitions. Currently only used with LocalTuple

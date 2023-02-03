@@ -220,7 +220,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
     TORCH_INTERNAL_ASSERT(
         thread_predicates_.find(tv_inp) != thread_predicates_.end(),
         "Thread predicate map was not initialized, couldn't find ",
-        inp);
+        inp->toString());
 
     const auto& pred_info = at(tv_inp);
 

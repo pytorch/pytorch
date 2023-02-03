@@ -2156,6 +2156,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         grouped_gwop->sync_buffer()->buffer()->as<TensorView>();
     func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
 
+    addProfileArguments(func_args, grouped_gwop);
+
     ArgumentBuilder func_template_args;
     func_template_args.arg(num_grouped_iterations);
     func_template_args.arg(data_type);
