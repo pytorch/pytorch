@@ -25,7 +25,6 @@ log = logging.getLogger(__name__)
 
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
-PrecomputedSizeArg = namedtuple("PrecomputedSizeArg", ["name", "expr"])
 
 
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
@@ -203,7 +202,6 @@ class KernelArgs:
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
-        self.precomputed_sizevars = dict()
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -259,9 +257,6 @@ class KernelArgs:
             self.sizevars["seed"] = "seed"
             return "seed"
         return self._lookup("ks", self.sizevars, name)
-
-    def precomputed_size(self, name):
-        return self._lookup("pks", self.precomputed_sizevars, name)
 
     def call_names(self):
         return chain(
@@ -345,10 +340,6 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(str(outer))
             precompile_args.append(SizeArg(inner, outer))
-        for outer, inner in self.precomputed_sizevars.items():
-            arg_defs.append(inner)
-            call_args.append(str(outer))
-            precompile_args.append(PrecomputedSizeArg(inner, outer))
 
         return arg_defs, call_args, precompile_args
 
