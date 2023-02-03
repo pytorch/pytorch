@@ -62,9 +62,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
-# run FX normalization passes in optimizer
-normalize_ir = False
-
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
@@ -173,12 +170,6 @@ raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
-
-# How to import torchdynamo, either torchdynamo or torch._dynamo
-dynamo_import = __name__.replace(".config", "")
-
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = dynamo_import.replace("dynamo", "inductor")
 
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
