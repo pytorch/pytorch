@@ -1538,18 +1538,18 @@ def _std_var(
     dim: DimOrDims,
     unbiased: Optional[bool],
     *,
-    correction: Optional[int],
+    correction_opt: Optional[NumberType],
     keepdim: Optional[bool],
     dtype: Optional[DType],
     mask: Optional[Tensor],
     take_sqrt: Optional[bool],
 ) -> Tensor:
     assert (unbiased is None or correction is None), "Only one of unbiased and correction may be given"
-    correction_int = 1
+    correction = 1
     if unbiased is not None:
-        correction_int = 1 if unbiased else 0
+        correction = 1 if unbiased else 0
     if correction is not None:
-        correction_int = correction
+        correction = correction_opt
 
     if dtype is None:
         dtype = input.dtype
@@ -1589,8 +1589,9 @@ def _std_var(
             )
         if not keepdim:
             count = count.reshape(total.shape)
-        if correction_int != 0:
-            count = torch.subtract(count, correction_int)
+        if correction != 0:
+            count = count.to(computation_dtype)
+            count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)
         if take_sqrt:
@@ -1608,7 +1609,7 @@ def var(
     dim: DimOrDims = None,
     unbiased: Optional[bool] = None,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
@@ -1625,7 +1626,7 @@ fully masked-out elements, have ``nan`` values.
         input=input,
         dim=dim,
         unbiased=unbiased,
-        correction=correction,
+        correction_opt=correction,
         keepdim=keepdim,
         dtype=dtype,
         mask=mask,
@@ -1656,7 +1657,7 @@ fully masked-out elements, have ``nan`` values.
         input=input,
         dim=dim,
         unbiased=unbiased,
-        correction=correction,
+        correction_opt=correction,
         keepdim=keepdim,
         dtype=dtype,
         mask=mask,

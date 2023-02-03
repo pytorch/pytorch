@@ -1465,20 +1465,20 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
 
 def set_correction(
     unbiased: Optional[bool] = None,
-    correction: Optional[int] = None,
-):
+    correction: Optional[NumberType] = None,
+) -> FloatLike:
     if correction is not None and unbiased is not None:
         raise RuntimeError("cannot specify both correction and unbiased arguments")
     elif correction is None and unbiased is None:
-        correction = 1
+        correction = 1.0
     elif correction is None and unbiased is not None:
-        correction = 0 if unbiased is False else 1
+        correction = 0.0 if unbiased is False else 1.0
     # NB: we don't actually support symint here, but it's harmless to accept
-    if not isinstance(correction, IntLike):
-        raise ValueError("correction argument should be integer")
+    if not isinstance(correction, (IntLike, FloatLike)):
+        raise ValueError("correction argument should be integer or float")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")
-    return correction
+    return sym_float(correction)
 
 
 def compute_required_storage_length(

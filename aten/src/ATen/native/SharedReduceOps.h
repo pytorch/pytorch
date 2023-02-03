@@ -94,7 +94,7 @@ struct WelfordData {
 
 template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
 struct WelfordOps {
-  index_t correction;
+  combine_t correction;
   bool take_sqrt;
  public:
   using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
@@ -152,7 +152,7 @@ struct WelfordOps {
     };
   }
 #endif
-  C10_HOST_DEVICE WelfordOps(index_t correction, bool take_sqrt)
+  C10_HOST_DEVICE WelfordOps(combine_t correction, bool take_sqrt)
       : correction(correction), take_sqrt(take_sqrt) {}
 };
 
