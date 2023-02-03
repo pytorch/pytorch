@@ -122,11 +122,12 @@ TEST_F(FuserTest, TestOne_CUDA) {
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an
     // appropriately sized view.
-    for (const auto i : c10::irange(graph.inputs().size())) {
-      std::vector<int64_t> dims = {128, 128, 32};
-      std::swap(dims[ti], dims[tj]);
-      inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
-    }
+    std::generate_n(
+        std::back_inserter(inputs), graph.inputs().size(), [ti, tj] {
+          std::array<int64_t, 3> dims = {128, 128, 32};
+          std::swap(dims[ti], dims[tj]);
+          return at::rand(dims, at::kCUDA).transpose(ti, tj);
+        });
 
     auto t22 = inputs[4].sigmoid();
     auto t20 = inputs[3].sigmoid();

@@ -4,26 +4,14 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    output: "onnx::PRelu_1"
-    name: "RandomUniformLike_0"
-    op_type: "RandomUniformLike"
+    output: "1"
+    name: "LeakyRelu_0"
+    op_type: "LeakyRelu"
     attribute {
-      name: "high"
-      f: 0.333333343
+      name: "alpha"
+      f: 0.229166672
       type: FLOAT
     }
-    attribute {
-      name: "low"
-      f: 0.125
-      type: FLOAT
-    }
-  }
-  node {
-    input: "input"
-    input: "onnx::PRelu_1"
-    output: "2"
-    name: "PRelu_1"
-    op_type: "PRelu"
   }
   name: "torch_jit"
   input {
@@ -49,7 +37,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
@@ -72,5 +60,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

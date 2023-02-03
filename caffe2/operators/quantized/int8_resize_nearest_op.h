@@ -49,8 +49,8 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
 
     int32_t Y_offset = this->template GetSingleArgument<int>("Y_zero_point", 0);
     auto Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    CHECK_EQ(Y_offset, X.zero_point);
-    CHECK_EQ(Y_scale, X.scale);
+    TORCH_CHECK_EQ(Y_offset, X.zero_point);
+    TORCH_CHECK_EQ(Y_scale, X.scale);
 
     const uint8_t* Xdata = X.t.data<uint8_t>();
     uint8_t* Ydata = Y->t.mutable_data<uint8_t>();

@@ -12,12 +12,12 @@ class ConvReluOp final : public ConvPoolOpBase<Context> {
       : ConvPoolOpBase<Context>(operator_def, ws) {
     for (auto name : operator_def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
-      CHECK_NOTNULL(local_input_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_input_blobs_.back());
     }
     local_op_.reset(new ConvOp<T, Context>(operator_def, &local_ws_));
     for (auto name : operator_def.output()) {
       local_output_blobs_.push_back(local_ws_.GetBlob(name));
-      CHECK_NOTNULL(local_output_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_output_blobs_.back());
     }
   }
   ~ConvReluOp() {}

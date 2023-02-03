@@ -7,7 +7,7 @@ sudo apt-get -y install expect-dev
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
-source "$pt_checkout/.jenkins/pytorch/common_utils.sh"
+source "$pt_checkout/.ci/pytorch/common_utils.sh"
 
 echo "python_doc_push_script.sh: Invoked with $*"
 
@@ -77,6 +77,9 @@ pushd pytorch.github.io
 
 export LC_ALL=C
 export PATH=/opt/conda/bin:$PATH
+if [ -n $ANACONDA_PYTHON_VERSION ]; then
+  export PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:$PATH
+fi
 
 rm -rf pytorch || true
 
@@ -135,6 +138,9 @@ git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
+  # push to a temp branch first to trigger CLA check and satisfy branch protections
+  git push -u origin HEAD:pytorchbot/temp-branch-py -f
+  sleep 30
   git push -u origin "${branch}"
 fi
 

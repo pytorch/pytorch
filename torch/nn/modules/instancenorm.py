@@ -3,6 +3,8 @@ from torch import Tensor
 from .batchnorm import _LazyNormBase, _NormBase
 from .. import functional as F
 
+__all__ = ['InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d', 'LazyInstanceNorm1d',
+           'LazyInstanceNorm2d', 'LazyInstanceNorm3d']
 
 class _InstanceNorm(_NormBase):
     def __init__(

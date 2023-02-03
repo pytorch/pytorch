@@ -26,7 +26,7 @@
 #include <ATen/ops/result_type.h>
 #endif
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 static inline void compare_base_kernel_core(
@@ -83,8 +83,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
     auto* result1_data_bytes = data[0];
     auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
-    for (const auto i : c10::irange(n)) {
-      (void)i; //Suppress unused variable warning
+    for (const auto i C10_UNUSED : c10::irange(n)) {
       f((scalar_t*)result1_data_bytes,
         (scalar_t_2*)result2_data_bytes,
         (scalar_t*)self_data_bytes,
@@ -113,7 +112,7 @@ static void min_kernel_impl(
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t min_number = self_data[0];
+        scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = self_data[i * self_dim_stride];
@@ -146,10 +145,10 @@ static void max_kernel_impl(
       const scalar_t* self_data, auto self_dim_stride) {
         using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-        scalar_t max_number = self_data[0];
+        scalar_t max_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) <= zabs_(max_number))) {
             max_number = value;
             index = i;
@@ -182,10 +181,10 @@ static void aminmax_kernel(
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        scalar_t min_number = self_data[0];
-        scalar_t max_number = self_data[0];
+        scalar_t min_number = c10::load(self_data);
+        scalar_t max_number = min_number;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           // note: comparison is written this way to handle NaN correctly
           if (!(value >= min_number)) {
             min_number = value;
@@ -245,8 +244,7 @@ static void mode_kernel_impl(
 
           std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
 
-          for (const auto k : c10::irange(n)) {
-            (void)k; //Suppress unused variable warning
+          for (const auto k C10_UNUSED : c10::irange(n)) {
             scalar_t* values_data = (scalar_t*)values_data_bytes;
             int64_t* indices_data = (int64_t*)indices_data_bytes;
             const scalar_t* self_data = (scalar_t*)self_data_bytes;
@@ -257,7 +255,7 @@ static void mode_kernel_impl(
             int64_t max_freq = 0;
 
             for (const auto i : c10::irange(self_dim_size)) {
-              elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
+              elements[i] = std::make_pair(c10::load(&self_data[i * self_dim_stride]), i);
             }
 
             // Even though, theoretically, we don't need to specify this lambda
@@ -378,7 +376,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
 }
 
 static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,
@@ -406,4 +404,4 @@ REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
 REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
 
-}} // namespace at::native
+} // namespace at::native

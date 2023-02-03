@@ -19,23 +19,19 @@ namespace at {
 namespace native {
 namespace mps {
 
-struct TORCH_CUDA_CPP_API MPSGeneratorImpl : public c10::GeneratorImpl {
-  MPSGeneratorImpl(DeviceIndex device_index = -1);
-  ~MPSGeneratorImpl() = default;
+struct MPSScalar {
+  id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
 
-  void set_current_seed(uint64_t seed) override;
-  uint64_t current_seed() const override;
-  uint64_t seed() override;
-  void set_state(const c10::TensorImpl& new_state) override;
-  c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
-  static DeviceType device_type();
-
-private:
-  MPSGeneratorImpl* clone_impl() const override;
-  uint64_t seed_ = default_rng_seed_val;
+  size_t size = 0;
+  ScalarType type = ScalarType::Undefined;
+  c10::DataPtr buffer; // stores MTLBuffer (frees buffer if MPSScalar instance goes out of scope)
+  union {
+    float f; // MPS doesn't support 'double'
+    at::Half h;
+    int64_t i;
+    bool b;
+  } value {};
 };
-
-const Generator& getDefaultMPSGenerator();
 
 void runMPSGraph(
     MPSStream* mpsStream,
@@ -45,24 +41,33 @@ void runMPSGraph(
 
 MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
-std::string getMPSTypeString(ScalarType scalar_type);
+MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
+std::string getMPSTypeString(ScalarType scalar_type, bool short_name = false);
+std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = true);
-double getMPSScalarValue(const Tensor& t);
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = false);
 std::string getArrayRefString(const IntArrayRef s);
-std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
-                          const IntArrayRef strides, int64_t offset);
-id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> s);
+// use has_storage() on the returned tensor to determine if src actually is a view
+Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
+MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
 
-MPSShape* getMPSShape(const Tensor& t);
-MPSShape* getMPSShape(IntArrayRef sizes);
-MPSShape* getMPSShape(c10::MaybeOwned<Tensor> t);
+// The MPSShape could vary based on memory format
+MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
+MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
+
+static inline id<MTLBuffer> getMTLBufferStorage(const at::Tensor& tensor) {
+  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+}
 
 class Placeholder {
  public:
-  Placeholder() : _placeholder(nullptr), _value(nullptr) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr);
+  Placeholder() : _placeholder(nullptr), _value(nullptr), _tensor(Tensor()) {}
+  Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr), _tensor(Tensor()) {}
+  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
+              bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -73,40 +78,32 @@ class Placeholder {
     return _value == nullptr;
   }
 
-  void allocateViewTensor(const at::Tensor& src)
-  {
-    assert (!_viewOutput.numel());
-    _viewOutput = at::native::empty_mps(
-                  src.sizes(),
-                  src.scalar_type(),
-                  c10::nullopt,
-                  kMPS,
-                  c10::nullopt,
-                  c10::nullopt);
-  }
-
  private:
   MPSGraphTensor* _placeholder;
   MPSGraphTensorData* _value;
-  Tensor _viewOutput;
+  Tensor _tensor;
 };
 
 void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
+MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
+MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
-MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType);
+MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
 MPSGraph* make_mps_graph();
 void printTensorNDArray(const Tensor& t);
+MPSNDArray* ndArrayFromTensor(const Tensor& tensor, MPSShape *shape, MPSDataType mpsType);
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
-MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape, MPSDataType dataType);
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 
-using MPSCacheKey = int64_t;
+using MPSCacheKey = uint64_t;
 
 // derive this class to cache a graph and its inputs/ouputs
 // can be used to store any NSObject
@@ -117,16 +114,36 @@ struct MPSCachedGraph
    [_object release];
    _object = nullptr;
   }
+
+  template<typename T>
+  inline T* as() {
+    return static_cast<T*>(this);
+  }
+
   MPSGraph *graph() const { return (MPSGraph *)_object; }
   NSObject *object() const { return _object; }
 private:
   NSObject *_object = nullptr;
 };
 
+struct MPSUnaryCachedGraph : public MPSCachedGraph
+{
+  MPSUnaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil;
+};
+
+struct MPSBinaryCachedGraph : public MPSCachedGraph
+{
+  MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *otherTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil;
+};
+
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
 // Cache holding various keys mapped to graphs
-
 struct MPSGraphCache
 {
   typedef MPSCachedGraph * (^CreateCachedGraphBlock)();
@@ -158,7 +175,7 @@ struct MPSGraphCache
   MPSGraphCache(const MPSGraphCache&) = delete;
   void operator=(const MPSGraphCache&) = delete;
 
-  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
+  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
 
     __block MPSCachedGraph * result = nil;
 
@@ -176,9 +193,17 @@ struct MPSGraphCache
         result = createCacheBlock();
         CacheEntry entry(key, result);
         cache_.emplace(hash, entry);
+        if (view_ptr) {
+          views_list.insert(std::make_pair(view_ptr, hash));
+        }
       }
     });
     return result;
+  }
+
+  template<typename T>
+  inline T* CreateCachedGraphAs(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
+    return static_cast<T *>(CreateCachedGraph(key, createCacheBlock, view_ptr));
   }
 
   MPSCachedGraph* LookUp(const std::string& key) const {
@@ -197,6 +222,30 @@ struct MPSGraphCache
     });
     return result;
   }
+
+  template<typename T>
+  inline T* LookUpAs(const std::string& key) const {
+    return static_cast<T *>(LookUp(key));
+  }
+
+  void FindAndRemoveViewEntry(void* ptr) {
+    // this may find multiple view entries with the same buffer pointers
+    auto views_range = views_list.equal_range(ptr);
+    if (views_range.first == views_range.second)
+      return;
+    for (auto view_it = views_range.first; view_it != views_range.second; ++view_it) {
+      MPSCacheKey hash = view_it->second;
+      // find the cache entry associated with the hash
+      auto cache_it = cache_.find(hash);
+      if (cache_it != cache_.end()) {
+        cache_.erase(cache_it);
+        delete cache_it->second.cachedGraph_;
+      }
+    }
+    // this erase-by-key will remove all pairs in the list with the same key
+    views_list.erase(ptr);
+  }
+
  private:
   MPSGraphCache() {
     serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
@@ -204,9 +253,13 @@ struct MPSGraphCache
 
   static MPSGraphCache* _instance_cache;
   std::unordered_map<MPSCacheKey, CacheEntry> cache_;
+  // list of buffers associated with view entries in the cache
+  // note that multiple view cache entries could use the same buffer pointer
+  std::unordered_multimap<void*, MPSCacheKey> views_list;
   dispatch_queue_t serialQueue_ = nullptr;
 
 };
+
 
 } // namespace mps
 } // namespace native

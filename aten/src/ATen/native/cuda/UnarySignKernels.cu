@@ -12,7 +12,7 @@
 
 #include <type_traits>
 
-namespace at { namespace native {
+namespace at::native {
 
 void logical_not_kernel_cuda(TensorIteratorBase& iter) {
   // error check -- this is just ensuring we don't dispatch on types that aren't in ALL_TYPES_AND_COMPLEX_AND3(...)
@@ -25,7 +25,7 @@ void logical_not_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-const char neg_name[] = "neg_kernel";
+constexpr char neg_name[] = "neg_kernel";
 void neg_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (at::isComplexType(dtype)) {
@@ -77,7 +77,6 @@ void signbit_kernel_cuda(TensorIteratorBase& iter){
   // NOTE: signbit does not always support integral arguments.
   if (at::isIntegralType(iter.input_dtype(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(), "signbit_cuda", [&]() {
-      using opmath_t = at::opmath_type<scalar_t>;
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return is_negative(a); });
     });
   } else {
@@ -97,7 +96,7 @@ C10_HOST_DEVICE static inline c10::complex<T> sgn_wrapper(c10::complex<T> z) {
   }
 }
 
-const char sgn_name[] = "sgn_kernel";
+constexpr char sgn_name[] = "sgn_kernel";
 void sgn_kernel_cuda(TensorIteratorBase& iter){
   auto dtype = iter.dtype();
   #if AT_USE_JITERATOR()
@@ -135,4 +134,4 @@ REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda);
 REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

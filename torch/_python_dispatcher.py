@@ -1,4 +1,5 @@
 import re
+
 import torch._C as C
 
 
@@ -45,18 +46,22 @@ Usage:
   # print(dispatcher.rawRegistrations())
   # print(dispatcher.rawDispatchTable())
 PythonDispatcher calls C++ dispatcher under the hood for to precompute dispatch table.
-This file only provides the simplified API for developers, revelant test code is located in
+This file only provides the simplified API for developers, relevant test code is located in
 test/test_dispatch.py
 """
+
+
 class PythonDispatcher:
     namespace = "__test__"
     name = "foo"
+    # fmt: off
     runtime_keys = [
         "CPU", "AutogradCPU",
         "FPGA", "AutogradOther",
         "XLA", "AutogradXLA",
         "Lazy", "AutogradLazy",
     ]
+    # fmt: on
     alias_keys = [
         "CompositeExplicitAutograd",
         "Autograd",
@@ -73,6 +78,7 @@ class PythonDispatcher:
     Returns a list of dispatch keys supported by PythonDispatcher.
     You can register kernels to these keys.
     """
+
     def keys(self):
         return self.supported_keys
 
@@ -83,27 +89,39 @@ class PythonDispatcher:
       this PythonDispatcher.E.g. for CPU key, a kernel(e.g fn_CPU for CPU) is
       automatically generated and registered.
     """
+
     def register(self, dispatchKeys):
         # Overriden is not supported and triggers a warning in C++ dispatcher.
         if len(set(dispatchKeys)) != len(dispatchKeys):
-            raise RuntimeError(f"Overriden is not allowed but found duplicates in {dispatchKeys}.")
+            raise RuntimeError(
+                f"Overriden is not allowed but found duplicates in {dispatchKeys}."
+            )
         # We currently forbid this in codegen instead of C++ dispatcher.
-        if 'CompositeImplicitAutograd' in dispatchKeys and 'CompositeExplicitAutograd' in dispatchKeys:
-            raise RuntimeError("Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed.")
+        if (
+            "CompositeImplicitAutograd" in dispatchKeys
+            and "CompositeExplicitAutograd" in dispatchKeys
+        ):
+            raise RuntimeError(
+                "Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed."
+            )
         for key in dispatchKeys:
             if key not in self.supported_keys:
-                raise RuntimeError(f"{key} is not supported, please select a dispatch key in {self.supported_keys}.")
+                raise RuntimeError(
+                    f"{key} is not supported, please select a dispatch key in {self.supported_keys}."
+                )
             self.ref.impl_t_t("foo", dispatch=key, debug="fn_" + key)
 
     """
     Helper function to format (key, kernel).
     """
+
     def _format_line(self, key, kernel):
         return "{:<15} {}\n".format(key, kernel)
 
     """
     Helper function to print a table header.
     """
+
     def _format_header(self, header):
         s = f"""
 {header}
@@ -116,6 +134,7 @@ class PythonDispatcher:
     Returns raw output of all registration info for debugging only.
     Use registrations() for a simplified version.
     """
+
     def rawRegistrations(self):
         return C._dispatch_dump("{}::{}".format(self.namespace, self.name))  # type: ignore[attr-defined]
 
@@ -123,6 +142,7 @@ class PythonDispatcher:
     Returns raw output of computed dispatch table for debugging only.
     Use dispatchTable() for a simplified version.
     """
+
     def rawDispatchTable(self):
         return C._dispatch_dump_table("{}::{}".format(self.namespace, self.name))  # type: ignore[attr-defined]
 
@@ -130,10 +150,11 @@ class PythonDispatcher:
     Returns a table(str) including all the registrations from users.
     Note this includes registrations to both runtime keys and alias keys.
     """
+
     def registrations(self):
         output = self._format_header("Registered Kernels")
         state = self.rawRegistrations()
-        state_entries = state.split('\n')
+        state_entries = state.split("\n")
         for line in state_entries:
             first = line.split(":")[0]
             if any(first.startswith(k) for k in self.supported_keys):
@@ -146,14 +167,15 @@ class PythonDispatcher:
     runtime keys, registrations to alias keys have been decoded to their
     mapped runtime keys.
     """
+
     def dispatchTable(self):
         output = self._format_header("Computed Dispatch Table")
         table = self.rawDispatchTable()
-        table_entries = table.split('\n')
+        table_entries = table.split("\n")
         regex = re.compile(r"registered at .*FallbackKernel\.cpp.*(\[)")
         for line in table_entries:
             k = line.split(":")[0]
             if k in self.runtime_keys:
-                entry = regex.sub('[', line)
+                entry = regex.sub("[", line)
                 output += self._format_line(k, entry.split(": ")[1])
         return output

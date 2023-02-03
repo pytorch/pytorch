@@ -100,25 +100,35 @@ TEST_F(AnyModuleTest, WrongNumberOfArguments) {
 #endif
   ASSERT_THROWS_WITH(
       any.forward(),
-      module_name + "'s forward() method expects 2 argument(s), but received 0. "
-      "If " + module_name + "'s forward() method has default arguments, "
-      "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+      module_name +
+          "'s forward() method expects 2 argument(s), but received 0. "
+          "If " +
+          module_name +
+          "'s forward() method has default arguments, "
+          "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(5),
-      module_name + "'s forward() method expects 2 argument(s), but received 1. "
-      "If " + module_name + "'s forward() method has default arguments, "
-      "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+      module_name +
+          "'s forward() method expects 2 argument(s), but received 1. "
+          "If " +
+          module_name +
+          "'s forward() method has default arguments, "
+          "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(1, 2, 3),
-      module_name + "'s forward() method expects 2 argument(s), but received 3.");
+      module_name +
+          "'s forward() method expects 2 argument(s), but received 3.");
 }
 
 struct M_default_arg_with_macro : torch::nn::Module {
   double forward(int a, int b = 2, double c = 3.0) {
     return a + b + c;
   }
+
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, torch::nn::AnyValue(2)}, {2, torch::nn::AnyValue(3.0)})
+  FORWARD_HAS_DEFAULT_ARGS(
+      {1, torch::nn::AnyValue(2)},
+      {2, torch::nn::AnyValue(3.0)})
 };
 
 struct M_default_arg_without_macro : torch::nn::Module {
@@ -127,7 +137,9 @@ struct M_default_arg_without_macro : torch::nn::Module {
   }
 };
 
-TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMethod) {
+TEST_F(
+    AnyModuleTest,
+    PassingArgumentsToModuleWithDefaultArgumentsInForwardMethod) {
   {
     AnyModule any(M_default_arg_with_macro{});
 
@@ -155,22 +167,32 @@ TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMetho
 
     ASSERT_THROWS_WITH(
         any.forward(),
-        module_name + "'s forward() method expects 3 argument(s), but received 0. "
-        "If " + module_name + "'s forward() method has default arguments, "
-        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+        module_name +
+            "'s forward() method expects 3 argument(s), but received 0. "
+            "If " +
+            module_name +
+            "'s forward() method has default arguments, "
+            "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward<double>(1),
-        module_name + "'s forward() method expects 3 argument(s), but received 1. "
-        "If " + module_name + "'s forward() method has default arguments, "
-        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+        module_name +
+            "'s forward() method expects 3 argument(s), but received 1. "
+            "If " +
+            module_name +
+            "'s forward() method has default arguments, "
+            "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward<double>(1, 3),
-        module_name + "'s forward() method expects 3 argument(s), but received 2. "
-        "If " + module_name + "'s forward() method has default arguments, "
-        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+        module_name +
+            "'s forward() method expects 3 argument(s), but received 2. "
+            "If " +
+            module_name +
+            "'s forward() method has default arguments, "
+            "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward(1, 2, 3.0, 4),
-        module_name + "'s forward() method expects 3 argument(s), but received 4.");
+        module_name +
+            "'s forward() method expects 3 argument(s), but received 4.");
   }
 }
 
@@ -345,13 +367,14 @@ TEST_F(AnyValueTest, CorrectlyAccessesIntWhenCorrectType) {
   ASSERT_NE(value.try_get<int>(), nullptr);
   // const and non-const types have the same typeid(),
   // but casting Holder<int> to Holder<const int> is undefined
-  // behavior according to UBSAN: https://github.com/pytorch/pytorch/issues/26964
+  // behavior according to UBSAN:
+  // https://github.com/pytorch/pytorch/issues/26964
   // ASSERT_NE(value.try_get<const int>(), nullptr);
   ASSERT_EQ(value.get<int>(), 5);
 }
 // This test does not work at all, because it looks like make_value
 // decays const int into int.
-//TEST_F(AnyValueTest, CorrectlyAccessesConstIntWhenCorrectType) {
+// TEST_F(AnyValueTest, CorrectlyAccessesConstIntWhenCorrectType) {
 //  auto value = make_value<const int>(5);
 //  ASSERT_NE(value.try_get<const int>(), nullptr);
 //  // ASSERT_NE(value.try_get<int>(), nullptr);

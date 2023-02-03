@@ -106,7 +106,9 @@ Tensor conv2d_prepack_run(
 } // namespace prepack
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::conv2d"), TORCH_FN(conv2d));
+  // NB: this didn't actually do anything; need to generalize this to
+  // work for general convolution and register to aten::convolution
+  // m.impl(TORCH_SELECTIVE_NAME("aten::conv2d"), TORCH_FN(conv2d));
 };
 
 TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {

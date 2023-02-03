@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/cpu/WeightNormKernel.h>
 
-#include <cstring>
-#include <memory>
-#include <sstream>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_weight_norm_differentiable_backward_native.h>
+#include <ATen/ops/_weight_norm_interface.h>
+#include <ATen/ops/_weight_norm_native.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/norm_except_dim.h>
+#include <ATen/ops/norm_except_dim_native.h>
+#endif
+
 #include <vector>
 
 namespace at {
@@ -82,7 +92,10 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  bool can_use_fused = (dim == 0) || (dim == v.dim() - 1);
+  auto has_half_dtype = v.scalar_type() == at::ScalarType::Half
+    || g.scalar_type() == at::ScalarType::Half;
+
+  bool can_use_fused = !has_half_dtype && ((dim == 0) || (dim == v.dim() - 1));
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through

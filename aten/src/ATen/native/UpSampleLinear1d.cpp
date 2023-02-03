@@ -1,9 +1,21 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/UpSample.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_linear1d.h>
+#include <ATen/ops/upsample_linear1d_backward.h>
+#include <ATen/ops/upsample_linear1d_backward_native.h>
+#include <ATen/ops/upsample_linear1d_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -85,17 +97,6 @@ Tensor upsample_linear1d(
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_w = get_scale_value(scale_factors, 0);
   return at::upsample_linear1d(input, osize, align_corners, scale_w);
-}
-
-Tensor upsample_linear1d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_w = get_scale_value(scale_factors, 0);
-  return at::upsample_linear1d_backward(grad_output, osize, input_size, align_corners, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_linear1d_kernel);

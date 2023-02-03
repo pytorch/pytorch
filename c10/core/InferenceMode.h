@@ -58,14 +58,15 @@ struct TORCH_API InferenceMode {
     AutogradState::set_tls_state(AutogradState(
         /* grad_mode */ !enabled,
         /* inference_mode */ enabled,
-        /* fw_grad_mode */ !enabled));
+        /* fw_grad_mode */ !enabled,
+        /* multithreading_enabled*/ !enabled));
     DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
         : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
     DispatchKeySet excluded = enabled
         ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
         : (prev_keyset.excluded_ - c10::autograd_dispatch_keyset);
-    c10::impl::PODLocalDispatchKeySet cur_keyset;
+    c10::impl::PODLocalDispatchKeySet cur_keyset{};
     cur_keyset.set_included(included);
     cur_keyset.set_excluded(excluded);
     c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);

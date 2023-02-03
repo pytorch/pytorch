@@ -1,3 +1,4 @@
+#include <ATen/autocast_mode.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -146,14 +147,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.mH());
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, a.layout());
         },
         aliasAnalysisFromSchema()),
 
@@ -419,6 +412,40 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
+        sym_size,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_size.int(Tensor self, int dim) -> SymInt"),
+        sym_size_int,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_stride.int(Tensor self, int dim) -> SymInt"),
+        sym_stride_int,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.strides());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
+        sym_numel,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_storage_offset(Tensor self) -> SymInt"),
+        sym_storage_offset,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
+        sym_stride,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);
@@ -469,6 +496,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::dtype(Tensor a) -> int"),
         dtype,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> Layout"),
+        layout,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__not__(bool self) -> bool"),
@@ -528,6 +559,34 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
               ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
           drop(stack, 1);
           pack(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
+        [](Stack& stack) {
+          auto memory_format = pop(stack).toMemoryFormat();
+          auto t = pop(stack).toTensor();
+          push(stack, t.is_contiguous(memory_format));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        // NB: intentionally suffixed with extra _format to prevent tests for
+        // "_like" suffix from triggering on this
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_strides_like_format(Tensor self, MemoryFormat memory_format) -> bool"),
+        [](Stack& stack) {
+          auto memory_format = pop(stack).toMemoryFormat();
+          auto t = pop(stack).toTensor();
+          push(stack, t.unsafeGetTensorImpl()->is_strides_like(memory_format));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_non_overlapping_and_dense(Tensor self) -> bool"),
+        [](Stack& stack) {
+          auto t = pop(stack).toTensor();
+          push(stack, t.unsafeGetTensorImpl()->is_non_overlapping_and_dense());
         },
         aliasAnalysisFromSchema()),
     // these ops are generic over the list element type.
@@ -649,6 +708,28 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, a != b);
         },
         aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          bool enabled = false;
+#else
+          bool enabled = at::autocast::is_enabled();
+#endif
+          push(stack, enabled);
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_cpu_enabled() -> bool"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          bool enabled = false;
+#else
+          bool enabled = at::autocast::is_cpu_enabled();
+#endif
+          push(stack, enabled);
+        },
+        aliasAnalysisConservative()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
         unInitialized,
@@ -1047,7 +1128,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           }
           auto self = pop(stack).toTensor();
           auto result =
-              at::index_put_(self, opt_list_indices, values, accumulate);
+              at::index_put(self, opt_list_indices, values, accumulate);
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
@@ -1078,6 +1159,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_cuda(Tensor a) -> bool"),
         isCuda,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_cpu(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_cpu());
+        },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
@@ -1186,7 +1275,7 @@ static std::vector<c10::optional<Operator>> createOperators(
 
 RegisterOperators reg(([]() {
   auto v = createOperators(opGenArgs);
-  v.push_back(Operator(
+  v.emplace_back(Operator(
       prim::tolist,
       // This operator has to be unschematized because the return type
       // depends on the type hint and input. The implementation of this
@@ -1290,7 +1379,7 @@ void dictDelete(Stack& stack) {
 
 void dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  if (dict.size() == 0) {
+  if (dict.empty()) {
     AT_ERROR("popitem(): dictionary is empty");
   }
   auto head_item = dict.begin();
@@ -1904,7 +1993,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           LOG(WARNING)
               << "The isidentifier() implementation being used is from Python 2\n";
-          if (string.size() < 1) {
+          if (string.empty()) {
             push(stack, false);
             return;
           }
@@ -2327,7 +2416,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          if (a.name() == "") {
+          if (a.name().empty()) {
             push(stack, IValue());
           } else {
             push(stack, a.name());

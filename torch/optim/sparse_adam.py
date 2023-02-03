@@ -1,28 +1,11 @@
 import torch
 from . import _functional as F
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _maximize_doc
 
+__all__ = ['SparseAdam']
 
 class SparseAdam(Optimizer):
-    r"""Implements lazy version of Adam algorithm suitable for sparse tensors.
-
-    In this variant, only moments that show up in the gradient get updated, and
-    only those portions of the gradient get applied to the parameters.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-
-    .. _Adam\: A Method for Stochastic Optimization:
-        https://arxiv.org/abs/1412.6980
-    """
-
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, maximize: bool = False):
         if not 0.0 < lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < eps:
@@ -37,7 +20,9 @@ class SparseAdam(Optimizer):
         sparse_params = []
         for index, param in enumerate(params):
             if isinstance(param, dict):
-                for d_index, d_param in enumerate(param.get("params", [])):
+                # given param group, convert given params to a list first before iterating
+                param['params'] = list(param.get("params", []))
+                for d_index, d_param in enumerate(param['params']):
                     if d_param.is_sparse:
                         sparse_params.append([index, d_index])
             elif param.is_sparse:
@@ -47,7 +32,7 @@ class SparseAdam(Optimizer):
                 f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
             )
 
-        defaults = dict(lr=lr, betas=betas, eps=eps)
+        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
         super(SparseAdam, self).__init__(params, defaults)
 
     @torch.no_grad()
@@ -55,7 +40,7 @@ class SparseAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -72,6 +57,7 @@ class SparseAdam(Optimizer):
             eps = group['eps']
             lr = group['lr']
             beta1, beta2 = group['betas']
+            maximize = group.get('maximize', False)
 
             for p in group['params']:
                 if p.grad is not None:
@@ -106,6 +92,27 @@ class SparseAdam(Optimizer):
                           beta1=beta1,
                           beta2=beta2,
                           lr=group['lr'],
-                          eps=group['eps'])
+                          eps=group['eps'],
+                          maximize=maximize)
 
         return loss
+
+SparseAdam.__doc__ = r"""Implements lazy version of Adam algorithm suitable for sparse tensors.
+
+    In this variant, only moments that show up in the gradient get updated, and
+    only those portions of the gradient get applied to the parameters.
+
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-3)
+        betas (Tuple[float, float], optional): coefficients used for computing
+            running averages of gradient and its square (default: (0.9, 0.999))
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        {maximize}
+
+    .. _Adam\: A Method for Stochastic Optimization:
+        https://arxiv.org/abs/1412.6980
+
+    """.format(maximize=_maximize_doc)

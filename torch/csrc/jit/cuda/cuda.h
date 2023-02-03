@@ -1,4 +1,4 @@
-#include <aten/src/ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/custom_class.h>
@@ -58,13 +58,6 @@ class CUDAStream final : public CustomClassHolder {
   /// Return the stream ID corresponding to this particular stream.
   int64_t id() const {
     return stream_->id();
-  }
-
-  /// Pack a CUDAStream to uint64_t representation.
-  /// The CUDAStream can be unpacked using unpack().  The format of
-  /// the uint64_t is unspecified and may be changed.
-  int64_t pack() const {
-    return stream_->pack();
   }
 
  private:
@@ -180,7 +173,6 @@ TORCH_LIBRARY(cuda, m) {
       .def("wait_stream", &CUDAStream::waitStream)
       .def("device_index", &CUDAStream::device_index)
       .def_property("device", &CUDAStream::device)
-      .def("pack", &CUDAStream::pack)
       .def("id", &CUDAStream::id);
 
   event_class.def("elapsed_time", &CUDAEvent::elapsedTime)

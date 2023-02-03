@@ -6,12 +6,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
@@ -34,10 +34,11 @@ from torch.jit.mobile import _load_for_lite_interpreter
 
 try:
     # graph mode quantization based on fx
-    from torch.quantization.quantize_fx import (
+    from torch.ao.quantization.quantize_fx import (
         prepare_fx,
         prepare_qat_fx,
         convert_fx,
+        convert_to_reference_fx,
     )
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
@@ -93,6 +94,9 @@ class NodeSpec:
 
     def __repr__(self):
         return repr(self.op) + " " + repr(self.target)
+
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -298,6 +302,22 @@ def skipIfNoQNNPACK(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not torch.onnx._CAFFE2_ATEN_FALLBACK:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfNoONEDNN(fn):
+    reason = 'Quantized operations require ONEDNN.'
+    if isinstance(fn, type):
+        if 'onednn' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'onednn' not in torch.backends.quantized.supported_engines:
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -587,7 +607,7 @@ class QuantizationTestCase(TestCase):
             expected_node, expected_node_occurrence, expected_node_list:
                see docs for checkGraphModeFxOp
         """
-        nodes_in_graph = dict()
+        nodes_in_graph = {}
         node_list = []
         modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
@@ -799,8 +819,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node=None,
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
-                prepare_custom_config_dict=None,
-                backend_config_dict=None):
+                prepare_custom_config=None,
+                backend_config=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -865,8 +885,8 @@ class QuantizationTestCase(TestCase):
             prepared = prepare(
                 model, qconfig_dict,
                 example_inputs=inputs,
-                prepare_custom_config_dict=prepare_custom_config_dict,
-                backend_config_dict=backend_config_dict)
+                prepare_custom_config=prepare_custom_config,
+                backend_config=backend_config)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
@@ -883,7 +903,7 @@ class QuantizationTestCase(TestCase):
 
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(copy.deepcopy(prepared))
-            qgraph_reference = convert_fx(copy.deepcopy(prepared), is_reference=True)
+            qgraph_reference = convert_to_reference_fx(copy.deepcopy(prepared))
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)
@@ -1363,6 +1383,38 @@ class LinearReluAddModel(torch.nn.Module):
         x = torch.add(x, 5)
         x = self.fc2(x)
         self.relu = torch.nn.ReLU()
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class LinearBnLeakyReluModel(torch.nn.Module):
+    def __init__(self, with_bn=True):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.bn1d = nn.BatchNorm1d(5)
+        self.leaky_relu = nn.LeakyReLU(0.01)
+        self.with_bn = with_bn
+
+    def forward(self, x):
+        x = self.linear(x)
+        if self.with_bn:
+            x = self.bn1d(x)
+        x = self.leaky_relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class LinearTanhModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.tanh(x)
         return x
 
     def get_example_inputs(self) -> Tuple[Any, ...]:

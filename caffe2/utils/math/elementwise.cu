@@ -305,7 +305,7 @@ CAFFE2_SPECIALIZED_HALF_SCALE_CUDA_KERNEL(float)
       return;                                                             \
     }                                                                     \
     if (alpha == T(0)) {                                                  \
-      cudaMemsetAsync(Y, 0, sizeof(T) * N, context->cuda_stream());       \
+      C10_CUDA_CHECK(cudaMemsetAsync(Y, 0, sizeof(T) * N, context->cuda_stream()));       \
     } else {                                                              \
       thrust::fill(                                                       \
           thrust::cuda::par.on(context->cuda_stream()), Y, Y + N, alpha); \

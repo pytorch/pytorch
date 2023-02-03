@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
@@ -59,7 +60,7 @@ c10::IValue preprocess(
       }
     }
   }
-  if (error.size() != 0) {
+  if (!error.empty()) {
     throw std::runtime_error(
         error +
         "\nmethod_compile_spec should contain a Tensor or Tensor List which bundles input parameters:"

@@ -72,6 +72,8 @@ TORCH_CUDA_CPP_API Allocator* getCUDADeviceAllocator();
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 
+TORCH_CUDA_CPP_API void clearCublasWorkspaces();
+
 #ifdef CUDART_VERSION
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif

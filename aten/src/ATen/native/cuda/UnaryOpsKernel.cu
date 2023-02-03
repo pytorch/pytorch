@@ -13,12 +13,12 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/complex.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
@@ -34,7 +34,7 @@ void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-const char exp_name[] = "exp_kernel";
+constexpr char exp_name[] = "exp_kernel";
 void exp_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -92,7 +92,7 @@ C10_HOST_DEVICE static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> v) {
   return one / ::sqrt(v);
 }
 
-const char rsqrt_name[] = "rsqrt_kernel";
+constexpr char rsqrt_name[] = "rsqrt_kernel";
 void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -103,7 +103,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
             const T one = T{1};
             return one / std::sqrt(x);
       }); // rsqrt_string
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "rsqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "rsqrt_cuda", [&]() {
           jitted_gpu_kernel<
               /*name=*/rsqrt_name,
               /*return_dtype=*/scalar_t,
@@ -111,10 +111,10 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
               /*arity=*/1>(iter, rsqrt_string);
       });
     #else
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "rsqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "rsqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
-          return rsqrt_wrapper(a);
+          using opmath_t = at::opmath_type<scalar_t>;
+          return rsqrt_wrapper(static_cast<opmath_t>(a));
         });
       });
     #endif
@@ -131,7 +131,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-const char sqrt_name[] = "sqrt_kernel";
+constexpr char sqrt_name[] = "sqrt_kernel";
 void sqrt_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -141,7 +141,7 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
           T sqrt_kernel(T x) {
             return std::sqrt(x);
       }); // sqrt_string
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sqrt_cuda", [&]() {
           jitted_gpu_kernel<
               /*name=*/sqrt_name,
               /*return_dtype=*/scalar_t,
@@ -149,9 +149,10 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
               /*arity=*/1>(iter, sqrt_string);
       });
     #else
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return std::sqrt(a);
+          using opmath_t = at::opmath_type<scalar_t>;
+          return ::sqrt(static_cast<opmath_t>(a));
         });
       });
     #endif
@@ -255,5 +256,4 @@ REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

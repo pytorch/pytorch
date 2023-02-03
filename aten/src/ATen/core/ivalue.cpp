@@ -1,17 +1,18 @@
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #include <iostream>
+#include <utility>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -93,6 +94,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return IntType::get();
       case Tag::SymInt:
         return c10::SymIntType::get();
+      case Tag::SymFloat:
+        return c10::SymFloatType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -105,6 +108,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       }
       case Tag::GenericList:
         return ListType::create(v.toList().elementType());
+      case Tag::Await:
+        return AwaitType::create(v.toAwait()->elementType());
       case Tag::Future:
         return FutureType::create(v.toFuture()->elementType());
       case Tag::RRef:
@@ -232,6 +237,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       break;
     }
     case Tag::Future:
+    case Tag::Await:
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -302,6 +308,10 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::SymInt:
       return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
+    case Tag::SymFloat:
+      // NB: this doesn't actually work as sym floats don't have equality
+      // defined
+      return rhs.isSymFloat() && lhs.toSymFloat() == rhs.toSymFloat();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -318,6 +328,7 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -353,7 +364,10 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
       return c10::get_hash(v.payload.u.as_int);
+    // NB: these are technically strict aliasing violations
     case Tag::SymInt:
+      return c10::get_hash(v.payload.u.as_int);
+    case Tag::SymFloat:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
@@ -365,6 +379,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::GenericList:
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -440,7 +455,7 @@ bool IValue::isOptionalTensorList() const {
     return false;
   }
   const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  const auto& expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
   return expected_ty == ty;
 }
 
@@ -480,14 +495,14 @@ std::ostream& printMaybeAnnotatedList(
     const IValue& the_list,
     IValueFormatter formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
-  if (the_list.toListRef().size() == 0 ||
+  if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
-    printList(out, the_list.toListRef(), "[", "]", formatter);
+    printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
     out << ")";
     return out;
   } else {
-    return printList(out, the_list.toListRef(), "[", "]", formatter);
+    return printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
   }
 }
 
@@ -521,12 +536,12 @@ std::ostream& printMaybeAnnotatedDict(
     const IValue& the_dict,
     IValueFormatter formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
-  if (the_dict.toGenericDict().size() == 0 ||
+  if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+    printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
   } else {
-    return printDict(out, the_dict.toGenericDict(), formatter);
+    return printDict(out, the_dict.toGenericDict(), std::move(formatter));
   }
   return out;
 }
@@ -584,6 +599,8 @@ std::ostream& IValue::repr(
       return out << v.toInt();
     case IValue::Tag::SymInt:
       return out << v.toSymInt();
+    case IValue::Tag::SymFloat:
+      return out << v.toSymFloat();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -772,6 +789,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toInt();
     case IValue::Tag::SymInt:
       return out << v.toSymInt();
+    case IValue::Tag::SymFloat:
+      return out << v.toSymFloat();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -791,6 +810,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Await:
+      return out << "Await";
     case IValue::Tag::Uninitialized:
       return out << "Uninitialized";
     case IValue::Tag::Device:
@@ -860,7 +881,7 @@ IValue IValue::deepcopy(
       for (const auto& e : toTupleRef().elements()) {
         copied_tuple.push_back(e.deepcopy(memo));
       }
-      copy = IValue(ivalue::Tuple::create(copied_tuple));
+      copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
       break;
     case IValue::Tag::GenericList: {
@@ -906,6 +927,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Double:
     case IValue::Tag::Int:
     case IValue::Tag::SymInt:
+    case IValue::Tag::SymFloat:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {
@@ -1000,18 +1022,13 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
 
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
-    TypePtr type) {
-  cu_ = std::move(cu);
-  type_ = type;
+    TypePtr type) : cu_(std::move(cu)), type_(std::move(type)) {
   TORCH_INTERNAL_ASSERT(type_);
 }
 
 WeakTypePtr::WeakTypePtr(
     std::weak_ptr<torch::jit::CompilationUnit> cu,
-    TypePtr type) {
-  cu_ = std::move(cu);
-  type_ = type;
-}
+    TypePtr type) : cu_(std::move(cu)), type_(std::move(type)) {}
 
 WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   if (!holds_strong_ref()) {
@@ -1019,7 +1036,7 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   } else {
     std::weak_ptr<torch::jit::CompilationUnit> weak_cu =
         cu_.getStrongRefOrThrow();
-    return WeakTypePtr(weak_cu, type_);
+    return WeakTypePtr(std::move(weak_cu), type_);
   }
 }
 
@@ -1088,7 +1105,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  if (ctx->srcFutures.size() == 0) {
+  if (ctx->srcFutures.empty()) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();

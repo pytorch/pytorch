@@ -32,6 +32,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'python_platform',
     'is_cuda_available',
     'cuda_runtime_version',
+    'cuda_module_loading',
     'nvidia_driver_version',
     'nvidia_gpu_models',
     'cudnn_version',
@@ -89,7 +90,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda):
     conda = os.environ.get('CONDA_EXE', 'conda')
-    out = run_and_read_all(run_lambda, f"{conda} list")
+    out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
         return out
 
@@ -283,7 +284,7 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
-        out = run_and_read_all(run_lambda, f"{pip} list --format=freeze")
+        out = run_and_read_all(run_lambda, "{} list --format=freeze".format(pip))
         return "\n".join(
             line
             for line in out.splitlines()
@@ -306,6 +307,16 @@ def get_pip_packages(run_lambda):
 def get_cachingallocator_config():
     ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
     return ca_config
+
+
+def get_cuda_module_loading_config():
+    if TORCH_AVAILABLE and torch.cuda.is_available():
+        torch.cuda.init()
+        config = os.environ.get('CUDA_MODULE_LOADING', '')
+        return config
+    else:
+        return "N/A"
+
 
 def is_xnnpack_available():
     if TORCH_AVAILABLE:
@@ -345,6 +356,7 @@ def get_env_info():
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
+        cuda_module_loading=get_cuda_module_loading_config(),
         nvidia_gpu_models=get_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
@@ -379,6 +391,7 @@ Python version: {python_version}
 Python platform: {python_platform}
 Is CUDA available: {is_cuda_available}
 CUDA runtime version: {cuda_runtime_version}
+CUDA_MODULE_LOADING set to: {cuda_module_loading}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
