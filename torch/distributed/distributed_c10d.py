@@ -1425,7 +1425,7 @@ def exception_handler(func):
                 error_msg_dict = {
                     "func_name": f"{func.__name__}",
                     "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend()}",
+                    "backend": f"{get_backend(kwargs.get('group'))}",
                     "world_size": f"{get_world_size()}",
                     "global_rank": f"{get_rank()}",
                     "local_rank": f"{get_rank(kwargs.get('group'))}",
