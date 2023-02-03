@@ -1163,7 +1163,7 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  if ($ENV{NVFUSER_SOURCE_DIR})
+  if (DEFINED ENV{NVFUSER_SOURCE_DIR})
     add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
   else()
     add_subdirectory(third_party/nvfuser nvfuser)
