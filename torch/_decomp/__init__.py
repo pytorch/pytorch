@@ -270,6 +270,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.softplus,
             aten.softplus_backward,
             aten.stack,
+            aten.std_mean,
             aten.t,
             aten.tanh_backward,
             aten.threshold_backward,
@@ -280,6 +281,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.upsample_bilinear2d.vec,
             aten.upsample_nearest2d_backward,
             aten.bucketize,
+            aten.var_mean,
             aten.zero_,
             aten.zero,
         ]

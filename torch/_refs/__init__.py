@@ -2393,16 +2393,17 @@ def mean(
 @register_decomposition(aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     *,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     correction: Optional[int] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    s = std(a, dim, unbiased, keepdim, correction=correction)
-    m = mean(a, dim, keepdim)
-    return s, m
+    correction = utils.set_correction(unbiased, correction)
+    v = torch.std(a, dim, correction=correction, keepdim=keepdim)
+    m = torch.mean(a, dim, keepdim=keepdim)
+    return v, m
 
 
 @register_decomposition(aten.var_mean)
@@ -2415,8 +2416,9 @@ def var_mean(
     correction: Optional[int] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    v = var(a, dim, unbiased, keepdim, correction=correction)
-    m = mean(a, dim, keepdim)
+    correction = utils.set_correction(unbiased, correction)
+    v = torch.var(a, dim, correction=correction, keepdim=keepdim)
+    m = torch.mean(a, dim, keepdim=keepdim)
     return v, m
 
 

@@ -3328,16 +3328,6 @@ def var_(x, axis=None, correction=1, keepdim=False):
     return div(sum_result, denom)
 
 
-@register_lowering(aten.var_mean)
-def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
-    if correction is None:
-        correction = int(unbiased)
-    return [
-        var_(x, dim, correction=correction, keepdim=keepdim),
-        mean(x, dim, keepdim=keepdim),
-    ]
-
-
 @register_lowering(aten.std)
 def std(x, axis=None, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
