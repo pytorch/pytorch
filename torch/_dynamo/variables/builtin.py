@@ -290,12 +290,7 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif all(isinstance(x, DynamicShapeVariable) for x in args):
-                    return wrap_fx_proxy_cls(
-                        DynamicShapeVariable,
-                        tx,
-                        proxy,
-                        **options,
-                    )
+                    return DynamicShapeVariable.create(tx, proxy, None, **options)
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
