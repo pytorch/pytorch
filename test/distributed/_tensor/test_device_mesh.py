@@ -22,23 +22,61 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.common_distributed import TEST_SKIPS
 
 
+def _get_device_type_and_backend():
+    device_type = "cuda" if torch.cuda.is_available() else "cpu"
+    backend = "nccl" if device_type == "cuda" else "gloo"
+    return device_type, backend
+
+
+def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
+    os.environ["MASTER_ADDR"] = addr
+    os.environ["MASTER_PORT"] = port
+    os.environ["WORLD_SIZE"] = f"{world_size}"
+    os.environ["RANK"] = f"{rank}"
+
+
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
         return 4
 
+    @with_comms
+    def test_eligible_default_pg_for_mesh(self):
+        mesh_tensor = torch.arange(self.world_size).reshape(2, -1)
+        mesh = DeviceMesh(self.device_type, mesh_tensor)
+
+    def test_ineligible_default_pg_for_mesh(self):
+        device_type, backend = _get_device_type_and_backend()
+        # skip the test if not enough GPUs
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        _set_env_var(world_size=self.world_size, rank=self.rank)
+        # missing ranks
+        mesh_tensor = torch.arange(self.world_size - 2).reshape(2, -1)
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
+            mesh = DeviceMesh(device_type, mesh_tensor)
+        # mesh ranks are not unique
+        mesh_tensor = torch.arange(self.world_size).reshape(2, -1)
+        mesh_tensor[0][1] = 2
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh cannot have duplicate values"):
+            mesh = DeviceMesh(device_type, mesh_tensor)
+        # mesh ranks don't start from 0
+        mesh_tensor = torch.arange(start=1, end=(self.world_size + 1)).reshape(2, -1)
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh ranks must start from 0"):
+            mesh = DeviceMesh(device_type, mesh_tensor)
+        # mesh ranks don't increment correctly
+        mesh_tensor = torch.arange(start=0, end=(2 * self.world_size), step=2).reshape(2, -1)
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh should have all ranks of WORLD"):
+            mesh = DeviceMesh(device_type, mesh_tensor)
+
     def test_init_process_group(self):
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        backend = "nccl" if device_type == "cuda" else "gloo"
+        device_type, backend = _get_device_type_and_backend()
         # skip the test if not enough GPUs
         if backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "25364"
-        os.environ["WORLD_SIZE"] = f"{self.world_size}"
-        os.environ["RANK"] = f"{self.rank}"
+        _set_env_var(world_size=self.world_size, rank=self.rank)
         mesh = DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
@@ -145,16 +183,12 @@ class DeviceMeshTestNDim(DTensorTestBase):
         return 8
 
     def test_mesh_size_requirement_error(self):
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        backend = "nccl" if device_type == "cuda" else "gloo"
+        device_type, backend = _get_device_type_and_backend()
         # skip the test if not enough GPUs
         if backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "25364"
-        os.environ["WORLD_SIZE"] = f"{self.world_size}"
-        os.environ["RANK"] = f"{self.rank}"
+        _set_env_var(world_size=self.world_size, rank=self.rank)
         with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
             mesh = DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(not is_initialized())
@@ -183,6 +217,17 @@ class DeviceMeshTestNDim(DTensorTestBase):
             for ranks in dim_ranks:
                 if self.rank in ranks:
                     self.assertEqual(global_ranks, ranks.tolist())
+
+    @with_comms
+    def test_device_mesh_hash(self):
+        mesh_tensor_2d = torch.arange(8).reshape(4, 2)
+        mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
+        mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
+        self.assertNotEqual(hash(mesh), hash(mesh2))
+        mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
+        mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
+        self.assertNotEqual(hash(mesh), hash(mesh3))
+        self.assertNotEqual(hash(mesh2), hash(mesh3))
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

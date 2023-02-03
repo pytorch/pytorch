@@ -18,8 +18,8 @@ import typing
 import types
 import warnings
 import unittest
-import torch.nn.utils._stateless as _stateless
 from math import sqrt
+from functorch.experimental import control_flow
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -31,6 +31,7 @@ from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
@@ -312,6 +313,18 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    def test_control_flow_tracing(self):
+        def true(x, y):
+            return x + y
+
+        def false(x, y):
+            return x - y
+
+        def f(x, y):
+            x = control_flow.cond(x[0] == 0, true, false, [x, y])
+
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
+            _ = symbolic_trace(f)
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -464,6 +477,45 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('wrapped_decorated_fn', m.code)
         self.assertEqual(m(1), 1)
+
+    @unittest.skipIf(sys.version_info >= (3, 11, 0), "FX currently does not have 3.11 support")
+    def test_wrap_with_make_fx(self):
+        def to_trace(y):
+            return a_lifted_leaf((4, y), 3) * a_lifted_leaf((3, 4), 5) * a_lifted_leaf((y, y), y)
+
+        expected_code = """def forward(self, y_1):
+    a_lifted_leaf = __main___a_lifted_leaf((4, y_1), 3)
+    a_lifted_leaf_1 = __main___a_lifted_leaf((3, 4), 5)
+    mul = torch.ops.aten.mul.Tensor(a_lifted_leaf, 12);  a_lifted_leaf = None
+    a_lifted_leaf_2 = __main___a_lifted_leaf((y_1, y_1), y_1);  y_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(mul, a_lifted_leaf_2);  mul = a_lifted_leaf_2 = None
+    return mul_1"""
+
+        m = make_fx(to_trace, tracing_mode="real")(torch.tensor([10]))
+        self.assertIn('a_lifted_leaf', m.code)
+        # aten.add.Tensor should be internal to `a_lifted_leaf` when some of the parameters are tensors.
+        # However, it should not be traced as the function is marked as opaque.
+        self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
+
+        m = make_fx(to_trace, tracing_mode="fake")(torch.tensor([10]))
+        self.assertIn('a_lifted_leaf', m.code)
+        self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
+
+        m = make_fx(to_trace, tracing_mode="symbolic")(torch.tensor([10]))
+        self.assertIn('a_lifted_leaf', m.code)
+        self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -1678,6 +1730,36 @@ class TestFX(JitTestCase):
             # node is channels-last
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
+
+    def test_nn_module_stack(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(64, 64, (3, 3), padding=1, bias=False)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub_mod = SubModule()
+
+            def forward(self, x):
+                return self.sub_mod(x)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        mod_stack = {}
+        expected_stack = [('sub_mod', type(m.sub_mod)),
+                          ('sub_mod.conv_mod', type(m.sub_mod.conv_mod))]
+        for node in gm.graph.nodes:
+            mod_stack = node.meta.get('nn_module_stack', {})
+            if mod_stack:
+                break
+        stack_list = list(mod_stack.items())
+        self.assertEqual(stack_list, expected_stack)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -3065,7 +3147,7 @@ class TestFX(JitTestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         fx_module = torch.fx.symbolic_trace(module)
-        res = _stateless.functional_call(fx_module, parameters, x)
+        res = torch.func.functional_call(fx_module, parameters, x)
         res.backward()
         self.assertIsNotNone(weight.grad)
         self.assertIsNotNone(bias.grad)
@@ -3294,6 +3376,7 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
@@ -3552,6 +3635,19 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         self.assertEqual(str(tracer.graph), str(tracer_after.graph))
         self.assertTrue(not hasattr(tracer_before, 'graph') or str(tracer.graph) != str(tracer_before.graph))
+
+    def test_deepcopy_graphmodule(self):
+        m = symbolic_trace(SimpleTest())
+        m.meta['hello'] = 'world'
+        copy_m = copy.deepcopy(m)
+        self.assertEqual(copy_m.meta['hello'], 'world')
+
+    def test_deepcopy_no_recursion(self):
+        m = symbolic_trace(SimpleTest())
+        m.meta['hello'] = m  # circular reference
+        copy_m = copy.deepcopy(m)  # finishes
+        self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
@@ -3906,6 +4002,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,
         "threshold_": BUILT_IN_FUNC,
@@ -4068,7 +4165,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 12):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)

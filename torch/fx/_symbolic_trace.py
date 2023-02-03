@@ -5,6 +5,7 @@ import inspect
 import math
 import os
 import warnings
+import collections
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -28,7 +29,7 @@ from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
-from .proxy import ParameterProxy, Proxy, TracerBase
+from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -43,7 +44,6 @@ _is_fx_tracing_flag = False
 
 def is_fx_tracing():
     return _is_fx_tracing_flag
-
 
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
@@ -119,7 +119,29 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
     co_flags = co.co_flags & ~HAS_VARSTUFF
     co_args: tuple
-    if hasattr(co, "co_posonlyargcount"):
+    if hasattr(co, "co_qualname"):
+        # Python-3.11+ code signature
+        co_args = (
+            nargs,
+            0,
+            0,
+            co.co_nlocals,
+            co.co_stacksize,
+            co_flags,
+            co.co_code,
+            co.co_consts,
+            co.co_names,
+            co.co_varnames,
+            co.co_filename,
+            co.co_name,
+            co.co_qualname,  # type: ignore[attr-defined]
+            co.co_firstlineno,
+            co.co_lnotab,
+            co.co_exceptiontable,  # type: ignore[attr-defined]
+            co.co_freevars,
+            co.co_cellvars,
+        )
+    elif hasattr(co, "co_posonlyargcount"):
         co_args = (
             nargs,
             0,
@@ -250,6 +272,13 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+        self.root_module_name: str = ""
+        # Maps the containing module's name to the operator name
+        self.scope = Scope("", None)
+        # Records the module call stack
+        self.module_stack = collections.OrderedDict()
+        # Mapping of node name to module scope
+        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -430,9 +459,18 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
+            # module_stack is an ordered dict so writing then deleting the
+            # entry is equivalent to push/pop on a list
+            self.module_stack[_scope.module_path] = _scope.module_type
+            if not self.is_leaf_module(m, module_qualified_name):
+                ret_val = forward(*args, **kwargs)
+            else:
+                ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
+            key, _ = self.module_stack.popitem(last=True)
+            assert key == _scope.module_path, f" Unexpected key {key}"
+
+        return ret_val
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
@@ -580,7 +618,7 @@ class Tracer(TracerBase):
                 name,
                 default,
                 {},
-                type_expr=fn_for_analysis.__annotations__.get(name, None),
+                type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
@@ -663,6 +701,7 @@ class Tracer(TracerBase):
                 ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
 
                 fn = getattr(type(root), self.traced_func_name)
+                self.root_module_name = root._get_name()
                 self.submodule_paths = {mod: name for name, mod in root.named_modules()}
             else:
                 self.root = torch.nn.Module()
@@ -810,6 +849,18 @@ def _create_wrapped_func(orig_fn):
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are tracing with proxy tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped fn while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -829,6 +880,18 @@ def _create_wrapped_method(cls, name):
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy("call_method", name, args, kwargs)
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are tracing with proxy tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped method while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -874,7 +937,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -884,6 +947,7 @@ class _Patcher(object):
                 _PatchedFnSetItem(frame_dict, name, frame_dict[name])
             )
         frame_dict[name] = new_fn
+        assert(getattr(frame_dict[name], "__fx_already_patched", False) == deduplicate)
 
     def patch_method(
         self, cls: type, name: str, new_fn: Callable, deduplicate: bool = True
@@ -891,12 +955,13 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
         setattr(cls, name, new_fn)
+        assert(getattr(getattr(cls, name), "__fx_already_patched", False) == deduplicate)
 
     def visit_once(self, thing: Any):
         """Return True on the first call to with thing, otherwise false"""

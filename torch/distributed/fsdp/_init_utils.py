@@ -36,6 +36,7 @@ from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_stat
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullOptimStateDictConfig,
     FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
@@ -239,10 +240,10 @@ def _init_ignored_module_states(
     ignored_modules: Optional[Iterable[torch.nn.Module]],
     ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> _FSDPState:
-    assert ignored_modules is None or ignored_parameters is None, (
-        "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
+    assert (
+        ignored_modules is None or ignored_parameters is None
+    ), "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
         Please either pass `ignored_modules` or `ignored_parameters`."
-    )
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params = _get_ignored_params(
         module,
@@ -374,6 +375,7 @@ def _init_prefetching_state(
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._optim_state_dict_config = FullOptimStateDictConfig()
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
@@ -484,8 +486,6 @@ def _init_param_handles_from_module(
             )
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
-        # Pass `root_module` to have internal FQN metadata prefix starting from
-        # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
     # Reverse `_handles` to preserve depth-first `.modules()` order for
     # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
@@ -600,19 +600,14 @@ def _get_ignored_params(
     all_ignored_params: Set[torch.nn.Parameter] = set()
 
     params_in_ignored_modules = set(
-        p
-        for m in ignored_modules
-        for p in m.parameters()
-        if not _is_fsdp_flattened(p)
+        p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
     )
 
     all_ignored_params.update(params_in_ignored_modules)
 
     if ignored_parameters is not None:
         params_in_ignored_parameters = set(
-            p
-            for p in ignored_parameters
-            if not _is_fsdp_flattened(p)
+            p for p in ignored_parameters if not _is_fsdp_flattened(p)
         )
         all_ignored_params.update(params_in_ignored_parameters)
 

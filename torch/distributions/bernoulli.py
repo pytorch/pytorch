@@ -115,7 +115,7 @@ class Bernoulli(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (torch.log(self.probs / (1 - self.probs)), )
+        return (torch.logit(self.probs), )
 
     def _log_normalizer(self, x):
-        return torch.log(1 + torch.exp(x))
+        return torch.log1p(torch.exp(x))
