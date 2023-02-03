@@ -111,7 +111,7 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
         self.multi_output_view_nodes = {}
         self.node_counter = -1
 
-        with FakeTensorMode(allow_meta=True) as mode:
+        with FakeTensorMode() as mode:
             fake_args = [mode.from_tensor(a) for a in args]
             return super().run(*fake_args)
 

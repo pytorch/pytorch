@@ -2010,7 +2010,7 @@ class TestFakeTensor(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+                mode = FakeTensorMode()
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
@@ -2096,7 +2096,7 @@ class TestFakeTensor(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+            mode = FakeTensorMode()
 
             def map_to_fake(e):
                 if isinstance(e, torch.Tensor):
