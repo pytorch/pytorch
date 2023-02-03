@@ -261,7 +261,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       broadcasted_shape.begin(),
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
     );
-    auto strides = contiguous_strides(broadcasted_sparse_dim_shape);
+    const auto strides = c10::contiguous_strides(broadcasted_sparse_dim_shape);
     std::array<int64_t, c10::kDimVectorStaticSize> strides_as_array;
     std::copy(strides.begin(), strides.end(), strides_as_array.begin());
     return strides_as_array;
@@ -600,11 +600,6 @@ void _sparse_binary_op_intersection_kernel_out(
       NAME, "(): expects inputs' indices to be of the same dtype (i.e. long or int)");
 
   const auto broadcasted_shape = infer_size(x.sizes(), y.sizes());
-
-  int64_t max_hash_val = 1;
-  for (const auto d : c10::irange(x.sparse_dim())) {
-    max_hash_val *= broadcasted_shape[d];
-  }
 
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
