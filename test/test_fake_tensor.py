@@ -22,6 +22,8 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+import torch._functorch.config
+from unittest.mock import patch
 
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -485,6 +487,17 @@ class FakeTensorTest(TestCase):
             self.assertEqual(ten.dtype, torch.float)
             self.checkType(ten, "cpu", [2])
 
+    def test_allow_meta(self):
+        def run_meta():
+            with FakeTensorMode():
+                x = torch.rand([4], device="meta")
+                return x + x
+
+        self.checkType(run_meta(), "meta", [4])
+
+        with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
+            self.assertRaises(Exception, run_meta)
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -540,7 +553,7 @@ class FakeTensorConstHandling(TestCase):
             return tensors[0].new_full(batch_shape, 0.0)
 
         with self.assertRaises(torch._subclasses.fake_tensor.DataDependentOutputException):
-            with torch._subclasses.fake_tensor.FakeTensorMode(throw_on_data_dependent_ops=True):
+            with torch._subclasses.fake_tensor.FakeTensorMode():
                 a = torch.randn(3, 800, 1199)
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
@@ -737,11 +750,37 @@ class FakeTensorOperatorInvariants(TestCase):
             # error
             sparse2 = sparse.new(indices, values, extra)
 
+    def test_tensor_new(self):
+        with FakeTensorMode():
+            x = torch.Tensor([1, 2, 3])
+        self.assertIsInstance(x, FakeTensor)
+
     def test_like_ops(self):
         for schema in self.get_all_aten_schemas():
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
+
+    # at::_embedding_bag has no op info,
+    # and returns extra tensors that at::embedding bag throws away
+    def test_embedding_bag_private(self):
+        args = [
+            torch.ones(6, 1),
+            torch.ones(6, dtype=torch.int64),
+            torch.arange(2, dtype=torch.int64),
+            False,
+            2,  # mode = max
+        ]
+
+        ref_out = torch.ops.aten._embedding_bag(*args)
+        with FakeTensorMode() as m:
+            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+            meta_out = torch.ops.aten._embedding_bag(*meta_args)
+
+        self.assertEqual(len(ref_out), len(meta_out))
+        for ref_o, meta_o in zip(ref_out, meta_out):
+            self.assertEqual(ref_o.size(), meta_o.size())
+
 
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):

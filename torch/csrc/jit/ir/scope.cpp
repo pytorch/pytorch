@@ -3,8 +3,7 @@
 #include <ATen/core/class_type.h>
 #include <ATen/core/function.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 // util functions
 namespace utils {
 
@@ -197,5 +196,4 @@ ModuleInstanceInfo::ModuleInstanceInfo(
     std::string instance_name)
     : module_type_(std::move(module_type)),
       instance_name_(std::move(instance_name)) {}
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

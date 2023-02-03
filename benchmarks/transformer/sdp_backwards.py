@@ -36,13 +36,12 @@ class CompositeMHA(torch.nn.Module):
         value = value.view(batch_size, -1, self.num_heads, head_dim).transpose(1, 2)
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
-        attn, _ = torch.nn.functional._scaled_dot_product_attention(
+        attn, _ = torch.nn.functional.scaled_dot_product_attention(
             query,
             key,
             value,
             attn_mask=None,
             dropout_p=0.0,
-            need_attn_weights=False,
             is_causal=False,
         )
 

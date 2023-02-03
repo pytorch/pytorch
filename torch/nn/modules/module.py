@@ -432,12 +432,22 @@ class Module:
     _state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
+    call_super_init: bool = False
 
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
         torch._C._log_api_usage_once("python.nn_module")
+
+        # Backward compatibility: no args used to be allowed when call_super_init=False
+        if self.call_super_init is False and bool(kwargs):
+            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'"
+                            "".format(type(self).__name__, next(iter(kwargs))))
+
+        if self.call_super_init is False and bool(args):
+            raise TypeError("{}.__init__() takes 1 positional argument but {} were"
+                            " given".format(type(self).__name__, len(args) + 1))
 
         """
         Calls super().__setattr__('a', a) instead of the typical self.a = a
@@ -461,6 +471,9 @@ class Module:
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
+
+        if self.call_super_init:
+            super(Module, self).__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -1335,7 +1348,10 @@ class Module:
 
     def register_forward_pre_hook(
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -1396,7 +1412,10 @@ class Module:
 
     def register_forward_hook(
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -1531,6 +1550,10 @@ class Module:
                     result = hook_result
 
         if bw_hook:
+            if not isinstance(result, (torch.Tensor, tuple)):
+                warnings.warn("For backward hooks to be called,"
+                              " module output should be a Tensor or a tuple of Tensors"
+                              f" but received {type(result)}")
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
@@ -2309,7 +2332,7 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         r"""Sets gradients of all model parameters to zero. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
