@@ -10,6 +10,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -25,14 +26,23 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, JaggedLayout, MultiOutput, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    JaggedLayout,
+    MultiOutput,
+    Pointwise,
+    Reduction,
+    TensorBox,
+)
 from .lowering import (
     layout_constraints,
     lowerings,
-    nested_lowerings,
-    nested_whitelist,
     make_fallback,
     needs_realized_inputs,
+    nested_lowerings,
+    nested_whitelist,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
 from .utils import gather_origins, get_dtype_size, sympy_product
@@ -194,7 +204,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.check_buffer_for_cpp_wrapper(buffer)
 
         name = f"buf{len(self.buffers)}"
-        print(f"registering {name}")
+        # print(f"registering {name}")
         # breakpoint()
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -290,9 +300,8 @@ class GraphLowering(torch.fx.Interpreter):
         with ir.IRNode.current_origins(gather_origins(args, kwargs)):
             if target is operator.getitem and isinstance(args[0], (list, tuple)):
                 return super().call_function(target, args, kwargs)
-            print("\n\n")
-            print(f"target: {target}\n args: {args}\n kwargs: {kwargs}\n\n\n")
-
+            # print("\n\n")
+            # print(f"target: {target}\n args: {args}\n kwargs: {kwargs}\n\n\n")
 
             if target not in lowerings:
                 # print(f"target not in lowerings {target}")
@@ -316,7 +325,14 @@ class GraphLowering(torch.fx.Interpreter):
                     raise MissingOperatorWithoutDecomp(target, args, kwargs)
             else:
                 # FIXME: need to treemap this maybe for inputs that might be TensorList?
-                has_jagged = any([isinstance(arg.data.data, MultiOutput) and isinstance(arg.data.data.layout, JaggedLayout) for arg in args])
+                args_flat, _ = pytree.tree_flatten(args)
+                has_jagged = any(
+                    [
+                        isinstance(arg.data.data, MultiOutput)
+                        and isinstance(arg.data.data.layout, JaggedLayout)
+                        for arg in args_flat
+                    ]
+                )
                 if has_jagged and target not in nested_whitelist:
                     if target not in nested_lowerings:
                         # error = JaggedOperator
@@ -332,12 +348,11 @@ class GraphLowering(torch.fx.Interpreter):
                     except Exception as e:
                         raise LoweringException(e, target, args, kwargs) from e
 
-
-            # try:
-            out = lowerings[target](*args, **kwargs)
-            return out
-            # except Exception as e:
-            #     raise LoweringException(e, target, args, kwargs) from e
+            try:
+                out = lowerings[target](*args, **kwargs)
+                return out
+            except Exception as e:
+                raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
         # this is a constant

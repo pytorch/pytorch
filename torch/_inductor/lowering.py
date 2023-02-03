@@ -156,7 +156,12 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool, lowerings_dict=None,
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind,
+    convert_input_to_bool,
+    lowerings_dict=None,
 ):
     """
     Add a lowering to lowerings dict
@@ -1008,7 +1013,9 @@ def make_fallback(kernel, layout_constraint=None, lowerings_dict=None):
     add_needs_realized_inputs(kernel)
     if layout_constraint is not None:
         add_layout_constraint(kernel, layout_constraint)
-    return register_lowering(kernel, type_promotion_kind=None, lowerings_dict=lowerings_dict)(fallback_handler(kernel))
+    return register_lowering(
+        kernel, type_promotion_kind=None, lowerings_dict=lowerings_dict
+    )(fallback_handler(kernel))
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)

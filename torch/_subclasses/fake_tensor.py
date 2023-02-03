@@ -464,16 +464,12 @@ def nested_constructor(fake_mode, func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=False
     )
     # default device is device of first tensor in tensorlist
-    default_device = torch.device("cpu") if len(args[0]) == 0 else args[0][0].fake_device
-    print(args)
-    print(kwargs)
-    print(new_args)
+    default_device = (
+        torch.device("cpu") if len(args[0]) == 0 else args[0][0].fake_device
+    )
     device_arg = new_args[3]
     out_device = default_device if device_arg is None else device_arg
     new_args = new_args[:3] + (torch.device("meta"),) + new_args[4:]
-    print(f"new_args={new_args}")
-    print(f"new_kwargs={new_kwargs}")
-    print(f"out_device={out_device}")
     with in_kernel_invocation_manager(fake_mode):
         r = func(*new_args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
@@ -988,9 +984,9 @@ class FakeTensorMode(TorchDispatchMode):
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {func}(*{args}, **{kwargs})"
                     )
-                # FIXME: commenting this out because 
+                # FIXME: commenting this out because
                 # Exception: Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode with 'allow_non_fake_inputs'. Found in aten._nested_from_padded.default(*(FakeTensor(FakeTensor(..., device='meta', size=(2, 5, 3)), cuda:0), tensor([[2, 3],
-                # [5, 3]])), **{}) 
+                # [5, 3]])), **{})
                 # what is happening here is backward for nested_to_padded is
                 # at::_nested_from_padded(grad, self._nested_tensor_size())
                 # if not self.allow_non_fake_inputs:

@@ -4,7 +4,12 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table, meta_table_nested
+from torch._decomp import (
+    _add_op_to_registry,
+    global_decomposition_table,
+    meta_table,
+    meta_table_nested,
+)
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -41,6 +46,7 @@ def register_meta(op):
 
     return wrapper
 
+
 # def register_meta_nested(op):
 #     def wrapper(fn):
 #         def register(op):
@@ -50,6 +56,7 @@ def register_meta(op):
 #         return fn
 
 #     return wrapper
+
 
 def toRealValueType(dtype):
     from_complex = {
@@ -2200,7 +2207,12 @@ def meta__scaled_dot_product_efficient_backward(
     return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 
-@register_meta([aten._nested_tensor_from_tensor_list.default, aten._nested_tensor_from_tensor_list.out])
+@register_meta(
+    [
+        aten._nested_tensor_from_tensor_list.default,
+        aten._nested_tensor_from_tensor_list.out,
+    ]
+)
 def meta_nested_constructor(tensor_list, dtype, layout, device, pin_memory):
     sizes = []
     strides = []
@@ -2218,6 +2230,7 @@ def meta_nested_constructor(tensor_list, dtype, layout, device, pin_memory):
     strides = torch.tensor(strides)
     # function that takes a 1D buffer and wraps it to a nested tensor with corresponding sizes
     return torch._nested_view_from_buffer(buffer, sizes, strides, offsets)
+
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()

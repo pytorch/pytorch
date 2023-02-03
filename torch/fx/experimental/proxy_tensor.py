@@ -505,7 +505,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        print(f"proxy calling {func}")
+        # print(f"proxy calling {func}")
         out = proxy_call(self, func, args, kwargs)
         return out
 

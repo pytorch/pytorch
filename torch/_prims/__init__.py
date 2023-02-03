@@ -254,6 +254,7 @@ def TensorMeta(
 
     return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
+
 def NestedTensorMeta(
     tensorlike: torch.Tensor = None,
     *,

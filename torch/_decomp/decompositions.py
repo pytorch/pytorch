@@ -1539,7 +1539,6 @@ def _to_copy(
     non_blocking: bool = False,
     memory_format: Optional[torch.memory_format] = None,
 ):
-    breakpoint()
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
     # if x.is_nested:

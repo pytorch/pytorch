@@ -145,7 +145,11 @@ def ir_node_to_tensor(x, guard_shape=True):
                 seq_len = offsets[i + 1] - offsets[i]
                 t = torch.empty((shape_fn(seq_len), shape_fn(embedding_dim))).zero_()
                 ts.append(t)
-            ts.append(torch.empty((shape_fn(size[0] - offsets[-1]), shape_fn(embedding_dim))).zero_())
+            ts.append(
+                torch.empty(
+                    (shape_fn(size[0] - offsets[-1]), shape_fn(embedding_dim))
+                ).zero_()
+            )
             output = torch.nested.nested_tensor(ts, dtype=dtype, device=device)
             # FIXME: this won't work
             # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet. Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data() to actually allocate memory.
@@ -1501,7 +1505,7 @@ class ReinterpretView(BaseView):
 
     def get_stride(self):
         return self.layout.stride
-    
+
     def get_jagged_offsets(self):
         try:
             return self.layout.jagged_offsets
@@ -1712,9 +1716,9 @@ class Layout(IRNode):
         order = [0] + list(reversed(range(1, len(self.stride) - 1)))
         order = [len(order)] + order
         return self.is_stride_ordered(order)
-    
+
     def is_jagged(self):
-        return hasattr(self, 'jagged_offsets')
+        return hasattr(self, "jagged_offsets")
 
     def as_fixed(self):
         return FixedLayout(
@@ -1775,6 +1779,7 @@ class FixedLayout(Layout):
 
         return indexer
 
+
 @dataclasses.dataclass
 class JaggedLayout(IRNode):
     def __init__(
@@ -1801,7 +1806,7 @@ class JaggedLayout(IRNode):
 
     def is_jagged(self):
         return True
-    
+
     def get_jagged_offsets(self):
         return self.jagged_offsets
 
@@ -1830,6 +1835,7 @@ class JaggedLayout(IRNode):
             and self.offset == other.offset
             and self.jagged_offsets == other.jagged_offsets
         )
+
 
 class FixedJaggedLayout(JaggedLayout):
     """A JaggedTensor layout we cannot change"""
@@ -3116,10 +3122,12 @@ class FallbackKernel(ExternKernelAlloc):
             return False, ()
         sizes = nt._nested_tensor_size()
         cum_seq_lens = sizes.select(1, 0).cumsum(0)
-        jagged_offsets = [sympy.Integer(0)] + [sympy.Integer(x) for x in cum_seq_lens[:-1]]
+        jagged_offsets = [sympy.Integer(0)] + [
+            sympy.Integer(x) for x in cum_seq_lens[:-1]
+        ]
         dense_size = [sympy.Integer(cum_seq_lens[-1]), sympy.Integer(embedding_dim)]
         dense_stride = [sympy.Integer(embedding_dim), sympy.Integer(1)]
-        return True, (jagged_offsets, dense_size, dense_stride)     
+        return True, (jagged_offsets, dense_size, dense_stride)
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -3158,6 +3166,7 @@ class FallbackKernel(ExternKernelAlloc):
             kwargs,
         )
         print(f"\n\n\nexample_output={example_output}\n\n\n")
+
         def generate_output(output, index=""):
             if isinstance(output, (list, tuple)):
                 return type(output)(
@@ -3166,16 +3175,18 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, torch.Tensor):
                 if output.is_nested:
-                    is_jagged, metadata = cls.check_nested_output_is_jagged_layout(output)
+                    is_jagged, metadata = cls.check_nested_output_is_jagged_layout(
+                        output
+                    )
                     if is_jagged:
-                        jagged_offsets, dense_size, dense_stride = metadata  
+                        jagged_offsets, dense_size, dense_stride = metadata
                         return MultiOutput(
                             FixedJaggedLayout(
                                 output.device,
                                 output.dtype,
                                 dense_size,
                                 dense_stride,
-                                jagged_offsets
+                                jagged_offsets,
                             ),
                             packed,
                             index,

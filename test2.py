@@ -16,7 +16,7 @@ torch._functorch.log_level=logging.DEBUG
 torch._functorch.debug_graphs = True
 
 device = 'cuda'
-requires_grad = True
+requires_grad = False
 
 
 def foo(x, y, z):
