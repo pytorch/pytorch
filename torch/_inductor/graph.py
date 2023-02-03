@@ -26,6 +26,7 @@ from .exc import (
 )
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
+    FALLBACK_ALLOW_LIST,
     layout_constraints,
     lowerings,
     make_fallback,
@@ -126,7 +127,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.warning(f"Using FallbackKernel: {name}")
+            log.info(f"Using FallbackKernel: {name}")
 
     @property
     def fake_mode(self):
@@ -294,13 +295,16 @@ class GraphLowering(torch.fx.Interpreter):
                 return target(*args, **kwargs)
 
             if target not in lowerings:
-                if config.implicit_fallbacks:
+                base_name = target.name().split(".")[0]
+                if base_name in FALLBACK_ALLOW_LIST:
+                    make_fallback(target)
+                elif config.implicit_fallbacks:
                     error = (
                         MissingOperatorWithDecomp
                         if get_decompositions([target])
                         else MissingOperatorWithoutDecomp
                     )
-                    log.warning(
+                    log.info(
                         "Creating implicit fallback for:\n%s",
                         error.operator_str(target, args, kwargs),
                     )
