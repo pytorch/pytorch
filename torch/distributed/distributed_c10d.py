@@ -1426,7 +1426,7 @@ def exception_handler(func):
                     "func_name": f"{func.__name__}",
                     "args": f"{args}, {kwargs}",
                     "backend": f"{get_backend(kwargs.get('group'))}",
-                    "world_size": f"{get_world_size()}",
+                    "world_size": f"{get_world_size(kwargs.get('group'))}",
                     "global_rank": f"{get_rank()}",
                     "local_rank": f"{get_rank(kwargs.get('group'))}",
                     "error": f"{error}",
