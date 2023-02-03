@@ -297,6 +297,21 @@ if HAS_SYMPY:
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
+            def check_supported_type(x):
+                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                    raise TypeError(
+                        f"unsupported operand type(s) for //: "
+                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                        f", expected integer or real")
+
+            check_supported_type(base)
+            check_supported_type(divisor)
+
+            # We don't provide the same error message as in Python because SymPy
+            # makes it difficult to check the types.
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+
             if base.is_zero:
                 return sympy.S.Zero
             if base.is_integer and divisor == 1:
