@@ -5,15 +5,13 @@ CONSTEXPR: Ensures users don't use vanilla constexpr since it causes issues
 import argparse
 import json
 import logging
-from os import replace
 import sys
-import re
 
 from enum import Enum
 from typing import NamedTuple, Optional
 
-CONSTEXPR = "constexpr"
-CONSTEXPR_MACRO = "CONSTEXPR_EXCEPT_WIN_CUDA"
+CONSTEXPR = "constexpr char"
+CONSTEXPR_MACRO = "CONSTEXPR_EXCEPT_WIN_CUDA char"
 
 LINTER_CODE = "CONSTEXPR"
 
@@ -54,7 +52,7 @@ def check_file(filename: str) -> Optional[LintMessage]:
                 name="Vanilla constexpr used, prefer macros",
                 original=original,
                 replacement=replacement,
-                description="Vanilla constexpr used, prefer macros run `lintrunner --take CONSTEXPR -a` to apply changes."
+                description="Vanilla constexpr used, prefer macros run `lintrunner --take CONSTEXPR -a` to apply changes.",
             )
     return None
 
