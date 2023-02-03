@@ -166,7 +166,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     def test_aot_cudagraphs(self):
-        self._check_backend_works("aot_cudagraphs")
+        self._check_backend_works("cudagraphs")
 
     @requires_cuda()
     def test_aot_ts_nvfuser(self):

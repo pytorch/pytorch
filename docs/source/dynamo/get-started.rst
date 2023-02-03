@@ -76,7 +76,7 @@ hub.
 
 And that is not the only available backend, you can run in a REPL
 ``dynamo.list_backends()`` to see all the available backends. Try out the
-``aot_cudagraphs`` or ``nvfuser`` next as inspiration.
+``cudagraphs`` or ``nvfuser`` next as inspiration.
 
 Let’s do something a bit more interesting now, our community frequently
 uses pretrained models from
@@ -147,7 +147,7 @@ Some of the most commonly used backends include:
   more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
   * ``dynamo.optimize("nvfuser")`` - nvFuser with TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
   * ``dynamo.optimize("aot_nvfuser")`` - nvFuser with AotAutograd. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-  * ``dynamo.optimize("aot_cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
+  * ``dynamo.optimize("cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
 
 * **Inference-only backends**:
   * ``dynamo.optimize("ofi")`` - Uses
