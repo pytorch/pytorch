@@ -2653,6 +2653,14 @@ def mkldnn_rnn_layer_backward(
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
+@register_meta([aten.bucketize.Tensor, aten.bucketize.Tensor_out])
+@out_wrapper()
+def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
+    return torch.empty_like(
+        self, dtype=torch.int32 if out_int32 else torch.int64
+    ).contiguous()
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
