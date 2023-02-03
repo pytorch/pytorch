@@ -435,7 +435,7 @@ class TestDecomp(TestCase):
             m.to(device).to(dtype)
 
             args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
-            with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype), enable_python_dispatcher():
+            with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all=True), enable_python_dispatcher():
                 decomp_out = m(*args, **kwargs)
 
             non_decomp_out = m(*args, **kwargs)
@@ -445,11 +445,12 @@ class TestDecomp(TestCase):
 
 
     class DecompCrossRefMode(TorchDispatchMode):
-        def __init__(self, test_case, saved_precision, saved_rel_tol, dtype):
+        def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
             self.test_case = test_case
             self.saved_precision = saved_precision
             self.saved_rel_tol = saved_rel_tol
             self.test_dtype = dtype
+            self.run_all = run_all
 
             # We check the correctness of each decomposition right after running it.
             # So, when we encounter a decomposition, we run the function normally, and
@@ -501,7 +502,7 @@ class TestDecomp(TestCase):
             decomposition = decomposition_table[func]
 
             do_relative_check = self.test_dtype in [torch.float16, torch.bfloat16]
-            if run_all:
+            if self.run_all:
                 # Execute recursively via DFS, to find the root of a possible error first
                 with self:
                     decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
@@ -588,7 +589,7 @@ class TestDecomp(TestCase):
                 # store the called list on the mode object instance and no
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
-                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype) as mode, enable_python_dispatcher():
+                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all) as mode, enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name, mode)
