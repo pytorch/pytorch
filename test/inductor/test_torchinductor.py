@@ -1048,6 +1048,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    def test_arange5(self):
+        def fn(step, device):
+            return torch.arange(512, -512, step, device=device)
+
+        compiled_fn = torch._dynamo.optimize()(fn)
+
+        # NOTE: use assertEqual to check dtypes which self.common doesn't do
+        for step in (-1, -1.0):
+            expect = fn(step, self.device)
+            actual = compiled_fn(step, self.device)
+            self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual)
+
+    def test_arange6(self):
+        def fn(x):
+            return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
+
+        # Test that float arguments are truncated to int when dtype is set explicitly
+        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        self.common(fn, (make_arg(1, dtype=torch.float32),))
+        self.common(fn, (make_arg(1, dtype=torch.int64),))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
@@ -3742,6 +3764,15 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[2, 4, 4, 4], dtype=torch.float32),)
         )
 
+    def test_constant_pad_float64(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/93351
+        def fn(input):
+            v1 = torch.nn.functional.pad(input, pad=(1, 0))
+            return torch.gt(v1, input)
+
+        x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
+        self.common(fn, (x,))
+
     def test_l1_loss(self):
         def fn(a, b):
             return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
@@ -6043,6 +6074,75 @@ if HAS_CPU:
                         same(fn(x), opt_fn(x))
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_inplace_unsqueeze(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                return unsqueeze_
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0])
+
+        def test_inplace_unsqueeze2(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                res = unsqueeze_ + 1
+                return res
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0] + 1)
+
+        def test_inplace_unsqueeze3(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                torch.ops.aten.unsqueeze_.default(a, 0)
+                return 0
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
