@@ -10,8 +10,7 @@
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::IValue;
 
@@ -111,6 +110,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         auto f = w.value.toFuture();
         if (f->completed()) {
           Work elem = {w.type->containedType(0), f->value()};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case AwaitType::Kind: {
+        auto aw = w.value.toAwait();
+        if (aw->completed()) {
+          Work elem = {w.type->containedType(0), aw->wait()};
           to_process.emplace_back(std::move(elem));
         }
       } break;
@@ -916,7 +922,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     const auto args_elems = args->elements();
     auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
     auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
-    if (py_state.size() > 0) {
+    if (!py_state.empty()) {
       TORCH_WARN(
           "Loading Tensor with Python attributes will return at::Tensor with Python attributes being discarded");
     }
@@ -1006,7 +1012,7 @@ std::string Unpickler::readBytes(size_t length) {
     // If the string is smallish, do a full buffer read,
     // and read out of that buffer.
     data.resize(length);
-    readSlowWithBuffer(&data[0], length);
+    readSlowWithBuffer(data.data(), length);
   } else {
     // Otherwise, for larger strings, read what we can from
     // the buffer, and then read directly to the destination.
@@ -1111,5 +1117,4 @@ std::string Unpickler::readString() {
   return ss;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
