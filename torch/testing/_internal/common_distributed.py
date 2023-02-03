@@ -1026,6 +1026,7 @@ class MultiThreadedTestCase(TestCase):
         # needs those states to be set i.e. using instantiate_device_type_tests()
         # TODO: figure out a better way to do this
         if hasattr(self, "_tls"):
+            self._tls = threading.local()
             self._tls.precision = TestCase._precision
             self._tls.rel_tol = TestCase._rel_tol
 
