@@ -15,6 +15,7 @@ import contextlib
 import math
 import atexit
 import os
+import copy
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -425,6 +426,14 @@ class TestPySymInt(TestCase):
             y = torch.add(x, x, alpha=a0)
 
         self.assertTrue(sym_int_encountered)
+
+    @skipIfNoSympy
+    def test_deepcopy(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        assert a0 < 4
+        new_shape_env = copy.deepcopy(shape_env)
+        self.assertEqual(len(new_shape_env.guards), 1)
 
     @skipIfNoSympy
     def test_print_readable_with_symints(self):

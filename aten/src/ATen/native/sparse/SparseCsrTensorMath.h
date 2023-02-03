@@ -70,9 +70,7 @@ inline void check_sparse_mm_reduce_impl_inputs(
     const Tensor& row_indices,
     const Tensor& ccol_indices,
     const Tensor& csr2csc) {
-  TORCH_CHECK(
-      self.is_sparse_csr(),
-     "Expected self to be sparse CSR tensor.");
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
   TORCH_CHECK(
       self.dense_dim() == 0,
       "Expected non-hybrid self tensor.");

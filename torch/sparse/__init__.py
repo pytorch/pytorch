@@ -69,7 +69,7 @@ mm = _add_docstr(_sparse._sparse_mm, r"""
     z_{ij} = \bigoplus_{k = 1}^K x_{ik} y_{kj}
 
 where :math:`\bigoplus` defines the reduce operator. :attr:`reduce` is implemented only for
-CSR storage format on CPU device.
+CSR or CSC storage format on CPU device.
 
 Args:
     mat1 (Tensor): the first sparse matrix to be multiplied

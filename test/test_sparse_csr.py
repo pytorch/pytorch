@@ -2174,7 +2174,22 @@ class TestSparseCSR(TestCase):
     def test_sparse_triangular_solve(self, device, dtype):
 
         def run_test(n, k, upper, unitriangular, transpose, zero):
-            triangle_function = torch.triu if upper else torch.tril
+            if not unitriangular:
+                triangle_function = torch.triu if upper else torch.tril
+            else:
+                # Make sure diagonal elements are not materialized.
+                # This is to exercise `unitriangular=True` not relying on
+                # explicit presence of these indices.
+                if upper:
+                    def remove_diagonal(t):
+                        return t.triu(-1)
+
+                else:
+                    def remove_diagonal(t):
+                        return t.tril(-1)
+
+                triangle_function = remove_diagonal
+
             make_A = torch.zeros if zero else make_tensor
             A = make_A((n, n), dtype=dtype, device=device)
             A = triangle_function(A)
@@ -2382,14 +2397,18 @@ class TestSparseCSR(TestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_sparse_mm_reduce_sum(self, device, dtype):
-        def run_test(m, n, k, nnz, train):
-            csr = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+        def run_test(m, n, k, nnz, train, sparse_csc):
+            if sparse_csc:
+                sparse = self.genSparseCSCTensor((k, m), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+            else:
+                sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+
             mat = torch.randn(k, n, dtype=dtype)
-            dense = csr.to_dense()
+            dense = spase.to_dense()
             ref_mat = mat.clone()
 
             if train:
-                csr.requires_grad_()
+                sparse.requires_grad_()
                 mat.requires_grad_()
                 dense.requires_grad_()
                 ref_mat.requires_grad_()
@@ -2403,7 +2422,7 @@ class TestSparseCSR(TestCase):
                 out.sum().backward()
                 ref_out.sum().backward()
 
-                grad_input = csr.grad
+                grad_input = sparse.grad
                 ref_grad_input = dense.grad
                 grad_mat = mat.grad
                 ref_grad_mat = ref_mat.grad
@@ -2411,8 +2430,10 @@ class TestSparseCSR(TestCase):
                 self.assertEqual(grad_input.to_dense(), ref_grad_input)
                 self.assertEqual(grad_mat, ref_grad_mat)
 
-            run_test(4, 5, 4, 10, False)
-            run_test(4, 4, 4, 16, True)
+            run_test(4, 5, 4, 10, False, False)
+            run_test(4, 4, 4, 16, True, True)
+            # torch.sparse.mm() backward not supported with CSC
+            run_test(4, 5, 4, 10, False, True)
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)

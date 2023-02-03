@@ -224,8 +224,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "multinomial": {f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64, f64},
-    "nn.functional.adaptive_avg_pool2d": {f16, f64},
+    "nn.functional.avg_pool2d": {i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.local_response_norm": {i64},
@@ -399,6 +399,7 @@ inductor_override_kwargs = {
 
 # Always test with all sample for following ops
 inductor_all_samples = {
+    "arange",
     "softmax.with_dtype",
     "index_add",
     "index_copy",

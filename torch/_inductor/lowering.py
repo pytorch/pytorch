@@ -22,6 +22,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.symbolic_shapes import sym_sqrt
+from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
@@ -37,7 +38,7 @@ from .ir import (
     TensorBox,
     View,
 )
-from .utils import ceildiv, has_torchvision_roi_align, sympy_product
+from .utils import ceildiv, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -571,16 +572,10 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    x_size_product = sympy_product(x.get_size())
-    try:
-        if x_size_product > 0:
-            x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product)
-            )
-    except TypeError:
-        # Certain sympy products cannot be compared, fails with
-        # cannot determine truth value of Relational
-        pass
+    x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+    if x_size_product > 0:
+        # maybe realize input before broadcasting it
+        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -632,16 +627,12 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = sympy_product(old_size)
-    try:
-        if old_size_product > 0:
-            x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
-            )
-    except TypeError:
-        # Certain sympy products cannot be compared, fails with
-        # cannot determine truth value of Relational
-        pass
+    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+    if old_size_product > 0:
+        # maybe realize the input
+        x.mark_reuse(
+            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+        )
 
     x_loader = x.make_loader()
     return Pointwise.create(
@@ -954,6 +945,36 @@ def register_onednn_fusion_ops():
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
+        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        def convolution_transpose_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionTransposeUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
         if torch._C.has_mkl:
 
             @register_lowering(torch.ops.mkl._mkl_linear)
@@ -964,9 +985,12 @@ def register_onednn_fusion_ops():
                 b: TensorBox,
                 batch_size,
             ):
-                return TensorBox.create(
-                    ir.MKLPackedLinear.create(x, packed_w, orig_w, b, batch_size)
+                result = TensorBox.create(
+                    ir.MKLPackedLinear.create(x, packed_w, orig_w, batch_size)
                 )
+                if b is not None:
+                    result = add(result, b)
+                return result
 
     else:
         pass
@@ -1165,10 +1189,6 @@ def require_contiguous(_, *args, **kwargs):
     return args, kwargs
 
 
-if has_torchvision_roi_align():
-    make_fallback(torch.ops.torchvision.roi_align)
-
-
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
@@ -1183,6 +1203,9 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
+FALLBACK_ALLOW_LIST = {
+    "torchvision::roi_align",
+}
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -1279,55 +1302,24 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
-fallback_arange = fallback_handler(aten.arange)
-
-
-@register_lowering([torch.arange, aten.arange])
-def arange(
-    start,
-    end=None,
-    step=1,
+@register_lowering(prims.iota)
+def iota(
+    length,
     *,
-    dtype=None,
-    device=None,
-    layout=torch.strided,
-    pin_memory=False,
+    start,
+    step,
+    dtype,
+    device,
+    requires_grad,
 ):
-    assert layout == torch.strided
-    assert not pin_memory
-    if end is None:
-        end = start
-        start = 0
-
-    if isinstance(start, float) and int(start) == start:
-        start = int(start)
-    if isinstance(end, float) and int(end) == end:
-        end = int(end)
-    if isinstance(step, float) and int(step) == step:
-        step = int(step)
-
-    # Triton kernel doesn't support float arange yet, fallback to aten.arange
-    if not (isinstance(start, int) and isinstance(end, int) and isinstance(step, int)):
-        return fallback_arange(
-            start,
-            end,
-            step,
-            dtype=dtype,
-            device=device,
-            layout=layout,
-            pin_memory=pin_memory,
-        )
-
-    dtype = dtype or torch.int64
-    length = ceildiv((end - start), step)
-    start = sympy.Integer(start)
-    step = sympy.Integer(step)
+    def fn(index):
+        return ops.index_expr(step * index[0] + start, dtype=dtype)
 
     return Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
-        inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
-        ranges=[sympy.Integer(length)],
+        inner_fn=fn,
+        ranges=[length],
     )
 
 
@@ -1714,6 +1706,13 @@ def new_empty_strided(
     return empty_strided(
         size, stride, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+
+@register_lowering(prims.copy_strided.default)
+def copy_strided(x, stride):
+    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride_order = sorted(range(len(stride)), key=stride.__getitem__)
+    return ir.ExternKernel.require_stride_order(x, stride_order)
 
 
 @register_lowering([torch.full, aten.full])
@@ -3740,18 +3739,7 @@ def _realize(x):
     return clone(x)
 
 
-def _import_kernels():
-    """
-    Need to make sure all these get registered in the lowers dict
-    """
-    import importlib
-    import os
+# populate lowerings defined in kernel/*
+from . import kernel
 
-    from . import kernel
-
-    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
-        if filename.endswith(".py") and filename[0] != "_":
-            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
-
-
-_import_kernels()
+import_submodule(kernel)
