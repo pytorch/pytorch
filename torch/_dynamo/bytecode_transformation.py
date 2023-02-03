@@ -332,9 +332,13 @@ def fix_vars(instructions: List[Instruction], code_options):
 
 
 def transform_code_object(code, transformations, safe=False):
-    keys = [
-        "co_argcount",
-        "co_posonlyargcount",  # python 3.8+
+    # Python 3.11 changes to code keys are not fully documented.
+    # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
+    # for new format.
+    keys = ["co_argcount"]
+    if sys.verion_info >= (3, 8):
+        keys.append("co_posonlyargcount")
+    keys.extend([
         "co_kwonlyargcount",
         "co_nlocals",
         "co_stacksize",
@@ -344,14 +348,22 @@ def transform_code_object(code, transformations, safe=False):
         "co_names",
         "co_varnames",
         "co_filename",
-        "co_name",
-        "co_firstlineno",
-        "co_lnotab",  # changed to "co_linetable" if python 3.10+
+        "co_name"
+    ])
+    if sys.version_info >= (3, 11):
+        keys.append("co_qualname")
+    keys.append("co_firstlineno")
+    if sys.version_info >= (3, 10):
+        keys.append("co_linetable")
+    else:
+        keys.append("co_lnotab")
+    if sys.version_info >= (3, 11):
+        # not documented, but introduced in https://github.com/python/cpython/issues/84403
+        keys.append("co_exceptiontable")
+    keys.extend([
         "co_freevars",
         "co_cellvars",
-    ]
-    if sys.version_info >= (3, 10):
-        keys = list(map(lambda x: x.replace("co_lnotab", "co_linetable"), keys))
+    ])
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -382,6 +394,9 @@ def transform_code_object(code, transformations, safe=False):
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
     }
+    if sys.version_info >= (3, 11):
+        # generated code doesn't contain exceptions, so leave exception table empty
+        code_options["co_exceptiontable"] = b""
     return types.CodeType(*[code_options[k] for k in keys])
 
 
