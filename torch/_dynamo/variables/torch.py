@@ -271,6 +271,9 @@ class TorchVariable(VariableTracker):
                 GradModeVariable._guards_singleton
             )
         elif self.value is torch.cuda.stream:
+            log.warning(
+                "torch.cuda.stream can't be passed through AOT yet, will be ignored"
+            )
             return CUDAStreamContextVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
