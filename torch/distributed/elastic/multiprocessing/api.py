@@ -117,9 +117,9 @@ class Std(IntFlag):
         Any other input raises an exception
         """
 
-        def to_std(v: str) -> Std: # type: ignore[return]
+        def to_std(v: str) -> Std:  # type: ignore[return]
             s = Std(int(v))
-            for s in Std:
+            if s in Std:
                 return s
             # return None -> should NEVER reach here since we regex check input
 
