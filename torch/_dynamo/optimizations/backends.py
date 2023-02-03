@@ -1,30 +1,16 @@
 import copy
 import functools
-import io
 import logging
 import os
-import subprocess
 import tempfile
 
-from typing import Dict
-
 import torch
-from ..output_graph import CompilerFn
 
-from ..utils import identity
+from ..backends.registry import register_backend
+
 from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
-BACKENDS: Dict[str, CompilerFn] = dict()
-
-
-def register_backend(fn):
-    @functools.wraps(fn)
-    def inner(gm, example_inputs, **kwargs):
-        return fn(gm, example_inputs, **kwargs)
-
-    BACKENDS[fn.__name__] = inner
-    return inner
 
 
 def create_backend(fn):
@@ -49,8 +35,7 @@ def create_backend(fn):
         except KeyboardInterrupt:
             raise
 
-    BACKENDS[fn.__name__] = inner
-    return inner
+    return register_backend(inner)
 
 
 @register_backend
@@ -61,75 +46,14 @@ def inductor(*args, **kwargs):
     return compile_fx(*args, **kwargs)
 
 
-@create_backend
-def eager(subgraph):
-    return subgraph.model
+@register_backend
+def eager(gm, fake_tensor_inputs):
+    return gm
 
 
-@create_backend
-def ts(subgraph):
-    return subgraph.scripted
-
-
-def reload_jit_model(subgraph, opt_fn=identity):
-    tmp = io.BytesIO()
-    torch.jit.save(subgraph.scripted, tmp)
-    tmp.seek(0)
-    model = torch.jit.load(tmp)
-    model = opt_fn(model)
-    # populate cache
-    for _ in range(3):
-        model(*subgraph.example_inputs)
-    return model
-
-
-def reload_jit_model_ofi(subgraph):
-    return reload_jit_model(subgraph, torch.jit.optimize_for_inference)
-
-
-@create_backend
-def nnc(subgraph):
-    with torch.jit.fuser("fuser1"):
-        return reload_jit_model(subgraph)
-
-
-@create_backend
-def nnc_ofi(subgraph):
-    with torch.jit.fuser("fuser1"):
-        return reload_jit_model_ofi(subgraph)
-
-
-@create_backend
-def ts_nvfuser(subgraph):
-    with torch.jit.fuser("fuser2"):
-        return reload_jit_model(subgraph)
-
-
-@create_backend
-def ts_nvfuser_ofi(subgraph):
-    with torch.jit.fuser("fuser2"):
-        return reload_jit_model_ofi(subgraph)
-
-
-@create_backend
-def onednn(subgraph):
-    with torch.jit.fuser("fuser3"):
-        return reload_jit_model(subgraph)
-
-
-@create_backend
-def ofi(subgraph):
-    return torch.jit.optimize_for_inference(subgraph.scripted)
-
-
-@create_backend
-def static_runtime(subgraph):
-    scripted = subgraph.scripted
-    if hasattr(scripted, "_c"):
-        static_module = torch._C._jit_to_static_module(scripted._c)
-    else:
-        static_module = torch._C._jit_to_static_module(scripted.graph)
-    return subgraph.wrap_returns(static_module)
+@register_backend(name="ts")
+def torchscript(gm, fake_tensor_inputs):
+    return torch.jit.script(gm)
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
@@ -242,70 +166,6 @@ def onnxrt(subgraph):
         return onnxrt_cpu(subgraph)
 
 
-@functools.lru_cache(None)
-def _init_tensorflow():
-    import tensorflow as tf  # type: ignore[import]
-
-    # prevent tensorflow from eating all the GPU memory
-    gpus = tf.config.list_physical_devices("GPU")
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-    return tf
-
-
-@create_backend
-def onnx2tf(subgraph):
-    import onnx  # type: ignore[import]
-    from onnx_tf.backend import prepare  # type: ignore[import]
-
-    tf = _init_tensorflow()
-    filename = subgraph.filename("tensorflow")
-    input_names = subgraph.input_names
-    output_names = subgraph.output_names
-    device = "/CPU:0" if subgraph.is_cpu else f"/GPU:{subgraph.device_index}"
-    with tf.device(device):
-        if not os.path.exists(filename):
-            prepare(onnx.load(subgraph.onnx_filename)).export_graph(filename)
-        tf_module = tf.saved_model.load(filename)
-        tf_module = tf.function(tf_module, jit_compile=True)
-
-    def run(*i_args):
-        args = [a.contiguous() for a in i_args]
-        with tf.device(device):
-            outs = tf_module(
-                **{
-                    name: tf.experimental.dlpack.from_dlpack(
-                        torch.utils.dlpack.to_dlpack(args[idx])
-                    )
-                    for idx, name in enumerate(input_names)
-                }
-            )
-            return [
-                torch.utils.dlpack.from_dlpack(
-                    tf.experimental.dlpack.to_dlpack(outs[name])
-                )
-                for name in output_names
-            ]
-
-    return subgraph.wrap_returns(run)
-
-
-@create_backend
-def taso(subgraph):
-    taso_filename = subgraph.filename("taso")
-    subprocess.check_call(
-        [
-            os.path.expanduser("~/conda/envs/taso/bin/python"),
-            "-c",
-            "import taso,onnx; onnx.save(taso.export_onnx(taso.optimize("
-            f"taso.load_onnx('{subgraph.onnx_filename}'))), '{taso_filename}')",
-        ]
-    )
-    return onnxrt_common(
-        subgraph, provider="CUDAExecutionProvider", onnx_filename=taso_filename
-    )
-
-
 @create_backend
 def ipex(subgraph, **kwargs):
     import intel_extension_for_pytorch as ipex  # type: ignore[import]
@@ -352,13 +212,9 @@ def fx2trt(subgraph, **kwargs):
     from torch_tensorrt.fx.trt_module import TRTModule  # type: ignore[import]
     from torch_tensorrt.fx.utils import LowerPrecision  # type: ignore[import]
 
-    from .normalize import normalize_ir
-
     try:
         model = subgraph.model
         inputs = subgraph.example_inputs
-        # normalize
-        model = normalize_ir(model, inputs)
         # pass rewrite
         model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)
@@ -467,32 +323,6 @@ def cudagraphs(subgraph):
     model = subgraph.model
     inputs = subgraph.example_inputs
     assert subgraph.is_cuda
-    return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
-
-
-@create_backend
-def cudagraphs_ts(subgraph):
-    assert subgraph.is_cuda
-    model = subgraph.scripted
-    inputs = subgraph.example_inputs
-
-    # warmup
-    for _ in range(3):
-        model(*inputs)
-
-    return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
-
-
-@create_backend
-def cudagraphs_ts_ofi(subgraph):
-    assert subgraph.is_cuda
-    model = torch.jit.optimize_for_inference(torch.jit.freeze(subgraph.scripted))
-    inputs = subgraph.example_inputs
-
-    # warmup
-    for _ in range(3):
-        model(*inputs)
-
     return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
 
 
@@ -790,17 +620,17 @@ def torchxla_trace_once(subgraph):
 
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "fp32"}
-    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+    return ipex(gm, example_inputs, **kwargs_ipex)
 
 
 def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "bf16"}
-    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+    return ipex(gm, example_inputs, **kwargs_ipex)
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": True}
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
+    trt_compiled = fx2trt(gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
@@ -812,7 +642,7 @@ def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": False}
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
+    trt_compiled = fx2trt(gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
