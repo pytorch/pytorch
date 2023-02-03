@@ -43,7 +43,7 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
   THPStorage* _self = (THPStorage*)self;
   // Some subclass of StorageBase are GC-tracked objects even
   // though the base class is not.
-  auto *type = Py_TYPE(self);
+  auto* type = Py_TYPE(self);
   if (PyType_HasFeature(type, Py_TPFLAGS_HAVE_GC) != 0) {
     PyObject_GC_UnTrack(self);
   }
