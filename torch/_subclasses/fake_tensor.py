@@ -589,6 +589,7 @@ def make_fast_binary_impl(slow_ref):
             elif shape != final_shape:
                 all_ops_same_shape = False
                 final_shape = infer_size(final_shape, shape)
+        assert final_shape is not None
 
         if not all_ops_same_shape:
             # We must do some extra safety checks to see if the output
@@ -607,6 +608,8 @@ def make_fast_binary_impl(slow_ref):
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
+                # Use elementwise_dtypes for the tricky case
+                has_different_input_dtypes = True
                 continue
             if common_device == cpu and not op.device.type == "cpu":
                 common_device = op.device
@@ -628,9 +631,9 @@ def make_fast_binary_impl(slow_ref):
         current_cpu_scalars_on_non_cpu = 0
         max_cpu_scalars_on_non_cpu = 1  # hard coded atm
         for op in operands:
-            if common_device != cpu and (
-                not isinstance(op, torch.Tensor) or (op.dim() == 0 and op.device == cpu)
-            ):
+            if not isinstance(op, torch.Tensor):
+                continue
+            if common_device != cpu and op.dim() == 0 and op.device == cpu:
                 if current_cpu_scalars_on_non_cpu >= max_cpu_scalars_on_non_cpu:
                     return slow("error")
                 current_cpu_scalars_on_non_cpu += 1
@@ -685,7 +688,7 @@ def make_fast_binary_impl(slow_ref):
 
 register_fast_op_impl(torch.ops.aten.add.Tensor)(make_fast_binary_impl(torch._refs.add))
 register_fast_op_impl(torch.ops.aten.sub.Tensor)(make_fast_binary_impl(torch._refs.sub))
-register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))
+register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
 register_fast_op_impl(torch.ops.aten.div.Tensor)(make_fast_binary_impl(torch._refs.div))
 
 
