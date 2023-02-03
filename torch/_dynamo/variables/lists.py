@@ -122,7 +122,6 @@ class BaseListVariable(VariableTracker):
         # Generic list comparison works by iterating over left aka self and right the compared-to list.
         # If we hit here, their lengths are the same and they cannot be expressed as python constants.
         # So, we iterate over the zipped list items.
-        equal = True
         comps = []
         for l, r in zip(left.items, right.items):
             comp = BuiltinVariable(op).call_function(tx, [l, r], {})

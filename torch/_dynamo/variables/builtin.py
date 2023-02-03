@@ -892,6 +892,17 @@ class BuiltinVariable(VariableTracker):
 
         _unimplemented()
 
+    # and_ is a constant fold function, so we only get here if constant fold is not valid
+    def call_and_(self, tx, a, b):
+        if isinstance(a, DynamicShapeVariable) and isinstance(b, DynamicShapeVariable):
+            return DynamicShapeVariable.create(
+                tx,
+                (operator.and_)(a.as_proxy(), b.as_proxy()),
+                dyn_shape=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
+
     call_eq = _comparison
     call_gt = _comparison
     call_lt = _comparison
