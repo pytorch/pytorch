@@ -152,7 +152,7 @@ template <
   typename value_selection_intersection_kernel_t,
   typename index_t = int64_t,
   bool use_dynamic_shapes = true,
-  int64_t max_static_len = 0>  // only relevant when use_dynamic_shapes is false.
+  int max_static_len = 0>  // only relevant when use_dynamic_shapes is false.
 void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
@@ -625,7 +625,7 @@ void _sparse_binary_op_intersection_kernel_out(
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
   // 10 sparse dims should be more than enough?
-  constexpr auto max_sparse_dims = 2 * c10::kDimVectorStaticSize;
+  constexpr int max_sparse_dims = 2 * c10::kDimVectorStaticSize;
 
   BOOL_TO_INDEX_TYPE1(is_32bit_indexing, [&]() {
       using index_t = index_t0;
