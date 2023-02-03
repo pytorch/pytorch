@@ -298,7 +298,7 @@ Tensor& addmm_out_cuda_impl(
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
-    std::cout << "USING LtInteraface!" << std::endl;
+    // std::cout << "USING LtInteraface!" << std::endl;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -685,11 +685,11 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 }
 
 Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const Scalar& beta, const Scalar& alpha) {
-  std::cout << "Calling _int_addmm_out_cuda" << std::endl;
+  // std::cout << "Calling _int_addmm_out_cuda" << std::endl;
   Tensor result = at::empty({mat1.size(0), mat2.size(1)}, mat1.options().dtype(at::kInt));
   Tensor bias = at::empty({mat2.size(1)}, mat1.options());
-  result.fill_(0);
-  bias.fill_(0);
+  // result.fill_(0);
+  // bias.fill_(0);
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();

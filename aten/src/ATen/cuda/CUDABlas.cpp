@@ -635,7 +635,7 @@ void gemm_and_bias(
     RDtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
-  std::cout << " GEMM AN DBIAS " << std::endl;
+//  std::cout << " GEMM AN DBIAS " << std::endl;
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 
@@ -664,7 +664,7 @@ void gemm_and_bias(
     computeType = CUBLAS_COMPUTE_32I;
     scaleType = CUDA_R_32I;
     // TORCH_CHECK(std::is_same<RDtype, int32_t>::value);
-    std::cout << "USING THEM INT DTYPES" << std::endl;
+//    std::cout << "USING THEM INT DTYPES" << std::endl;
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
