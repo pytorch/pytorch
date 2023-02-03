@@ -71,7 +71,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     # torch.Tensor.{fn}
-    if isinstance(func, types.MethodDescriptorType) and func.__name__ in dir(torch.Tensor):
+    if isinstance(func, types.MethodDescriptorType) and func is getattr(torch.Tensor, func.__name__, None):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
     module = _find_module_of_method(func)
