@@ -171,8 +171,9 @@ def track_tensor(tensor, proxy, *, constant, tracer):
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
-            track_tensor(e, proxy, tracer=tracer, constant=constant)
-            set_meta(proxy, e)
+            if not isinstance(proxy, torch.Tensor):
+                track_tensor(e, proxy, tracer=tracer, constant=constant)
+                set_meta(proxy, e)
         elif isinstance(e, py_sym_types):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
@@ -327,8 +328,11 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
-                                               name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
+    # If there are any fx.Proxy object!
+    # isinstance(arg, fx.Proxy)?
+    if any(map(lambda arg: not isinstance(arg, torch.Tensor), f_args)):
+        proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
+                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
     # This makes DCE marginally less likely to DCE inplace operations.
     # It is not strictly necessary
@@ -390,7 +394,10 @@ def proxy_call(proxy_mode, func, args, kwargs):
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    # If there are any fx.Proxy object!
+    # isinstance(arg, fx.Proxy)?
+    if any(map(lambda arg: not isinstance(arg, torch.Tensor), f_args)):
+        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 
