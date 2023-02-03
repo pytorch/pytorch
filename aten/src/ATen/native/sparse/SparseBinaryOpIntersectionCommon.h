@@ -302,7 +302,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = static_cast<int64_t>(0);
           for (decltype(sdim) dim = 0; dim < sdim; ++dim) {
-            const auto dim_hash_coeff = *(hash_coeffs.begin() + dim);
+            const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
           }
@@ -380,7 +380,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = static_cast<int64_t>(0);
           for (decltype(sdim) dim = 0; dim < sdim; ++dim) {
-            const auto dim_hash_coeff = *(hash_coeffs.begin() + dim);
+            const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
           }

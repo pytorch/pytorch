@@ -13,7 +13,6 @@ import signal
 import subprocess
 import sys
 import time
-import warnings
 from contextlib import contextmanager
 from typing import NamedTuple
 
@@ -116,7 +115,10 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
-    "xcit_large_24_p8_224",  # fp64_OOM
+    "xcit_large_24_p8_224",  # fp64_OOM,
+    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
@@ -139,6 +141,8 @@ CI_SKIP[CI("inductor", training=False)] = [
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
+    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -173,6 +177,9 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     "vision_maskrcnn",  # cannot determine truth value of Relational
     # timm_models
     "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
+    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -312,6 +319,8 @@ def print_summary(filename):
     data = pd.read_csv(filename)
     if "tag" in data.columns:
         for tag in data.tag.unique():
+            if tag == "0.0000":
+                continue  # This happens for failed runs
             print(f"\nSummary for tag={tag}:")
             print_summary_table(data[data.tag == tag])
     else:
@@ -325,21 +334,21 @@ def print_summary_table(data):
             if col in ("dev", "name", "batch_size", "tag"):
                 continue
             elif col in ("pct_ops", "pct_time"):
-                print(col.ljust(width), f"{data[col].mean():.1%}")
+                print(col.ljust(width), f"{data[col].mean():.3%}")
             elif col in ("graphs", "graph_calls", "captured_ops", "total_ops"):
-                print(col.ljust(width), f"{data[col].mean():.1f}")
+                print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
-                print(col.ljust(width), f"mean={data[col].mean():.1f} seconds")
+                print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
             elif col in ("compression_ratio"):
-                print(col.ljust(width), f"mean={data[col].mean():.1f}x")
+                print(col.ljust(width), f"mean={data[col].mean():.3f}x")
             elif col in ("accuracy"):
                 pass_rate = (data[col] == "pass").mean()
-                print(col.ljust(width), f"pass_rate={100*pass_rate:.1f}%")
+                print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
             else:
                 cdata = data[col].clip(1)
                 print(
                     col.ljust(width),
-                    f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
+                    f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
                 )
         except Exception as e:
             pass
@@ -1416,56 +1425,6 @@ class BenchmarkRunner:
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
-    def compare_branches(
-        self,
-        name,
-        model,
-        example_inputs,
-        optimize_ctx,
-        experiment,
-        explain,
-        comparison_branch=None,
-        branch=None,
-    ):
-        assert branch is None, "Branch set during top level flow."
-        import git
-
-        repo = git.Repo()
-        curr_branch = repo.active_branch.name
-        if curr_branch != comparison_branch:
-            # Run current
-            try:
-                self.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=explain,
-                    branch=curr_branch,
-                    tag=curr_branch,
-                )
-                # Run comparison branch
-                repo.git.checkout(comparison_branch)
-                self.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=explain,
-                    branch=comparison_branch,
-                    tag=comparison_branch,
-                )
-            finally:
-                # Swap back
-                repo.git.checkout(curr_branch)
-            return
-        else:
-            raise RuntimeError(
-                f"--diff-branch: current branch is same as {comparison_branch} branch, what are you diffing?"
-            )
-
     def run_one_model(
         self,
         name,
@@ -1473,26 +1432,13 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        comparison_branch=None,
-        branch=None,
         explain=False,
         tag=None,
     ):
-        if comparison_branch is not None:
-            self.compare_branches(
-                name,
-                model,
-                example_inputs,
-                optimize_ctx,
-                experiment,
-                comparison_branch=comparison_branch,
-                explain=explain,
-            )
-            return
         mode = "train" if self.args.training else "eval"
         msg = f"{current_device:4} {mode:5} {current_name:34} "
-        if branch:
-            msg += f" {branch:26}"
+        if tag:
+            msg += f" {tag:26}"
         print(msg, end=" ", flush=True)
         start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
@@ -1528,6 +1474,13 @@ class BenchmarkRunner:
 
 def help(fn):
     return fn.__doc__
+
+
+diff_branch_default = "DIFF-BRANCH-DEFAULT"
+
+
+def should_diff_branch(args):
+    return args.diff_branch != diff_branch_default
 
 
 def parse_args(args=None):
@@ -1742,7 +1695,13 @@ def parse_args(args=None):
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
     parser.add_argument(
-        "--diff-branch", default=None, help="Delta current branch against given branch."
+        "--diff-branch",
+        default=diff_branch_default,
+        help="delta current branch against given branch.",
+    )
+
+    parser.add_argument(
+        "--tag", default=None, help="Specify a tag to be included in csv files."
     )
 
     parser.add_argument(
@@ -1890,7 +1849,7 @@ def main(runner, original_dir=None):
         os.chdir(original_dir)
     args = parse_args()
 
-    if args.diff_branch:
+    if should_diff_branch(args):
         import git
 
         # We do this here so we error out earlier if there's an issue
@@ -1898,6 +1857,11 @@ def main(runner, original_dir=None):
         if repo.is_dirty():
             raise RuntimeError(
                 "--diff-branch called on dirty branch. Commit, stash, or reset."
+            )
+        main_branch = repo.active_branch.name
+        if main_branch == args.diff_branch:
+            raise RuntimeError(
+                f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
     with maybe_init_distributed(
@@ -2112,7 +2076,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
     elif args.speedup_dynamo_ts:
-        optimize_ctx = torch._dynamo.optimize(backends.ts, nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedup_dynamo_ts.csv"
     elif args.speedup_fx2trt:
@@ -2217,7 +2181,25 @@ def run(runner, args, original_dir=None):
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
-    if args.only:
+    if args.only and should_diff_branch(args):
+        import git
+
+        repo = git.Repo()
+        main_branch = repo.active_branch.name
+        try:
+            # Adding diff-branch again to the args will override previous value
+            call_args = (
+                [sys.executable] + sys.argv + [f"--diff-branch={diff_branch_default}"]
+            )
+            # Run for main branch
+            subprocess.check_call(call_args + [f"--tag={main_branch}"])
+            # Run for comparison branch
+            repo.git.checkout(args.diff_branch)
+            subprocess.check_call(call_args + [f"--tag={args.diff_branch}"])
+        finally:
+            # Go back to main branch
+            repo.git.checkout(main_branch)
+    elif args.only:
         model_name = args.only
         for device in args.devices:
             batch_size = args.batch_size
@@ -2289,8 +2271,8 @@ def run(runner, args, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                comparison_branch=args.diff_branch,
                 explain=args.explain,
+                tag=args.tag,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
@@ -2324,8 +2306,11 @@ def run(runner, args, original_dir=None):
                     )
 
             try:
+                timeout = 60 * 20
+                if should_diff_branch(args):
+                    timeout *= 2
                 subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
@@ -2371,6 +2356,6 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.WARNING)
-    warnings.filterwarnings("ignore")
-    main()
+    raise RuntimeError(
+        f"You shouldn't run {sys.argv[0]} directly, instead try timm_model.py, torchbench.py or hugginface.py"
+    )
