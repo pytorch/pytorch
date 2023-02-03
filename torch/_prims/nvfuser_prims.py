@@ -143,6 +143,7 @@ _nvfuser_unary_ops = {
 
 def _assert_nvfuser_op_exists(fname: str):
     try:
+        import nvfuser
         if hasattr(nvfuser, "version"):
             from nvfuser import FusionDefinition as fd  # type: ignore[import]
         else:

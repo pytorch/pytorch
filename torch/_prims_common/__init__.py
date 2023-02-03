@@ -9,6 +9,7 @@ import torch
 from torch import sym_float, sym_int, sym_max
 
 try:
+    import nvfuser
     if hasattr(nvfuser, "version"):
         from nvfuser import DataType  # type: ignore[import]
     else:

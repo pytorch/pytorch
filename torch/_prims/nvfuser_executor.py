@@ -19,6 +19,7 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
+    import nvfuser
     from packaging.version import Version
     nvfuser_version = Version("0.0.0")
     if hasattr(nvfuser, "version"):

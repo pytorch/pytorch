@@ -145,6 +145,7 @@ class TestPrims(TestCase):
         # This test is to ensure that when the nvfuser implementation exists it is used
         # Assuming one-to-one mapping between prims and nvfuser implementations
         # This test is not intended to test the correctness of the nvfuser implementation
+        import nvfuser
         if hasattr(nvfuser, "version"):
             from nvfuser import FusionDefinition as fd
         else:
