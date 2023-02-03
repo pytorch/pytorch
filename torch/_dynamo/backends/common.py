@@ -1,9 +1,12 @@
+import functools
 import logging
 
 import torch
 from torch._dynamo import eval_frame
 from torch._dynamo.utils import counters
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch._subclasses import FakeTensor
+from torch.utils._python_dispatch import _disable_current_modes
 
 log = logging.getLogger(__name__)
 
@@ -70,3 +73,37 @@ def mem_efficient_fusion_kwargs(use_decomps):
         kwargs["decompositions"] = default_decompositions
 
     return kwargs
+
+
+def fake_tensor_unsupported(fn):
+    """
+    Decorator for backends that need real inputs.  We swap out fake
+    tensors for zero tensors.
+    """
+
+    def defake(x):
+        if not isinstance(x, FakeTensor):
+            return x
+        y = torch.empty_strided(
+            x.size(),
+            x.stride(),
+            dtype=x.dtype,
+            device=x.device,
+            requires_grad=x.requires_grad,
+        )
+        y.zero_()
+        return y
+
+    @functools.wraps(fn)
+    def wrapper(model, inputs, **kwargs):
+        with _disable_current_modes():
+            inputs = list(map(defake, inputs))
+            return fn(model, inputs, **kwargs)
+
+    return wrapper
+
+
+def device_from_inputs(example_inputs) -> torch.device:
+    for x in example_inputs:
+        if hasattr(x, "device"):
+            return x.device
