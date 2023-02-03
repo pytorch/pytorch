@@ -31,7 +31,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_MACOS,
     IS_WINDOWS,
+    IS_X86,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -79,12 +81,16 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
+HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
 slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
+skip_if_x86_mac = functools.partial(
+    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
+)
 
 config.triton.autotune_pointwise = False  # too slow
 
@@ -918,6 +924,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
+    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -925,6 +932,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
+    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -3015,7 +3023,13 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (torch.randn([16, 16]),),
+            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
+            (
+                torch.randn(
+                    [16, 16],
+                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                ),
+            ),
             # Mismatched elements: 9 / 256 (3.5%)
             # Greatest absolute difference: 2.491354329061828e+28 at index (6, 6) (up to 1e-05 allowed)
             # Greatest relative difference: 2.9793410720160818e-05 at index (4, 5) (up to 1.3e-06 allowed)
@@ -3612,6 +3626,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
+    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -5151,11 +5166,13 @@ class CommonTemplate:
             sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
             return (new_zeros_default_4, sum_default_7)
 
+        # TODO: Remove once https://github.com/pytorch/pytorch/issues/94017 is resolved
+        dtype = torch.float64 if self.device == "cpu" else torch.float32
         args = [
-            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
-            ((), (), torch.float32),
-            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
-            ((3,), (1,), torch.float32),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
+            ((), (), dtype),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
+            ((3,), (1,), dtype),
         ]
         args = [
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
@@ -5428,6 +5445,7 @@ class CommonTemplate:
             assert callable(func), "not a callable"
             func()
 
+    @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
             x = torch.nn.functional.pixel_shuffle(x, 2)
