@@ -18,7 +18,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
+from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen, AOTCppWrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -491,6 +491,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
                 self.sizevars = CppSizeVarAllocator(self._shape_env)
+                if config.aot:
+                    self.wrapper_code = AOTCppWrapperCodeGen()    
+                    return
                 self.wrapper_code = CppWrapperCodeGen()
                 return
         self.wrapper_code = WrapperCodeGen()

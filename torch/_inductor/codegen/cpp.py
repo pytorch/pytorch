@@ -1477,9 +1477,11 @@ class CppScheduling:
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def get_kernel_group(self):
-        from .wrapper import CppWrapperCodeGen
+        from .wrapper import CppWrapperCodeGen, AOTCppWrapperCodeGen
 
-        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+        if isinstance(V.graph.wrapper_code, AOTCppWrapperCodeGen):
+            self.kernel_group = AOTCppWrapperKernelGroup()
+        elif isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
             self.kernel_group = CppWrapperKernelGroup()
         else:
             self.kernel_group = KernelGroup()
@@ -1576,6 +1578,7 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
+        breakpoint()
         wrapper.define_kernel(kernel_name, codecache_str)
         wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
@@ -1587,6 +1590,51 @@ class CppWrapperKernelGroup(KernelGroup):
         super().__init__()
         self.args = CppWrapperKernelArgs()
 
+
+class AOTCppWrapperKernelGroup(CppWrapperKernelGroup):
+    def __init__(self):
+        super().__init__()
+
+    def codegen_define_and_call(self, wrapper):
+        self.stack.close()
+        if self.count == 0:
+            return
+
+        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
+        arg_types = ",".join(arg_types)
+        code = BracesBuffer()
+        # TODO: support kernel profile on other platforms
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
+        if enable_kernel_profile:
+            code.writelines(["#include <ATen/record_function.h>"])
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
+        with code.indent():
+            if enable_kernel_profile:
+                graph_id = V.graph.graph_id
+                prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+                code.writelines(
+                    [
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                    ]
+                )
+            for old, new in self.args.aliases():
+                code.writeline(f"auto {old} = {new};")
+            code.splice(self.loops_code)
+
+        codecache_def = IndentedBuffer()
+        codecache_def.splice(code)
+
+        codecache_str = codecache_def.getvalue()
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        codecache_str = codecache_str.replace("#pragma CMT", "//")
+        breakpoint()
+        wrapper.define_kernel(kernel_name, codecache_str)
+        # generate the code to call this
 
 class WorkSharing:
     def __init__(self, code):

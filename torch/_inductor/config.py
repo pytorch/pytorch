@@ -11,7 +11,9 @@ disable_progress = True
 verbose_progress = False
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = True
+
+aot = True
 
 # dead code elimination
 dce = False

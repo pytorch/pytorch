@@ -363,12 +363,14 @@ class VariableBuilder:
                     source=self.get_source(),
                     # Guards are added inside register_attr_or_module
                 )
+        # Is the constant a literal or one of our supported types?
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            if type(value) in (int, float) and not config.specialize_int_float:
-                # unspecializing int/float by default, but still
-                # specialize for the following conditions
+            # Okay, cool, it is, now we check - is the constant an int or float, and are we NOT SPECIALIZING?
+            if type(value) in (int, float) and config.specialize_int_float == False:
+                # Check a weird back door, or check if it was a global, or an attribute, cause,
+                # despite what the user config says, we know better, so its time to make it a constant.
                 if (
                     value in self._common_constants()
                     or isinstance(self.source, GlobalSource)
@@ -382,6 +384,8 @@ class VariableBuilder:
                         value=value,
                         guards=make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
+                # Okay, its not one of these, and we are indeed an int or a float, and we are not specializing
+                # So, let's wrap the literal in a tensor 
                 else:
                     return self.wrap_unspecialized_primitive(value)
             else:

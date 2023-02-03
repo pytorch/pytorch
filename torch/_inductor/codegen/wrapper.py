@@ -573,6 +573,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(self, name: str, kernel: str):
+        
         self.header.splice(f"\n\n{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
@@ -596,6 +597,7 @@ class WrapperCodeGen(CodeGen):
 
     def writeline(self, line):
         self.lines.append(line)
+
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
@@ -782,3 +784,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
+
+class AOTCppWrapperCodeGen(CppWrapperCodeGen):
+    def write_prefix(self):
+        pass
+
+    def generate_extern_kernel_out(
+        self, output_view, codegen_reference, args, kernel, cpp_kernel
+    ):
+        pass
+
+    def generate_end(self, result):
+        pass
