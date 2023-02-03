@@ -37,7 +37,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "FloorDiv", "guard_int", "wrap_node",
+    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -103,10 +103,22 @@ def _handle_sym_dispatch(func, args, kwargs):
     finally:
         SYM_FUNCTION_MODE = mode
 
+def guard_bool(a):
+    if isinstance(a, SymBool):
+        return a.node.guard_bool("", 0)  # NB: uses Python backtrace
+    assert type(a) is bool
+    return a
+
 def guard_int(a):
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
     assert type(a) is int
+    return a
+
+def guard_float(a):
+    if isinstance(a, SymFloat):
+        return a.node.guard_float("", 0)  # NB: uses Python backtrace
+    assert isinstance(a, float)
     return a
 
 # Drop in replacement for math.sqrt
@@ -260,6 +272,28 @@ class SymNode:
 
 
 if HAS_SYMPY:
+    # Overloaded to be compatible with regular Python.
+    # https://github.com/pytorch/pytorch/issues/90900
+    class Pow(sympy.Function):
+        @classmethod
+        def eval(cls, base, exp):
+            if exp.is_zero:
+                return sympy.Integer(1)
+            elif base.is_zero and exp < 0:
+                raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
+            else:
+                return base ** exp
+
+    # Overloaded to be compatible with regular Python.
+    # https://github.com/pytorch/pytorch/issues/90900
+    class TrueDiv(sympy.Function):
+        @classmethod
+        def eval(cls, base, divisor):
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+            else:
+                return base / divisor
+
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -297,8 +331,23 @@ if HAS_SYMPY:
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
+            def check_supported_type(x):
+                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                    raise TypeError(
+                        f"unsupported operand type(s) for //: "
+                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                        f", expected integer or real")
+
+            check_supported_type(base)
+            check_supported_type(divisor)
+
+            # We don't provide the same error message as in Python because SymPy
+            # makes it difficult to check the types.
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+
+            if base.is_zero:
+                return sympy.S.Zero
             if base.is_integer and divisor == 1:
                 return base
             if base.is_real and divisor == 1:
@@ -355,10 +404,10 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
-    'pow': lambda a, b: a ** b,
+    'pow': lambda a, b: Pow(a, b),
     'and': lambda a, b: a & b,
     'or': lambda a, b: a | b,
-    'truediv': lambda a, b: a / b,
+    'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
@@ -443,7 +492,7 @@ magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
-always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
 
@@ -490,10 +539,19 @@ def _make_node_magic(method, func):
             raise
         out = safe_expand(out)
         pytype: Type
+        # This is not strictly correct. In Python, a**b may return complex when
+        # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
+        # returns a float while both arguments are ints: 2**(-1). Also, max and
+        # min do not type promote. To avoid having data-dependent control flow
+        # here, we just set the type to float if one of the args is a float. In
+        # case of a type mismatch, we assume that it will be detected during
+        # evaluation.
         if method in always_float_magic_methods:
             pytype = float
         elif method in always_bool_magic_methods:
             pytype = bool
+        elif self.pytype is float or other.pytype is float:
+            pytype = float
         else:
             pytype = self.pytype
 
@@ -662,6 +720,8 @@ if HAS_SYMPY:
             return self.source_ref(self.symbol_to_source[expr][0])
 
 
+TLS = threading.local()
+
 
 class ShapeEnv(object):
     def __init__(self):
@@ -677,20 +737,19 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
-        self.tls = threading.local()
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
 
     def _suppress_guards_tls(self):
-        return getattr(self.tls, "suppress_guards", False)
+        return getattr(TLS, "suppress_guards", False)
 
     @contextmanager
     def suppress_guards(self):
-        self.tls.suppress_guards = True
+        TLS.suppress_guards = True
         try:
             yield
         finally:
-            self.tls.suppress_guards = False
+            TLS.suppress_guards = False
 
     def _get_key(self):
         """
