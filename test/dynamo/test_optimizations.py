@@ -1,32 +1,18 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import importlib
 import unittest
 
 import torch
 
 import torch._dynamo
+import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
+from torch._dynamo.backends.ipex import has_ipex
+from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
-
-def has_onnxruntime():
-    try:
-        importlib.import_module("onnxruntime")
-        return True
-    except ImportError:
-        return False
-
-
-def has_ipex():
-    try:
-        importlib.import_module("intel_extension_for_pytorch")
-        return True
-    except ImportError:
-        return False
 
 
 class Seq(torch.nn.Module):
