@@ -659,8 +659,10 @@ void gemm_and_bias(
   cudaDataType_t abType = abcType;
   cudaDataType_t cType = abcType;
   if (std::is_same<Dtype, int8_t>::value) {
-    abType = CUDA_R_8I1;
+    abType = CUDA_R_8I;
     cType = CUDA_R_32I;
+    computeType = CUBLAS_COMPUTE_32I;
+    scaleType = CUDA_R_32I;
     // TORCH_CHECK(std::is_same<RDtype, int32_t>::value);
     std::cout << "USING THEM INT DTYPES" << std::endl;
   }
@@ -686,22 +688,22 @@ void gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_EPILOGUE,
-      &epilogue,
-      sizeof(epilogue)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-      computeDesc.descriptor(),
-      CUBLASLT_MATMUL_DESC_BIAS_POINTER,
-      &bias,
-      sizeof(Dtype*)));
+//  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+//      computeDesc.descriptor(),
+//      CUBLASLT_MATMUL_DESC_EPILOGUE,
+//      &epilogue,
+//      sizeof(epilogue)));
+//  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+//      computeDesc.descriptor(),
+//      CUBLASLT_MATMUL_DESC_BIAS_POINTER,
+//      &bias,
+//      sizeof(Dtype*)));
 
   CuBlasLtMatrixLayout Adesc(
-      abcType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
+      abType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
   CuBlasLtMatrixLayout Bdesc(
-      abcType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
-  CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
+      abType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
@@ -721,21 +723,22 @@ void gemm_and_bias(
   int returnedResult = 0;
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Cdesc.descriptor(),
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
-  if (returnedResult == 0) {
-    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-  }
+  // TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+  //     ltHandle,
+  //     computeDesc.descriptor(),
+  //     Adesc.descriptor(),
+  //     Bdesc.descriptor(),
+  //     Cdesc.descriptor(),
+  //     Cdesc.descriptor(),
+  //     preference.descriptor(),
+  //     1,
+  //     &heuristicResult,
+  //     &returnedResult));
+  // if (returnedResult == 0) {
+  //   TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  // }
 
+  float beta_special = 0.0f;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -744,14 +747,14 @@ void gemm_and_bias(
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      &beta_val,
+      &beta_special, // &beta_val,
       result_ptr,
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
-      &heuristicResult.algo,
-      workspace.data_ptr(),
-      workspaceSize,
+      NULL, // &heuristicResult.algo,
+      NULL, // workspace.data_ptr(),
+      0, // workspaceSize,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
@@ -773,8 +776,10 @@ void gemm_and_bias(
       mat2_ld,
       " result_ld ",
       result_ld,
-      " abcType ",
-      abcType,
+      " abType ",
+      abType,
+      " cType ",
+      cType,
       " computeType ",
       computeType,
       " scaleType ",
