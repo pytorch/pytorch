@@ -561,10 +561,10 @@ class SweepInputs2:
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
-        r3 = sympy.Symbol("r3")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
+        r3 = sympy.Symbol("r3", integer=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -645,9 +645,9 @@ class TestIndexingSimplification(TorchTestCase):
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
 
         # join two ModularIndexing calls into one larger one when possible
         expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
