@@ -349,19 +349,23 @@ class WrapperCodeGen(CodeGen):
             def call(args):
             """
         )
-        with self.wrapper_call.indent():
+        with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline("torch.cuda.synchronize()")
+                self.prefix.writeline("torch.cuda.synchronize()")
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
-                self.wrapper_call.writeline(f"{lhs} = args")
-                self.wrapper_call.writeline("args.clear()")
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
             for name in V.graph.randomness_seeds:
-                self.wrapper_call.writeline(
+                self.prefix.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
                 )
-            V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
+            V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
+
+    def append_precomputed_sizes_to_prefix(self):
+        with self.prefix.indent():
+            V.graph.sizevars.codegen_precomputed_sizes(self.prefix)
 
     def write_get_cuda_stream(self, index):
         name = f"stream{index}"
@@ -488,7 +492,6 @@ class WrapperCodeGen(CodeGen):
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
-        result.splice(self.prefix)
 
         out_names = V.graph.get_output_names()
         with contextlib.ExitStack() as stack:
@@ -538,6 +541,9 @@ class WrapperCodeGen(CodeGen):
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
+
+        self.append_precomputed_sizes_to_prefix()
+        result.splice(self.prefix)
 
         with result.indent():
             result.splice(self.wrapper_call)
