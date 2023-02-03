@@ -2,10 +2,9 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/TensorCompare.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/native/Resize.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 struct CachedGraph : public MPSCachedGraph
@@ -416,5 +415,103 @@ Tensor where_mps(const Tensor& condition,
 
 }
 
-} // namespace native
-} // namespace at
+Tensor& nan_to_num_out_mps(const Tensor& self,
+                           c10::optional<double> nan,
+                           c10::optional<double> pos_inf,
+                           c10::optional<double> neg_inf,
+                           Tensor& result) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "nan_to_num: dtype of out: ",
+              result.scalar_type(), " should be same as input: ", self.scalar_type());
+  if (result.numel() == 0) {
+    return result;
+  }
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    at::native::resize_output(result, self.sizes());
+    result.copy_(self);
+    return result;
+  }
+  using namespace mps;
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* selfTensor = nil;
+    MPSGraphTensor* outputTensor = nil;
+    MPSGraphTensor* nanReplacementTensor = nil;
+    MPSGraphTensor* posInfReplacementTensor = nil;
+    MPSGraphTensor* negInfReplacementTensor = nil;
+  };
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  @autoreleasepool {
+    string key = "nan_to_num" + getTensorsStringKey({self});
+    MPSDataType self_dtype = getMPSScalarType(self.scalar_type());
+
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    if (!cachedGraph) {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          newCachedGraph->nanReplacementTensor    = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[@1]);
+          newCachedGraph->posInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[@1]);
+          newCachedGraph->negInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[@1]);
+
+          MPSGraphTensor* nanFreeTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph isNaNWithTensor: newCachedGraph->selfTensor name:nil]
+                                                          truePredicateTensor: newCachedGraph->nanReplacementTensor
+                                                         falsePredicateTensor: newCachedGraph->selfTensor
+                                                                         name: nil];
+          MPSGraphTensor* subZeroTensor = [mpsGraph lessThanWithPrimaryTensor: nanFreeTensor
+                                                              secondaryTensor: [mpsGraph constantWithScalar: 0.0 dataType: self_dtype]
+                                                                         name: nil];
+          // the cast is a workaround for the issue #103149520 (crash when bool and fp16 passed to binary ops)
+          MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor: [mpsGraph castTensor: subZeroTensor toType: self_dtype name: @"castTensor"]
+                                                                 secondaryTensor: [mpsGraph isInfiniteWithTensor: nanFreeTensor name:nil]
+                                                                            name: nil];
+          MPSGraphTensor* negInfFreeTensor = [mpsGraph selectWithPredicateTensor: isNegInfTensor
+                                                             truePredicateTensor: newCachedGraph->negInfReplacementTensor
+                                                            falsePredicateTensor: nanFreeTensor
+                                                                            name: nil];
+          newCachedGraph->outputTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph isInfiniteWithTensor: negInfFreeTensor name:nil]
+                                                         truePredicateTensor: newCachedGraph->posInfReplacementTensor
+                                                        falsePredicateTensor: negInfFreeTensor
+                                                                        name: nil];
+        }
+        return newCachedGraph;
+      });
+    }
+    MPSScalar nanReplacementScalar, posInfReplacementScalar, negInfReplacementScalar;
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
+        scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
+        scalar_t pos_inf_replacement = pos_inf.has_value() ?
+                                       static_cast<scalar_t>(pos_inf.value()) :
+                                       std::numeric_limits<scalar_t>::max();
+        scalar_t neg_inf_replacement = neg_inf.has_value() ?
+                                       static_cast<scalar_t>(neg_inf.value()) :
+                                       std::numeric_limits<scalar_t>::lowest();
+
+        nanReplacementScalar    = getMPSScalar(nan_replacement, self.scalar_type());
+        posInfReplacementScalar = getMPSScalar(pos_inf_replacement, self.scalar_type());
+        negInfReplacementScalar = getMPSScalar(neg_inf_replacement, self.scalar_type());
+    });
+
+    MPSStream* stream = getCurrentMPSStream();
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, result);
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor()  : selfPlaceholder.getMPSGraphTensorData(),
+      cachedGraph->nanReplacementTensor    : getMPSGraphTensorFromScalar(stream, nanReplacementScalar),
+      cachedGraph->posInfReplacementTensor : getMPSGraphTensorFromScalar(stream, posInfReplacementScalar),
+      cachedGraph->negInfReplacementTensor : getMPSGraphTensorFromScalar(stream, negInfReplacementScalar),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+  return result;
+}
+
+} // namespace at::native

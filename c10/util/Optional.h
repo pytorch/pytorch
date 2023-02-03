@@ -172,7 +172,7 @@ class bad_optional_access : public std::logic_error {
 
 template <class T>
 union storage_t {
-  unsigned char dummy_;
+  unsigned char dummy_{};
   T value_;
 
 #if __cplusplus >= 202002L
@@ -501,13 +501,8 @@ class arrayref_optional_base {
       : storage_(v) {}
 
   constexpr bool initialized() const noexcept {
-    typename storage::raw repr;
-    // Cast to void* to suppress GCC's -Wclass-memaccess.
-    memcpy(
-        static_cast<void*>(&repr),
-        static_cast<const void*>(&storage_),
-        sizeof(storage_));
-    return repr.p != nullptr || repr.sz == 0;
+    return storage_.uninitialized_.p != nullptr ||
+        storage_.uninitialized_.sz == 0;
   }
 
   void setInitialized(bool init) noexcept {
@@ -630,7 +625,7 @@ class optional : private OptionalBase<T> {
   typedef T value_type;
 
   // 20.5.5.1, constructors
-  constexpr optional() noexcept : OptionalBase<T>(){};
+  constexpr optional() noexcept = default;
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;

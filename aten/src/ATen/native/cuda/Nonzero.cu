@@ -16,8 +16,7 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace{
 template<typename T>
@@ -128,5 +127,4 @@ Tensor nonzero_cuda(const Tensor& self){
   Tensor out = at::detail::empty_cuda({0}, self.options().dtype(kLong));
   return at::native::nonzero_out_cuda(self, out);
 }
-} //namespace::native
-} //namespace::at
+} //namespace at::native

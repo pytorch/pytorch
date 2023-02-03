@@ -12,7 +12,6 @@
 #include <ATen/ops/_test_ambiguous_defaults_native.h>
 #include <ATen/ops/_test_autograd_multiple_dispatch_native.h>
 #include <ATen/ops/_test_autograd_multiple_dispatch_view_native.h>
-#include <ATen/ops/_test_inductor_realize_native.h>
 #include <ATen/ops/_test_optional_filled_intlist_native.h>
 #include <ATen/ops/_test_optional_floatlist_native.h>
 #include <ATen/ops/_test_optional_intlist_native.h>
@@ -107,8 +106,8 @@ Tensor _test_autograd_multiple_dispatch_view(const Tensor &self) {
   return self.view(-1);
 }
 
-// Helper for inductor tests
-Tensor _test_inductor_realize(const Tensor &self) {
+Tensor _test_check_tensor(const Tensor& self) {
+  TORCH_CHECK_TENSOR_ALL(self, "Test message for TORCH_CHECK_TENSOR_ALL");
   return self.clone();
 }
 

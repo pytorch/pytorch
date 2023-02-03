@@ -13,6 +13,7 @@ from caffe2.python import core, workspace
 
 from typing import Set, Dict, Tuple, List
 
+log = logging.getLogger(__name__)
 
 def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
     """
@@ -156,7 +157,7 @@ def _remap_keys(old_dict, rename_fn):
     Args:
         old_dict: Dictionary (i.e. containing blob_name -> blob_name
             relationships.)
-        remap_fn: Function string -> string for renaming.
+        rename_fn: Function string -> string for renaming.
 
     Returns:
         None. Modifies old_dict in-place.
@@ -754,7 +755,7 @@ def _try_get_shapes(nets):
         shapes, _ = workspace.InferShapesAndTypes(nets)
         return shapes
     except Exception as e:
-        logging.warning("Failed to compute shapes: %s", e)
+        log.warning("Failed to compute shapes: %s", e)
         return {}
 
 

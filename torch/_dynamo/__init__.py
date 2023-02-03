@@ -1,4 +1,5 @@
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
+from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
 from .eval_frame import (
     assume_constant_result,
@@ -12,7 +13,8 @@ from .eval_frame import (
     run,
     skip,
 )
-from .utils import compilation_metrics, guard_failures, orig_code_map
+from .external_utils import is_compiling
+from .utils import compilation_metrics, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
     "allow_in_graph",
@@ -27,9 +29,11 @@ __all__ = [
     "replay",
     "disable",
     "reset",
-    "list_backends",
     "skip",
     "OptimizedModule",
+    "is_compiling",
+    "register_backend",
+    "list_backends",
 ]
 
 
@@ -46,19 +50,7 @@ def reset():
     resume_execution.ContinueExecutionCache.cache.clear()
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
-
-
-def list_backends():
-    """
-    Return valid strings that can be passed to::
-
-        @torch._dynamo.optimize(<backend>)
-        def foo(...):
-           ....
-    """
-    from .optimizations import BACKENDS
-
-    return [*sorted([*BACKENDS.keys(), "inductor"])]
+    reset_frame_count()
 
 
 def allow_in_graph(fn):
