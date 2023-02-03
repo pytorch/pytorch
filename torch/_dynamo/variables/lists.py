@@ -105,7 +105,6 @@ class BaseListVariable(VariableTracker):
     @staticmethod
     def generic_list_compare(left, tx, op, right, **options):
         from .builtin import BuiltinVariable
-        from .tensor import DynamicShapeVariable
 
         assert not (
             left.is_python_constant() and right.is_python_constant()
