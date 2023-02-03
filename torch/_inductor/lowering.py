@@ -342,7 +342,12 @@ def make_pointwise(
         dtype = override_return_dtype or inputs[0].get_dtype()
         is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
         # Won't work for (J, D) ops
-        jagged_offsets = inputs[0].get_jagged_offsets()
+        # FIXME: This is just bad, def need better design of get_jagged_offsets in ir but for now...
+        try:
+            jagged_offsets = inputs[0].get_jagged_offsets()
+        except AttributeError:
+            jagged_offsets = None
+
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()

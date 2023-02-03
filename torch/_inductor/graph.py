@@ -35,6 +35,7 @@ from .ir import (
     Pointwise,
     Reduction,
     TensorBox,
+    StorageBox,
 )
 from .lowering import (
     layout_constraints,
