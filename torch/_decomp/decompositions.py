@@ -1991,12 +1991,13 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
             lambda: "Must specify exactly one of output_size and scale_factors",
         )
         utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
-        return [
-            # Returning output_size as float. We cannot convert it to int directly,
-            # as latter computation of scale_factor is relying output size being float
-            sym_float(input_size[i + 2] * scale_factors[i])
-            for i in range(spatial_dimensions)
-        ]
+        output_size = []
+        for i, s in enumerate(scale_factors):
+            if int(s) == s:
+                output_size.append(input_size[i + 2] * int(scale_factors[i]))
+            else:
+                output_size.append(sym_int(input_size[i + 2] * scale_factors[i]))
+        return output_size
     utils.check(
         False, lambda: "Must specify exactly one of output_size and scale_factors"
     )
@@ -2058,13 +2059,13 @@ def _compute_upsample_nearest_indices(input, output_size):
         # scale = isize / osize
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
-        osize = sym_float(output_size[d])
+        osize = output_size[d]
         output_indices = torch.arange(
-            sym_int(osize), dtype=input.dtype, device=input.device
+            osize, dtype=input.dtype, device=input.device
         )
-        isize = sym_float(input.shape[-num_spatial_dims + d])
+        isize = input.shape[-num_spatial_dims + d]
         scale = isize / osize
-        input_indices = torch.floor(output_indices * scale).to(torch.int64)
+        input_indices = (output_indices * scale).to(torch.int64)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)
@@ -2076,7 +2077,7 @@ def _compute_upsample_nearest_indices(input, output_size):
 @pw_cast_for_opmath
 def upsample_nearest1d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     scales: Optional[float] = None,
 ) -> Tensor:
     (l_indices,) = _compute_upsample_nearest_indices(input, output_size)
@@ -2089,7 +2090,7 @@ def upsample_nearest1d(
 @pw_cast_for_opmath
 def upsample_nearest2d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
@@ -2114,7 +2115,7 @@ def upsample_nearest2d(
 @pw_cast_for_opmath
 def upsample_nearest3d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     scales_d: Optional[float] = None,
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
@@ -2153,14 +2154,14 @@ def upsample_bilinear2d(
     # get dimensions of original image
     n_batch, n_channels, in_h, in_w = input.shape
 
-    out_h = sym_float(output_size[0])
-    out_w = sym_float(output_size[1])
+    out_h = output_size[0]
+    out_w = output_size[1]
 
     # Calculate horizontal and vertical scaling factor
     # TODO: Figure out if scales_h/scales_w matters here
     if out_h > 1:
         if align_corners:
-            h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
+            h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
             h_scale_factor = in_h / out_h
     else:
@@ -2168,14 +2169,14 @@ def upsample_bilinear2d(
 
     if out_w > 1:
         if align_corners:
-            w_scale_factor = (in_w - 1) / (sym_int(out_w) - 1)
+            w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
             w_scale_factor = in_w / out_w
     else:
         w_scale_factor = 0.0
 
-    i = torch.arange(sym_int(out_h), dtype=input.dtype, device=input.device)
-    j = torch.arange(sym_int(out_w), dtype=input.dtype, device=input.device)
+    i = torch.arange(out_h, dtype=input.dtype, device=input.device)
+    j = torch.arange(out_w, dtype=input.dtype, device=input.device)
 
     if align_corners:
         x = h_scale_factor * i
@@ -2184,9 +2185,9 @@ def upsample_bilinear2d(
         x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
         y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
 
-    x_floor = torch.floor(x).to(torch.int64)
+    x_floor = x.to(torch.int64)
     x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
-    y_floor = torch.floor(y).to(torch.int64)
+    y_floor = y.to(torch.int64)
     y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
 
     x_view = x.unsqueeze(1)
