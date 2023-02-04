@@ -616,7 +616,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         for _ in range(10):
             opt_fn(a)
-        print(cnts.frame_count)
         self.assertEqual(cnts.frame_count, 3)
 
     def test_build_tuple_unpack(self):

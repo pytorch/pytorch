@@ -77,12 +77,25 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ] + cleanup
 
-            if self.target_values is None:
-                call_fn_args = 0
-            else:
-                call_fn_args = len(self.target_values)
+            load_args = []
+            if self.target_values is not None:
+                for val in self.target_values:
+                    if val not in code_options["co_consts"]:
+                        code_options["co_consts"] = tuple(code_options["co_consts"]) + (
+                            val,
+                        )
+                    load_args.append(
+                        create_instruction(
+                            "LOAD_CONST",
+                            code_options["co_consts"].index(val),
+                            val,
+                        )
+                    )
+
+            call_fn_args = len(self.target_values) if self.target_values else 0
 
             return [
+                *load_args,
                 create_instruction("CALL_FUNCTION", call_fn_args),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
@@ -160,21 +173,7 @@ class ContinueExecutionCache:
             for i in range(nstack):
                 prefix.append(create_instruction("LOAD_FAST", f"___stack{i}"))
                 if i in hooks:
-                    setup_fn = hooks.pop(i)
-                    if setup_fn.target_values is not None:
-                        for val in setup_fn.target_values:
-                            if val not in code_options["co_consts"]:
-                                code_options["co_consts"] = tuple(
-                                    code_options["co_consts"]
-                                ) + (val,)
-                            prefix.append(
-                                create_instruction(
-                                    "LOAD_CONST",
-                                    code_options["co_consts"].index(val),
-                                    val,
-                                )
-                            )
-                    prefix.extend(setup_fn(code_options, cleanup))
+                    prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
 
             prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
