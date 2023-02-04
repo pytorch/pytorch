@@ -1378,6 +1378,7 @@ class BenchmarkRunner:
         print(msg, end=" ", flush=True)
         start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+        start_graph_breaks = sum(torch._dynamo.utils.counters["graph_breaks"].values())
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
@@ -1404,10 +1405,12 @@ class BenchmarkRunner:
 
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+        end_graph_breaks = sum(torch._dynamo.utils.counters["graph_breaks"].values())
         if explain:
             print(
                 f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) "
-                f"covering {end_calls_captured-start_calls_captured} ops"
+                f"covering {end_calls_captured-start_calls_captured} ops with "
+                f"{end_graph_breaks-start_graph_breaks} graph breaks"
             )
 
 
