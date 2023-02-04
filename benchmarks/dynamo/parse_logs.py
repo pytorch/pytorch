@@ -57,11 +57,8 @@ out.writerow(
         gist_url,
         "frame_time",
         "backend_time",
-        "total_ops",
-        "fake_tensor_dispatch_calls",
-        "proxy_torch_dispatch_calls",
-        "time_per_op",
-        "dispatches_per_op",
+        "graph_count",
+        "op_count",
     ]
 )
 
@@ -148,27 +145,17 @@ for name, name2, log in chunker(entries, 3):
             backend_time = float(split_str[1])
             frame_time = float(split_str[0].split("entire_frame_compile:")[1])
 
-    tot_ops = None
-    fm_dispatches = None
-    pm_dispatches = None
     if "STATS:" in log:
         result = re.search("STATS:(.*)\n", log).group(1)
         # call_* op count: 970 | FakeTensor.__torch_dispatch__:35285 | ProxyTorchDispatchMode.__torch_dispatch__:13339
         split_all = result.split("|")
+        # TODO: rewrite this to work with arbitrarily many stats
 
-        if len(split_all) == 3:
-            tot_ops = int(split_all[0].split("call_* op count:")[1])
-            fm_dispatches = int(split_all[1].split("FakeTensor.__torch_dispatch__:")[1])
-            pm_dispatches = int(
-                split_all[2].split("ProxyTorchDispatchMode.__torch_dispatch__:")[1]
-            )
-    time_per_op = None
-    if frame_time is not None and tot_ops is not None:
-        time_per_op = frame_time / tot_ops * 1000  # ms
-
-    dispatches_per_op = None
-    if fm_dispatches is not None and pm_dispatches is not None and tot_ops is not None:
-        dispatches_per_op = (fm_dispatches + pm_dispatches) / tot_ops
+    graph_count = None
+    op_count = None
+    if m := re.search(r"Dynamo produced (\d+) graph\(s\) covering (\d+) ops", log):
+        graph_count = m.group(1)
+        op_count = m.group(2)
 
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
@@ -193,11 +180,8 @@ for name, name2, log in chunker(entries, 3):
             explain,
             frame_time,
             backend_time,
-            tot_ops,
-            fm_dispatches,
-            pm_dispatches,
-            time_per_op,
-            dispatches_per_op,
+            graph_count,
+            op_count,
         ]
     )
     i += 1
