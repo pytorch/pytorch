@@ -14,7 +14,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .dependencies import StarDep
+from .dependencies import Dep, StarDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, has_triton
 from .virtualized import V
@@ -61,6 +61,9 @@ class BaseSchedulerNode:
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
         self.written = False
+        self.prunable_dep_names: Set[
+            str
+        ] = set()  # these deps can be removed if after fusion they are redundant
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -96,8 +99,8 @@ class BaseSchedulerNode:
     def update_mutated_names(self, renames: Dict[str, str]):
         self.set_read_writes(self.read_writes.rename(renames))
 
-    def add_mutation_dep(self, name):
-        self.set_read_writes(self.read_writes.with_read(name))
+    def add_mutation_dep(self, name, prunable=False):
+        self.set_read_writes(self.read_writes.with_read(name, prunable))
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
@@ -137,6 +140,39 @@ class BaseSchedulerNode:
             for dep in self.unmet_dependencies
             if dep.name not in self.scheduler.available_buffer_names
         }
+
+    def prune_redundant_deps(self, name_to_fused_node):
+        """
+        Prunes stardeps intended for mutation ordering
+        on an upstream fused node if after fusion there is another dependency
+        on the fused upstream node, making the stardep redundant
+
+        In essence this enforces an ordering on fusions. As fusions occur, prunable stardeps will
+        be incrementally removed, enabling other fusions, ensuring they are fused in order.
+        """
+        name_to_dep_count = collections.Counter()
+
+        for dep in self.unmet_dependencies:
+            name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
+
+        def should_prune(dep):
+            return (
+                isinstance(dep, StarDep)
+                and dep.prunable
+                and name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 1
+            )
+
+        deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
+        self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
+        self.set_read_writes(
+            dependencies.ReadWrites(
+                self.read_writes.reads - deps_to_prune,
+                self.read_writes.writes,
+                self.read_writes.index_exprs,
+                self.read_writes.range_vars,
+                self.read_writes.var_ranges,
+            )
+        )
 
     def get_name(self) -> str:
         return self.node.get_name()
@@ -686,7 +722,7 @@ class Scheduler:
                     if other_name not in known_dep_node_names:
                         # If this node alreay directly or indirectly depends on other_node,
                         # we don't need to insert an extra StarDep.
-                        node.add_mutation_dep(other_name)
+                        node.add_mutation_dep(other_name, prunable=True)
                         add_user(other_name, node)
 
             # add normal non-mutation dependencies
@@ -810,6 +846,11 @@ class Scheduler:
                 )
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.topological_sort_schedule()
+        self.prune_redundant_deps()
+
+    def prune_redundant_deps(self):
+        for node in self.nodes:
+            node.prune_redundant_deps(self.name_to_fused_node)
 
     def get_possible_fusions(self):
         """

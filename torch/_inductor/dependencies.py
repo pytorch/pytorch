@@ -95,10 +95,11 @@ class MemoryDep(typing.NamedTuple):
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
+    prunable: bool = False
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
-            return StarDep(renames[self.name])
+            return StarDep(renames[self.name], self.prunable)
         return self
 
     def numbytes_hint(self):
@@ -143,10 +144,10 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, name: str) -> "ReadWrites":
+    def with_read(self, name: str, prunable=False) -> "ReadWrites":
         assert isinstance(name, str)
         return ReadWrites(
-            set.union(self.reads, {StarDep(name)}),
+            set.union(self.reads, {StarDep(name, prunable)}),
             self.writes,
             self.index_exprs,
             self.range_vars,
