@@ -177,8 +177,15 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   }
 
   //! Returns the disassembled latest compiled binary
-  std::string disassembledBinary() const {
-    return executor_utils::disassembleBinary(last_compiled_binary_);
+  std::string disassembledBinary(const std::string& nvdisasm_args = "") const {
+    return executor_utils::disassembleBinary(
+        last_compiled_binary_, nvdisasm_args);
+  }
+
+  //! Returns the disassembled latest compiled binary
+  std::string disassembledKernelSASS() const {
+    return executor_utils::disassembleBinary(
+        last_compiled_binary_, "-fun 1 -c");
   }
 
   std::string kernelName() const {

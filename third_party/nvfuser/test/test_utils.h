@@ -17,17 +17,20 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 // Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using namespace torch::jit::fuser::cuda;
 
-namespace {
 // Make a tensor that is known to be fully contiguous of dimensionality=ndims,
 // but unknown sizes
-TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
+inline TensorView* makeContigTensor(
+    size_t ndims,
+    DataType dtype = DataType::Float) {
   return TensorViewBuilder()
       .ndims(ndims)
       .dtype(dtype)
@@ -37,18 +40,20 @@ TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
 
 // Make a tensor that is known to be non-contiguous of dimensionality=ndims,
 // but unknown sizes
-TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
+inline TensorView* makeSymbolicTensor(
+    size_t ndims,
+    DataType dtype = DataType::Float) {
   return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
 }
 
 // Make a non-contiguous tensor of compile-time known sizes
-TensorView* makeConcreteTensor(
+inline TensorView* makeConcreteTensor(
     std::vector<int64_t> shape,
     DataType dtype = DataType::Float) {
   return TensorViewBuilder().shape(shape).dtype(dtype).build();
 }
 
-TensorView* makeContigConcreteTensor(
+inline TensorView* makeContigConcreteTensor(
     std::vector<int64_t> shape,
     DataType dtype = DataType::Float) {
   return TensorViewBuilder()
@@ -58,7 +63,7 @@ TensorView* makeContigConcreteTensor(
       .build();
 }
 
-void checkIntValue(
+inline void checkIntValue(
     ExpressionEvaluator& evaluator,
     Val* val,
     Int::ScalarType expected_value) {
@@ -68,29 +73,9 @@ void checkIntValue(
   TORCH_CHECK(actual_value.value() == expected_value);
 }
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-variable")
-// prime numbers
-int64_t prime_numbers[] = {
-    2,    3,    5,    7,    11,   13,   17,   19,   23,   29,   31,   37,
-    41,   43,   47,   53,   59,   61,   67,   71,   73,   79,   83,   89,
-    97,   101,  103,  107,  109,  113,  127,  131,  137,  139,  149,  151,
-    157,  163,  167,  173,  179,  181,  191,  193,  197,  199,  211,  223,
-    227,  229,  233,  239,  241,  251,  257,  263,  269,  271,  277,  281,
-    283,  293,  307,  311,  313,  317,  331,  337,  347,  349,  353,  359,
-    367,  373,  379,  383,  389,  397,  401,  409,  419,  421,  431,  433,
-    439,  443,  449,  457,  461,  463,  467,  479,  487,  491,  499,  503,
-    509,  521,  523,  541,  547,  557,  563,  569,  571,  577,  587,  593,
-    599,  601,  607,  613,  617,  619,  631,  641,  643,  647,  653,  659,
-    661,  673,  677,  683,  691,  701,  709,  719,  727,  733,  739,  743,
-    751,  757,  761,  769,  773,  787,  797,  809,  811,  821,  823,  827,
-    829,  839,  853,  857,  859,  863,  877,  881,  883,  887,  907,  911,
-    919,  929,  937,  941,  947,  953,  967,  971,  977,  983,  991,  997,
-    1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
-    1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163,
-    1171, 1181, 1187, 1193, 1201, 1213, 1217, 1223};
-C10_DIAGNOSTIC_POP()
+int64_t prime_number(int64_t i);
 
-bool deviceMajorMinorCheck(int major, int minor = 0) {
+inline bool deviceMajorMinorCheck(int major, int minor = 0) {
   auto dev_prop = at::cuda::getCurrentDeviceProperties();
   if (dev_prop->major < major ||
       (dev_prop->major == major && dev_prop->minor < minor)) {
@@ -99,12 +84,12 @@ bool deviceMajorMinorCheck(int major, int minor = 0) {
   return true;
 }
 
-int deviceSMCount() {
+inline int deviceSMCount() {
   int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   return sm_count;
 }
 
-void clearL2Cache() {
+inline void clearL2Cache() {
   torch::NoGradGuard no_grad;
   auto l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
   auto options =
@@ -115,7 +100,7 @@ void clearL2Cache() {
   torch::Tensor t1 = torch::clone(t0);
 };
 
-TensorView* loweredTv(TensorView* tv, kir::Kernel* kernel) {
+inline TensorView* loweredTv(TensorView* tv, kir::Kernel* kernel) {
   auto used_tvs = ir_utils::allTvs(kernel);
   TensorView* matching_tv = nullptr;
   for (auto lowered_tv : used_tvs) {
@@ -127,7 +112,7 @@ TensorView* loweredTv(TensorView* tv, kir::Kernel* kernel) {
   return matching_tv;
 }
 
-TensorView* loweredTv(TensorView* tv, GpuLower& gpulw) {
+inline TensorView* loweredTv(TensorView* tv, GpuLower& gpulw) {
   return loweredTv(tv, gpulw.kernel());
 }
 
@@ -364,8 +349,6 @@ class KernelExprVisitor : private kir::IrVisitor {
   std::vector<Expr*> all_exprs_;
 };
 
-} // namespace
-
 class ContextCudnnTF32Disabled {
  public:
   ContextCudnnTF32Disabled() {
@@ -395,32 +378,94 @@ class NVFuserTest : public ::testing::Test {
 };
 
 // assert that the given fusion lowers to the given CUDA kernel
-inline void assertCUDAKernel(
-    Fusion* fusion,
-    const std::string& expected_kernel) {
-  const std::string actual_kernel =
-      "\n" + codegen::generateCudaKernel(GpuLower(fusion).kernel());
-  if (expected_kernel.size() != actual_kernel.size() ||
-      expected_kernel.compare(actual_kernel) != 0) {
-    std::cerr
-        << " Codegen mismatch, codegen possibly changed, or is incorrect. "
-        << " \n ========= EXPECTED ========= \n"
-        << expected_kernel << "\n========= ACTUAL ========== \n"
-        << actual_kernel << "\n=================" << std::endl;
-    auto it = std::mismatch(
-        expected_kernel.begin(),
-        expected_kernel.end(),
-        actual_kernel.begin(),
-        actual_kernel.end());
-    std::string actual_mismatched_snippet(it.second, actual_kernel.end());
-    actual_mismatched_snippet = actual_mismatched_snippet.substr(0, 10);
-    std::string expected_mismatched_snippet(it.first, expected_kernel.end());
-    expected_mismatched_snippet = expected_mismatched_snippet.substr(0, 10);
-    std::cerr << "First mismatch found at: " << actual_mismatched_snippet
-              << ", expected: " << expected_mismatched_snippet << std::endl;
-    TORCH_CHECK(false);
+void assertCUDAKernel(Fusion* fusion, const std::string& expected_kernel);
+
+namespace sass {
+
+// For SASS instruction definitions, see:
+// https://docs.nvidia.com/cuda/cuda-binary-utilities/index.html#instruction-set-reference
+
+struct Instruction {
+  std::string str;
+  size_t address;
+
+  std::string predicate();
+  std::string action(); // The part of the string that is not predicate
+  std::string op(); // Some thing like: LDGSTS.E.128
+  std::string opCode(); // Something like LDGSTS
+};
+
+struct Label {
+  std::string name;
+};
+
+struct Container {
+  std::unordered_map<std::string, std::string> attributes;
+  std::vector<std::variant<Instruction, Label>> code;
+
+  std::string toString();
+};
+
+Container parse(const std::string& nvdisasm_output);
+
+} // namespace sass
+
+inline bool cudaArchGuardShouldSkip(int required_major, int required_minor) {
+  int capability_major = at::cuda::getCurrentDeviceProperties()->major;
+  int capability_minor = at::cuda::getCurrentDeviceProperties()->minor;
+
+  if (capability_major < required_major ||
+      (capability_major == required_major &&
+       capability_minor < required_minor)) {
+    return true;
   }
+  return false;
 }
 
-} // namespace jit
-} // namespace torch
+#define NVFUSER_TEST_CUDA_ARCH_GUARD(REQUIRED_MAJOR, REQUIRED_MINOR)          \
+  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) {              \
+    GTEST_SKIP() << "Requires GPU capability above " << REQUIRED_MAJOR << "." \
+                 << REQUIRED_MINOR << " to run.\n";                           \
+  }
+
+#define NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(                                \
+    REQUIRED_MAJOR, REQUIRED_MINOR, COMPILE_FUSION)                          \
+  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) {             \
+    ASSERT_ANY_THROW(COMPILE_FUSION);                                        \
+    GTEST_SKIP() << "(Lowered Only) Requires GPU capability above "          \
+                 << REQUIRED_MAJOR << "." << REQUIRED_MINOR << " to run.\n"; \
+  } else {                                                                   \
+    COMPILE_FUSION;                                                          \
+  }
+
+// util to track support matmul operand layout.
+using MatmulLayout = MmaOptions::MmaInputLayout;
+
+static constexpr std::array<MatmulLayout, 3> kAllSupportedMatmulLayout = {
+    MatmulLayout::TT,
+    MatmulLayout::NT,
+    MatmulLayout::TN};
+
+// Generic interface to get matmul op with the given layout.
+TensorView* matmul(TensorView* a, TensorView* b, MatmulLayout layout);
+
+// Utility to generate matmul input tensors based on given layout
+at::Tensor atMatmul(at::Tensor a, at::Tensor b, MatmulLayout layout);
+
+// Utility to generate reference results based on given layout
+std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
+    int M,
+    int N,
+    int K,
+    MatmulLayout layout);
+
+#define REQUIRE_DEVICE_SMEM_SIZE(required_size, device_idx)                 \
+  if (at::cuda::getDeviceProperties(device_idx)->sharedMemPerBlockOptin <   \
+      required_size) {                                                      \
+    GTEST_SKIP() << "not enough shared memory space on device to run test"; \
+  }
+
+// Disable magic zero
+constexpr CompileParams matmul_cparams{DataType::Int32, 255, false};
+
+} // namespace torch::jit

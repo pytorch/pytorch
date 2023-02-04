@@ -85,51 +85,6 @@ TEST_F(NVFuserTest, FusionExternalSrc_CUDA) {
   }
 }
 
-namespace {
-
-std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
-    int M,
-    int N,
-    int K,
-    MmaOptions::MmaInputLayout layout) {
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-
-  switch (layout) {
-    case MmaOptions::MmaInputLayout::TT:
-      return std::make_pair(
-          at::randn({M, K}, options), at::randn({K, N}, options));
-    case MmaOptions::MmaInputLayout::TN:
-      return std::make_pair(
-          at::randn({M, K}, options), at::randn({N, K}, options));
-    case MmaOptions::MmaInputLayout::NT:
-      return std::make_pair(
-          at::randn({K, M}, options), at::randn({K, N}, options));
-    default:
-      TORCH_CHECK(false, "unsupported data layout.");
-  }
-  return std::make_pair(at::Tensor(), at::Tensor());
-}
-
-// Utility to generate matmul input tensors based on given layout
-at::Tensor atMatmul(
-    at::Tensor a,
-    at::Tensor b,
-    MmaOptions::MmaInputLayout layout) {
-  switch (layout) {
-    case MmaOptions::MmaInputLayout::TT:
-      return a.matmul(b);
-    case MmaOptions::MmaInputLayout::TN:
-      return a.matmul(b.t());
-    case MmaOptions::MmaInputLayout::NT:
-      return a.t().matmul(b);
-    default:
-      TORCH_CHECK(false, "unsupported data layout.");
-  }
-  return at::Tensor();
-}
-
-} // namespace
-
 // This is based on the following benchmark:
 // Nvfuser_Matmul_4warp3stage/no_quant_nvfuser_4warp_TN_Legacy/2048/3456/2048/manual_time
 TEST_F(NVFuserTest, FusionExternalSrcMatmul_CUDA) {

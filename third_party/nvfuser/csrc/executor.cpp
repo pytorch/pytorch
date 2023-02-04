@@ -359,7 +359,7 @@ void FusionExecutor::compileFusion(
           fusion_id_,
           block_size,
           maxrregcount_high_water_mark,
-          save_compiled_binary_);
+          save_compiled_binary_ || isDebugDumpEnabled(DebugDumpOption::Sass));
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
 
@@ -370,6 +370,10 @@ void FusionExecutor::compileFusion(
       CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
       compiled_kernel_.function));
   maybe_available_dynamic_smem_ = max_dynamic_smem;
+
+  if (isDebugDumpEnabled(DebugDumpOption::Sass)) {
+    std::cout << disassembledKernelSASS() << std::endl;
+  }
 }
 
 namespace {

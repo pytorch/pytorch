@@ -3,6 +3,7 @@
 #if defined(__linux__)
 
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,9 @@
 
 namespace torch::jit::fuser::cuda::executor_utils {
 
-std::string disassembleBinary(const std::vector<char>& cubin) {
+std::string disassembleBinary(
+    const std::vector<char>& cubin,
+    const std::string& nvdisasm_args) {
   const char* err = "Failed to disassemble cubin";
 
   // Reference:
@@ -83,12 +86,11 @@ std::string disassembleBinary(const std::vector<char>& cubin) {
     //   nvdisasm fatal   : Memory allocation failure
     // so I have to dump the stdin to a temp file and let nvdisasm read it. I am
     // hoping that nvdisasm will support reading from stdin one day.
-    execl(
-        "/bin/bash",
-        "bash",
-        "-c",
-        "TMPFILE=$(mktemp); cat>$TMPFILE; nvdisasm $TMPFILE; rm $TMPFILE",
-        NULL);
+    std::stringstream ss;
+    ss << "TMPFILE=$(mktemp); cat>$TMPFILE; nvdisasm $TMPFILE " << nvdisasm_args
+       << "; rm $TMPFILE";
+    auto command = ss.str();
+    execl("/bin/bash", "bash", "-c", command.c_str(), NULL);
 
     // only reachable when execl fails
     TORCH_INTERNAL_ASSERT(false, err);

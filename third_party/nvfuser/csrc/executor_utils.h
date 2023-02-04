@@ -44,7 +44,9 @@ TORCH_CUDA_CU_API ExpressionEvaluator bindInputs(
     Fusion* fusion,
     bool check_consistency = true);
 
-std::string disassembleBinary(const std::vector<char>& cubin);
+std::string disassembleBinary(
+    const std::vector<char>& cubin,
+    const std::string& nvdisasm_args);
 
 struct NvrtcFunction {
   CUmodule module = CUmodule();

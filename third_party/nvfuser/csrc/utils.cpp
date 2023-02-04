@@ -124,6 +124,7 @@ auto parseDebugDumpOptions() {
       {"python_frontend_debug", DebugDumpOption::PythonFrontendDebug},
       {"transform_propagator", DebugDumpOption::TransformPropagator},
       {"cubin", DebugDumpOption::Cubin},
+      {"sass", DebugDumpOption::Sass},
       {"ptx", DebugDumpOption::Ptx},
       {"bank_conflict", DebugDumpOption::BankConflictInfo},
       {"sync_map", DebugDumpOption::SyncMap},

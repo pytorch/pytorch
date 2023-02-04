@@ -40,126 +40,10 @@
 #include <iostream>
 
 // Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
-
-namespace {
-
-bool cudaArchGuardShouldSkip(int required_major, int required_minor) {
-  int capability_major = at::cuda::getCurrentDeviceProperties()->major;
-  int capability_minor = at::cuda::getCurrentDeviceProperties()->minor;
-
-  if (capability_major < required_major ||
-      (capability_major == required_major &&
-       capability_minor < required_minor)) {
-    return true;
-  }
-  return false;
-}
-
-#define NVFUSER_TEST_CUDA_ARCH_GUARD(REQUIRED_MAJOR, REQUIRED_MINOR)          \
-  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) {              \
-    GTEST_SKIP() << "Requires GPU capability above " << REQUIRED_MAJOR << "." \
-                 << REQUIRED_MINOR << " to run.\n";                           \
-  }
-
-#define NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(                                \
-    REQUIRED_MAJOR, REQUIRED_MINOR, COMPILE_FUSION)                          \
-  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) {             \
-    ASSERT_ANY_THROW(COMPILE_FUSION);                                        \
-    GTEST_SKIP() << "(Lowered Only) Requires GPU capability above "          \
-                 << REQUIRED_MAJOR << "." << REQUIRED_MINOR << " to run.\n"; \
-  } else {                                                                   \
-    COMPILE_FUSION;                                                          \
-  }
-
-// util to track support matmul operand layout.
-using MatmulLayout = MmaOptions::MmaInputLayout;
-
-static constexpr std::array<MatmulLayout, 3> kAllSupportedLayout = {
-    MatmulLayout::TT,
-    MatmulLayout::NT,
-    MatmulLayout::TN};
-
-// Generic interface to get matmul op with the given layout.
-TensorView* matmul(TensorView* a, TensorView* b, MatmulLayout layout) {
-  TORCH_CHECK(
-      a->nDims() == 2 && b->nDims() == 2, "only pure matmuls for these tests");
-  TensorView *tv2 = nullptr, *tv0b = nullptr, *tv1b = nullptr;
-  switch (layout) {
-    case MatmulLayout::TT:
-      tv0b = broadcast(a, {false, false, true});
-      tv1b = broadcast(b, {true, false, false});
-      tv2 = fusedMultiplySum(tv0b, tv1b, {1});
-      break;
-    case MatmulLayout::TN:
-      tv0b = broadcast(a, {false, true, false});
-      tv1b = broadcast(b, {true, false, false});
-      tv2 = fusedMultiplySum(tv0b, tv1b, {2});
-      break;
-    case MatmulLayout::NT:
-      tv0b = broadcast(a, {false, false, true});
-      tv1b = broadcast(b, {false, true, false});
-      tv2 = fusedMultiplySum(tv0b, tv1b, {0});
-      break;
-    default:
-      TORCH_CHECK(false, "unsupported data layout.");
-  }
-  return tv2;
-}
-
-// Utility to generate matmul input tensors based on given layout
-at::Tensor atMatmul(at::Tensor a, at::Tensor b, MatmulLayout layout) {
-  switch (layout) {
-    case MatmulLayout::TT:
-      return a.matmul(b);
-    case MatmulLayout::TN:
-      return a.matmul(b.t());
-    case MatmulLayout::NT:
-      return a.t().matmul(b);
-    default:
-      TORCH_CHECK(false, "unsupported data layout.");
-  }
-  return at::Tensor();
-}
-
-// Utility to generate reference results based on given layout
-std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
-    int M,
-    int N,
-    int K,
-    MatmulLayout layout) {
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-
-  switch (layout) {
-    case MatmulLayout::TT:
-      return std::make_pair(
-          at::randn({M, K}, options), at::randn({K, N}, options));
-    case MatmulLayout::TN:
-      return std::make_pair(
-          at::randn({M, K}, options), at::randn({N, K}, options));
-    case MatmulLayout::NT:
-      return std::make_pair(
-          at::randn({K, M}, options), at::randn({K, N}, options));
-    default:
-      TORCH_CHECK(false, "unsupported data layout.");
-  }
-  return std::make_pair(at::Tensor(), at::Tensor());
-}
-
-#define REQUIRE_DEVICE_SMEM_SIZE(required_size, device_idx)                 \
-  if (at::cuda::getDeviceProperties(device_idx)->sharedMemPerBlockOptin <   \
-      required_size) {                                                      \
-    GTEST_SKIP() << "not enough shared memory space on device to run test"; \
-  }
-
-// Disable magic zero
-CompileParams cparams{DataType::Int32, 255, false};
-
-} // namespace
 
 // MMA unit test for a single instruction tile. VoltaTT
 TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
@@ -248,7 +132,9 @@ TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      7,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
@@ -315,7 +201,9 @@ TEST_F(NVFuserTest, FusionVoltaMMATN_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      7,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
@@ -384,7 +272,9 @@ TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      7,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
@@ -395,7 +285,7 @@ TEST_F(NVFuserTest, FusionVoltaMatmul_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 264, N = 136, K = 248;
 
-  for (auto layout : kAllSupportedLayout) {
+  for (auto layout : kAllSupportedMatmulLayout) {
     Fusion fusion;
     FusionGuard fg(&fusion);
     auto tv0 = makeContigTensor(2, DataType::Half);
@@ -429,7 +319,10 @@ TEST_F(NVFuserTest, FusionVoltaMatmul_CUDA) {
         7,
         0,
         fe.compileFusion(
-            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+            &fusion,
+            {inputs.first, inputs.second},
+            LaunchParams(),
+            matmul_cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -442,7 +335,7 @@ TEST_F(NVFuserTest, FusionVoltaMatmulRegDoubleBuffer_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 264, N = 136, K = 248;
 
-  for (auto layout : kAllSupportedLayout) {
+  for (auto layout : kAllSupportedMatmulLayout) {
     Fusion fusion;
     FusionGuard fg(&fusion);
     auto tv0 = makeContigTensor(2, DataType::Half);
@@ -477,7 +370,10 @@ TEST_F(NVFuserTest, FusionVoltaMatmulRegDoubleBuffer_CUDA) {
         7,
         0,
         fe.compileFusion(
-            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+            &fusion,
+            {inputs.first, inputs.second},
+            LaunchParams(),
+            matmul_cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -549,7 +445,9 @@ TEST_F(NVFuserTest, FusionAmpereMMATN_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
@@ -625,7 +523,9 @@ TEST_F(NVFuserTest, FusionAmpereMMATT_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -704,7 +604,9 @@ TEST_F(NVFuserTest, FusionAmpereMMANT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
@@ -717,7 +619,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmul_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 504, N = 136, K = 248;
 
-  for (auto layout : kAllSupportedLayout) {
+  for (auto layout : kAllSupportedMatmulLayout) {
     Fusion fusion;
     FusionGuard fg(&fusion);
     auto tv0 = makeContigTensor(2, DataType::Half);
@@ -754,7 +656,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmul_CUDA) {
         8,
         0,
         fe.compileFusion(
-            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+            &fusion,
+            {inputs.first, inputs.second},
+            LaunchParams(),
+            matmul_cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -770,7 +675,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulPipelineGmem_CUDA) {
 
   // Gmem pipeline stage
   for (auto stage : {3, 4}) {
-    for (auto layout : kAllSupportedLayout) {
+    for (auto layout : kAllSupportedMatmulLayout) {
       Fusion fusion;
       FusionGuard fg(&fusion);
       auto tv0 = makeContigTensor(2, DataType::Half);
@@ -808,7 +713,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmulPipelineGmem_CUDA) {
           8,
           0,
           fe.compileFusion(
-              &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+              &fusion,
+              {inputs.first, inputs.second},
+              LaunchParams(),
+              matmul_cparams));
       auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
       auto tref = atMatmul(
           inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -824,7 +732,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulRegDbouleBuffer_CUDA) {
 
   // Gmem pipeline stage
   for (auto stage : {3, 4}) {
-    for (auto layout : kAllSupportedLayout) {
+    for (auto layout : kAllSupportedMatmulLayout) {
       Fusion fusion;
       FusionGuard fg(&fusion);
       auto tv0 = makeContigTensor(2, DataType::Half);
@@ -863,7 +771,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmulRegDbouleBuffer_CUDA) {
           8,
           0,
           fe.compileFusion(
-              &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+              &fusion,
+              {inputs.first, inputs.second},
+              LaunchParams(),
+              matmul_cparams));
       auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
       auto tref = atMatmul(
           inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -1143,7 +1054,9 @@ TEST_F(NVFuserTest, FusionMatmulMatmulAmpere_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1, t2}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1, t2}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1, t2});
 
@@ -1522,7 +1435,9 @@ TEST_F(NVFuserTest, FusionMatmulSoftmaxMatmulAmpere_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1, t2}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1, t2}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1, t2});
 
@@ -1594,7 +1509,9 @@ TEST_F(NVFuserTest, FusionTuringMMATN_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      7,
+      5,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -1668,7 +1585,9 @@ TEST_F(NVFuserTest, FusionTuringMMATT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      7,
+      5,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -1745,7 +1664,9 @@ TEST_F(NVFuserTest, FusionTuringMMANT_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      7, 5, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      7,
+      5,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -1759,7 +1680,7 @@ TEST_F(NVFuserTest, FusionTuringMatmul_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 504, N = 136, K = 248;
 
-  for (auto layout : kAllSupportedLayout) {
+  for (auto layout : kAllSupportedMatmulLayout) {
     Fusion fusion;
     FusionGuard fg(&fusion);
     auto tv0 = makeContigTensor(2, DataType::Half);
@@ -1928,7 +1849,9 @@ TEST_F(NVFuserTest, FusionAmpereMatmulTNcpAsync_CUDA) {
 
   FusionExecutor fe;
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -2094,7 +2017,9 @@ TEST_F(NVFuserTest, FusionAmpereStridedBatchedMatmulTN_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -2264,7 +2189,9 @@ TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   FusionExecutor fe;
 
   NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
-      8, 0, fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams));
+      8,
+      0,
+      fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams));
 
   auto cg_outputs = fe.runFusion({t0, t1});
 
@@ -2430,7 +2357,7 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTNCrossWarp_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams);
+  fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams);
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
@@ -2600,7 +2527,7 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTNCrossCTA_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), cparams);
+  fe.compileFusion(&fusion, {t0, t1}, LaunchParams(), matmul_cparams);
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
@@ -2774,7 +2701,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulTNSwizzled_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {}, LaunchParams(), cparams);
+  fe.compileFusion(&fusion, {}, LaunchParams(), matmul_cparams);
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
@@ -2786,7 +2713,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulTNSwizzled_CUDA) {
 TEST_F(NVFuserTest, FusionAmpereMatmulLargeLoad_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 504, N = 136, K = 248;
-  for (auto layout : kAllSupportedLayout) {
+  for (auto layout : kAllSupportedMatmulLayout) {
     Fusion fusion;
     FusionGuard fg(&fusion);
     auto tv0 = makeContigTensor(2, DataType::Half);
@@ -2823,7 +2750,10 @@ TEST_F(NVFuserTest, FusionAmpereMatmulLargeLoad_CUDA) {
         8,
         0,
         fe.compileFusion(
-            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+            &fusion,
+            {inputs.first, inputs.second},
+            LaunchParams(),
+            matmul_cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -2836,7 +2766,7 @@ TEST_F(NVFuserTest, FusionTuringMatmulLargeLoad_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 504, N = 136, K = 248;
 
-  for (auto layout : kAllSupportedLayout) {
+  for (auto layout : kAllSupportedMatmulLayout) {
     Fusion fusion;
     FusionGuard fg(&fusion);
     auto tv0 = makeContigTensor(2, DataType::Half);
@@ -2870,7 +2800,10 @@ TEST_F(NVFuserTest, FusionTuringMatmulLargeLoad_CUDA) {
         7,
         5,
         fe.compileFusion(
-            &fusion, {inputs.first, inputs.second}, LaunchParams(), cparams));
+            &fusion,
+            {inputs.first, inputs.second},
+            LaunchParams(),
+            matmul_cparams));
     auto cg_outputs = fe.runFusion({inputs.first, inputs.second});
     auto tref = atMatmul(
         inputs.first.to(at::kFloat), inputs.second.to(at::kFloat), layout);
@@ -2880,5 +2813,4 @@ TEST_F(NVFuserTest, FusionTuringMatmulLargeLoad_CUDA) {
 
 #undef NVFUSER_TEST_CUDA_ARCH_GUARD
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

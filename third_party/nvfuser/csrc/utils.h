@@ -64,6 +64,7 @@ enum class DebugDumpOption {
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
   Cubin, //! Dump compiled CUBIN
+  Sass, // Dump disassembled SASS
   Ptx, //! Dump compiled PTX
   BankConflictInfo, //! Dump bank confliction info
   SyncMap, //! RAW dependency info
