@@ -1550,14 +1550,14 @@ Tensor var_backward(
   const auto correction = correction_opt.value_or(1).toSymFloat();
   if (self.dim() == 0 || !dim_opt.has_value()) {
     const auto dof = c10::SymFloat(self.sym_numel()) - correction;
-    return (c10::SymFloat(2.0) / dof) *
-        grad * (self - self.mean());
+    return (c10::SymFloat(2.0) / dof) * grad * (self - self.mean());
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
     grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const auto dof = c10::SymFloat(_safe_size(self.sym_sizes(), dim)) - correction;
+  const auto dof =
+      c10::SymFloat(_safe_size(self.sym_sizes(), dim)) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
   return (c10::SymFloat(2.0) / dof) * grad *
       (self - self.mean(dim, /*keepdim=*/true));

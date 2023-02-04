@@ -1818,7 +1818,7 @@ std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
@@ -1826,20 +1826,20 @@ std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
   return at::std_mean(
       self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}));
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
   return at::var_mean(
       self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}));
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 static TensorOptions options_to_value_type(TensorOptions opts) {
@@ -1868,36 +1868,36 @@ std::tuple<Tensor, Tensor> std_mean(
 Tensor var(const Tensor& self, bool unbiased) {
   return at::var(
       self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}));
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 Tensor var(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
 Tensor& var_out(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::var_out(
       result, self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}),
+      /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0),
       keepdim);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
   return at::std(
-      self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}));
+      self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std(self, dim,
-                 /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}), keepdim);
+                 /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0), keepdim);
 }
 
 Tensor& std_out(const Tensor& self, at::OptionalIntArrayRef opt_dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::std_out(result, self, opt_dim,
-                     /*correction=*/c10::make_optional<Scalar>({unbiased ? 1 : 0}), keepdim);
+                     /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0), keepdim);
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim,
