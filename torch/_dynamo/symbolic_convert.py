@@ -1494,14 +1494,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         pass
 
     def BINARY_OP(self, inst):
-        # linter complains about dis missing _nb_ops in py < 3.11
-        if sys.version_info < (3, 11):
-            unimplemented("BINARY_OP requires Python 3.11+")
-        else:
+        if sys.version_info >= (3, 11):
             opname = dis._nb_ops[inst.arg][0][3:]
             if opname.startswith("INPLACE"):
                 return getattr(self, "INPLACE_" + opname[8:])(inst)
             return getattr(self, "BINARY_" + opname)(inst)
+        else:
+            unimplemented("BINARY_OP requires Python 3.11+")
 
     def COPY(self, inst):
         self.push(self.stack[-inst.arg])
