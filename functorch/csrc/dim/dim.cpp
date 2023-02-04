@@ -100,7 +100,7 @@ static void initializeGlobals(Arena & A) {
     THPVariable_getitem = TensorBase->tp_as_mapping->mp_subscript;
     THPVariable_setitem = TensorBase->tp_as_mapping->mp_ass_subscript;
     NamedTuple = py::import("typing").attr("NamedTuple");
-    no_slice = PySlice_New(nullptr, nullptr, nullptr);
+    no_slice = PySlice_New(NULL, NULL, NULL);
 
 }
 
@@ -118,7 +118,7 @@ struct Dim : public py::base<Dim> {
     int64_t level_; // for stable comparisons in prototype
     py::object name_;
     Dim()
-    : base(), level_(n_dims_created++) {}
+    : level_(n_dims_created++) {}
     void init(py::object name, int64_t s = -1) {
         name_ = std::move(name);
         size_ = s;
@@ -186,7 +186,7 @@ struct DimEntry {
         return data_;
     }
     py::hdl<Dim> dim() const {
-        Dim* result = nullptr;
+        Dim* result;
         std::memcpy(&result, &data_, sizeof(Dim*));
         return py::hdl<Dim>(result);
     }
@@ -205,7 +205,7 @@ struct DimEntry {
         return data_ == rhs.data_;
     }
 private:
-    int64_t data_ = 0;
+    int64_t data_;
 };
 
 std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
@@ -284,56 +284,56 @@ static PyObject* Dim_get_batchtensor(Dim* self, void*) {
 
 static PyGetSetDef Dim_getsetters[] = {
     {"size", (getter) Dim_getsize, (setter) Dim_setsize,
-     "Dimension size", nullptr},
-    {"is_bound", (getter) Dim_getis_bound, nullptr, "is_bound", nullptr},
-    {"_level", (getter) Dim_getlevel, nullptr, "_level", nullptr},
-    {"_levels", (getter) Dim_get_levels, nullptr, "_levels", nullptr},
-    {"_has_device", (getter) Dim_get_has_device, nullptr, "_has_device", nullptr},
-    {"_tensor", (getter) Dim_get_tensor, nullptr, "_tensor", nullptr},
-    {"_batchtensor", (getter) Dim_get_batchtensor, nullptr, "_batchtensor", nullptr},
-    {"ndim", (getter) [](PyObject* self, void*) -> PyObject* { return py::from_int(1).release(); }, nullptr, "ndim", nullptr},
-    {nullptr}  /* Sentinel */
+     "Dimension size", NULL},
+    {"is_bound", (getter) Dim_getis_bound, NULL, "is_bound", NULL},
+    {"_level", (getter) Dim_getlevel, NULL, "_level", NULL},
+    {"_levels", (getter) Dim_get_levels, NULL, "_levels", NULL},
+    {"_has_device", (getter) Dim_get_has_device, NULL, "_has_device", NULL},
+    {"_tensor", (getter) Dim_get_tensor, NULL, "_tensor", NULL},
+    {"_batchtensor", (getter) Dim_get_batchtensor, NULL, "_batchtensor", NULL},
+    {"ndim", (getter) [](PyObject* self, void*) -> PyObject* { return py::from_int(1).release(); }, NULL, "ndim", NULL},
+    {NULL}  /* Sentinel */
 };
 
 PyTypeObject Dim::Type = {
-    PyVarObject_HEAD_INIT(nullptr, 0)
-    "_C.Dim",                       /* tp_name */
-    sizeof(Dim),                    /* tp_basicsize */
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "_C.Dim",               /* tp_name */
+    sizeof(Dim),               /* tp_basicsize */
     0,                              /* tp_itemsize */
-    Dim::dealloc_stub,              /* tp_dealloc */
+    Dim::dealloc_stub,      /* tp_dealloc */
     0,                              /* tp_vectorcall_offset */
-    nullptr,                        /* tp_getattr */
-    nullptr,                        /* tp_setattr */
-    nullptr,                        /* tp_as_async */
-    (reprfunc)Dim_repr,             /* tp_repr */
-    nullptr,                        /* tp_as_number */
-    nullptr,                        /* tp_as_sequence */
-    nullptr,                        /* tp_as_mapping */
-    nullptr,                        /* tp_hash */
-    nullptr,                        /* tp_call */
-    nullptr,                        /* tp_str */
-    nullptr,                        /* tp_getattro */
-    nullptr,                        /* tp_setattro */
-    nullptr,                        /* tp_as_buffer */
+    0,                              /* tp_getattr */
+    0,                              /* tp_setattr */
+    0,                              /* tp_as_async */
+    (reprfunc)Dim_repr,           /* tp_repr */
+    0,                 /* tp_as_number */
+    0,                              /* tp_as_sequence */
+    0,                              /* tp_as_mapping */
+    0,      /* tp_hash */
+    0,                              /* tp_call */
+    0,                              /* tp_str */
+    0,                              /* tp_getattro */
+    0,                              /* tp_setattro */
+    0,                              /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  /* tp_flags */
     "Dim Object",                   /* tp_doc */
-    nullptr,                        /* tp_traverse */
-    nullptr,                        /* tp_clear */
-    nullptr,                        /* tp_richcompare */
+    0,                              /* tp_traverse */
+    0,                              /* tp_clear */
+    0,  /* tp_richcompare */
     0,                              /* tp_weaklistoffset */
-    nullptr,                        /* tp_iter */
-    nullptr,                        /* tp_iternext */
-    nullptr,                        /* tp_methods */
-    nullptr,                        /* tp_members */
+    0,                              /* tp_iter */
+    0,                              /* tp_iternext */
+    0,                              /* tp_methods */
+    0,                              /* tp_members */
     Dim_getsetters,                 /* tp_getset */
-    nullptr,                        /* tp_base */
-    nullptr,                        /* tp_dict */
-    nullptr,                        /* tp_descr_get */
-    nullptr,                        /* tp_descr_set */
+    0,                              /* tp_base */
+    0,                              /* tp_dict */
+    0,                              /* tp_descr_get */
+    0,                              /* tp_descr_set */
     0,                              /* tp_dictoffset */
     (initproc)(void*) Dim_init,     /* tp_init */
-    nullptr,                        /* tp_alloc */
-    Dim::new_stub,                  /* tp_new */
+    0,                              /* tp_alloc */
+    Dim::new_stub,                      /* tp_new */
 };
 
 // class DimList ------------
@@ -390,7 +390,7 @@ static PyObject* DimList_repr(DimList* self) {
         for(size_t i = 0; i < size; ++i) {
             t.set(i, self->dims_[i]);
         }
-        return py::repr(std::move(t)).release();
+        return py::repr(t).release();
     } else if(!py::is_none(self->name_)) {
         return py::unicode_from_format("*%S", self->name_.ptr()).release();
     } else {
@@ -406,7 +406,7 @@ static PyObject* DimList_bind(DimList *self,
     PY_BEGIN
     py::handle sizes;
     static const char * const _keywords[] = {"sizes", nullptr};
-    static _PyArg_Parser parser = {"O", _keywords, nullptr};
+    static _PyArg_Parser parser = {"O", _keywords, 0};
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &sizes)) {
         return nullptr;
     }
@@ -428,9 +428,9 @@ static PyObject* DimList_bind_len(DimList *self,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
     PY_BEGIN
-    int size = 0;
+    int size;
     static const char * const _keywords[] = {"N", nullptr};
-    static _PyArg_Parser parser = {"i", _keywords, nullptr};
+    static _PyArg_Parser parser = {"i", _keywords, 0};
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &size)) {
         return nullptr;
     }
@@ -442,7 +442,7 @@ static PyObject* DimList_bind_len(DimList *self,
 static PyMethodDef DimList_methods[] = {
     {"bind", (PyCFunction)(void*) DimList_bind, METH_FASTCALL | METH_KEYWORDS},
     {"bind_len", (PyCFunction)(void*) DimList_bind_len, METH_FASTCALL | METH_KEYWORDS},
-    {nullptr, nullptr, 0, nullptr}        /* Sentinel */
+    {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
 
@@ -467,16 +467,16 @@ PyObject * DimList_item(DimList* self, Py_ssize_t idx) {
 
 PySequenceMethods DimList_seq {
     (lenfunc) DimList_len, //lenfunc sq_length;
-    nullptr, //binaryfunc sq_concat;
-    nullptr, //ssizeargfunc sq_repeat;
+    0, //binaryfunc sq_concat;
+    0, //ssizeargfunc sq_repeat;
     (ssizeargfunc) DimList_item, //ssizeargfunc sq_item;
-    nullptr, //void *was_sq_slice;
-    nullptr, //ssizeobjargproc sq_ass_item;
-    nullptr, //void *was_sq_ass_slice;
-    nullptr, //objobjproc sq_contains;
+    0, //void *was_sq_slice;
+    0, //ssizeobjargproc sq_ass_item;
+    0, //void *was_sq_ass_slice;
+    0, //objobjproc sq_contains;
 
-    nullptr, //binaryfunc sq_inplace_concat;
-    nullptr, //ssizeargfunc sq_inplace_repeat;
+    0, //binaryfunc sq_inplace_concat;
+    0, //ssizeargfunc sq_inplace_repeat;
 };
 
 static PyObject* DimList_getis_bound(DimList* self, void*) {
@@ -484,8 +484,8 @@ static PyObject* DimList_getis_bound(DimList* self, void*) {
 }
 
 static PyGetSetDef DimList_getsetters[] = {
-    {"is_bound", (getter) DimList_getis_bound, nullptr, "is_bound", nullptr},
-    {nullptr}  /* Sentinel */
+    {"is_bound", (getter) DimList_getis_bound, NULL, "is_bound", NULL},
+    {NULL}  /* Sentinel */
 };
 
 
@@ -511,51 +511,51 @@ static PyObject* DimList_subscript(DimList* self, py::handle idx) {
 }
 
 PyMappingMethods DimList_mapping = {
-    nullptr, //lenfunc mp_length;
+    0, //lenfunc mp_length;
     (binaryfunc)(void*) DimList_subscript, //binaryfunc mp_subscript;
-    nullptr, //objobjargproc mp_ass_subscript;
+    0, //objobjargproc mp_ass_subscript;
 };
 
 
 
 PyTypeObject DimList::Type = {
-    PyVarObject_HEAD_INIT(nullptr, 0)
-    "_C.DimList",                   /* tp_name */
-    sizeof(DimList),                /* tp_basicsize */
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "_C.DimList",               /* tp_name */
+    sizeof(DimList),               /* tp_basicsize */
     0,                              /* tp_itemsize */
-    DimList::dealloc_stub,          /* tp_dealloc */
+    DimList::dealloc_stub,      /* tp_dealloc */
     0,                              /* tp_vectorcall_offset */
-    nullptr,                        /* tp_getattr */
-    nullptr,                        /* tp_setattr */
-    nullptr,                        /* tp_as_async */
-    (reprfunc)DimList_repr,         /* tp_repr */
-    nullptr,                        /* tp_as_number */
-    &DimList_seq,                   /* tp_as_sequence */
-    &DimList_mapping,               /* tp_as_mapping */
-    nullptr,                        /* tp_hash */
-    nullptr,                        /* tp_call */
-    nullptr,                        /* tp_str */
-    nullptr,                        /* tp_getattro */
-    nullptr,                        /* tp_setattro */
-    nullptr,                        /* tp_as_buffer */
+    0,                              /* tp_getattr */
+    0,                              /* tp_setattr */
+    0,                              /* tp_as_async */
+    (reprfunc)DimList_repr,           /* tp_repr */
+    0,                 /* tp_as_number */
+    &DimList_seq,                 /* tp_as_sequence */
+    &DimList_mapping,             /* tp_as_mapping */
+    0,      /* tp_hash */
+    0,                              /* tp_call */
+    0,                              /* tp_str */
+    0,                              /* tp_getattro */
+    0,                              /* tp_setattro */
+    0,                              /* tp_as_buffer */
     0,                              /* tp_flags */
-    "DimList Object",               /* tp_doc */
-    nullptr,                        /* tp_traverse */
-    nullptr,                        /* tp_clear */
-    nullptr,                        /* tp_richcompare */
+    "DimList Object",                   /* tp_doc */
+    0,                              /* tp_traverse */
+    0,                              /* tp_clear */
+    0,                              /* tp_richcompare */
     0,                              /* tp_weaklistoffset */
-    nullptr,                        /* tp_iter */
-    nullptr,                        /* tp_iternext */
+    0,                              /* tp_iter */
+    0,                              /* tp_iternext */
     DimList_methods,                /* tp_methods */
-    nullptr,                        /* tp_members */
+    0,                              /* tp_members */
     DimList_getsetters,             /* tp_getset */
-    nullptr,                        /* tp_base */
-    nullptr,                        /* tp_dict */
-    nullptr,                        /* tp_descr_get */
-    nullptr,                        /* tp_descr_set */
+    0,                              /* tp_base */
+    0,                              /* tp_dict */
+    0,                              /* tp_descr_get */
+    0,                              /* tp_descr_set */
     0,                              /* tp_dictoffset */
     (initproc) DimList_init,            /* tp_init */
-    nullptr,                        /* tp_alloc */
+    0,                              /* tp_alloc */
     DimList::new_stub,                      /* tp_new */
 };
 
@@ -637,7 +637,7 @@ private:
     at::Tensor tensor_;
     at::Tensor batchtensor_;
     OwnedSlice<DimEntry> levels_;
-    bool has_device_ = false;
+    bool has_device_;
     std::unique_ptr<DelayedOperator> delayed_;
 public:
 
@@ -718,7 +718,7 @@ at::Tensor _add_batch_dims(Arena& A, at::Tensor t, Slice<DimEntry> levels_) {
         if (min_index == -1) {
             return t;
         }
-        auto t2 = at::functorch::addBatchDim(t, min_index, min_value);
+        auto t2 = at::functorch::addBatchDim(std::move(t), min_index, min_value);
         t = std::move(t2);
         levels[min_real_index] = DimEntry();
     }
@@ -758,7 +758,7 @@ int64_t ndim_of_levels(Slice<DimEntry> levels) {
 struct TensorInfo {
     TensorRef tensor;
     Slice<DimEntry> levels;
-    bool has_device = false;
+    bool has_device;
     TensorRef batchedtensor;
     int64_t ndim() const {
         return ndim_of_levels(levels);
@@ -965,9 +965,9 @@ struct UnflattenVectorArgs {
         return py::vector_args(args.begin(), nargs, kwnames);
     }
     Slice<Unflatten> children;
-    Py_ssize_t nargs = 0;
+    Py_ssize_t nargs;
     py::handle kwnames;
-    bool had_nested = false;
+    bool had_nested;
 };
 
 UnflattenVectorArgs tree_flatten(Arena& A, py::vector_args args, Slice<py::handle>& flat_elements) {
@@ -1163,7 +1163,7 @@ struct EnableAllLayers {
         }
     }
 private:
-    int64_t levels_start_ = 0;
+    int64_t levels_start_{};
     Slice<py::hdl<Dim>> levels_to_dim_;
 };
 
@@ -1228,7 +1228,7 @@ static py::object run_torch_function(Arena &A, py::handle orig, py::vector_args 
                     tensor = A.autorelease(tensor->to(device_holding_tensor->device()));
                 }
                 auto ml = _match_levels(A, tensor, infos[i].levels, result_levels);
-                flat_args[i] = handle_from_tensor(A, ml);
+                flat_args[i] = handle_from_tensor(A, std::move(ml));
             }
         }
 
@@ -1247,7 +1247,7 @@ static py::object run_torch_function(Arena &A, py::handle orig, py::vector_args 
             }
             return h;
         };
-        return tree_map(A, wrap, std::move(result));
+        return tree_map(A, wrap, result);
     } else {
         // std::cout << orig << " calling functorch...\n";
         // std::cout << "rl: " << result_levels << "\n";
@@ -1275,7 +1275,7 @@ static py::object run_torch_function(Arena &A, py::handle orig, py::vector_args 
         if (THPVariable_Check(result.ptr())) {
             return guard.from_batched(A, THPVariable_Unpack(result.ptr()), device_holding_tensor);
         }
-        return tree_map(A, wrap, std::move(result));
+        return tree_map(A, wrap, result);
     }
 }
 
@@ -1337,7 +1337,7 @@ static PyObject* py___torch_function__(PyObject *self,
     AT_ASSERT(nargs == 4 || nargs == 5);
     auto va = as_vector_args(A, args[3], nargs == 5 ? args[4] : nullptr);
     bool is_pointwise = pointwise.contains(args[1]);
-    return __torch_function__(A, args[1], va, is_pointwise).release();
+    return __torch_function__(A, args[1], std::move(va), is_pointwise).release();
     PY_END(nullptr)
 }
 
@@ -1361,65 +1361,65 @@ PyObject* Tensor_ndim(Tensor* self, void*) {
 }
 
 static PyGetSetDef Tensor_getsetters[] = {
-   {"_has_device", (getter) [](PyObject* self, void*) -> PyObject* { return py::from_bool(((Tensor*)self)->has_device()).release(); }, nullptr},
+   {"_has_device", (getter) [](PyObject* self, void*) -> PyObject* { return py::from_bool(((Tensor*)self)->has_device()).release(); }, NULL},
    {"_tensor", (getter) [](PyObject* self, void*) -> PyObject* {
        Arena A;
-       return THPVariable_Wrap(((Tensor*)self)->tensor(A)); }, nullptr},
+       return THPVariable_Wrap(((Tensor*)self)->tensor(A)); }, NULL},
    {"_batchtensor", (getter) [](PyObject* self, void*) -> PyObject* {
        Arena A;
-       return THPVariable_Wrap(((Tensor*)self)->batchtensor(A)); }, nullptr},
+       return THPVariable_Wrap(((Tensor*)self)->batchtensor(A)); }, NULL},
    {"_levels", (getter) [](PyObject* self, void*) -> PyObject* {
        PY_BEGIN
        return levels_to_tuple(((Tensor*)self)->levels()).release();
        PY_END(nullptr)
    }},
-    {"ndim", (getter) Tensor_ndim, nullptr, "ndim", nullptr},
-    {nullptr}  /* Sentinel */
+    {"ndim", (getter) Tensor_ndim, NULL, "ndim", NULL},
+    {NULL}  /* Sentinel */
 };
 
 static PyMethodDef Tensor_methods[] = {
-    {nullptr, nullptr, 0, nullptr}        /* Sentinel */
+    {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
 
 PyTypeObject Tensor::Type = {
-    PyVarObject_HEAD_INIT(nullptr, 0)
+    PyVarObject_HEAD_INIT(NULL, 0)
     "_C.Tensor",               /* tp_name */
     sizeof(Tensor),               /* tp_basicsize */
     0,                              /* tp_itemsize */
     Tensor::dealloc_stub,      /* tp_dealloc */
     0,                              /* tp_vectorcall_offset */
-    nullptr,                              /* tp_getattr */
-    nullptr,                              /* tp_setattr */
-    nullptr,                              /* tp_as_async */
-    nullptr,           /* tp_repr */
-    nullptr,                 /* tp_as_number */
-    nullptr,                 /* tp_as_sequence */
-    nullptr,             /* tp_as_mapping */
-    nullptr,      /* tp_hash */
-    nullptr,                              /* tp_call */
-    nullptr,                              /* tp_str */
-    nullptr,                              /* tp_getattro */
-    nullptr,                              /* tp_setattro */
-    nullptr,                              /* tp_as_buffer */
+    0,                              /* tp_getattr */
+    0,                              /* tp_setattr */
+    0,                              /* tp_as_async */
+    0,           /* tp_repr */
+    0,                 /* tp_as_number */
+    0,                 /* tp_as_sequence */
+    0,             /* tp_as_mapping */
+    0,      /* tp_hash */
+    0,                              /* tp_call */
+    0,                              /* tp_str */
+    0,                              /* tp_getattro */
+    0,                              /* tp_setattro */
+    0,                              /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE , /* tp_flags */
     "Tensor Object",                   /* tp_doc */
-    nullptr,                              /* tp_traverse */
-    nullptr,                              /* tp_clear */
-    nullptr,  /* tp_richcompare */
+    0,                              /* tp_traverse */
+    0,                              /* tp_clear */
+    0,  /* tp_richcompare */
     0,                              /* tp_weaklistoffset */
-    nullptr,                              /* tp_iter */
-    nullptr,                              /* tp_iternext */
+    0,                              /* tp_iter */
+    0,                              /* tp_iternext */
     Tensor_methods,                /* tp_methods */
-    nullptr,                              /* tp_members */
+    0,                              /* tp_members */
     Tensor_getsetters,             /* tp_getset */
-    nullptr,                              /* tp_base */
-    nullptr,                              /* tp_dict */
-    nullptr,                              /* tp_descr_get */
-    nullptr,                              /* tp_descr_set */
+    0,                              /* tp_base */
+    0,                              /* tp_dict */
+    0,                              /* tp_descr_get */
+    0,                              /* tp_descr_set */
     0,                              /* tp_dictoffset */
-    nullptr,            /* tp_init */
-    nullptr,                              /* tp_alloc */
+    0,            /* tp_init */
+    0,                              /* tp_alloc */
     Tensor::new_stub,                      /* tp_new */
 };
 
@@ -1804,7 +1804,7 @@ static PyObject* order(PyObject *_,
     Slice<DimEntry> levels;
     TensorRef data;
     py::handle self = args++[0];
-    bool has_device = false;
+    bool has_device;
     if (Tensor::check_exact(self)) {
         auto t = Tensor::unchecked_wrap(self);
         orig_levels = t->levels();
@@ -2027,12 +2027,12 @@ inline bool has_dims(py::handle d) {
 }
 
 struct IndexingInfo {
-    bool can_call_original = false; // if true, then it is safe to just call getitem or setitem, these objects do not need special handling
-    bool advanced_indexing = false; // requires actual lookup
+    bool can_call_original; // if true, then it is safe to just call getitem or setitem, these objects do not need special handling
+    bool advanced_indexing; // requires actual lookup
     TensorRef self;
     Slice<py::handle> flat_inputs;
     Slice<DimEntry> result_levels;
-    bool has_device = false;
+    bool has_device;
 };
 
 static Slice<py::handle> as_slice(py::tuple_view tv) {
@@ -2891,43 +2891,43 @@ struct WrappedOperator : public py::base<WrappedOperator> {
 };
 
 PyTypeObject WrappedOperator::Type = {
-    PyVarObject_HEAD_INIT(nullptr, 0)
+    PyVarObject_HEAD_INIT(NULL, 0)
     "_C.WrappedOperator",               /* tp_name */
     sizeof(WrappedOperator),               /* tp_basicsize */
     0,                              /* tp_itemsize */
     WrappedOperator::dealloc_stub,      /* tp_dealloc */
     0,                              /* tp_vectorcall_offset */
-    nullptr,                              /* tp_getattr */
-    nullptr,                              /* tp_setattr */
-    nullptr,                              /* tp_as_async */
-    nullptr,           /* tp_repr */
-    nullptr,                 /* tp_as_number */
-    nullptr,                 /* tp_as_sequence */
-    nullptr,             /* tp_as_mapping */
-    nullptr,      /* tp_hash */
-    nullptr,                              /* tp_call */
-    nullptr,                              /* tp_str */
-    nullptr,                              /* tp_getattro */
-    nullptr,                              /* tp_setattro */
-    nullptr,                              /* tp_as_buffer */
+    0,                              /* tp_getattr */
+    0,                              /* tp_setattr */
+    0,                              /* tp_as_async */
+    0,           /* tp_repr */
+    0,                 /* tp_as_number */
+    0,                 /* tp_as_sequence */
+    0,             /* tp_as_mapping */
+    0,      /* tp_hash */
+    0,                              /* tp_call */
+    0,                              /* tp_str */
+    0,                              /* tp_getattro */
+    0,                              /* tp_setattro */
+    0,                              /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT, /* tp_flags */
     "Wrapped Object Holder",                   /* tp_doc */
-    nullptr,                              /* tp_traverse */
-    nullptr,                              /* tp_clear */
-    nullptr,  /* tp_richcompare */
+    0,                              /* tp_traverse */
+    0,                              /* tp_clear */
+    0,  /* tp_richcompare */
     0,                              /* tp_weaklistoffset */
-    nullptr,                              /* tp_iter */
-    nullptr,                              /* tp_iternext */
-    nullptr,                /* tp_methods */
-    nullptr,                              /* tp_members */
-    nullptr,             /* tp_getset */
-    nullptr,                              /* tp_base */
-    nullptr,                              /* tp_dict */
-    nullptr,                              /* tp_descr_get */
-    nullptr,                              /* tp_descr_set */
+    0,                              /* tp_iter */
+    0,                              /* tp_iternext */
+    0,                /* tp_methods */
+    0,                              /* tp_members */
+    0,             /* tp_getset */
+    0,                              /* tp_base */
+    0,                              /* tp_dict */
+    0,                              /* tp_descr_get */
+    0,                              /* tp_descr_set */
     0,                              /* tp_dictoffset */
-    nullptr,            /* tp_init */
-    nullptr,                              /* tp_alloc */
+    0,            /* tp_init */
+    0,                              /* tp_alloc */
     WrappedOperator::new_stub,                      /* tp_new */
 };
 
@@ -3011,7 +3011,7 @@ static PyObject* patched_dim_method(PyObject * self_,
         }
         py_indices = std::move(tup);
     }
-    _patcharg(self->dim_name.c_str(), self->dim_offset, std::move(py_indices));
+    _patcharg(self->dim_name.c_str(), self->dim_offset, py_indices);
     patched_args[0] = handle_from_tensor(A, info.tensor);
     auto r = self->orig.call_vector(patched_args.begin(), nargs, kwnames);
     auto wrap = [&](py::handle h) {
@@ -3020,7 +3020,7 @@ static PyObject* patched_dim_method(PyObject * self_,
         }
         return h;
     };
-    return tree_map(A, wrap, std::move(r)).release();
+    return tree_map(A, wrap, r).release();
     PY_END(nullptr)
 }
 
@@ -3167,7 +3167,7 @@ static PyObject* _patch_tensor_class(PyObject * self_,
 
     auto torch = py::import("torch");
     auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
-    replaceMappingIfMatches(std::move(py_TensorBase));
+    replaceMappingIfMatches(py_TensorBase);
 
     Py_RETURN_NONE;
     PY_END(nullptr)
@@ -3209,19 +3209,19 @@ static PyMethodDef methods[] = {
     {"_parse_test", (PyCFunction)(void*) _parse_test, METH_FASTCALL | METH_KEYWORDS},
     {"_set_pointwise_optimize", (PyCFunction)(void*) _set_pointwise_optimize, METH_FASTCALL | METH_KEYWORDS},
     {"_patch_tensor_class", (PyCFunction)(void*) _patch_tensor_class, METH_FASTCALL | METH_KEYWORDS},
-    {nullptr, nullptr, 0, nullptr}        /* Sentinel */
+    {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
 static struct PyModuleDef module_def = {
     PyModuleDef_HEAD_INIT,
     "_C",   /* name of module */
-    nullptr, /* module documentation, may be NULL */
+    NULL, /* module documentation, may be NULL */
     -1,       /* size of per-interpreter state of the module,
                  or -1 if the module keeps state in global variables. */
     methods
 };
 
-PyObject* Dim_init() {
+PyObject* Dim_init(void) {
     Arena A;
     try {
         py::object mod = py::object::checked_steal(PyModule_Create(&module_def));

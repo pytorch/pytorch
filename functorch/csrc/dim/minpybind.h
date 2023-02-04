@@ -427,7 +427,7 @@ struct slice_view {
         }
         slicelength = PySlice_AdjustIndices(size, &start, &stop, step);
     }
-    Py_ssize_t start = 0, stop = 0, step = 0, slicelength;
+    Py_ssize_t start, stop, step, slicelength;
 };
 
 bool is_slice(handle h) {
@@ -616,12 +616,12 @@ struct vector_args {
             }
             *format_it++ = '\0';
             _PyArg_Parser* _parser = new _PyArg_Parser{format_str, &names_buf[0], fname_cstr, 0};
-            PyObject *dummy = nullptr;
+            PyObject *dummy = NULL;
             _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser, &dummy, &dummy, &dummy, &dummy, &dummy);
 #else
-            _PyArg_Parser* _parser = new _PyArg_Parser{nullptr, &names_buf[0], fname_cstr, nullptr};
+            _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
             std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
-            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, nullptr, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
+            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #endif
             throw exception_set();
         };
