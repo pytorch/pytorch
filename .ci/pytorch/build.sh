@@ -11,6 +11,20 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
+if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+    # DEBUG pytorch sccache
+    export CARGO_HOME=/opt/cargo
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+    . $CARGO_HOME/env && \
+      git clone --recursive https://github.com/pytorch/sccache.git && \
+      cd sccache && \
+      cargo install --path . && \
+      cd .. && \
+      rm -rf sccache
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi

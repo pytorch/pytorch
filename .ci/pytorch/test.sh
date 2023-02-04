@@ -669,6 +669,18 @@ build_xla() {
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
+  # DEBUG pytorch sccache
+  export CARGO_HOME=/opt/cargo
+
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+  . $CARGO_HOME/env && \
+    git clone --recursive https://github.com/pytorch/sccache.git && \
+    cd sccache && \
+    cargo install --path . && \
+    cd .. && \
+    rm -rf sccache
+
   XLA_DIR=xla
   USE_CACHE=1
   clone_pytorch_xla
