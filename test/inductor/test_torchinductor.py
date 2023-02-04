@@ -797,6 +797,16 @@ class CommonTemplate:
         t2[1] = float("nan")
         self.common(fn, (t1, t2))
 
+    def test_neg_max_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/93380
+        def fn(a, b):
+            c = torch.neg(a)
+            return torch.maximum(b, c)
+
+        a = torch.randint(256, (1,), dtype=torch.uint8)
+        b = torch.randint(256, (8390,), dtype=torch.uint8)
+        self.common(fn, (a, b))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
