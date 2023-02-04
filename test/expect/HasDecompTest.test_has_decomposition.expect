@@ -1060,13 +1060,13 @@ aten::randn.names_out
 aten::randn_like
 aten::randn_like.out
 aten::random
-aten::random.from
-aten::random.from_out
+aten::random.from_int
+aten::random.from_int_out
 aten::random.out
 aten::random.to
 aten::random.to_out
 aten::random_
-aten::random_.from
+aten::random_.from_int
 aten::random_.to
 aten::randperm
 aten::randperm.generator

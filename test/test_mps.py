@@ -5692,7 +5692,7 @@ class TestNLLLoss(TestCase):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
-    # Test random_.to and random_.from
+    # Test random_.to and random_.from_int
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
 
