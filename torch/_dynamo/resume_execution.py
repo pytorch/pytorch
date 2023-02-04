@@ -84,10 +84,7 @@ class ReenterWith:
             ]
 
         else:
-            # NOTE: copying over for now since more changes are anticipated
-            with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
-
             cleanup_complete_jump_target = create_instruction("NOP")
 
             def create_load_none():
@@ -97,7 +94,6 @@ class ReenterWith:
 
             cleanup[:] = (
                 [
-                    create_instruction("POP_BLOCK"),
                     create_load_none(),
                     create_load_none(),
                     create_load_none(),
@@ -108,16 +104,19 @@ class ReenterWith:
                     create_instruction(
                         "JUMP_FORWARD", target=cleanup_complete_jump_target
                     ),
-                    with_except_start,
+                    create_instruction("PUSH_EXC_INFO"),
+                    create_instruction("WITH_EXCEPT_START"),
                     create_instruction(
                         "POP_JUMP_FORWARD_IF_TRUE",
                         target=pop_top_after_with_except_start,
                     ),
-                    create_instruction("RERAISE"),
-                    pop_top_after_with_except_start,
-                    create_instruction("POP_TOP"),
-                    create_instruction("POP_TOP"),
+                    create_instruction("RERAISE", 2),
+                    create_instruction("COPY", 3),
                     create_instruction("POP_EXCEPT"),
+                    create_instruction("RERAISE", 1),
+                    pop_top_after_with_except_start,
+                    create_instruction("POP_EXCEPT"),
+                    create_instruction("POP_TOP"),
                     create_instruction("POP_TOP"),
                     cleanup_complete_jump_target,
                 ]
@@ -125,7 +124,7 @@ class ReenterWith:
             )
 
             return create_call_function(0, False) + [
-                create_instruction("SETUP_WITH", target=with_except_start),
+                create_instruction("BEFORE_WITH"),
                 create_instruction("POP_TOP"),
             ]
 
