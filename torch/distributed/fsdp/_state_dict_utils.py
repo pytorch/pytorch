@@ -462,7 +462,7 @@ def _local_pre_load_state_dict_hook(
             )
             load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
     else:
-        load_tensor = flat_param.clone().detach()
+        load_tensor = flat_param
     state_dict[fqn] = load_tensor
 
 
