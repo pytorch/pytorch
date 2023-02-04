@@ -294,6 +294,7 @@ def _flatten_optim_state_dict(
     model: nn.Module,
     shard_state: bool,
     use_orig_params: bool = False,
+    optim: Optional[torch.optim.Optimizer] = None,
 ) -> Dict[str, Any]:
     """
     Flattens the full optimizer state dict, still keying by unflattened
@@ -317,6 +318,16 @@ def _flatten_optim_state_dict(
     flat_osd_state: Dict[Union[_OptimStateKey, str], Any] = {}
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
+
+    # local_state_dict is used to construct states of empty parameters.
+    # This should only be used if is_named_optimizer=True.
+    local_state_dict: Dict[str, Any] = {}
+    local_state_clean_fqns: Dict[str, str] = {}
+    if optim is not None:
+        local_state_dict = optim.state_dict()["state"]
+        for fqn in local_state_dict.keys():
+            clean_fqn = clean_tensor_name(fqn)
+            local_state_clean_fqns[clean_fqn] = fqn
 
     for param, unflat_param_names in param_to_fqns.items():
         fqn = unflat_param_names[0]
@@ -346,6 +357,13 @@ def _flatten_optim_state_dict(
                 # Only include non-empty states since as expected by
                 # `torch.optim.Optimizer` s
                 flat_osd_state[key] = flat_state
+            elif optim is not None:  # NamedOptimizer or KeyedOptimizer case.
+                assert len(unflat_param_names) == 1
+                local_wrapped_fqn = local_state_clean_fqns.get(fqn, "")
+                if local_wrapped_fqn:
+                    flat_osd_state[key] = copy.deepcopy(
+                        local_state_dict[local_wrapped_fqn]
+                    )
         else:  # do not flatten non-FSDP parameters' states
             assert len(unflat_param_names) == 1
             key = _OptimStateKey(tuple(unflat_param_names), False)
