@@ -446,16 +446,15 @@ def _local_pre_load_state_dict_hook(
 
     # Convert the ShardedTensor to a Tensor.
     flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    assert flat_param is not None
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     shards = load_tensor.local_shards()
-    # assert False, (dist.get_rank(), valid_data_size, flat_param.numel(), flat_param._shard_numel_padded)
     if valid_data_size > 0:
         assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
         load_tensor = shards[0].tensor
 
         # Get the metadata of the flat_param to decide whether to pad the loaded
         # tensor.
-        assert flat_param is not None
         if flat_param._shard_numel_padded > 0:
             assert load_tensor.numel() < flat_param.numel(), (
                 f"Local shard size = {flat_param.numel()} and the tensor in "
