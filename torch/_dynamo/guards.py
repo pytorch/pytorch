@@ -410,7 +410,7 @@ class GuardBuilder(GuardBuilderBase):
         )
         if guards.fn is not None:
             self.shape_env_fn = guards.fn
-            self._produce_guard_code(guard, [guards.call_expr], shape_env=True, preface=guards.preface)
+            self._produce_guard_code(guard, [guards.call], shape_env=True, preface=guards.preface)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -629,8 +629,17 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        preface = "\n".join((" " * 8) + line for line in local_builder.shape_env_preface)
+        preface = "\n".join((" " * 4 * 3) + line for line in local_builder.shape_env_preface)
+        if len(preface) > 0:
+            preface = [
+                "try:",
+                *[f"{'': ^4}{line}" for line in preface],
+                "except:",
+                f"{'': ^4}return False"
+            ]
+        preface_str = "\n".join(f"{'': ^8}{line}" for line in preface)
         code = " and ".join(unique(code_parts))
+
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
@@ -645,10 +654,11 @@ class CheckFunctionManager:
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
     def guard({args}):
-{preface}
+{preface_str}
         return {code}
     return guard
 """
+
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)

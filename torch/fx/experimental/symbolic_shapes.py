@@ -1,4 +1,5 @@
 import ast
+import dataclasses
 import torch
 from typing import Any, Callable, Set, Dict, List, Type, Tuple, Optional, Union, cast
 import sys
@@ -36,6 +37,20 @@ try:
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
+
+if sys.version_info.minor <= 8:
+    import astunparse
+    def _ast_unparse(node: ast.AST) -> str:
+        return astunparse.unparse(node)[:-1]
+
+    def _ast_unparse_implemented(node: ast.AST) -> bool:
+        return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+else:
+    def _ast_unparse(node: ast.AST) -> str:
+        return ast.unparse(node)[:-1]
+
+    def _ast_unparse_implemented(node: ast.AST) -> bool:
+        return True
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -943,9 +958,6 @@ TLS = threading.local()
 #        'NodeTransformer')
 class PyExprCSEPass:
     IGNORED_NODE_TYPES = (
-        # Expr Context
-        ast.Store, ast.Load, ast.Del, ast.AugLoad, ast.AugStore, ast.Param,
-        # Leaf
         ast.Name, ast.Constant
     )
 
@@ -965,8 +977,8 @@ class PyExprCSEPass:
 
             # 'PASSTHROUGH_NODE_TYPES' have the same string representation
             # as its child, so we must not count it.
-            if not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
-                self._expr_counter[PyExprCSEPass._ast_unparse(node)] += 1
+            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
+                self._expr_counter[_ast_unparse(node)] += 1
 
             super().visit(node)
 
@@ -987,8 +999,8 @@ class PyExprCSEPass:
             if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
                 return node
 
-            if not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
-                expr = PyExprCSEPass._ast_unparse(node)
+            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
+                expr = _ast_unparse(node)
 
                 # Replacement only occurs if a given expression is used more
                 # than once.
@@ -1002,7 +1014,7 @@ class PyExprCSEPass:
                         # Indexing still uses the old 'node', since that's what was counted
                         # by the 'NodeVisitor'.
                         node_ = super().visit(node)
-                        expr_ = PyExprCSEPass._ast_unparse(node_)
+                        expr_ = _ast_unparse(node_)
                         var_name = self._gen_name_from_expr(expr)
                         self._preface.append(f"{var_name} = {expr_}")
                         self._expr_to_name[expr] = var_name
@@ -1026,22 +1038,25 @@ class PyExprCSEPass:
 
         new_exprs = []
         for e in parsed_exprs:
-            new_exprs.append(PyExprCSEPass._ast_unparse(transformer.visit(e)))
+            new_exprs.append(_ast_unparse(transformer.visit(e)))
 
         return preface, new_exprs
 
-    @staticmethod
-    def _ast_unparse(node: ast.AST) -> str:
-        if sys.version_info.minor <= 8:
-            import astunparse
-            return astunparse.unparse(node)[:-1]
-        else:
-            return ast.unparse(node)[:-1]
-
 
 class GuardCompiler:
-    SourceInfo = collections.namedtuple("SourceInfo", ["name", "source", "type"])
-    SymbolicShapesExpr = collections.namedtuple("SymbolicShapeExpr", ["guard_expr", "call_expr", "preface", "fn"])
+
+    @dataclasses.dataclass
+    class SourceInfo:
+        name: str
+        source: Source
+        type: Type
+
+    @dataclasses.dataclass
+    class SymbolicShapesExpr:
+        guard: str
+        call: str
+        preface: List[str]
+        fn: Optional[Callable] = None
 
     def __init__(self, source_ref: Callable[[Source], str]) -> None:
         self._source_ref = source_ref
@@ -1128,7 +1143,7 @@ class GuardCompiler:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         if len(exprs) == 0:
-            return self.SymbolicShapesExpr("True", "True", [], None)
+            return self.SymbolicShapesExpr("True", "True", [])
 
         fn_name = "___symbolic_shape_fn"
 
@@ -1204,7 +1219,12 @@ extern "C" int guard({guard_parameters}) {{
             args = [ctypes.cast(id(a), ctypes.c_void_p) for a in args]
             return bool(fn(*args))
 
-        return self.SymbolicShapesExpr(guard_expression, call_expression, call_preface, wrapper_fn)
+        return self.SymbolicShapesExpr(
+            guard=guard_expression,
+            call=call_expression,
+            preface=call_preface,
+            fn=wrapper_fn
+        )
 
 
 
@@ -1555,7 +1575,7 @@ class ShapeEnv:
         if guards.fn is not None:
             kwargs = dict(zip(arg_names, args))
             kwargs["___symbolic_shape_fn"] = guards.fn
-            return eval("\n".join([*guards.preface, guards.call_expr]), {}, kwargs)
+            return eval("\n".join([*guards.preface, guards.call]), {}, kwargs)
         return True
 
     def bind_symbols(self, placeholders, args):
