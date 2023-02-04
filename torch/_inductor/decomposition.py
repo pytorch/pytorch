@@ -154,7 +154,11 @@ def floordiv(a, b):
 
 
 def get_alignment_size(x):
-    if "A100" in torch.cuda.get_device_name():
+    try:
+        gpu_name = torch.cuda.get_device_name()
+    except:
+        gpu_name = ""
+    if "A100" in gpu_name:
         has_a100 = True
     if x.dtype == torch.int8:
         return 128 if has_a100 else 16
