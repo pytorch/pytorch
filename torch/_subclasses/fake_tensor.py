@@ -10,7 +10,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
-import torch._refs
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -686,10 +685,21 @@ def make_fast_binary_impl(slow_ref):
     return fast_binary_impl
 
 
-register_fast_op_impl(torch.ops.aten.add.Tensor)(make_fast_binary_impl(torch._refs.add))
-register_fast_op_impl(torch.ops.aten.sub.Tensor)(make_fast_binary_impl(torch._refs.sub))
-register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
-register_fast_op_impl(torch.ops.aten.div.Tensor)(make_fast_binary_impl(torch._refs.div))
+@functools.lru_cache(None)
+def get_fast_op_impls():
+    import torch._refs
+
+    register_fast_op_impl(torch.ops.aten.add.Tensor)(
+        make_fast_binary_impl(torch._refs.add)
+    )
+    register_fast_op_impl(torch.ops.aten.sub.Tensor)(
+        make_fast_binary_impl(torch._refs.sub)
+    )
+    register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
+    register_fast_op_impl(torch.ops.aten.div.Tensor)(
+        make_fast_binary_impl(torch._refs.div)
+    )
+    return FAST_OP_IMPLEMENTATIONS
 
 
 @contextlib.contextmanager
@@ -726,6 +736,13 @@ class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
+
+    @property
+    def device(self):
+        if self.fake_mode.in_kernel_invocation:
+            return torch.device("meta")
+        else:
+            return self.fake_device
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -948,6 +965,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         try:
             return self.dispatch(func, types, args, kwargs)
@@ -1074,7 +1092,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Try for fastpath
         if has_symbolic_sizes:
-            fast_impl = FAST_OP_IMPLEMENTATIONS.get(func)
+            fast_impl = get_fast_op_impls().get(func)
             if fast_impl is not None:
                 return fast_impl(self, *args, **kwargs)
 
