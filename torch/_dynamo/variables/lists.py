@@ -84,9 +84,6 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
             return self.getitem_const(args[0])
-        elif name == "__add__":
-            assert not kwargs and len(args) == 1
-            return type(self)(self.items + args[0].items, **options)
         elif (
             name == "__contains__"
             and len(args) == 1
@@ -255,15 +252,11 @@ class TupleVariable(BaseListVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if (
-            name in ("__add__", "__iadd__")
-            and len(args) == 1
-            and isinstance(args[0], TupleVariable)
-        ):
+        if name == "__iadd__" and len(args) == 1 and isinstance(args[0], TupleVariable):
             assert not kwargs
             return TupleVariable(self.items + args[0].items, **options)
         elif (
-            name in ("__add__", "__iadd__")
+            name == "__iadd__"
             and len(args) == 1
             and isinstance(args[0], variables.ConstantVariable)
         ):

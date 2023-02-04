@@ -5,9 +5,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 
-#include <limits>
-#include <memory>
-
 namespace c10 {
 
 class C10_API SymBool {
