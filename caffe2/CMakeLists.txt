@@ -6,11 +6,6 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
-# ---[ MSVC OpenMP modification
-if(MSVC)
-  include(../cmake/public/utils.cmake)
-endif()
-
 # Debug messages - if you want to get a list of source files and examine
 # target information, enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
 set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
@@ -1219,29 +1214,6 @@ if(NOT NO_API)
     $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
 endif()
 
-
-if(USE_OPENMP)
-  find_package(OpenMP QUIET)
-endif()
-if(USE_OPENMP AND OPENMP_FOUND)
-  if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES "libiomp5md\\.lib")
-    set(AT_MKL_MT 1)
-  else()
-    set(AT_MKL_MT 0)
-  endif()
-  message(STATUS "pytorch is compiling with OpenMP. \n"
-    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
-    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  if(UNIX)
-    separate_arguments(OpenMP_CXX_OPTIONS UNIX_COMMAND "${OpenMP_CXX_FLAGS}")
-  else()
-    separate_arguments(OpenMP_CXX_OPTIONS WINDOWS_COMMAND "${OpenMP_CXX_FLAGS}")
-  endif()
-  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_OPTIONS})
-  target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
-endif()
-
-
 if(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE
     USE_ROCM
@@ -1332,13 +1304,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 endif()
 
-if(USE_OPENMP AND OPENMP_FOUND)
-  message(STATUS "Caffe2 is compiling with OpenMP. \n"
-    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
-    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
-endif()
-
 if($ENV{TH_BINARY_BUILD})
   if(NOT MSVC AND USE_CUDA AND NOT APPLE)
     # Note [Extra MKL symbols for MAGMA in torch_cpu]
@@ -1375,9 +1340,6 @@ target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
 target_include_directories(torch_cpu INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(torch_cpu PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(torch_cpu SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
-# Set standard properties on the target
-torch_set_target_props(torch_cpu)
-
 
 target_compile_options(torch_cpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if(USE_CUDA)
@@ -1711,11 +1673,6 @@ if(BUILD_TEST)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} torch_library gtest_main)
-    if(USE_OPENMP)
-      # -fopenmp is a compile time flag and as result not guaranteed
-      # to link executable against OpenMP runtime library
-      target_link_libraries(${test_name} ${OpenMP_CXX_LIBRARIES})
-    endif()
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
@@ -1911,7 +1868,6 @@ if(BUILD_PYTHON)
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   endif()
-  torch_set_target_props(caffe2_pybind11_state)
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
   set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1947,7 +1903,6 @@ if(BUILD_PYTHON)
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     endif()
-    torch_set_target_props(caffe2_pybind11_state_gpu)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1979,7 +1934,6 @@ if(BUILD_PYTHON)
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     endif()
-    torch_set_target_props(caffe2_pybind11_state_hip)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
