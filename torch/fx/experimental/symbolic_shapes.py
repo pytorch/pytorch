@@ -1,4 +1,3 @@
-import ast
 import dataclasses
 import torch
 from typing import Any, Callable, Set, Dict, List, Type, Tuple, Optional, Union, cast
@@ -37,20 +36,6 @@ try:
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
-
-if sys.version_info.minor <= 8:
-    import astunparse
-    def _ast_unparse(node: ast.AST) -> str:
-        return astunparse.unparse(node)[:-1]
-
-    def _ast_unparse_implemented(node: ast.AST) -> bool:
-        return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
-else:
-    def _ast_unparse(node: ast.AST) -> str:
-        return ast.unparse(node)[:-1]
-
-    def _ast_unparse_implemented(node: ast.AST) -> bool:
-        return True
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -947,104 +932,41 @@ if HAS_SYMPY:
 
 TLS = threading.local()
 
-# Common Sub-Expression Elimination for Python expressions.
-#
-# There are 2 steps to this pass:
-#     1. Count the frequency of each sub-expression (i.e. inner
-#        node in the AST tree)
-#
-#     2. Replace those that occur more than once by a fresh variable 'v'.
-#        'v' will be defined in the 'preface' list (output argument to
-#        'NodeTransformer')
-class PyExprCSEPass:
-    IGNORED_NODE_TYPES = (
-        ast.Name, ast.Constant
-    )
 
-    PASSTHROUGH_NODE_TYPES = (
-        ast.Expression, ast.Index
-    )
+@dataclasses.dataclass
+class UniqueNameSet:
+    data: Set[str] = dataclasses.field(default_factory=set)
 
-    class CSEVisitor(ast.NodeVisitor):
-        IGNORE = object()
+    def _mangle(self, name: str) -> str:
+        name = name.replace(" ", "_")
+        name = name.replace("-", "_Neg_")
+        name = name.replace("[", "_LBr_").replace("]", "_RBr_")
+        name = name.replace("(", "_LPar_").replace(")", "_RPar_")
+        name = name.replace("'", "_Q_")
+        name = name.replace(".", "_D_").replace(",", "_C_")
+        return name
 
-        def __init__(self) -> None:
-            self._expr_counter = collections.defaultdict(lambda: 0)
+    def has(self, name: str) -> bool:
+        return name in self.data
 
-        def visit(self, node: ast.AST) -> Any:
-            if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
-                return
+    def add(self, name: str) -> None:
+        self.data.add(name)
 
-            # 'PASSTHROUGH_NODE_TYPES' have the same string representation
-            # as its child, so we must not count it.
-            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
-                self._expr_counter[_ast_unparse(node)] += 1
+    def mangle_and_add(self, expr: str) -> str:
+        mangled = self._mangle(expr)
+        unique_name = mangled
+        # Makes sure we generate no repeated names.
+        # It's very unlikely the loop-body will be executed more than once.
+        counter = 1
+        while unique_name in self.data:
+            unique_name = mangled + str(counter)
+            counter += 1
 
-            super().visit(node)
+        self.add(unique_name)
+        return unique_name
 
-    class CSETransformer(ast.NodeTransformer):
-        def __init__(
-                self,
-                expr_counter: Dict[str, int],
-                preface: List[str],
-                gen_name_from_expr: Callable[[str], str],
-        ) -> None:
-            super().__init__()
-            self._expr_counter = expr_counter
-            self._preface = preface
-            self._gen_name_from_expr = gen_name_from_expr
-            self._expr_to_name = {}
-
-        def visit(self, node: ast.AST) -> Any:
-            if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
-                return node
-
-            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
-                expr = _ast_unparse(node)
-
-                # Replacement only occurs if a given expression is used more
-                # than once.
-                if self._expr_counter[expr] > 1:
-                    if expr not in self._expr_to_name:
-                        # Parent 'visit' is called so that we CSE the inner expressions first.
-                        #
-                        # The resulting expression is used as right-hand-side of the variable
-                        # assignment. i.e. we are CSE-ing the children before the parents.
-                        #
-                        # Indexing still uses the old 'node', since that's what was counted
-                        # by the 'NodeVisitor'.
-                        node_ = super().visit(node)
-                        expr_ = _ast_unparse(node_)
-                        var_name = self._gen_name_from_expr(expr)
-                        self._preface.append(f"{var_name} = {expr_}")
-                        self._expr_to_name[expr] = var_name
-                    else:
-                        var_name = self._expr_to_name[expr]
-                    return ast.Name(var_name, ast.Load())
-
-            return super().visit(node)
-
-    def __init__(self, gen_name_from_expr: Callable[[str], str]) -> None:
-        self._gen_name_from_expr = gen_name_from_expr
-
-    def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
-        preface = []
-        visitor = self.CSEVisitor()
-        transformer = self.CSETransformer(visitor._expr_counter, preface, self._gen_name_from_expr)
-
-        parsed_exprs = [ast.parse(e, mode="eval") for e in exprs]
-        for e in parsed_exprs:
-            visitor.visit(e)
-
-        new_exprs = []
-        for e in parsed_exprs:
-            new_exprs.append(_ast_unparse(transformer.visit(e)))
-
-        return preface, new_exprs
-
-
+@dataclasses.dataclass
 class GuardCompiler:
-
     @dataclasses.dataclass
     class SourceInfo:
         name: str
@@ -1055,31 +977,20 @@ class GuardCompiler:
     class SymbolicShapesExpr:
         guard: str
         call: str
-        preface: List[str]
         fn: Optional[Callable] = None
 
-    def __init__(self, source_ref: Callable[[Source], str]) -> None:
-        self._source_ref = source_ref
+    source_ref: Callable[[Source], str]
 
-        # Used when generating a new name for a given source.
-        # Avoids dupplicated parameter names.
-        self._unique_names = set()
+    # Used when generating a new name for a given source.
+    # Avoids dupplicated parameter names.
+    unique_name_set: UniqueNameSet = dataclasses.field(default_factory=UniqueNameSet)
 
-        # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
-        # SourceInfo holds the mapped unique name, original source, and type.
-        self._source_expr_to_info = {}
+    # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
+    # SourceInfo holds the mapped unique name, original source, and type.
+    source_expr_to_info: Dict[str, "GuardCompiler.SourceInfo"] = dataclasses.field(default_factory=dict)
 
-        # Keeps track of the SourceInfo that are the actual parameters.
-        self._parameter_source_infos = []
-
-    def _flat_name(self, var_name: str) -> str:
-        var_name = var_name.replace(" ", "_")
-        var_name = var_name.replace("-", "_Neg_")
-        var_name = var_name.replace("[", "_LBr_").replace("]", "_RBr_")
-        var_name = var_name.replace("(", "_LPar_").replace(")", "_RPar_")
-        var_name = var_name.replace("'", "_Q_")
-        var_name = var_name.replace(".", "_D_").replace(",", "_C_")
-        return var_name
+    # Keeps track of the SourceInfo that are the actual parameters.
+    parameter_infos: List["GuardCompiler.SourceInfo"] = dataclasses.field(default_factory=list)
 
     def _type_to_cpp_argtype(self, type: Type) -> str:
         if type == SymInt:
@@ -1090,31 +1001,33 @@ class GuardCompiler:
             raise TypeError(f"unexpected type: {type}")
 
     def is_source_registered(self, source: Source) -> bool:
-        return source.name() in self._source_expr_to_info
+        return source.name() in self.source_expr_to_info
 
     def get_source_info(self, source: Source) -> "GuardCompiler.SourceInfo":
-        return self._source_expr_to_info[source.name()]
+        return self.source_expr_to_info[source.name()]
 
     def register_source(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
         assert not self.is_source_registered(source)
         if name is None:
             name = self.register_unique_name(source)
-        self._source_expr_to_info[source.name()] = self.SourceInfo(name, source, type)
+        self.source_expr_to_info[source.name()] = self.SourceInfo(name, source, type)
 
     def register_parameter(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
         assert not self.is_source_registered(source)
         self.register_source(source, name=name, type=type)
-        self._parameter_source_infos.append(self.get_source_info(source))
+        self.parameter_infos.append(self.get_source_info(source))
 
     def register_unique_name(self, source: Union[str, Source]) -> str:
         from torch._dynamo.source import TensorPropertySource
 
         if isinstance(source, TensorPropertySource):
-            source_name = f"{self._source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
+            source_name = f"{self.source_expr_to_info[source.base.name()].name}_{source.prop.name.lower()}"
         elif isinstance(source, Source):
-            source_name = self._flat_name(source.name())
+            source_name = source.name()
         else:
-            source_name = self._flat_name(source)
+            source_name = source
+
+        return self.unique_name_set.mangle_and_add(source_name)
 
         # Makes sure there are no repeated names.
         # It's very unlikely the loop-body will be executed more than once.
@@ -1131,7 +1044,7 @@ class GuardCompiler:
         from torch._dynamo.source import TensorPropertySource
 
         # We need to call 'source_ref' here due to its side effects.
-        ref = self._source_ref(source)
+        ref = self.source_ref(source)
 
         info = self.get_source_info(source)
         index_expr = ""
@@ -1143,30 +1056,28 @@ class GuardCompiler:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         if len(exprs) == 0:
-            return self.SymbolicShapesExpr("True", "True", [])
+            return self.SymbolicShapesExpr("True", "True")
 
         fn_name = "___symbolic_shape_fn"
 
         # 1. Function call
         #     a) Get all the argument expressions for each parameter
-        arguments = [info.source.name() for info in self._parameter_source_infos]
-        #     b) Run the CSE pass on them, so as to avoid member access overhead
-        call_preface, call_arguments = PyExprCSEPass(self.register_unique_name).run(arguments)
-        #     c) Generate the actual function call
-        call_expression = f"""{fn_name}({",".join(call_arguments)})"""
+        call_arguments = ", ".join(info.source.name() for info in self.parameter_infos)
+        #     b) Generate the actual function call
+        call_expression = f"{fn_name}({call_arguments})"
 
         # 2. Function definition
         #     a) Get all the parameters declaration
         guard_parameters = ", ".join([
             f"{self._type_to_cpp_argtype(info.type)} {info.name}"
-            for info in self._parameter_source_infos
+            for info in self.parameter_infos
         ])
         #     b) Generate the actual guard expression
         guard_expression = " && ".join(exprs)
         #     c) Generate the extra temporary variables corresponding to Tensor
         #        properties (e.g. sizes, strides, and storage_offset)
         source_creation = []
-        for info in self._parameter_source_infos:
+        for info in self.parameter_infos:
             if info.type != torch.Tensor:
                 continue
 
@@ -1219,12 +1130,7 @@ extern "C" int guard({guard_parameters}) {{
             args = [ctypes.cast(id(a), ctypes.c_void_p) for a in args]
             return bool(fn(*args))
 
-        return self.SymbolicShapesExpr(
-            guard=guard_expression,
-            call=call_expression,
-            preface=call_preface,
-            fn=wrapper_fn
-        )
+        return self.SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
 
 
 

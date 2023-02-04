@@ -1,11 +1,14 @@
 import builtins
+import ast
 import collections
+import dataclasses
 import logging
 import math
 import os
 import re
 import types
 import weakref
+import sys
 from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
@@ -20,7 +23,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP, UniqueNameSet
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -60,6 +63,20 @@ CLOSURE_VARS = collections.OrderedDict(
         ("inf", float("inf")),
     ]
 )
+
+if sys.version_info.minor <= 8:
+    import astunparse
+    def _ast_unparse(node: ast.AST) -> str:
+        return astunparse.unparse(node).replace("\n", "")
+
+    def _ast_unparse_implemented(node: ast.AST) -> bool:
+        return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+else:
+    def _ast_unparse(node: ast.AST) -> str:
+        return ast.unparse(node).replace("\n", "")
+
+    def _ast_unparse_implemented(node: ast.AST) -> bool:
+        return True
 
 
 def strip_function_call(name):
@@ -116,9 +133,6 @@ class GuardBuilder(GuardBuilderBase):
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[str] = []
-        # shape_env_preface holds a sequence of variable definitions.
-        # Those are the results of the common sub-expression elimination pass.
-        self.shape_env_preface: List[str] = []
 
         # Most of the time, we generate Python code in a guard to directly
         # check various properties.  However, tensors are a bit special;
@@ -410,7 +424,7 @@ class GuardBuilder(GuardBuilderBase):
         )
         if guards.fn is not None:
             self.shape_env_fn = guards.fn
-            self._produce_guard_code(guard, [guards.call], shape_env=True, preface=guards.preface)
+            self._produce_guard_code(guard, [guards.call], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -439,7 +453,7 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False, preface=[]
+        self, guard, code_list, provided_guarded_object=None, shape_env=False
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -458,7 +472,6 @@ class GuardBuilder(GuardBuilderBase):
 
         if shape_env:
             self.shape_env_code.extend(code_list)
-            self.shape_env_preface.extend(preface)
         else:
             self.code.extend(code_list)
 
@@ -483,6 +496,102 @@ class GuardBuilder(GuardBuilderBase):
             code_list,
             obj_ref,
         )
+
+
+# Common Sub-Expression Elimination for Python expressions.
+#
+# There are 2 steps to this pass:
+#     1. Count the frequency of each sub-expression (i.e. inner
+#        node in the AST tree)
+#
+#     2. Replace those that occur more than once by a fresh variable 'v'.
+#        'v' will be defined in the 'preface' list (output argument to
+#        'NodeTransformer')
+class PyExprCSEPass:
+    IGNORED_NODE_TYPES = (
+        ast.Name, ast.Constant
+    )
+
+    PASSTHROUGH_NODE_TYPES = (
+        ast.Expression, ast.Index, ast.Expr, ast.Module
+    )
+
+    class CSEVisitor(ast.NodeVisitor):
+        IGNORE = object()
+
+        def __init__(self) -> None:
+            self._expr_counter = collections.defaultdict(lambda: 0)
+
+        def visit(self, node: ast.AST) -> Any:
+            if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
+                return
+
+            # 'PASSTHROUGH_NODE_TYPES' have the same string representation
+            # as its child, so we must not count it.
+            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
+                self._expr_counter[_ast_unparse(node)] += 1
+
+            super().visit(node)
+
+    class CSETransformer(ast.NodeTransformer):
+        def __init__(
+                self,
+                expr_counter: Dict[str, int],
+                preface: List[str],
+                gen_name_from_expr: Callable[[str], str],
+        ) -> None:
+            super().__init__()
+            self._expr_counter = expr_counter
+            self._preface = preface
+            self._gen_name_from_expr = gen_name_from_expr
+            self._expr_to_name = {}
+
+        def visit(self, node: ast.AST) -> Any:
+            if isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
+                return node
+
+            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.PASSTHROUGH_NODE_TYPES):
+                expr = _ast_unparse(node)
+
+                # Replacement only occurs if a given expression is used more
+                # than once.
+                if self._expr_counter[expr] > 1:
+                    if expr not in self._expr_to_name:
+                        # Parent 'visit' is called so that we CSE the inner expressions first.
+                        #
+                        # The resulting expression is used as right-hand-side of the variable
+                        # assignment. i.e. we are CSE-ing the children before the parents.
+                        #
+                        # Indexing still uses the old 'node', since that's what was counted
+                        # by the 'NodeVisitor'.
+                        node_ = super().visit(node)
+                        expr_ = _ast_unparse(node_)
+                        var_name = self._gen_name_from_expr(expr)
+                        self._preface.append(f"{var_name} = {expr_}")
+                        self._expr_to_name[expr] = var_name
+                    else:
+                        var_name = self._expr_to_name[expr]
+                    return ast.Name(var_name, ast.Load())
+
+            return super().visit(node)
+
+    def __init__(self, gen_name_from_expr: Callable[[str], str]) -> None:
+        self._gen_name_from_expr = gen_name_from_expr
+
+    def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
+        preface = []
+        parsed_exprs = [ast.parse(e) for e in exprs]
+        new_exprs = []
+
+        visitor = self.CSEVisitor()
+        transformer = self.CSETransformer(visitor._expr_counter, preface, self._gen_name_from_expr)
+
+        for e in parsed_exprs:
+            visitor.visit(e)
+        for e in parsed_exprs:
+            new_exprs.append(_ast_unparse(transformer.visit(e)))
+
+        return preface, new_exprs
 
 
 # NB: Naively, you'd expect this to only be a function that produces
@@ -561,9 +670,15 @@ class CheckFunctionManager:
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
+        unique_name_set = UniqueNameSet()
+
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
         largs += [a for a in local_builder.argnames if a != "___implicit0"]
+
+        for name in largs:
+            unique_name_set.add(name)
+
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
@@ -629,7 +744,7 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        preface = "\n".join((" " * 4 * 3) + line for line in local_builder.shape_env_preface)
+        preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(list(unique(code_parts)))
         if len(preface) > 0:
             preface = [
                 "try:",
@@ -638,7 +753,7 @@ class CheckFunctionManager:
                 f"{'': ^4}return False"
             ]
         preface_str = "\n".join(f"{'': ^8}{line}" for line in preface)
-        code = " and ".join(unique(code_parts))
+        code = " and ".join(opt_code_parts)
 
         closure_vars = collections.OrderedDict(
             [
