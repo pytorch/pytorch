@@ -14,7 +14,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .dependencies import Dep, StarDep
+from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, has_triton
 from .virtualized import V
