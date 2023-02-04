@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <cuda_runtime.h>
 
-#include <iostream>
 #include <string>
 
 namespace c10 {
@@ -29,6 +28,7 @@ void c10_cuda_check_implementation(
   (void)error_unused;
 
   std::string check_message;
+#ifndef STRIP_ERROR_MESSAGES
   check_message.append("CUDA error: ");
   check_message.append(cudaGetErrorString(cuda_error));
   check_message.append(c10::cuda::get_cuda_check_suffix());
@@ -39,10 +39,7 @@ void c10_cuda_check_implementation(
     check_message.append(
         "Device-side assertions were explicitly omitted for this error check; the error probably arose while initializing the DSA handlers.");
   }
-
-  std::cout << "BEGIN DEBUG" << std::endl;
-  std::cout << check_message << std::endl;
-  std::cout << "END DEBUG" << std::endl;
+#endif
 
   TORCH_CHECK(false, check_message);
 }
