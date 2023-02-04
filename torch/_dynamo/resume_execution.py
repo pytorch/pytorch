@@ -198,7 +198,6 @@ class ContinueExecutionCache:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
 
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
             prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno
