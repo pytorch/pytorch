@@ -1994,9 +1994,9 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
         output_size = []
         for i, s in enumerate(scale_factors):
             if int(s) == s:
-                output_size.append(input_size[i + 2] * int(scale_factors[i]))
+                output_size.append(input_size[i + 2] * int(s))
             else:
-                output_size.append(sym_int(input_size[i + 2] * scale_factors[i]))
+                output_size.append(sym_int(input_size[i + 2] * s))
         return output_size
     utils.check(
         False, lambda: "Must specify exactly one of output_size and scale_factors"
@@ -2056,7 +2056,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
         osize = output_size[d]
         output_indices = torch.arange(osize, dtype=input.dtype, device=input.device)
         isize = input.shape[-num_spatial_dims + d]
-        scale = 1 / scales[d] if scales[d] is not None else isize / osize
+        scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
         input_indices = (output_indices * scale).to(torch.int64)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
@@ -2129,7 +2129,6 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
@@ -2155,7 +2154,9 @@ def upsample_bilinear2d(
         if align_corners:
             h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
-            h_scale_factor = in_h / out_h
+            h_scale_factor = (
+                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_h
+            )
     else:
         h_scale_factor = 0.0
 
@@ -2163,7 +2164,9 @@ def upsample_bilinear2d(
         if align_corners:
             w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
-            w_scale_factor = in_w / out_w
+            w_scale_factor = (
+                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_w
+            )
     else:
         w_scale_factor = 0.0
 
