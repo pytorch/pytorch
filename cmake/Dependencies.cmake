@@ -1923,7 +1923,7 @@ if(USE_KINETO)
         include(CheckCXXSourceRuns)
         # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
         if(NOT APPLE)
-          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl" "pthread")
         endif()
         set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
         check_cxx_source_runs("#include <stdexcept>
