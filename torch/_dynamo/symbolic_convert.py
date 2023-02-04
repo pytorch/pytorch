@@ -107,10 +107,6 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index)
 
-    def context_target_values(self):
-        if self.with_context is not None:
-            return self.with_context.target_values
-
     def exit(self, tx):
         return self.with_context.exit(tx)
 

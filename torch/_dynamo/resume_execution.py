@@ -92,11 +92,9 @@ class ReenterWith:
                         )
                     )
 
-            call_fn_args = len(self.target_values) if self.target_values else 0
-
             return [
                 *load_args,
-                create_instruction("CALL_FUNCTION", call_fn_args),
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
