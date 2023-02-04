@@ -5859,11 +5859,11 @@ class TestNLLLoss(TestCase):
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
     def test_cumsum_dim_check(self):
-        x=torch.rand((3, 3), device="mps")
+        x = torch.rand((3, 3), device="mps")
         self.assertEqual(x.cumsum(1), x.cumsum(-1))
         self.assertEqual(x.cumsum(0), x.cumsum(-2))
-        self.assertRaises(IndexError, lambda:x.cumsum(2))
-        self.assertRaises(IndexError, lambda:x.cumsum(-3))
+        self.assertRaises(IndexError, lambda: x.cumsum(2))
+        self.assertRaises(IndexError, lambda: x.cumsum(-3))
 
 class TestNNMPS(NNTestCase):
 
