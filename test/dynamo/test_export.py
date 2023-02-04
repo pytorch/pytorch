@@ -1777,6 +1777,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result = fn_with_kwargs(pos0, tuple0, *myargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            m = MyModule()
+
+        inp = torch.ones(2, 3, device="meta")
+        exported = torch._dynamo.export(m, inp)
+        out_graph = exported[0]
+        dynamo_result = out_graph(inp)
+        self.assertEqual(dynamo_result, m(inp))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
