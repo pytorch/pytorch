@@ -1745,7 +1745,7 @@ def parse_args(args=None):
     )
     group.add_argument(
         "--backend",
-        choices=torch._dynamo.list_backends(),
+        choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
     )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
