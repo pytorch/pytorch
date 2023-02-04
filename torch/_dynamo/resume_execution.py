@@ -2,7 +2,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
     create_instruction,
@@ -28,6 +28,7 @@ CO_ASYNC_GENERATOR = 0x0200
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int = None
+    target_values: Optional[Tuple] = None
 
     def __call__(self, code_options, cleanup):
         if sys.version_info < (3, 9):
@@ -76,8 +77,13 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ] + cleanup
 
+            if self.target_values is None:
+                call_fn_args = 0
+            else:
+                call_fn_args = len(self.target_values)
+
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                create_instruction("CALL_FUNCTION", call_fn_args),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
@@ -154,7 +160,13 @@ class ContinueExecutionCache:
             for i in range(nstack):
                 prefix.append(create_instruction("LOAD_FAST", f"___stack{i}"))
                 if i in hooks:
-                    prefix.extend(hooks.pop(i)(code_options, cleanup))
+                    setup_fn = hooks.pop(i)
+                    if setup_fn.target_values is not None:
+                        for val in setup_fn.target_values:
+                            if val not in code_options["co_consts"]:
+                                code_options["co_consts"] = tuple(code_options["co_consts"]) + (val,)
+                            prefix.append(create_instruction("LOAD_CONST", code_options["co_consts"].index(val), val))
+                    prefix.extend(setup_fn(code_options, cleanup))
             assert not hooks
 
             prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
