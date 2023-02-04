@@ -1016,8 +1016,9 @@ class Scheduler:
                     V.graph.wrapper_code.codegen_free(node.node)
             elif name in V.graph.graph_inputs:
                 storage = V.graph.graph_inputs[name].data
-                assert storage.is_input_buffer()
-                V.graph.wrapper_code.codegen_free(storage.data)
+                if not isinstance(storage, ir.ReinterpretView):
+                    assert storage.is_input_buffer()
+                    V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
 
