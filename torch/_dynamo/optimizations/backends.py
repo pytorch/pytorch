@@ -1,4 +1,3 @@
-import copy
 import functools
 import logging
 import os
@@ -36,24 +35,6 @@ def create_backend(fn):
             raise
 
     return register_backend(inner)
-
-
-@register_backend
-def inductor(*args, **kwargs):
-    # do import here to avoid loading inductor into memory when it is not used
-    from torch._inductor.compile_fx import compile_fx
-
-    return compile_fx(*args, **kwargs)
-
-
-@register_backend
-def eager(gm, fake_tensor_inputs):
-    return gm
-
-
-@register_backend(name="ts")
-def torchscript(gm, fake_tensor_inputs):
-    return torch.jit.script(gm)
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
@@ -164,27 +145,6 @@ def onnxrt(subgraph):
         return onnxrt_cuda(subgraph)
     else:
         return onnxrt_cpu(subgraph)
-
-
-@create_backend
-def ipex(subgraph, **kwargs):
-    import intel_extension_for_pytorch as ipex  # type: ignore[import]
-
-    inputs = subgraph.example_inputs
-    model = subgraph.model
-    with torch.no_grad():
-        model.eval()
-        if kwargs["datatype"] == "bf16":
-            model = ipex.optimize(model, dtype=torch.bfloat16)
-        else:
-            model = ipex.optimize(model, dtype=torch.float32)
-        try:
-            traced_model = torch.jit.trace(model, inputs).eval()
-            traced_model = torch.jit.freeze(traced_model)
-            return traced_model
-        except Exception:
-            log.warning("JIT trace failed during the 'ipex' optimize process.")
-            return model
 
 
 def _raise_timeout(signum, frame):
@@ -558,74 +518,43 @@ def tvm_compile_inner(
         return jit_mod  # explicit fall back to eager
 
 
-@functools.lru_cache(None)
-def _init_ltc():
+@create_backend
+def ipex(subgraph):
     try:
-        import torch._lazy.extract_compiled_graph
-        from torch._lazy.ts_backend import init as init_ts_backend
-
-        # hopefully changing this line to sth like _ltc_init_xla_backend in future
-        # will enable XLA
-        init_ts_backend()
-
-        return torch._lazy
-    except ModuleNotFoundError as e:
-        print(f"ltc backend fails. Can not import {e.name}")
+        import intel_extension_for_pytorch  # type: ignore[import]  # noqa: F401
+    except ImportError:
+        log.exception(
+            "Unable to import Intel Extension for PyTorch (IPEX). "
+            "Please install the right version of IPEX that matches the PyTorch version being used. "
+            "Refer to https://github.com/intel/intel-extension-for-pytorch for details."
+        )
         raise
 
+    from torch.utils._mode_utils import no_dispatch
 
-def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs):
-    ltc = _init_ltc()
-    return ltc.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
-
-
-def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
-    ltc = _init_ltc()
-    lazy_model = copy.deepcopy(gm).to(device="lazy")
-    ltc.extract_compiled_graph.force_lazy_device(lazy_model)
-
-    def ltc_model(*inputs):
-        orig_device = inputs[0].device if len(inputs) > 0 else "cuda"
-        lazy_inputs = tuple(inp.to(device="lazy") for inp in inputs)
-
-        lazy_out = lazy_model(*lazy_inputs)
-        out = tuple(out.to(device=orig_device) for out in lazy_out)
-        return out
-
-    return ltc_model
-
-
-@create_backend
-def torchxla_trivial(subgraph):
-    return subgraph.model
-
-
-@create_backend
-def torchxla_trace_once(subgraph):
-    import torch_xla.core.dynamo_bridge as bridge  # type: ignore[import]
-
-    compiled_graph = None
     model = subgraph.model
-
-    def fwd(*args):
-        nonlocal subgraph
-        nonlocal compiled_graph
-        if compiled_graph is None:
-            compiled_graph = bridge.extract_compiled_graph(model, args)
-            del subgraph
-        return compiled_graph(*args)
-
-    return fwd
-
-
-def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": "fp32"}
-    return ipex(gm, example_inputs, **kwargs_ipex)
-
-
-def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": "bf16"}
-    return ipex(gm, example_inputs, **kwargs_ipex)
+    inputs = subgraph.example_inputs
+    with no_dispatch():
+        static_inputs = []
+        for x in inputs:
+            if x._has_symbolic_sizes_strides:
+                size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
+                stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
+                static_inputs.append(
+                    torch.as_strided(
+                        torch.zeros(size, dtype=x.dtype, device=x.device), size, stride
+                    )
+                )
+            else:
+                static_inputs.append(torch.zeros_like(x))
+    try:
+        with torch.no_grad():
+            traced_model = torch.jit.trace(model.eval(), static_inputs)
+            traced_model = torch.jit.freeze(traced_model)
+        return traced_model
+    except Exception:
+        log.warning("JIT trace failed during the 'ipex' optimize process.")
+        return model
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
