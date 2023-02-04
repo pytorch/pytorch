@@ -20,6 +20,8 @@ inductor_decompositions = get_decompositions(
     [
         aten.flip,
         aten.linalg_vector_norm,
+        aten.std,
+        aten.std_mean,
         aten._to_copy,
     ]
 )
