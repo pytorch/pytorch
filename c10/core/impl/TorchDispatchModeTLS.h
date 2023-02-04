@@ -2,8 +2,6 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 
 namespace c10 {
 namespace impl {

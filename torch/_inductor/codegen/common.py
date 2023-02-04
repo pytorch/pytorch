@@ -340,6 +340,7 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(str(outer))
             precompile_args.append(SizeArg(inner, outer))
+
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
@@ -619,7 +620,9 @@ class Kernel(CodeGen):
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
-            x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
 
