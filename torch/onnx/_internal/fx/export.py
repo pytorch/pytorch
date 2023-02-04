@@ -5,7 +5,7 @@ import inspect
 import itertools
 import operator
 from types import ModuleType
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 try:
     import onnx
@@ -250,6 +250,7 @@ def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_valu
 
     return onnx_tensor
 
+
 def _filter_incompatible_kwargs(kwargs):
     """Filter out kwargs that are not supported by onnxscript."""
     filtered = {}
@@ -275,17 +276,18 @@ def _filter_incompatible_kwargs(kwargs):
 
 
 def _wrap_fx_args_as_onnxscript_args(
-    node: torch.fx.Node, fx_name_to_onnxscipt_value: Dict[
+    node: torch.fx.Node,
+    fx_name_to_onnxscipt_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
-    ]
+    ],
 ) -> Tuple[tuple, dict, tuple, dict]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
     # (1) Complete the arguments with default values.
-    complete_args = []
-    complete_kwargs = {}
+    complete_args: List[Any] = []
+    complete_kwargs: Dict[str, Any] = {}
     if inspect.isbuiltin(node.target):
         complete_args = node.args
     else:
@@ -299,20 +301,27 @@ def _wrap_fx_args_as_onnxscript_args(
                     # Get default from schema.
                     complete_kwargs[expected_arg.name] = expected_arg.default_value
 
-    graph_args = tuple(_retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value) for arg in complete_args)
+    graph_args = tuple(
+        _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value)
+        for arg in complete_args
+    )
     graph_kwargs = _filter_incompatible_kwargs(complete_kwargs)
+
     # prepare torch format args and kwargs for op-level validation
+    # Use fake tensor to create real tensor to feed in ops
     torch_args = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
-            # from fake tensor to real tensor tensor
+            # based on fake tensor to create real tensor
             from torch.utils._mode_utils import no_dispatch
+
             with no_dispatch():
                 torch_args.append(torch.randn_like(arg.meta["val"]))
         else:
             torch_args.append(arg)
     torch_kwargs = complete_kwargs
     return (graph_args, graph_kwargs, tuple(torch_args), torch_kwargs)
+
 
 def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -401,9 +410,13 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             if symbolic_fn is None:
                 raise RuntimeError(f"Cannot find function for {exporter_key}")
             # Map FX inputs to ONNX inputs and fill optional inputs with default values.
-            onnx_args, onnx_kwargs, torch_args, torch_kwargs = _wrap_fx_args_as_onnxscript_args(
-                node, fx_name_to_onnxscipt_value
-            )
+            # torch_args and torch_kwargs are for op-level validation
+            (
+                onnx_args,
+                onnx_kwargs,
+                torch_args,
+                torch_kwargs,
+            ) = _wrap_fx_args_as_onnxscript_args(node, fx_name_to_onnxscipt_value)
             with evaluator.default_as(tracer):
                 output: Union[
                     graph_building.TorchScriptTensor,
@@ -421,9 +434,14 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
                 output
             )
             # op-level validation
+            # TODO(titaiwang): Change ORTEvaluator to ReferenceEvaluator
+            # Symbolic_fn should have the same output as node.target (torch ops)
             with evaluator.default_as(evaluator.ORTEvaluator()):
                 expected_output = node.target(*torch_args, **torch_kwargs)
-                numpy_args = [arg.numpy() if isinstance(arg, torch.Tensor) else arg for arg in torch_args]
+                numpy_args = [
+                    arg.numpy() if isinstance(arg, torch.Tensor) else arg
+                    for arg in torch_args
+                ]
                 ort_output = symbolic_fn(*numpy_args, **torch_kwargs)
                 torch.testing.assert_close(expected_output.numpy(), ort_output)
 
