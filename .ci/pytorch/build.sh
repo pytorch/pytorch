@@ -6,11 +6,6 @@ set -ex
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck source=./common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-# shellcheck source=./common-build.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
 if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
     # DEBUG pytorch sccache
     export CARGO_HOME=/opt/cargo
@@ -24,6 +19,11 @@ if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
       cd .. && \
       rm -rf sccache
 fi
+
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"

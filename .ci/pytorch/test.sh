@@ -665,10 +665,6 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
   # DEBUG pytorch sccache
   export CARGO_HOME=/opt/cargo
 
@@ -680,6 +676,10 @@ build_xla() {
     cargo install --path . && \
     cd .. && \
     rm -rf sccache
+
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
   XLA_DIR=xla
   USE_CACHE=1
