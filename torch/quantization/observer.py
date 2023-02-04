@@ -48,6 +48,8 @@ for orig_name in _deprecated_names:
     target_obj_name = f"{_AO_MIGRATION_DEPRECATED_NAME_PREFIX}_{orig_name}"
     target_obj = getattr(__orig_mod, orig_name)
     setattr(sys.modules[__name__], target_obj_name, target_obj)
+del target_obj_name
+del target_obj
 
 def __getattr__(name):
     if name in _deprecated_names:
