@@ -27,7 +27,7 @@ jobs:
           check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.circleci/docker/requirements-ci.txt
+            **/.ci/docker/requirements-ci.txt
             **/.github/requirements-gha-cache.txt
 
       - name: Install Python Packages
