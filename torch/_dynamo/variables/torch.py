@@ -337,14 +337,19 @@ class TorchVariable(VariableTracker):
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
             )
         if (
-            self.value.__name__ == "get_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
+            (
+                self.value.__name__ == "get_state"
+                and hasattr(self.value, "__self__")
+                and isinstance(self.value.__self__, torch._C.Generator)
+            )
+            or self.value == torch.random.get_rng_state
+            or self.value == torch.cuda.get_rng_state
         ):
 
             def get_state_from_generator():
                 return self.value()
 
+            options["source"] = self.source
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -356,16 +361,20 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         if (
-            self.value.__name__ == "set_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ) or self.value == torch.random.set_rng_state:
+            (
+                self.value.__name__ == "set_state"
+                and hasattr(self.value, "__self__")
+                and isinstance(self.value.__self__, torch._C.Generator)
+            )
+            or self.value == torch.random.set_rng_state
+            or self.value == torch.cuda.set_rng_state
+        ):
             assert len(args) == 1
             assert isinstance(args[0], TensorVariable)
 
-            unimplemented(
-                "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
-            )
+            # unimplemented(
+            #     "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+            # )
             # In fake tensor case, this state doesn't matter, but
             # it needs to be valid to not segfault. Pull a real tensor out.
             # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
@@ -373,10 +382,13 @@ class TorchVariable(VariableTracker):
             # (Not the fake example_value) - for the sake of graph correctness.
             if self.value == torch.random.set_rng_state:
                 example_value = torch.random.get_rng_state()
+            elif self.value == torch.cuda.set_rng_state:
+                example_value = torch.cuda.get_rng_state()
             else:
                 example_value = self.value.__self__.get_state()
 
             self.value.__module__ = self.__module__
+            options["source"] = self.source
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
