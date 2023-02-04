@@ -822,28 +822,6 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "th_header",
-        header_namespace = "",
-        exported_headers = subdir_glob([
-            # TH
-            ("aten/src", "TH/*.h"),
-            ("aten/src", "TH/*.hpp"),
-            ("aten/src", "TH/generic/*.h"),
-            ("aten/src", "TH/generic/*.hpp"),
-            ("aten/src", "TH/generic/simd/*.h"),
-            ("aten/src", "TH/vector/*.h"),
-            ("aten/src", "TH/generic/*.c"),
-            ("aten/src", "TH/generic/*.cpp"),
-            ("aten/src/TH", "*.h"),  # for #include <THGenerateFloatTypes.h>
-            # THNN
-            ("aten/src", "THNN/*.h"),
-            ("aten/src", "THNN/generic/*.h"),
-            ("aten/src", "THNN/generic/*.c"),
-        ]),
-        labels = labels,
-    )
-
-    fb_xplat_cxx_library(
         name = "aten_header",
         header_namespace = "",
         exported_headers = subdir_glob([
