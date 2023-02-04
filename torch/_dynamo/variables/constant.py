@@ -87,19 +87,11 @@ class ConstantVariable(VariableTracker):
             ).call_method(tx, name, args, kwargs)
 
         if any([isinstance(x, DynamicShapeVariable) for x in args]):
-            # NOTE! DANGER! THIS ONLY WORKS FOR COMMUTATIVE OPS
-            # we are relying on add to have arg[0] be a DynamicShapeVariable
-            # because we are in ConstantVariable land
-            # This transforms
-            # constant + dynamic
-            # into
-            # dynamic + constant
-            # Which already has infra built for writing to the graph
-            if name == "__add__":
-                assert len(args) == 1
-                return args[0].call_method(tx, name, [self], {})
-            # Unfortunate constant
-            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+            # Promote to DynamicShapeVariable for operations involving dynamic shapes.
+            return variables.DynamicShapeVariable(
+                self.as_proxy(), self.value
+            ).call_method(tx, name, args, kwargs)
+
         try:
             const_args = [a.as_python_constant() for a in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
