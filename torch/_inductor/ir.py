@@ -46,6 +46,20 @@ log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
+"""
+Normally you have:
+TensorBox -> StorageBox -> Buffer
+
+If you mutate the data, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation)
+
+For views you get:
+TensorBox -> View -> StorageBox -> Buffer
+where the StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+For metadata mutation (e.g. as_strided_) we swing the TensorBox pointer.
+"""
+
 
 def inverse_reorder(order):
     inv_order = dict(zip(order, range(len(order))))
@@ -4182,10 +4196,7 @@ class AllReduce(ExternKernel):
 
     @classmethod
     def create(
-        cls,
-        x: "TensorBox",
-        group_id: int,
-        reduce_op: str,
+        cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         x = cls.realize_input(x)
 
@@ -4199,7 +4210,7 @@ class AllReduce(ExternKernel):
         all_reduce = AllReduce(
             layout=new_layout,
             inputs=[x],
-            constant_args=[group_id, reduce_op],
+            constant_args=[reduce_op, tag, ranks, group_size],
         )
 
         # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
