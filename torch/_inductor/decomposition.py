@@ -154,10 +154,16 @@ def floordiv(a, b):
 
 
 def get_alignment_size(x):
-    if x.dtype == torch.float16 or x.dtype == torch.half or x.dtype == torch.bfloat16:
-        return 8
-    elif x.dtype == torch.float32 or x.dtype == torch.float:
-        return 4
+    if torch.cuda.get_device_name().contains("A100"):
+        has_a100 = True
+    if x.dtype == torch.int8:
+        return 128 if has_a100 else 16
+    elif x.dtype == torch.float16 or x.dtype == torch.half or x.dtype == torch.bfloat16:
+        return 64 if has_a100 else 8
+    elif x.dtype == torch.float32:
+        return 32 if has_a100 else 4
+    elif x.dtype == torch.float64:
+        return 16 if has_a100 else 2
     else:
         return 0
 
