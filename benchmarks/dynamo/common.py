@@ -174,12 +174,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
     "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # cannot determine truth value of Relational
-    # timm_models
-    "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
-    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -195,13 +190,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # ValueError: floor is not defined
+    "pytorch_unet",  # floor is not defined
     # timm_models
-    "hrnet_w18",  # name 'floor' is not defined
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
     "volo_d1_224",  # ceiling is not defined
-    "xcit_large_24_p8_224",  # ceiling is not defined
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
