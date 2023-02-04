@@ -348,18 +348,20 @@ def transform_code_object(code, transformations, safe=False):
     keys = ["co_argcount"]
     if sys.verion_info >= (3, 8):
         keys.append("co_posonlyargcount")
-    keys.extend([
-        "co_kwonlyargcount",
-        "co_nlocals",
-        "co_stacksize",
-        "co_flags",
-        "co_code",
-        "co_consts",
-        "co_names",
-        "co_varnames",
-        "co_filename",
-        "co_name"
-    ])
+    keys.extend(
+        [
+            "co_kwonlyargcount",
+            "co_nlocals",
+            "co_stacksize",
+            "co_flags",
+            "co_code",
+            "co_consts",
+            "co_names",
+            "co_varnames",
+            "co_filename",
+            "co_name",
+        ]
+    )
     if sys.version_info >= (3, 11):
         keys.append("co_qualname")
     keys.append("co_firstlineno")
@@ -370,10 +372,12 @@ def transform_code_object(code, transformations, safe=False):
     if sys.version_info >= (3, 11):
         # not documented, but introduced in https://github.com/python/cpython/issues/84403
         keys.append("co_exceptiontable")
-    keys.extend([
-        "co_freevars",
-        "co_cellvars",
-    ])
+    keys.extend(
+        [
+            "co_freevars",
+            "co_cellvars",
+        ]
+    )
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
