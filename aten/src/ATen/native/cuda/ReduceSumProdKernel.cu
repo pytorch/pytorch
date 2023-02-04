@@ -21,7 +21,7 @@ struct sum_functor {
 };
 
 // jiterated specialization for `complex<Half>`
-constexpr char sum_name[] = "sum";
+CONSTEXPR_EXCEPT_WIN_CUDA char sum_name[] = "sum";
 template <>
 struct sum_functor<c10::complex<at::Half>> {
 // jiterator reduction fails on windows
@@ -57,7 +57,7 @@ struct nansum_functor {
   }
 };
 
-constexpr char prod_name[] = "prod";
+CONSTEXPR_EXCEPT_WIN_CUDA char prod_name[] = "prod";
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
