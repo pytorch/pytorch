@@ -1302,55 +1302,24 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
-fallback_arange = fallback_handler(aten.arange)
-
-
-@register_lowering([torch.arange, aten.arange])
-def arange(
-    start,
-    end=None,
-    step=1,
+@register_lowering(prims.iota)
+def iota(
+    length,
     *,
-    dtype=None,
-    device=None,
-    layout=torch.strided,
-    pin_memory=False,
+    start,
+    step,
+    dtype,
+    device,
+    requires_grad,
 ):
-    assert layout == torch.strided
-    assert not pin_memory
-    if end is None:
-        end = start
-        start = 0
-
-    if isinstance(start, float) and int(start) == start:
-        start = int(start)
-    if isinstance(end, float) and int(end) == end:
-        end = int(end)
-    if isinstance(step, float) and int(step) == step:
-        step = int(step)
-
-    # Triton kernel doesn't support float arange yet, fallback to aten.arange
-    if not (isinstance(start, int) and isinstance(end, int) and isinstance(step, int)):
-        return fallback_arange(
-            start,
-            end,
-            step,
-            dtype=dtype,
-            device=device,
-            layout=layout,
-            pin_memory=pin_memory,
-        )
-
-    dtype = dtype or torch.int64
-    length = ceildiv((end - start), step)
-    start = sympy.Integer(start)
-    step = sympy.Integer(step)
+    def fn(index):
+        return ops.index_expr(step * index[0] + start, dtype=dtype)
 
     return Pointwise.create(
         device=decode_device(device),
         dtype=dtype,
-        inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
-        ranges=[sympy.Integer(length)],
+        inner_fn=fn,
+        ranges=[length],
     )
 
 
