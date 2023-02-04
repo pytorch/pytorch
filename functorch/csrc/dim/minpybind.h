@@ -59,8 +59,7 @@ struct vector_args;
 struct handle {
     handle(PyObject* ptr)
     : ptr_(ptr) {}
-    handle()
-    : ptr_(nullptr) {}
+    handle() = default;
 
 
     PyObject* ptr() const {
@@ -90,7 +89,7 @@ struct handle {
     }
 
 protected:
-    PyObject * ptr_;
+    PyObject* ptr_ = nullptr;
 };
 
 
@@ -107,7 +106,7 @@ struct hdl : public handle {
     }
     hdl(T* ptr)
     : hdl((PyObject*) ptr) {}
-    hdl(obj<T> o)
+    hdl(const obj<T>& o)
     : hdl(o.ptr()) {}
 private:
     hdl(handle h) : handle(h) {}
@@ -428,7 +427,7 @@ struct slice_view {
         }
         slicelength = PySlice_AdjustIndices(size, &start, &stop, step);
     }
-    Py_ssize_t start, stop, step, slicelength;
+    Py_ssize_t start = 0, stop = 0, step = 0, slicelength;
 };
 
 bool is_slice(handle h) {
@@ -503,7 +502,7 @@ struct dict_view : public handle {
         return PyDict_Check(h.ptr());
     }
     bool next(Py_ssize_t* pos, py::handle* key, py::handle* value) {
-        PyObject *k, *v;
+        PyObject *k = nullptr, *v = nullptr;
         auto r = PyDict_Next(ptr(), pos, &k, &v);
         *key = k;
         *value = v;
@@ -617,12 +616,12 @@ struct vector_args {
             }
             *format_it++ = '\0';
             _PyArg_Parser* _parser = new _PyArg_Parser{format_str, &names_buf[0], fname_cstr, 0};
-            PyObject *dummy = NULL;
+            PyObject *dummy = nullptr;
             _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser, &dummy, &dummy, &dummy, &dummy, &dummy);
 #else
-            _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
+            _PyArg_Parser* _parser = new _PyArg_Parser{nullptr, &names_buf[0], fname_cstr, nullptr};
             std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
-            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
+            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, nullptr, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #endif
             throw exception_set();
         };
