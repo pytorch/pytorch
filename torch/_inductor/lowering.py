@@ -1,8 +1,6 @@
 import functools
 import itertools
 import logging
-import math
-import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -21,7 +19,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.symbolic_shapes import sym_sqrt
+from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
@@ -29,7 +27,6 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
-    FloorDiv,
     IndexingConstant,
     PermuteView,
     Pointwise,
@@ -3683,49 +3680,8 @@ def sym_numel(a):
     return a.get_numel()
 
 
-@register_lowering(operator.mul)
-def op_mul(a, b):
-    return a * b
-
-
-@register_lowering(operator.add)
-def op_add(a, b):
-    return a + b
-
-
-@register_lowering(operator.sub)
-def op_sub(a, b):
-    return a - b
-
-
-@register_lowering(operator.floordiv)
-def op_floordiv(a, b):
-    return FloorDiv(a, b)
-
-
-@register_lowering(operator.truediv)
-def op_truediv(a, b):
-    return a / b
-
-
-@register_lowering(math.ceil)
-def op_ceil(a):
-    return sympy.ceiling(a)
-
-
-@register_lowering(math.floor)
-def op_floor(a):
-    return sympy.floor(a)
-
-
-@register_lowering(sym_sqrt)
-def op_sqrt(a):
-    return sympy.sqrt(a)
-
-
-@register_lowering(torch.sym_float)
-def op_sym_float(a):
-    return a
+for method, func in magic_methods.items():
+    register_lowering(method_to_operator(method))(func)
 
 
 @register_lowering(aten._foobar)
