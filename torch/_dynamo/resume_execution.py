@@ -5,6 +5,7 @@ import types
 from typing import Any, Dict, List
 
 from .bytecode_transformation import (
+    create_call_function,
     create_instruction,
     create_jump_absolute,
     Instruction,
@@ -94,29 +95,36 @@ class ReenterWith:
                     "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
                 )
 
-            cleanup[:] = [
-                create_instruction("POP_BLOCK"),
-                create_load_none(),
-                create_load_none(),
-                create_load_none(),
-                create_instruction("CALL_FUNCTION", 3),
-                create_instruction("POP_TOP"),
-                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
-                with_except_start,
-                create_instruction(
-                    "POP_JUMP_FORWARD_IF_TRUE", target=pop_top_after_with_except_start
-                ),
-                create_instruction("RERAISE"),
-                pop_top_after_with_except_start,
-                create_instruction("POP_TOP"),
-                create_instruction("POP_TOP"),
-                create_instruction("POP_EXCEPT"),
-                create_instruction("POP_TOP"),
-                cleanup_complete_jump_target,
-            ] + cleanup
+            cleanup[:] = (
+                [
+                    create_instruction("POP_BLOCK"),
+                    create_load_none(),
+                    create_load_none(),
+                    create_load_none(),
+                ]
+                + create_call_function(2, False)
+                + [
+                    create_instruction("POP_TOP"),
+                    create_instruction(
+                        "JUMP_FORWARD", target=cleanup_complete_jump_target
+                    ),
+                    with_except_start,
+                    create_instruction(
+                        "POP_JUMP_FORWARD_IF_TRUE",
+                        target=pop_top_after_with_except_start,
+                    ),
+                    create_instruction("RERAISE"),
+                    pop_top_after_with_except_start,
+                    create_instruction("POP_TOP"),
+                    create_instruction("POP_TOP"),
+                    create_instruction("POP_EXCEPT"),
+                    create_instruction("POP_TOP"),
+                    cleanup_complete_jump_target,
+                ]
+                + cleanup
+            )
 
-            return [
-                create_instruction("CALL_FUNCTION", 0),
+            return create_call_function(0, False) + [
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
@@ -150,6 +158,7 @@ class ContinueExecutionCache:
         nstack: int,
         argnames: List[str],
         setup_fns: List[ReenterWith],
+        null_idxes: List[int],
     ):
         assert offset is not None
         assert not (
@@ -159,7 +168,7 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, lineno, offset, nstack, argnames, setup_fns
+                code, lineno, offset, nstack, argnames, setup_fns, null_idxes
             )
 
         meta = ResumeFunctionMetadata(code)
@@ -200,6 +209,11 @@ class ContinueExecutionCache:
                 if i in hooks:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
+
+            if sys.version_info >= (3, 11):
+                for idx in null_idxes:
+                    prefix.append(create_instruction("PUSH_NULL"))
+                    prefix.extend(create_rot_n(idx))
 
             prefix.append(create_jump_absolute(target))
 

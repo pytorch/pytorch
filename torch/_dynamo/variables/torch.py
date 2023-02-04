@@ -160,7 +160,7 @@ class TorchVariable(VariableTracker):
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
 
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value)
+        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
 
     def as_proxy(self):
         return self.value

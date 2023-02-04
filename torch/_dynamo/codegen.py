@@ -1,14 +1,17 @@
 import collections
 import dataclasses
 import re
+import sys
 import types
 from typing import List
 
 import torch.nn
 
 from .bytecode_transformation import (
+    create_call_function,
     create_dup_top,
     create_instruction,
+    create_load_global,
     create_rot_n,
     Instruction,
 )
@@ -123,10 +126,7 @@ class PyCodegen(object):
 
             if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
-                    [
-                        self.create_load_attr("item"),
-                        create_instruction("CALL_FUNCTION", 0),
-                    ]
+                    [self.create_load_attr("item")] + create_call_function(0, True)
                 )
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
@@ -161,7 +161,7 @@ class PyCodegen(object):
         for i in items:
             self(i)
 
-    def setup_globally_cached(self, name, value):
+    def setup_globally_cached(self, name, value, push_null):
         """Store value in a new global"""
         name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         f_globals = self.tx.f_globals
@@ -169,7 +169,7 @@ class PyCodegen(object):
             assert id(f_globals[name]) == id(value)
         else:
             f_globals[name] = value
-        return [self.create_load_global(name, add=True)]
+        return [self.create_load_global(name, push_null, add=True)]
 
     def clear_tos(self):
         self.top_of_stack = None
@@ -213,12 +213,12 @@ class PyCodegen(object):
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
         )
 
-    def create_load_global(self, name, add=False):
+    def create_load_global(self, name, push_null, add=False):
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
-        return create_instruction(
-            "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
+        return create_load_global(
+            name, self.code_options["co_names"].index(name), push_null
         )
 
     def create_load_const(self, value):
@@ -256,11 +256,18 @@ class PyCodegen(object):
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
 
-    def load_function_name(self, fn_name, num_on_stack=0):
+    def load_function_name(self, fn_name, push_null, num_on_stack=0):
         """Load the global fn_name on the stack num_on_stack down"""
-        return [self.create_load_global(fn_name, add=True)] + self.rot_n(
-            num_on_stack + 1
+        output = []
+        if push_null and sys.version_info >= (3, 11):
+            output.extend(
+                [create_instruction("PUSH_NULL")] + self.rot_n(num_on_stack + 1)
+            )
+        output.extend(
+            [self.create_load_global(fn_name, False, add=True)]
+            + self.rot_n(num_on_stack + 1)
         )
+        return output
 
     def rot_n(self, n):
         try:
@@ -299,42 +306,38 @@ class PyCodegen(object):
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
-    def create_load_python_module(self, mod):
+    def create_load_python_module(self, mod, push_null):
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
         root_globals = self.tx.output.root_globals
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if root_globals.get(name, None) is mod:
-            return self.create_load_global(name, add=True)
+            return self.create_load_global(name, push_null, add=True)
         mangled_name = f"___module_{name}_{id(mod)}"
         if mangled_name not in root_globals:
             self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, add=True)
+        return self.create_load_global(mangled_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> List[Instruction]:
         """Call the generated code function stored in fn_name"""
-        self.extend_output(self.load_function_name(fn_name))
+        self.extend_output(self.load_function_name(fn_name, True))
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
             if arg.is_unspecialized:
                 self.extend_output(
                     [
-                        self.create_load_python_module(torch),
+                        self.create_load_python_module(torch, True),
                         self.create_load_attr("tensor"),
                     ]
                 )
                 self.extend_output(arg.load(self))
-                self.extend_output(
-                    [
-                        create_instruction("CALL_FUNCTION", 1),
-                    ]
-                )
+                self.extend_output(create_call_function(1, False))
             else:
                 self.extend_output(arg.load(self))
 
-        self.append_output(create_instruction("CALL_FUNCTION", len(graphargs)))
+        self.extend_output(create_call_function(len(graphargs), False))
 
     def load_import_from(self, module_name, object_name):
         self.extend_output(
@@ -345,3 +348,15 @@ class PyCodegen(object):
 
     def create_begin_finally(self):
         return create_instruction("BEGIN_FINALLY")
+
+    def create_call_function_kw(self, nargs, kw_names, push_null):
+        if sys.version_info >= (3, 11):
+            return [
+                create_instruction(
+                    "KW_NAMES", self.get_const_index(self.code_options, kw_names)
+                )
+            ] + create_call_function(nargs, push_null)
+        return [
+            self.create_load_const(kw_names),
+            create_instruction("CALL_FUNCTION_KW", nargs),
+        ]
