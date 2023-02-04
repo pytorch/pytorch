@@ -2325,6 +2325,7 @@ def std(
     a = _maybe_convert_to_dtype(a, opmath_dtype)
     a_var = torch.var(a, dim, correction=correction, keepdim=keepdim)
     a_std = torch.sqrt(a_var)
+    assert dtype is not None
     return _maybe_convert_to_dtype(a_std, dtype)
 
 
@@ -2397,6 +2398,7 @@ def std_mean(
     a = _maybe_convert_to_dtype(a, opmath_dtype)
     a_var, a_mean = torch.var_mean(a, dim, correction=correction, keepdim=keepdim)
     a_std = torch.sqrt(a_var)
+    assert dtype is not None
     return (
         _maybe_convert_to_dtype(a_std, dtype),
         _maybe_convert_to_dtype(a_mean, original_dtype),
