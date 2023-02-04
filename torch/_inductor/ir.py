@@ -4173,6 +4173,13 @@ class Wait(ExternKernel):
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
 
+    @classmethod
+    def create(cls, x: "TensorBox"):
+        return Wait(
+            layout=x.get_layout(),
+            inputs=[x],
+        )
+
     def get_alias_names(self):
         # reporting alias name here didn't impact anything.
         #
@@ -4207,17 +4214,10 @@ class AllReduce(ExternKernel):
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
         # Nobody should consume the output of AllReduce except 'Wait', which we control here.
-        all_reduce = AllReduce(
+        return AllReduce(
             layout=new_layout,
             inputs=[x],
             constant_args=[reduce_op, tag, ranks, group_size],
-        )
-
-        # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
-        # and waits on it, also producing a buffer which is really the input buffer to AllReduce.
-        return Wait(
-            layout=new_layout,
-            inputs=[all_reduce],
         )
 
     def codegen(self, wrapper):
@@ -4227,10 +4227,14 @@ class AllReduce(ExternKernel):
         # extract references to our args in string form for codegen output
         (input_name,) = [t.codegen_reference() for t in self.inputs]
         output_name = self.get_name()
-        group_id = f"{repr(self.constant_args[0])}"
-        reduce_op = self.constant_args[1]
+        reduce_op, tag, ranks, group_size = self.constant_args
         # TODO make this real
         c10d_op = {"sum": "ReduceOp.SUM"}
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = dist._find_or_create_pg_by_ranks_and_tag({tag}, {ranks})"
+        )
 
         # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
         # to reuse the input buffer.  (This requires no other users of the input buffer.)
@@ -4241,7 +4245,7 @@ class AllReduce(ExternKernel):
         # (1) the input buffer, which we're allowed to inplace modify
         # (2) a freshly allocated buffer, which we've copied the input into above
         wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
+            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={output_name}_pg, op={c10d_op[reduce_op]})"
         )
 
     def get_alias_names(self):

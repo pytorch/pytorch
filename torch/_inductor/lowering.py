@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 import sympy
 
 import torch
+import torch.distributed.traceable_collectives
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
@@ -46,6 +47,7 @@ lowerings = {}
 layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
+tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 
@@ -3770,15 +3772,21 @@ def _realize(x):
     return clone(x)
 
 
+@register_lowering(tr_c10d.wait)
+def wait(input):
+    return TensorBox.create(ir.Wait.create(input))
+
+
 @register_lowering(aten.all_reduce)
-def allreduce(inputs, group_id, reduce_op):
-    # return TensorBox.create(
-    return ir.AllReduce.create(
-        inputs,
-        group_id,
-        reduce_op,
+def allreduce(input, group_id, reduce_op):
+    return TensorBox.create(
+        ir.AllReduce.create(
+            input,
+            group_id,
+            reduce_op,
+        )
     )
-    # )
+
 
 # populate lowerings defined in kernel/*
 from . import kernel
