@@ -2016,8 +2016,6 @@ def upsample_nearest1d_vec(input, output_size, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale = get_scale_value(scale_factors, 0)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_nearest1d.default here
     return upsample_nearest1d(input, osize, scale)
 
 
@@ -2029,8 +2027,6 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_nearest2d.default here
     return upsample_nearest2d(input, osize, scale_h, scale_w)
 
 
@@ -2043,12 +2039,10 @@ def upsample_nearest3d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 1)
     scale_w = get_scale_value(scale_factors, 2)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_nearest3d.default here
     return upsample_nearest3d(input, osize, scale_d, scale_h, scale_w)
 
 
-def _compute_upsample_nearest_indices(input, output_size):
+def _compute_upsample_nearest_indices(input, output_size, scales):
     # For each dim in output_size, compute the set of input indices used
     # to produce the upsampled output.
     indices = []
@@ -2064,7 +2058,7 @@ def _compute_upsample_nearest_indices(input, output_size):
             osize, dtype=input.dtype, device=input.device
         )
         isize = input.shape[-num_spatial_dims + d]
-        scale = isize / osize
+        scale = 1/scales[d] if scales[d] is not None else isize / osize
         input_indices = (output_indices * scale).to(torch.int64)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
@@ -2080,7 +2074,7 @@ def upsample_nearest1d(
     output_size: List[int],
     scales: Optional[float] = None,
 ) -> Tensor:
-    (l_indices,) = _compute_upsample_nearest_indices(input, output_size)
+    (l_indices,) = _compute_upsample_nearest_indices(input, output_size, (scales,))
     result = input[:, :, l_indices]
     return result
 
@@ -2094,7 +2088,7 @@ def upsample_nearest2d(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    h_indices, w_indices = _compute_upsample_nearest_indices(input, output_size)
+    h_indices, w_indices = _compute_upsample_nearest_indices(input, output_size, (scales_h, scales_w))
     result = input[:, :, h_indices, w_indices]
 
     # convert output to correct memory format, if necessary
@@ -2121,7 +2115,7 @@ def upsample_nearest3d(
     scales_w: Optional[float] = None,
 ) -> Tensor:
     d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
-        input, output_size
+        input, output_size, (scales_d, scales_h, scales_w)
     )
     result = input[:, :, d_indices, h_indices, w_indices]
 
