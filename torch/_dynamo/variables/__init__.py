@@ -22,6 +22,7 @@ from .misc import (
     ClosureVariable,
     ContextWrappingVariable,
     CUDAStreamContextVariable,
+    CUDAStreamVariable,
     GetAttrVariable,
     GradModeVariable,
     InspectSignatureVariable,

@@ -184,13 +184,14 @@ class TorchVariable(VariableTracker):
         from . import (
             ConstantVariable,
             CUDAStreamContextVariable,
+            CUDAStreamVariable,
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )
 
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -272,13 +273,22 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.cuda.stream:
             log.warning(
-                "torch.cuda.stream can't be passed through AOT yet, will be ignored"
+                "torch.cuda.stream() not fully supported, streams may be ignored"
             )
-            return CUDAStreamContextVariable.create(
-                tx, args[0].as_python_constant(), **options
-            )
+            assert len(args) == 1
+            return CUDAStreamContextVariable.create(tx, args[0], **options)
         elif self.value is torch.cuda.streams.Stream:
-            return TorchVariable(self.value(), **options)
+            return wrap_fx_proxy_cls(
+                CUDAStreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.cuda.streams.Stream,
+                    (),
+                    {},
+                ),
+                **options,
+            )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):

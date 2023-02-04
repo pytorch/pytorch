@@ -1519,9 +1519,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2))
         ref = fn(x)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
