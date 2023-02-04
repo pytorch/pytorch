@@ -531,7 +531,9 @@ class GraphLowering(torch.fx.Interpreter):
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
-                writes = set([dep for dep in writes if is_materialized(dep)])
+                removed_buffers = set(dep for dep in writes if not is_materialized(dep))
+                writes = writes - removed_buffers
+                reads = reads - removed_buffers
             node_bytes = 0
             for buf in reads | writes:
                 if buf in self.name_to_buffer:
