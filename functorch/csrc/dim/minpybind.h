@@ -119,14 +119,14 @@ struct object : public handle {
     : handle(other.ptr_) {
         Py_XINCREF(ptr_);
     }
-    object(object&& other)
+    object(object&& other) noexcept
     : handle(other.ptr_) {
         other.ptr_ = nullptr;
     }
     object& operator=(const object& other) {
         return *this = object(other);
     }
-    object& operator=(object&& other) {
+    object& operator=(object&& other) noexcept {
         PyObject* tmp = ptr_;
         ptr_ = other.ptr_;
         other.ptr_ = tmp;
@@ -165,14 +165,14 @@ struct obj : public object {
     : object(other.ptr_) {
         Py_XINCREF(ptr_);
     }
-    obj(obj&& other)
+    obj(obj&& other) noexcept
     : object(other.ptr_) {
         other.ptr_ = nullptr;
     }
     obj& operator=(const obj& other) {
         return *this = obj(other);
     }
-    obj& operator=(obj&& other) {
+    obj& operator=(obj&& other) noexcept {
         PyObject* tmp = ptr_;
         ptr_ = other.ptr_;
         other.ptr_ = tmp;
