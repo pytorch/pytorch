@@ -811,7 +811,6 @@ def wrap_fx_proxy_cls(
                 "ignore_subclass": ignore_subclass,
                 "is_tensor": target_cls is TensorVariable,
             }
-            breakpoint()
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
             example_value = wrap_to_fake_tensor_and_record(
