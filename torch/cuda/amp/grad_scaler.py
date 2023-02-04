@@ -353,7 +353,7 @@ class GradScaler(object):
                         t.to(scaler.device, non_blocking=True) for t in self._check_inf_per_device(optimizer).values()
                     ])
                 )
-                optimizer.grad_scale = scaler
+                optimizer.grad_scale = None if optimizer_state["stage"] == OptState.UNSCALED else scaler
                 optimizer.found_inf = found_inf
             retval = optimizer.step(*args, **kwargs_)
             optimizer_state["stage"] = OptState.STEPPED

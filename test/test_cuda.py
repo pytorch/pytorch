@@ -2451,15 +2451,16 @@ torch.cuda.synchronize()
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs in product(
+        for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
             (torch.optim.Adam, torch.optim.AdamW),
             ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
+            (False, True),
         ):
-            with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs):
+            with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs, separate_unscale=separate_unscale):
                 self._grad_scaling_autocast_fused_optimizers(
-                    optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+                    optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, separate_unscale=separate_unscale)
 
-    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs):
+    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs, separate_unscale):
         (
             mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
         ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
@@ -2483,6 +2484,8 @@ torch.cuda.synchronize()
                 output_scaling = mod_scaling(input)
                 loss_scaling = loss_fn(output_scaling, target)
             scaler.scale(loss_scaling).backward()
+            if separate_unscale:
+                scaler.unscale_(opt_scaling)
             scaler.step(opt_scaling)
             scaler.update()
 
