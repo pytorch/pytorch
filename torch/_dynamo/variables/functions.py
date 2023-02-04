@@ -49,6 +49,8 @@ def wrap_bound_arg(tx, val, options, source=None):
         return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
         return variables.EnumVariable(val, source=source, **options)
+    elif isinstance(val, contextlib.AbstractContextManager):
+        return variables.ContextWrappingVariable(val, )
     elif isinstance(val, (type, abc.ABCMeta)):
         return variables.UserDefinedClassVariable(val, source=source, **options)
     elif istensor(val):
