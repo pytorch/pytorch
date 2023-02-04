@@ -1407,7 +1407,8 @@ def _optim_state_dict(
                 "If use_orig_params is False, we must be able to find the "
                 f"corresponding param id. {optim_state_key} {param_key}"
             )
-            continue
+            if not optim_state_key.is_fsdp_managed:
+                continue
 
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
