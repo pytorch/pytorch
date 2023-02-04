@@ -152,7 +152,7 @@ def _reparametrize_module(
             )
         if len(error_msgs) > 0:
             raise RuntimeError(
-                "Error(s) in reparameterizing for {}:\n\t{}".format(
+                "Error(s) in reparametrizing for {}:\n\t{}".format(
                     module._get_name(), "\n\t".join(error_msgs)
                 )
             )

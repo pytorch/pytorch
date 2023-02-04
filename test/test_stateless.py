@@ -202,7 +202,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_module_fail_reset_to_original(self, functional_call):
+    def test_reparametrize_module_fail_reset_to_original(self, functional_call):
         module = MockModule()
         torch.nn.utils.parametrizations.spectral_norm(module.l1)
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
@@ -225,7 +225,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_some_weights(self, functional_call):
+    def test_reparametrize_some_weights(self, functional_call):
         module = MockModule()
         weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
@@ -247,7 +247,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_strict(self, functional_call):
+    def test_reparametrize_strict(self, functional_call):
         module = MockModule()
         weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
@@ -331,7 +331,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_special(self, functional_call):
+    def test_reparametrize_special(self, functional_call):
         class NonTensor:
             def __repr__(self):
                 return f'<{self.__class__.__name__}>'
@@ -425,7 +425,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_tie_weights(self, functional_call):
+    def test_reparametrize_tie_weights(self, functional_call):
         module = MockTiedModule()
         weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
@@ -451,7 +451,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_tie_some_weights(self, functional_call):
+    def test_reparametrize_tie_some_weights(self, functional_call):
         module = MockTiedModule()
         weight = torch.tensor([[2.0]])
         buffer = torch.tensor([3.0])
@@ -521,7 +521,7 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_reparamertize_tie_weights_strict(self, functional_call):
+    def test_reparametrize_tie_weights_strict(self, functional_call):
         module = MockTiedModule()
         weight = torch.tensor([[2.0]])
         bias = torch.tensor([5.0])
