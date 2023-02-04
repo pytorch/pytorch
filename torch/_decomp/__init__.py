@@ -260,6 +260,8 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.nll_loss_forward,
             aten.norm,
             aten._reshape_alias,
+            aten.rsub.Tensor,
+            aten.rsub.Scalar,
             aten.select_backward,
             aten.select_scatter,
             aten.sgn,

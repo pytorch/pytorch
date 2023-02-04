@@ -419,6 +419,7 @@ inductor_all_samples = {
     "nan_to_num",
     "mT",
     "mH",
+    "rsub",
 }
 
 
