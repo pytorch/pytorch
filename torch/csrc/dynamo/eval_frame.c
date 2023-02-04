@@ -587,7 +587,7 @@ inline static PyObject* eval_custom_code(
   }
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
-  Py_DECREF(shadow);
+  Py_DECREF(shadow_obj);
   return result;
 }
 
