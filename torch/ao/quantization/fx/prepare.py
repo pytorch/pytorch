@@ -1212,12 +1212,8 @@ def insert_observers_for_model(
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
     processed_nodes: Set[Node] = set()
     # initalize target_dtype_info
-    DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO = (
-        QConfig(
-            activation=PlaceholderObserver.with_args(dtype=torch.float32),
-            weight=PlaceholderObserver.with_args(dtype=torch.float32)
-        )
-    )
+    DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO = \
+        torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig
     for node in model.graph.nodes:
         node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO.activation,
