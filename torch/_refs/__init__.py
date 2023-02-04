@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
+    FloatWithoutSymFloat,
     IntLike,
     is_weakly_lesser_type,
     Number,
@@ -82,6 +83,8 @@ __all__ = [
     "index_fill_",
     "isfinite",
     "isinf",
+    "isposinf",
+    "isneginf",
     "isnan",
     "isreal",
     "i0",
@@ -611,8 +614,10 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
-        return logical_or(isinf(real(a)), isinf(imag(a)))
-    return logical_not(logical_or(isnan(a), isfinite(a)))
+        return torch.logical_or(isinf(torch.real(a)), isinf(torch.imag(a)))
+    if utils.is_float_dtype(a.dtype):
+        return torch.abs(a) == float("inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -622,8 +627,8 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
     if utils.is_float_dtype(a.dtype):
-        return eq(a, float("inf"))
-    return zeros_like(a, dtype=torch.bool)
+        return a == float("inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -633,8 +638,8 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
     if utils.is_float_dtype(a.dtype):
-        return eq(a, float("-inf"))
-    return zeros_like(a, dtype=torch.bool)
+        return a == float("-inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -733,7 +738,7 @@ def nan_to_num(
     assert isinstance(a, TensorLike)
 
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
-        return clone(a)
+        return a.clone()
 
     if nan is None:
         nan = 0.0
@@ -744,14 +749,9 @@ def nan_to_num(
     if neginf is None:
         neginf = torch.finfo(a.dtype).min
 
-    result = where(isnan(a), nan, a)
-
-    is_neg = signbit(a)
-    is_neginf = bitwise_and(isinf(a), is_neg)
-    result = where(is_neginf, neginf, result)
-
-    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
-    result = where(is_posinf, posinf, result)
+    result = torch.where(torch.isnan(a), nan, a)  # type: ignore[call-overload]
+    result = torch.where(torch.isneginf(a), neginf, result)  # type: ignore[call-overload]
+    result = torch.where(torch.isposinf(a), posinf, result)  # type: ignore[call-overload]
     return result
 
 
@@ -4262,13 +4262,7 @@ def empty_like(
     )
 
 
-@register_decomposition(
-    [
-        aten.arange.default,
-        aten.arange.start,
-        aten.arange.start_step,
-    ]
-)
+@register_decomposition(aten.arange)
 @out_wrapper()
 def arange(
     start: NumberType = 0,
@@ -4283,20 +4277,78 @@ def arange(
 ) -> TensorLikeType:
     utils.check_layout(layout)
     utils.check_pin_memory(pin_memory)
+    device = torch.device(utils.device_or_default(device))
+
+    assert not isinstance(start, complex)
+    assert not isinstance(end, complex)
+    assert not isinstance(step, complex)
+
     # Case: torch.arange(5)
     if end is None:
         end = start
         start = 0
-    return prims.arange(
-        start,
-        end,
-        step,
-        dtype=dtype,
-        # layout=layout,
-        device=device,
-        # pin_memory=pin_memory,
-        requires_grad=requires_grad,
+    utils.check(step != 0, lambda: "step must be nonzero")
+    utils.check(
+        (step > 0 and end >= start) or (step < 0 and end <= start),
+        lambda: "upper bound and lower bound inconsistent with step sign",
     )
+
+    def is_finite(x):
+        return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
+
+    utils.check(
+        is_finite(start) and is_finite(end),
+        lambda: f"unsupported range: {start} -> {end}",
+    )
+    utils.check(
+        is_finite(step),
+        lambda: f"step must be finite but got {step}",
+    )
+
+    if dtype is None:
+        args = (start, end, step)
+        integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+        dtype = torch.int64 if integer_args else torch.get_default_dtype()
+
+    is_integer = utils.is_integer_dtype(dtype)
+    if is_integer:
+        xstart = sym_int(start)
+        xend = sym_int(end)
+        xstep = sym_int(step)
+
+    # For int64 we truncate arguments to int before calculating length, but
+    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
+    if dtype == torch.int64:
+        length = math.ceil((xend - xstart) / xstep)
+    else:
+        length = math.ceil((end - start) / step)
+
+    if is_integer:
+        return prims.iota(
+            length,
+            start=xstart,
+            step=xstep,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+
+    computation_dtype = utils.get_acc_type(dtype, device)
+    index = prims.iota(
+        length,
+        start=0,
+        step=1,
+        dtype=torch.int64,
+        device=device,
+        requires_grad=False,
+    )
+    index = _maybe_convert_to_dtype(index, computation_dtype)
+    result = start + step * index
+    result = _maybe_convert_to_dtype(result, dtype)
+
+    if requires_grad:
+        result.requires_grad_(True)
+    return result
 
 
 @register_decomposition(aten.lerp)

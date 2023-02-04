@@ -261,6 +261,7 @@ def fix_extended_args(instructions: List[Instruction]):
     instructions[:] = output
     return added
 
+
 # from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
 # TODO use the actual object instead, can interface from eval_frame.c
 _PYOPCODE_CACHES = {
@@ -276,6 +277,7 @@ _PYOPCODE_CACHES = {
     "PRECALL": 1,
     "CALL": 4,
 }
+
 
 def instruction_size(inst):
     if sys.version_info >= (3, 11):

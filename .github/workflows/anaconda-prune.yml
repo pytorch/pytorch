@@ -24,7 +24,7 @@ jobs:
     name: anaconda-prune-pytorch-nightly
     uses: ./.github/workflows/_prune-anaconda-packages.yml
     with:
-      packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+      packages: "pytorch torchvision torchaudio torchtext torchdata ignite torchcsprng"
       channel: pytorch-nightly
     secrets:
      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -33,7 +33,7 @@ jobs:
     name: anaconda-prune-pytorch-test
     uses: ./.github/workflows/_prune-anaconda-packages.yml
     with:
-      packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+      packages: "pytorch torchvision torchaudio torchtext torchdata ignite torchcsprng"
       channel: pytorch-test
     secrets:
      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
