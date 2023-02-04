@@ -14,9 +14,9 @@ struct Call {
 struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
-  explicit ErrorReport(SourceRange r);
-  explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
-  explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
+  explicit ErrorReport(SourceRange r, c10::optional<std::string>& backtrace = c10::nullopt);
+  explicit ErrorReport(const TreeRef& tree, c10::optional<std::string>& backtrace = c10::nullopt) : ErrorReport(tree->range(), backtrace) {}
+  explicit ErrorReport(const Token& tok, c10::optional<std::string>& backtrace = c10::nullopt) : ErrorReport(tok.range, backtrace) {}
 
   const char* what() const noexcept override;
 
@@ -42,6 +42,7 @@ struct TORCH_API ErrorReport : public std::exception {
   OwnedSourceRange context;
   mutable std::string the_message;
   std::vector<Call> error_stack;
+  std::string backtrace_;
 };
 
 template <typename T>

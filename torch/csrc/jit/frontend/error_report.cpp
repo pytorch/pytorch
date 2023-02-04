@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -11,15 +12,25 @@ namespace torch::jit {
 thread_local std::vector<Call> calls;
 #endif // C10_MOBILE
 
+namespace {
+std::string unwrap_backtrace(c10::optional<std::string>& backtrace) {
+  if (backtrace.has_value()) {
+    return backtrace.value();
+  }
+  return c10::get_backtrace(/*frames_to_skip=*/1);
+}
+} // namespace
+
 ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
       context(e.context),
       the_message(e.the_message),
-      error_stack(e.error_stack.begin(), e.error_stack.end()) {}
+      error_stack(e.error_stack.begin(), e.error_stack.end()),
+      backtrace_(e.backtrace_) {}
 
 #ifndef C10_MOBILE
-ErrorReport::ErrorReport(SourceRange r)
-    : context(std::move(r)), error_stack(calls.begin(), calls.end()) {}
+ErrorReport::ErrorReport(SourceRange r, c10::optional<std::string>& backtrace)
+    : context(std::move(r)), error_stack(calls.begin(), calls.end()), backtrace_(unwrap_backtrace(backtrace)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
