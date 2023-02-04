@@ -1,5 +1,4 @@
 import inspect
-import sys
 import types
 from typing import Dict, List
 
@@ -185,7 +184,9 @@ class ContextWrappingVariable(VariableTracker):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def reconstruct(self, codegen, target_inst=None):
-        raise NotImplementedError("Cannot reconstruct a ContextWrappingVariable directly")
+        raise NotImplementedError(
+            "Cannot reconstruct a ContextWrappingVariable directly"
+        )
 
     def module_name(self):
         raise NotImplementedError("module_name called on base")
@@ -278,7 +279,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        print("init", target_values, kwargs, initial_values)
         mode = kwargs.pop("mode", None)
         super(AutocastModeVariable, self).__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
@@ -296,7 +296,6 @@ class AutocastModeVariable(ContextWrappingVariable):
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
-    
     def module_name(self):
         return "torch"
 

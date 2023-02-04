@@ -74,7 +74,6 @@ from .variables.misc import (
     ClosureVariable,
     ContextWrappingVariable,
     GetAttrVariable,
-    GradModeVariable,
     PythonModuleVariable,
     UnknownVariable,
     WithExitFunctionVariable,
@@ -107,7 +106,7 @@ class BlockStackEntry:
             return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
         else:
             return ReenterWith(self.stack_index)
-    
+
     def context_target_values(self):
         if self.with_context is not None:
             return self.with_context.target_values

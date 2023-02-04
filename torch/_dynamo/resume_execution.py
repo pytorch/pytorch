@@ -164,8 +164,16 @@ class ContinueExecutionCache:
                     if setup_fn.target_values is not None:
                         for val in setup_fn.target_values:
                             if val not in code_options["co_consts"]:
-                                code_options["co_consts"] = tuple(code_options["co_consts"]) + (val,)
-                            prefix.append(create_instruction("LOAD_CONST", code_options["co_consts"].index(val), val))
+                                code_options["co_consts"] = tuple(
+                                    code_options["co_consts"]
+                                ) + (val,)
+                            prefix.append(
+                                create_instruction(
+                                    "LOAD_CONST",
+                                    code_options["co_consts"].index(val),
+                                    val,
+                                )
+                            )
                     prefix.extend(setup_fn(code_options, cleanup))
             assert not hooks
 
