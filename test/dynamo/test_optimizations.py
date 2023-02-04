@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import importlib
 import unittest
 
@@ -6,8 +7,10 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.optimizations import backends
 from torch._dynamo.testing import same
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 def has_onnxruntime():
@@ -21,14 +24,6 @@ def has_onnxruntime():
 def has_ipex():
     try:
         importlib.import_module("intel_extension_for_pytorch")
-        return True
-    except ImportError:
-        return False
-
-
-def has_functorch():
-    try:
-        importlib.import_module("functorch")
         return True
     except ImportError:
         return False
@@ -122,11 +117,14 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch._dynamo.optimize(backends.ipex_fp32)(model)
-        with torch.no_grad():
-            r2 = opt_model(input)
-        self.assertTrue(same(r1, r2))
-        self.assertEqual(r2.dtype, torch.float32)
+        for dynamic_shapes in [True, False]:
+            torch._dynamo.reset()
+            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
+            with torch.no_grad():
+                for _ in range(3):
+                    r2 = opt_model(input)
+            self.assertTrue(same(r1, r2))
+            self.assertEqual(r2.dtype, torch.float32)
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
     def test_ipex_bf16(self):
@@ -135,15 +133,18 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch._dynamo.optimize(backends.ipex_bf16)(model)
-        with torch.no_grad(), torch.cpu.amp.autocast():
-            r2 = opt_model(input)
-        self.assertTrue(same(r1, r2.float(), tol=0.1))
-        self.assertEqual(r2.dtype, torch.bfloat16)
+        for dynamic_shapes in [True, False]:
+            torch._dynamo.reset()
+            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
+            with torch.no_grad(), torch.cpu.amp.autocast():
+                for _ in range(3):
+                    r2 = opt_model(input)
+            self.assertTrue(same(r1, r2.float(), tol=0.1))
+            self.assertEqual(r2.dtype, torch.bfloat16)
 
     def _check_backend_works(self, backend):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1).eval()
-        input = torch.randn(8, 3, 64, 64)
+        model = Seq().eval()
+        input = torch.randn(2, 10)
         r1 = model(input)
         r2 = torch.compile(model, backend=backend)(input)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
@@ -154,9 +155,33 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_torchscript(self):
         self._check_backend_works("ts")
 
+    def test_aot_eager(self):
+        self._check_backend_works("aot_eager")
+
+    def test_aot_eager_decomp_partition(self):
+        self._check_backend_works("aot_eager_decomp_partition")
+
+    def test_aot_ts(self):
+        self._check_backend_works("aot_ts")
+
+    @requires_cuda()
+    def test_aot_cudagraphs(self):
+        self._check_backend_works("aot_cudagraphs")
+
+    @requires_cuda()
+    def test_aot_ts_nvfuser(self):
+        self._check_backend_works("aot_ts_nvfuser")
+
+    @requires_cuda()
+    def test_nvprims_nvfuser(self):
+        self._check_backend_works("nvprims_nvfuser")
+
+    @requires_cuda()
+    def test_nvprims_aten(self):
+        self._check_backend_works("nvprims_aten")
+
 
 class NormalizeIRTests(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_inplace_normalize(self):
         def fn(a, b):
             x = torch.cos(a)
