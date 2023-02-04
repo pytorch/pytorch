@@ -70,9 +70,6 @@ def _lazy_import():
 
     import_submodule(backends)
 
-    # TODO(jansel): refactor backends defined in other places
-    from .. import debug_utils
-    from ..optimizations import backends
+    from ..debug_utils import dynamo_minifier_backend
 
-    assert backends is not None
-    assert debug_utils is not None
+    assert dynamo_minifier_backend is not None
