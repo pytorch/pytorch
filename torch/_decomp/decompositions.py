@@ -1134,23 +1134,6 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-# This computes the mean and variance along the specifized normalization dims,
-# then normalizes along those dims. Finally, it returns the mean and variance of
-# the normalized dims. Note that it intentionally leaves outputs upcasted.
-# Example:
-# input: [2, 3, 4, 5], norm_dims: [1, 3]
-# mean: [2, 1, 4, 1]
-def normalize(input, norm_dims, eps):
-    computation_dtype = utils.get_computation_dtype(input.dtype)
-    input_acc = input.to(dtype=computation_dtype)
-    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
-    mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
-    rstd = torch.rsqrt(biased_var + eps)
-
-    out = (input - mean) * rstd
-    return out, mean, rstd
-
-
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
@@ -1341,10 +1324,9 @@ def native_batch_norm_helper(
     if training:
         computation_dtype = utils.get_computation_dtype(input.dtype)
         input_acc = input.to(dtype=computation_dtype)
-        biased_var = torch.var(
-            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        biased_var, mean = torch.var_mean(
+            input_acc, dim=reduction_dims, correction=0, keepdim=True
         )
-        mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
         rstd = torch.rsqrt(biased_var + eps)
 
         output = (input - mean) * rstd

@@ -193,12 +193,13 @@ __all__ = [
     "amin",
     "any",
     "mean",
+    "std",
     "std_mean",
-    "var_mean",
     "sum",
     "sum_to_size",
     "prod",
     "var",
+    "var_mean",
     #
     # Linear algebra ops
     #
@@ -2317,26 +2318,14 @@ def std(
 ) -> TensorLikeType:
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
-    # reduces over all dimensions if dim=() is passed
-    if dim == () or dim == []:
-        dim = None
 
     opmath_dtype, dtype = utils.reduction_dtypes(
         a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
     )
-
-    result = _reduction(
-        a,
-        partial(prims.var, correction=correction),
-        dims=dim,
-        keepdims=keepdim,
-        dtype=opmath_dtype,
-        out=None,
-        has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
-    )
-    result = sqrt(result)
-    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
+    a = _maybe_convert_to_dtype(a, opmath_dtype)
+    a_var = torch.var(a, dim, correction=correction, keepdim=keepdim)
+    a_std = torch.sqrt(a_var)
+    return _maybe_convert_to_dtype(a_std, dtype)
 
 
 @register_decomposition(aten.mean)
@@ -2401,9 +2390,17 @@ def std_mean(
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
-    v = torch.std(a, dim, correction=correction, keepdim=keepdim)
-    m = torch.mean(a, dim, keepdim=keepdim)
-    return v, m
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
+    original_dtype = a.dtype
+    a = _maybe_convert_to_dtype(a, opmath_dtype)
+    a_var, a_mean = torch.var_mean(a, dim, correction=correction, keepdim=keepdim)
+    a_std = torch.sqrt(a_var)
+    return (
+        _maybe_convert_to_dtype(a_std, dtype),
+        _maybe_convert_to_dtype(a_mean, original_dtype),
+    )
 
 
 @register_decomposition(aten.var_mean)
@@ -2416,9 +2413,8 @@ def var_mean(
     correction: Optional[int] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    correction = utils.set_correction(unbiased, correction)
-    v = torch.var(a, dim, correction=correction, keepdim=keepdim)
-    m = torch.mean(a, dim, keepdim=keepdim)
+    v = var(a, dim, unbiased, keepdim, correction=correction)
+    m = mean(a, dim, keepdim)
     return v, m
 
 
