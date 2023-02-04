@@ -287,10 +287,10 @@ index_select_add(
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
           for (int64_t i = start_idx; i < end_idx; i++) {
-            // Convert FP32 intermediate buffer result back to 16bit/BF16 for
+            // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
             if (std::is_same<data_t, at::Half>::value) {
-              // 16bit
+              // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
                     static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
@@ -366,7 +366,7 @@ index_select_add(
       }
     }
     for (const auto i : c10::irange(output.size(0))) {
-      // Convert FP32 intermediate buffer result back to 16bit/BF16 for output
+      // Convert FP32 intermediate buffer result back to 16 bit for output
       // dtype
       for (const auto d : c10::irange(ddim)) {
         (output_data + output_stride0 * i)[d * output_stride1] =
@@ -609,12 +609,12 @@ index_select_scale_add(
     bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
     if (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
-          reinterpret_cast<const uint16_t*>(scale_data),
+          reinterpret_cast<const fbgemm::bfloat16*>(scale_data),
           scale_data_fp32,
           scale_fp32.numel());
     } else {
       fbgemm::Float16ToFloat_simd(
-          reinterpret_cast<const uint16_t*>(scale_data),
+          reinterpret_cast<const fbgemm::float16*>(scale_data),
           scale_data_fp32,
           scale_fp32.numel());
     }
@@ -675,10 +675,10 @@ index_select_scale_add(
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
           for (int64_t i = start_idx; i < end_idx; i++) {
-            // Convert FP32 intermediate buffer result back to 16bit/BF16 for
+            // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
             if (std::is_same<data_t, at::Half>::value) {
-              // 16bit
+              // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
                     static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
@@ -746,7 +746,7 @@ index_select_scale_add(
       }
     }
     for (const auto i : c10::irange(output.size(0))) {
-      // Convert FP32 intermediate buffer result back to 16bit/BF16 for output
+      // Convert FP32 intermediate buffer result back to 16 bit for output
       // dtype
       for (const auto d : c10::irange(ddim)) {
         (output_data + output_stride0 * i)[d * output_stride1] =
