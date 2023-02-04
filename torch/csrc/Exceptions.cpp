@@ -1,12 +1,10 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 
+#include <array>
 #include <cstdarg>
 #include <exception>
-#include <iterator>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 #include <fmt/format.h>
 #include <torch/csrc/THP.h>
@@ -282,16 +280,13 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       } else {
         // Lets Python set the source location and puts the C++ warning
         // location into the message.
-        fmt::memory_buffer buf;
-        fmt::format_to(
-            std::back_inserter(buf),
-            FMT_STRING("{} (Triggered internally at {}:{}.)"),
+        auto buf = fmt::format(
+            "{} (Triggered internally at {}:{}.)",
             msg,
             source_location.file,
             source_location.line);
-        buf.push_back('\0');
         result =
-            PyErr_WarnEx(map_warning_to_python_type(warning), buf.data(), 1);
+            PyErr_WarnEx(map_warning_to_python_type(warning), buf.c_str(), 1);
       }
       if (result < 0) {
         if (in_exception_) {
