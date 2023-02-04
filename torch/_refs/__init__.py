@@ -4321,7 +4321,6 @@ def arange(
     if dtype == torch.int64:
         length = math.ceil((xend - xstart) / xstep)
     else:
-        print(start, end, step)
         length = math.ceil((end - start) / step)
 
     if is_integer:
