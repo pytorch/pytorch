@@ -1376,9 +1376,20 @@ class BenchmarkRunner:
         if tag:
             msg += f" {tag:26}"
         print(msg, end=" ", flush=True)
-        start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
-        start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
-        start_graph_breaks = sum(torch._dynamo.utils.counters["graph_breaks"].values())
+
+        def get_stats():
+            # TODO: consider deepcopy'ing the entire counters struct and
+            # adding a helper to do subtraction on it
+            return collections.Counter({
+                'calls_captured': torch._dynamo.utils.counters["stats"]["calls_captured"],
+                'unique_graphs': torch._dynamo.utils.counters["stats"]["unique_graphs"],
+                'graph_breaks': sum(torch._dynamo.utils.counters["graph_break"].values()),
+                # NB: The plus removes zero counts
+                'unique_graph_breaks': len(+torch._dynamo.utils.counters["graph_break"]),
+            })
+
+        start_stats = get_stats()
+
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
@@ -1403,14 +1414,14 @@ class BenchmarkRunner:
             )
             print(stats)
 
-        end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
-        end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
-        end_graph_breaks = sum(torch._dynamo.utils.counters["graph_breaks"].values())
+        stats = get_stats()
+        stats.subtract(start_stats)
+
         if explain:
             print(
-                f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) "
-                f"covering {end_calls_captured-start_calls_captured} ops with "
-                f"{end_graph_breaks-start_graph_breaks} graph breaks"
+                f"Dynamo produced {stats['unique_graphs']} graphs "
+                f"covering {stats['calls_captured']} ops with "
+                f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
 
 
@@ -1661,6 +1672,11 @@ def parse_args(args=None):
         "--disable-cudagraphs",
         action="store_true",
         help="Disables cudagraphs for Inductor",
+    )
+    parser.add_argument(
+        "--print-graph-breaks",
+        action="store_true",
+        help="Show a warning whenever graph break",
     )
     parser.add_argument(
         "--trace-on-xla",
@@ -1949,6 +1965,9 @@ def run(runner, args, original_dir=None):
 
     if args.verbose:
         torch._dynamo.config.log_level = logging.DEBUG
+
+    if args.print_graph_breaks:
+        torch._dynamo.config.print_graph_breaks = True
 
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
