@@ -19,7 +19,6 @@ from ..observer import (
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
-    QConfig,
     QConfigAny,
 )
 from ..qconfig_mapping import (
