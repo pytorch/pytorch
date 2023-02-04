@@ -471,27 +471,11 @@ atol_rtol_tensor_batch_rule(
 }
 
 std::tuple<Tensor, c10::optional<int64_t>>
-matrix_rank_atol_rtol_tensor_batch_rule(
-    const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
-    const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
-    const c10::optional<int64_t> rtol_bdim, bool hermitian) {
-  return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_matrix_rank, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "torch.linalg.matrix_rank");
-}
-
-std::tuple<Tensor, c10::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
     const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
     const c10::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
-}
-
-std::tuple<Tensor,optional<int64_t>>
-matrix_rank_atol_rtol_float_batch_rule(
-    const Tensor& input, optional<int64_t> input_bdim, optional<double> atol, optional<double> rtol, bool hermitian) {
-  TORCH_CHECK(rankWithoutBatchDim(input, input_bdim) >= 2,
-            "torch.linalg.matrix_rank: The input tensor input must have at least 2 dimensions.");
-  return std::make_tuple(linalg_matrix_rank(moveBatchDimToFront(input, input_bdim), atol, rtol, hermitian), 0);
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -619,8 +603,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
-  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_tensor, matrix_rank_atol_rtol_tensor_batch_rule);
-  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_float, matrix_rank_atol_rtol_float_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
