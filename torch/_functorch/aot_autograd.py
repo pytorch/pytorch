@@ -1174,7 +1174,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     _input_info = _fw_metadata.input_info
 
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
-        flat_args, _input_info
+        flat_args, _input_info, is_inference=True, is_runtime=False
     )
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
@@ -1210,7 +1210,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
-        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        compiled_fw = aot_config.fw_compiler(fw_module, flat_args_with_views_handled)
 
     metadata_ = CompiledRuntimeMetadata(
         synthetic_base_info=_synthetic_base_info,
@@ -1334,7 +1334,14 @@ def same_dtype_views(view1, view2):
 #   c_base = torch.Tensor(c.storage())
 #   f(c_base, b_base, a, d)
 def merge_view_inputs(
-    fwd_inputs: List[Any], mutated_input_info: List[InputAliasInfo]
+    fwd_inputs: List[Any], mutated_input_info: List[InputAliasInfo],
+    *,
+    # The autograd case currently has more restrictions than the inference case.
+    is_inference: bool,
+    # We should consider refactoring, but today, this function is used merge aliased inputs
+    # into synthetic bases both at runtime (when we have real tensors), and at compile time
+    # (when we have fake tensors)
+    is_runtime: bool
 ) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
@@ -1372,9 +1379,10 @@ def merge_view_inputs(
             view2 = fwd_inputs[idx2]
             # The "inputs that are aliased but have different differentiable bases" case
             # is more complicated and hopefully pretty rare. Not currently handled.
-            assert are_differentiable_views(
-                view1, view2
-            ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+            if not is_inference:
+                assert are_differentiable_views(
+                    view1, view2
+                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
             # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
             # not handling for now
             assert same_dtype_views(
@@ -1392,7 +1400,37 @@ def merge_view_inputs(
             # Case where none of the aliases have a ._base
             # we generate a synthetic base without gradients, and generate views off of it
             example_idx = aliased_input_indices[0]
-            synthetic_base = torch.Tensor(fwd_inputs[example_idx].untyped_storage())
+            if is_runtime:
+                # Wondering when we hit this case? a known example is when compiling
+                # the optimizer step, where the parameters came from an LSTM module.
+                # LSTM performs weight packing, so weights are views from a shared buffer.
+                # NOTE: There is one case where this is unsafe:
+                # torch.Tensor(storage) will ALWAYS create a 1D tensor, which is not necessarily
+                # the same shape as the "actual" base that the tensor came from.
+                # For the most part this is fine, because we always use as_strided()
+                # to generate the original aliased inputs again.
+                # If we were to use view-replay though, this could cause the aliased views
+                # to have incorrect sizes.
+                example_alias = fwd_inputs[example_idx]
+                # We don't actually have a convenient way of going from storage -> tensor,
+                # So using set_() here (we suffer some minor overhead, but this case is rare).
+                synthetic_base = torch.empty((), dtype=example_alias.dtype, device=example_alias.device)
+                synthetic_base.set_(example_alias.untyped_storage())
+            else:
+                # Construct a FakeTensor synthetic base, given any of our FakeTensor aliases.
+                # (Assuming that all our aliases share the same FakeTensorMode, which should
+                # generally be true)
+                curr_aliased_inp = fwd_inputs[example_idx]
+                # We need to hardcode that the synthetic base we're creating here is a FakeTensor.
+                # We should also be guaranteed that torch_dispatch subclasses have been desugared
+                # by the time we get here (through AOTDispatch).
+                assert isinstance(curr_aliased_inp, FakeTensor)
+                curr_fake_mode = curr_aliased_inp.fake_mode
+                # Hack: we can't construct a FakeTensor directly from a storage,
+                # so just plumb the storage through a temporary real tensor.
+                synthetic_base_dummy = torch.Tensor(fwd_inputs[example_idx].untyped_storage())
+                synthetic_base_ = curr_fake_mode.from_tensor(synthetic_base_dummy)
+                synthetic_base = synthetic_base_.to(device=curr_aliased_inp.device)
         else:
             # Case where all of the aliases require gradients, and have the same _base.
             synthetic_base = non_none_bases[0]
@@ -1798,7 +1836,8 @@ def create_runtime_wrapper(
             # that replace the views. The input views are regenerated manually in the compiled function.
             # TODO: think harder about what happens if (a view of) one of these mutated input views is ALSO returned
             new_inputs, metadata = merge_view_inputs(
-                args, runtime_metadata.fw_metadata.input_info
+                args, runtime_metadata.fw_metadata.input_info, is_inference=not trace_joint,
+                is_runtime=True
             )
             # We're just re-running the original-args-to-synthetic-base transformation
             # that we ran during compilation.
@@ -1972,7 +2011,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     # When that happens, we replace the aliased inputs with a synthetic base, and in the traced forward
     # we later generate the input views
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
-        flat_args, _fw_metadata.input_info
+        flat_args, _fw_metadata.input_info, is_inference=False,
+        is_runtime=False
     )
 
     # pre-compute, so we can bail out quickly in the hotpath
