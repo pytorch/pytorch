@@ -7,8 +7,6 @@ import torch._dynamo.test_case
 import torch.distributed as dist
 from torch._dynamo.utils import same
 from torch._dynamo.testing import CompileCounter
-from torch.distributed.distributed_c10d import _get_default_group
-from torch._C._distributed_c10d import _register_process_group
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -30,6 +28,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
+    def get_world_trs(self):
+        return {
+            "tag": "",
+            "ranks": list(range(self.world_size)),
+            "stride": self.world_size,
+        }
 
     @unittest.skip("hangs in nccl somewhere. work cleanup issue?")
     @skip_if_lt_x_gpu(2)
@@ -38,11 +42,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         This is matmul/cat/allreduce is a pattern we aim to optimize.
         """
 
-        def matmul_cat_col(a, b, c, d, e, f, *, pg_id):
+        def matmul_cat_col(a, b, c, d, e, f, *, ranks, stride, tag):
             x = torch.matmul(a, b)
             y = torch.matmul(c, d)
             z = torch.cat((x, y))
-            ar = torch.ops.aten.all_reduce(z, group_id=pg_id, reduce_op="sum")
+            ar = torch.ops.aten.all_reduce(z, "sum", tag, ranks, stride)
             g = torch.matmul(e, f)
             out = torch.add(ar, g.repeat(2, 1))
             return (out, )
@@ -53,9 +57,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
 
-            pg = _get_default_group()
-            pg_id = _register_process_group(pg)
-            matmul_cat_col = functools.partial(matmul_cat_col, pg_id=pg_id)
+            matmul_cat_col = functools.partial(
+                matmul_cat_col,
+                **self.get_world_trs(),
+            )
             inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 6
 
             # non-ideally, i seem to need to enable this at user level in order to construct a torchdispatch subclass
@@ -69,8 +74,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     def test_allreduce_eager(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            pg = _get_default_group()
-            pg_id = _register_process_group(pg)
             input = torch.ones(4, 4, device="cuda")
             orig_input = input.clone()
 
@@ -78,7 +81,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 correct = input.clone()
                 dist.all_reduce(correct, async_op=False)
 
-                out = torch.ops.aten.all_reduce(input, group_id=pg_id, reduce_op="sum")
+                out = torch.ops.aten.all_reduce(input, reduceOp="sum", **self.get_world_trs())
                 assert same(correct, out), f"aten.all_reduce ({out}) didn't match dist.all_reduce ({correct})!"
                 assert same(orig_input, input), "aten.all_reduce mutated input!"
 
@@ -88,22 +91,26 @@ class TestCollectives(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
     """
+    def get_world_trs(self, world_size=1):
+        return {
+            "tag": "",
+            "ranks": list(range(world_size)),
+            "stride": world_size,
+        }
 
     def test_inductor_single_op(self):
         torch._inductor.config.debug = True
 
-        def func(inp, *, pg_id):
-            ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
+        def func(inp, *, tag, ranks, stride):
+            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, stride)
             return ar
 
-        pg = _get_default_group()
-        pg_id = _register_process_group(pg)
         inputs = torch.ones(4, 4, device="cuda")
 
         with enable_python_dispatcher():
             compiled = torch.compile(func)
-            out = compiled(inputs, pg_id=pg_id)
-            correct = func(inputs, pg_id=pg_id)
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
 
     def test_inductor_steal_buffer(self):
@@ -113,19 +120,17 @@ class TestCollectives(DynamoDistributedSingleProcTestCase):
         """
         torch._inductor.config.debug = True
 
-        def func(inp, *, pg_id):
+        def func(inp, *, tag, ranks, stride):
             x = inp + 1
-            ar = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
+            ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, stride)
             return ar
 
-        pg = _get_default_group()
-        pg_id = _register_process_group(pg)
         inputs = torch.ones(4, 4, device="cuda")
 
         with enable_python_dispatcher():
             compiled = torch.compile(func)
-            out = compiled(inputs, pg_id=pg_id)
-            correct = func(inputs, pg_id=pg_id)
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
 
     def test_inductor_doesnt_mutate_shared(self):
@@ -134,35 +139,31 @@ class TestCollectives(DynamoDistributedSingleProcTestCase):
         """
         torch._inductor.config.debug = True
 
-        def func(inp, *, pg_id):
+        def func(inp, *, tag, ranks, stride):
             x = inp + 1
-            ar = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
+            ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, stride)
             y = x + 2
             return ar, y
 
-        pg = _get_default_group()
-        pg_id = _register_process_group(pg)
         inputs = torch.ones(4, 4, device="cuda")
 
         with enable_python_dispatcher():
             compiled = torch.compile(func)
-            out = compiled(inputs, pg_id=pg_id)
-            correct = func(inputs, pg_id=pg_id)
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
 
     def test_dynamo_trace_allreduce(self):
-        def func(inp, *, pg_id):
-            ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
+        def func(inp, *, tag, ranks, stride):
+            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, stride)
             return ar
 
-        pg = _get_default_group()
-        pg_id = _register_process_group(pg)
         inputs = torch.ones(4, 4, device="cuda")
         counter = CompileCounter()
         with enable_python_dispatcher():
             compiled = torch.compile(func, backend=counter)
-            out = compiled(inputs, pg_id=pg_id)
-            correct = func(inputs, pg_id=pg_id)
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
             assert counter.frame_count == 1
             assert counter.op_count == 1
             assert same(out, correct)
@@ -174,29 +175,25 @@ class TestCollectives(DynamoDistributedSingleProcTestCase):
 
         However, I wanted to at least see if it was possible to support it as a design goal.
         """
-        def func(inp, *, pg_id):
-            ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
+        def func(inp, *, tag, ranks, stride):
+            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, stride)
             return ar
 
-        pg = _get_default_group()
-        pg_id = _register_process_group(pg)
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
         with enable_python_dispatcher():
             compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
-            out = compiled(input, pg_id=pg_id)
+            out = compiled(input, **self.get_world_trs())
             out.sum().backward()
 
             correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input, pg_id=pg_id)
+            correct = func(correct_input, **self.get_world_trs())
             correct.sum().backward()
             assert same(out, correct)
             assert same(input.grad, correct_input.grad)
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
-        pg = _get_default_group()
-        pg_id = _register_process_group(pg)
-        out = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
+        out = torch.ops.aten.all_reduce(x, "sum", **self.get_world_trs())
         assert x.size() == out.size()
 
 if __name__ == "__main__":
