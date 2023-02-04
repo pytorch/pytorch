@@ -70,6 +70,14 @@ def create_dup_top():
 
 
 def create_rot_n(n):
+    """
+    Returns a "simple" sequence of instructions that rotates TOS to the n-th
+    position in the stack. For Python < 3.11, returns a single ROT_*
+    instruction. If no such instruction exists, an error is raised and the
+    caller is expected to generate an equivalent sequence of instructions.
+    For Python >= 3.11, any rotation can be expressed as a simple sequence of
+    swaps.
+    """
     if n <= 1:
         # don't rotate
         return []
@@ -369,8 +377,13 @@ def fix_vars(instructions: List[Instruction], code_options):
 
 
 def transform_code_object(code, transformations, safe=False):
-    keys = [
-        "co_argcount",
+    # Python 3.11 changes to code keys are not fully documented.
+    # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
+    # for new format.
+    keys = ["co_argcount"]
+    if sys.verion_info >= (3, 8):
+        keys.append("co_posonlyargcount")
+    keys.extend([
         "co_kwonlyargcount",
         "co_nlocals",
         "co_stacksize",
@@ -380,28 +393,22 @@ def transform_code_object(code, transformations, safe=False):
         "co_names",
         "co_varnames",
         "co_filename",
-        "co_name",
-        "co_firstlineno",
+        "co_name"
+    ])
+    if sys.version_info >= (3, 11):
+        keys.append("co_qualname")
+    keys.append("co_firstlineno")
+    if sys.version_info >= (3, 10):
+        keys.append("co_linetable")
+    else:
+        keys.append("co_lnotab")
+    if sys.version_info >= (3, 11):
+        # not documented, but introduced in https://github.com/python/cpython/issues/84403
+        keys.append("co_exceptiontable")
+    keys.extend([
         "co_freevars",
         "co_cellvars",
-    ]
-    if sys.version_info < (3, 8):
-        keys.insert(12, "co_lnotab")
-    elif sys.version_info < (3, 10):
-        keys.insert(1, "co_posonlyargcount")
-        keys.insert(13, "co_lnotab")
-    elif sys.version_info < (3, 11):
-        keys.insert(1, "co_posonlyargcount")
-        keys.insert(13, "co_linetable")
-    else:
-        # Python 3.11 changes to code keys are not fully documented.
-        # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
-        # for new format.
-        keys.insert(1, "co_posonlyargcount")
-        keys.insert(12, "co_qualname")
-        keys.insert(14, "co_linetable")
-        # not documented, but introduced in https://github.com/python/cpython/issues/84403
-        keys.insert(15, "co_exceptiontable")
+    ])
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
