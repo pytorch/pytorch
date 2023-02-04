@@ -61,9 +61,6 @@ class BaseSchedulerNode:
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
         self.written = False
-        self.prunable_dep_names: Set[
-            str
-        ] = set()  # these deps can be removed if after fusion they are redundant
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
