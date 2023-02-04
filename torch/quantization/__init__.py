@@ -1,5 +1,5 @@
 from .quantize import *  # noqa: F403
-from .observer import *  # noqa: F403
+# from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403
 from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules
@@ -10,13 +10,22 @@ from .quantize_jit import *  # noqa: F403
 from .quantization_mappings import *  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 
-from .observer import _deprecated_names as _observer_deprecated_names
+import sys
+import warnings
+
 from torch.utils._migration_utils import (
     _get_ao_migration_warning_str,
     _AO_MIGRATION_DEPRECATED_NAME_PREFIX,
 )
 
-import warnings
+from .observer import _deprecated_names as _observer_deprecated_names
+from torch.ao.quantization import observer as __orig_observer_mod
+for orig_name in _observer_deprecated_names:
+    target_obj_name = f"{_AO_MIGRATION_DEPRECATED_NAME_PREFIX}_{orig_name}"
+    target_obj = getattr(__orig_observer_mod, orig_name)
+    setattr(sys.modules[__name__], target_obj_name, target_obj)
+
+
 
 def default_eval_fn(model, calib_data):
     r"""

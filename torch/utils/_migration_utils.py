@@ -16,9 +16,4 @@ def _get_ao_migration_warning_str(
     )
     return s
 
-# Note: this does not start with an underscore because we need to
-# keep statements such as `from torch.quantization.foo import *`
-# backwards compatible, and a low-effort way to do this is to allow
-# the deprecated objects to still participate in the `import *`
-# syntax.
-_AO_MIGRATION_DEPRECATED_NAME_PREFIX = "deprecated"
+_AO_MIGRATION_DEPRECATED_NAME_PREFIX = "_deprecated"
