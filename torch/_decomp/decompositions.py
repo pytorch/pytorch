@@ -2136,8 +2136,6 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_bilinear2d.default here
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
@@ -2146,7 +2144,7 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
 @pw_cast_for_opmath
 def upsample_bilinear2d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     align_corners: bool,
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
