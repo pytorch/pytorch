@@ -2778,7 +2778,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         real_device_32 = real_32.device
         real_dtype_32 = real_32.dtype
 
-
         graph = torch._dynamo.optimize("eager")(module)
         exported_16, exported_32 = graph(torch.tensor([0.5]))
         self.assertEqual(exported_16.device, real_device_16)
