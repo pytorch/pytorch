@@ -715,13 +715,13 @@ Tensor gelu_double_backward(
     c10::string_view approximate);
 Tensor as_strided_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     optional<c10::SymInt> storage_offset_);
 Tensor as_strided_scatter_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,

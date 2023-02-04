@@ -179,7 +179,7 @@ static c10::intrusive_ptr<c10::StorageImpl> THPStorage_newFdStorage(
       at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_UNLINK;
   std::string handle = at::NewProcessWideShmHandle();
   auto sptr = at::MapAllocator::makeDataPtr(
-      handle.c_str(), flags, size * sizeof(uint8_t), nullptr);
+      handle, flags, size * sizeof(uint8_t), nullptr);
   return c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size,
