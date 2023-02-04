@@ -5109,6 +5109,7 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), 3, [2, 3, 0])
         helper((2, 3, 3), -1, [1, 2])
         helper((), 0, [0])
+        helper((5), 0, [])
 
     def test_index_select_scalar(self):
         def helper(value, dim, index, idx_dtype=torch.int32):

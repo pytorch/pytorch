@@ -37,8 +37,9 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
                          bool accumulate) {
   using namespace mps;
 
- if (iter.numel() == 0)
+ if (iter.numel() == 0) {
     return true;
+  }
 
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
@@ -631,6 +632,11 @@ Tensor& index_select_out_mps(const Tensor & self,
   // Scalar input
   if (self.dim() == 0 && self.numel() == 1){
     output.copy_(self);
+    return output;
+  }
+
+  // Empty index
+  if (index.numel() == 0) {
     return output;
   }
 
