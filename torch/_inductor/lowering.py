@@ -3314,11 +3314,6 @@ def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
     ]
 
 
-@register_lowering(aten.std)
-def std(x, axis=None, correction=1, keepdim=False):
-    return sqrt(var_(x, axis, correction, keepdim=keepdim))
-
-
 def pow_recursive(x, y, dtype):
     if y < 0:
         return pow_recursive(ops.reciprocal(x), -y, dtype)
