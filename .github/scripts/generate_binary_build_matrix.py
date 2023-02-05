@@ -13,7 +13,7 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["11.6", "11.7"]
+CUDA_ARCHES = ["11.7", "11.8"]
 
 
 ROCM_ARCHES = ["5.2", "5.3"]
@@ -71,7 +71,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
+FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -89,11 +89,13 @@ def list_without(in_list: List[str], without: List[str]) -> List[str]:
 def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
-    python_versions = FULL_PYTHON_VERSIONS
+    python_versions = list(FULL_PYTHON_VERSIONS)
+    if os == "linux":
+        # NOTE: We only build 3.11 on linux right now as many dependencies
+        # are yet not available on conda
+        python_versions.append("3.11")
     if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
-    elif os == "macos-arm64":
-        python_versions = list_without(python_versions, ["3.7"])
     for python_version in python_versions:
         # We don't currently build conda packages for rocm
         for arch_version in arches:
@@ -180,13 +182,7 @@ def generate_wheels_matrix(os: str,
     if python_versions is None:
         # Define default python version
         python_versions = list(FULL_PYTHON_VERSIONS)
-        if os == "macos-arm64":
-            python_versions = list_without(python_versions, ["3.7"])
-
-        if os == "linux":
-            # NOTE: We only build 3.11 wheel on linux as 3.11 is not
-            # available on conda right now
-            python_versions.append("3.11")
+        python_versions.append("3.11")
 
     if arches is None:
         # Define default compute archivectures
@@ -219,9 +215,17 @@ def generate_wheels_matrix(os: str,
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements":
-                        "nvidia-cuda-runtime-cu11; platform_system == 'Linux' | "
-                        "nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | "
-                        "nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'",
+                        "nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux' and platform_machine == 'x86_64'",
                         "build_name":
                         f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn"
                         .replace(

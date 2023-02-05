@@ -24,6 +24,7 @@ __all__ = [
     'ExpTransform',
     'IndependentTransform',
     'LowerCholeskyTransform',
+    'PositiveDefiniteTransform',
     'PowerTransform',
     'ReshapeTransform',
     'SigmoidTransform',
@@ -823,7 +824,7 @@ class CorrCholeskyTransform(Transform):
         y_cumsum_vec = tril_matrix_to_vec(y_cumsum_shifted, diag=-1)
         t = y_vec / (y_cumsum_vec).sqrt()
         # inverse of tanh
-        x = ((1 + t) / (1 - t)).log() / 2
+        x = (t.log1p() - t.neg().log1p()) / 2
         return x
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
@@ -970,6 +971,25 @@ class LowerCholeskyTransform(Transform):
 
     def _inverse(self, y):
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
+
+
+class PositiveDefiniteTransform(Transform):
+    """
+    Transform from unconstrained matrices to positive-definite matrices.
+    """
+    domain = constraints.independent(constraints.real, 2)
+    codomain = constraints.positive_definite  # type: ignore[assignment]
+
+    def __eq__(self, other):
+        return isinstance(other, PositiveDefiniteTransform)
+
+    def _call(self, x):
+        x = LowerCholeskyTransform()(x)
+        return x @ x.mT
+
+    def _inverse(self, y):
+        y = torch.linalg.cholesky(y)
+        return LowerCholeskyTransform().inv(y)
 
 
 class CatTransform(Transform):

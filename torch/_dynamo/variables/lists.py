@@ -434,11 +434,6 @@ class NamedTupleVariable(TupleVariable):
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
-        from .tensor import DynamicShapeVariable
-
-        if any([isinstance(x, DynamicShapeVariable) for x in items]):
-            unimplemented("Dynamic slicing not supported")
-
         items_to_map = items
         start, stop, step = [variables.ConstantVariable(None)] * 3
 
@@ -451,15 +446,10 @@ class SliceVariable(BaseListVariable):
         else:
             raise AssertionError()
 
-        # Avoids a .item() call in the tensor slice that would attempt to get a
-        # value out fake tensors, and which would determine the output shape of
-        # the slice.  It is a workaround until
-        # https://github.com/pytorch/pytorch/pull/83567 is landed and there is
-        # more complete support for breaking on data dependent operators.
-        if not config.capture_scalar_outputs:
-            for limit in (start, stop, step):
-                if isinstance(limit, (variables.TensorVariable, DynamicShapeVariable)):
-                    unimplemented("Dynamic slicing not supported")
+        if isinstance(start, variables.TensorVariable) or isinstance(
+            stop, variables.TensorVariable
+        ):
+            unimplemented("Dynamic slicing on data-dependent value is not supported")
 
         super().__init__([start, stop, step], **kwargs)
 
