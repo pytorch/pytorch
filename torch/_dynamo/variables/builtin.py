@@ -27,7 +27,7 @@ from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import BaseListVariable, ListVariable, TupleVariable
-from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
+from .tensor import SymbolicNumericalVariable, FakeItemVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -222,8 +222,8 @@ class BuiltinVariable(VariableTracker):
                     **options,
                 )
 
-            handlers.append(((DynamicShapeVariable, VariableTracker), dynamic_handler))
-            handlers.append(((VariableTracker, DynamicShapeVariable), dynamic_handler))
+            handlers.append(((SymbolicNumericalVariable, VariableTracker), dynamic_handler))
+            handlers.append(((VariableTracker, SymbolicNumericalVariable), dynamic_handler))
 
             op_handlers[op] = handlers
 
@@ -436,8 +436,8 @@ class BuiltinVariable(VariableTracker):
                         need_unwrap=need_unwrap,
                         **options,
                     )
-                elif all(isinstance(x, DynamicShapeVariable) for x in args):
-                    return DynamicShapeVariable.create(tx, proxy, None, **options)
+                elif all(isinstance(x, SymbolicNumericalVariable) for x in args):
+                    return SymbolicNumericalVariable.create(tx, proxy, None, **options)
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
@@ -452,7 +452,7 @@ class BuiltinVariable(VariableTracker):
 
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if self.fn in (int, float) and isinstance(args[0], DynamicShapeVariable):
+        if self.fn in (int, float) and isinstance(args[0], SymbolicNumericalVariable):
             fn_ = sym_int if self.fn is int else sym_float
             out = wrap_fx_proxy(
                 tx=tx,
@@ -524,7 +524,7 @@ class BuiltinVariable(VariableTracker):
                 a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
-            if isinstance(a, DynamicShapeVariable):
+            if isinstance(a, SymbolicNumericalVariable):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -589,11 +589,11 @@ class BuiltinVariable(VariableTracker):
                 return variables.ConstantVariable(max(a.value, b.value))
             else:
                 return variables.ConstantVariable(min(a.value, b.value))
-        elif isinstance(a, DynamicShapeVariable) or isinstance(b, DynamicShapeVariable):
+        elif isinstance(a, SymbolicNumericalVariable) or isinstance(b, SymbolicNumericalVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
             )
-            return DynamicShapeVariable.create(tx, proxy, None)
+            return SymbolicNumericalVariable.create(tx, proxy, None)
         else:
 
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
@@ -608,7 +608,7 @@ class BuiltinVariable(VariableTracker):
         elif self._dynamic_args(*args):
 
             def guard_if_dyn(arg):
-                if isinstance(arg, DynamicShapeVariable):
+                if isinstance(arg, SymbolicNumericalVariable):
                     return arg.evaluate_expr(tx.output)
                 return arg
 
@@ -618,8 +618,8 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def _dynamic_args(self, *args, **kwargs):
-        return any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
-            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
+        return any([isinstance(x, SymbolicNumericalVariable) for x in args]) or any(
+            [isinstance(x, SymbolicNumericalVariable) for x in kwargs.values()]
         )
 
     def call_slice(self, tx, *args):
@@ -964,11 +964,11 @@ class BuiltinVariable(VariableTracker):
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx, a):
-        if isinstance(a, DynamicShapeVariable):
-            return DynamicShapeVariable.create(
+        if isinstance(a, SymbolicNumericalVariable):
+            return SymbolicNumericalVariable.create(
                 tx,
                 (operator.neg)(a.as_proxy()),
-                dyn_shape=None,
+                sym_num=None,
             )
         # None no-ops this handler and lets the driving function proceed
         return None
@@ -1022,25 +1022,25 @@ class BuiltinVariable(VariableTracker):
                 op(left.as_proxy(), right.as_proxy()),
             )
 
-        if isinstance(left, DynamicShapeVariable):
+        if isinstance(left, SymbolicNumericalVariable):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
 
-            return DynamicShapeVariable.create(
+            return SymbolicNumericalVariable.create(
                 tx,
                 op(left.as_proxy(), right.as_proxy()),
-                dyn_shape=None,
+                sym_num=None,
             )
 
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
-        if isinstance(a, DynamicShapeVariable) and isinstance(b, DynamicShapeVariable):
-            return DynamicShapeVariable.create(
+        if isinstance(a, SymbolicNumericalVariable) and isinstance(b, SymbolicNumericalVariable):
+            return SymbolicNumericalVariable.create(
                 tx,
                 (operator.and_)(a.as_proxy(), b.as_proxy()),
-                dyn_shape=None,
+                sym_num=None,
             )
         # None no-ops this handler and lets the driving function proceed
         return None

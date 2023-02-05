@@ -87,7 +87,7 @@ from .misc import (
 )
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
-    DynamicShapeVariable,
+    SymbolicNumericalVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -623,15 +623,15 @@ class VariableBuilder:
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 source=None,
-                dyn_shape=value
+                sym_num=value
                 # shape Guards live their own rich life via shape_env
             )
-        return DynamicShapeVariable.create(
+        return SymbolicNumericalVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
             ),
-            dyn_shape=value
+            sym_num=value
             # shape Guards live their own rich life via shape_env
         )
 
@@ -897,13 +897,13 @@ def wrap_fx_proxy_cls(
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
         proxy.node.meta["example_value"] = example_value
-        return DynamicShapeVariable.create(tx, proxy, example_value, **options)
+        return SymbolicNumericalVariable.create(tx, proxy, example_value, **options)
     elif istype(example_value, torch.Size) and config.dynamic_shapes:
         proxy.node.meta["example_value"] = example_value
         sizes = []
         for i, v in enumerate(example_value):
             proxy_i = proxy[i]
-            sizes.append(DynamicShapeVariable.create(tx, proxy_i, v, **options))
+            sizes.append(SymbolicNumericalVariable.create(tx, proxy_i, v, **options))
         return SizeVariable(sizes, proxy, **options)
     elif istype(example_value, int) and proxy.node.target in (
         torch.seed,
@@ -914,7 +914,7 @@ def wrap_fx_proxy_cls(
     ):
         if config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
+            return SymbolicNumericalVariable.create(tx, proxy, example_value, **options)
         else:
             return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
@@ -961,7 +961,7 @@ def wrap_fx_proxy_cls(
         return ConstantVariable(example_value, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
-        return DynamicShapeVariable(proxy, example_value, **options)
+        return SymbolicNumericalVariable(proxy, example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

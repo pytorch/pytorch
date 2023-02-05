@@ -76,7 +76,7 @@ class ConstantVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .tensor import DynamicShapeVariable
+        from .tensor import SymbolicNumericalVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -86,9 +86,9 @@ class ConstantVariable(VariableTracker):
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
-        if any([isinstance(x, DynamicShapeVariable) for x in args]):
-            # Promote to DynamicShapeVariable for operations involving dynamic shapes.
-            return variables.DynamicShapeVariable(
+        if any([isinstance(x, SymbolicNumericalVariable) for x in args]):
+            # Promote to SymbolicNumericalVariable for operations involving dynamic shapes.
+            return variables.SymbolicNumericalVariable(
                 self.as_proxy(), self.value
             ).call_method(tx, name, args, kwargs)
 
@@ -114,16 +114,16 @@ class ConstantVariable(VariableTracker):
             op = getattr(operator, name)
             add_target = const_args[0]
             if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import DynamicShapeVariable
+                from .tensor import SymbolicNumericalVariable
 
                 # Addition between a non sym and sym makes a sym
-                # dyn_shape = tx.output.register_attr_or_module(
+                # sym_num = tx.output.register_attr_or_module(
                 #     add_target, f"sym_shape_{add_target}", source=None
                 # )
                 proxy = tx.output.create_proxy(
                     "call_function", op, (self.value, add_target), {}
                 )
-                return DynamicShapeVariable.create(tx, proxy, add_target, **options)
+                return SymbolicNumericalVariable.create(tx, proxy, add_target, **options)
             return ConstantVariable(op(self.value, add_target), **options)
         elif name == "__len__" and not (args or kwargs):
             return ConstantVariable(len(self.value), **options)

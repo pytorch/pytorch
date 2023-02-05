@@ -35,7 +35,7 @@ from .misc import (
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
-    DynamicShapeVariable,
+    SymbolicNumericalVariable,
     FakeItemVariable,
     TensorVariable,
     UnspecializedPythonVariable,

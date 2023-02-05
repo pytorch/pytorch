@@ -14,7 +14,7 @@ from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymbolicNumericalVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -95,7 +95,7 @@ class PyCodegen(object):
             value,
             (
                 TensorVariable,
-                DynamicShapeVariable,
+                SymbolicNumericalVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
             ),
