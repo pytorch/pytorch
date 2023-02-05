@@ -157,7 +157,10 @@ for name, name2, log in chunker(entries, 3):
     op_count = None
     graph_breaks = None
     unique_graph_breaks = None
-    if m := re.search(r"Dynamo produced (\d+) graphs covering (\d+) ops with (\d+) graph breaks \((\d+) unique\)", log):
+    if m := re.search(
+        r"Dynamo produced (\d+) graphs covering (\d+) ops with (\d+) graph breaks \((\d+) unique\)",
+        log,
+    ):
         graph_count = m.group(1)
         op_count = m.group(2)
         graph_breaks = m.group(3)

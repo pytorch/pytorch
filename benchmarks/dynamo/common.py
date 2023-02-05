@@ -1380,13 +1380,23 @@ class BenchmarkRunner:
         def get_stats():
             # TODO: consider deepcopy'ing the entire counters struct and
             # adding a helper to do subtraction on it
-            return collections.Counter({
-                'calls_captured': torch._dynamo.utils.counters["stats"]["calls_captured"],
-                'unique_graphs': torch._dynamo.utils.counters["stats"]["unique_graphs"],
-                'graph_breaks': sum(torch._dynamo.utils.counters["graph_break"].values()),
-                # NB: The plus removes zero counts
-                'unique_graph_breaks': len(+torch._dynamo.utils.counters["graph_break"]),
-            })
+            return collections.Counter(
+                {
+                    "calls_captured": torch._dynamo.utils.counters["stats"][
+                        "calls_captured"
+                    ],
+                    "unique_graphs": torch._dynamo.utils.counters["stats"][
+                        "unique_graphs"
+                    ],
+                    "graph_breaks": sum(
+                        torch._dynamo.utils.counters["graph_break"].values()
+                    ),
+                    # NB: The plus removes zero counts
+                    "unique_graph_breaks": len(
+                        +torch._dynamo.utils.counters["graph_break"]
+                    ),
+                }
+            )
 
         start_stats = get_stats()
 
