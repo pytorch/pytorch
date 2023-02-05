@@ -132,10 +132,22 @@ torchgen/packaged/*
 .ipynb_checkpoints
 
 # Editor temporaries
+*.swa
+*.swb
+*.swc
+*.swd
+*.swe
+*.swf
+*.swg
+*.swh
+*.swi
+*.swj
+*.swk
+*.swl
+*.swm
 *.swn
 *.swo
 *.swp
-*.swm
 *~
 
 # macOS dir files

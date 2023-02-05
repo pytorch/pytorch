@@ -421,6 +421,7 @@ class TestList(JitTestCase):
 
         self.checkScript(func2, ())
 
+    @skipIfTorchDynamo("TorchDynamo fails to raise on this checkScriptRaisesRegex, because we trace it properly now")
     def test_list_ops(self):
         def test_equality():
             a = [1, 2, 3]
