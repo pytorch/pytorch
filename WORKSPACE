@@ -259,7 +259,7 @@ local_repository(
 )
 
 local_repository(
-    name = "unused_fmt",
+    name = "unused_ftm_bazel",
     path = "third_party/fmt/support/bazel",
 )
 
