@@ -1991,12 +1991,13 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
             lambda: "Must specify exactly one of output_size and scale_factors",
         )
         utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
-        return [
-            # Returning output_size as float. We cannot convert it to int directly,
-            # as latter computation of scale_factor is relying output size being float
-            sym_float(input_size[i + 2] * scale_factors[i])
-            for i in range(spatial_dimensions)
-        ]
+        output_size = []
+        for i, s in enumerate(scale_factors):
+            if int(s) == s:
+                output_size.append(input_size[i + 2] * int(s))
+            else:
+                output_size.append(sym_int(input_size[i + 2] * s))
+        return output_size
     utils.check(
         False, lambda: "Must specify exactly one of output_size and scale_factors"
     )
@@ -2015,8 +2016,6 @@ def upsample_nearest1d_vec(input, output_size, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale = get_scale_value(scale_factors, 0)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_nearest1d.default here
     return upsample_nearest1d(input, osize, scale)
 
 
@@ -2028,8 +2027,6 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_nearest2d.default here
     return upsample_nearest2d(input, osize, scale_h, scale_w)
 
 
@@ -2042,12 +2039,10 @@ def upsample_nearest3d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 1)
     scale_w = get_scale_value(scale_factors, 2)
 
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_nearest3d.default here
     return upsample_nearest3d(input, osize, scale_d, scale_h, scale_w)
 
 
-def _compute_upsample_nearest_indices(input, output_size):
+def _compute_upsample_nearest_indices(input, output_size, scales):
     # For each dim in output_size, compute the set of input indices used
     # to produce the upsampled output.
     indices = []
@@ -2058,13 +2053,11 @@ def _compute_upsample_nearest_indices(input, output_size):
         # scale = isize / osize
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
-        osize = sym_float(output_size[d])
-        output_indices = torch.arange(
-            sym_int(osize), dtype=input.dtype, device=input.device
-        )
-        isize = sym_float(input.shape[-num_spatial_dims + d])
-        scale = isize / osize
-        input_indices = torch.floor(output_indices * scale).to(torch.int64)
+        osize = output_size[d]
+        output_indices = torch.arange(osize, dtype=input.dtype, device=input.device)
+        isize = input.shape[-num_spatial_dims + d]
+        scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
+        input_indices = (output_indices * scale).to(torch.int64)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)
@@ -2076,10 +2069,10 @@ def _compute_upsample_nearest_indices(input, output_size):
 @pw_cast_for_opmath
 def upsample_nearest1d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     scales: Optional[float] = None,
 ) -> Tensor:
-    (l_indices,) = _compute_upsample_nearest_indices(input, output_size)
+    (l_indices,) = _compute_upsample_nearest_indices(input, output_size, (scales,))
     result = input[:, :, l_indices]
     return result
 
@@ -2089,11 +2082,13 @@ def upsample_nearest1d(
 @pw_cast_for_opmath
 def upsample_nearest2d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    h_indices, w_indices = _compute_upsample_nearest_indices(input, output_size)
+    h_indices, w_indices = _compute_upsample_nearest_indices(
+        input, output_size, (scales_h, scales_w)
+    )
     result = input[:, :, h_indices, w_indices]
 
     # convert output to correct memory format, if necessary
@@ -2114,13 +2109,13 @@ def upsample_nearest2d(
 @pw_cast_for_opmath
 def upsample_nearest3d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     scales_d: Optional[float] = None,
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
     d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
-        input, output_size
+        input, output_size, (scales_d, scales_h, scales_w)
     )
     result = input[:, :, d_indices, h_indices, w_indices]
 
@@ -2134,9 +2129,6 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-
-    # NB: osize could be a list of float when scale_factors is float
-    # so we cannot redispatch to aten.upsample_bilinear2d.default here
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
@@ -2145,7 +2137,7 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
 @pw_cast_for_opmath
 def upsample_bilinear2d(
     input: Tensor,
-    output_size: List[Union[int, float]],
+    output_size: List[int],
     align_corners: bool,
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
@@ -2153,29 +2145,33 @@ def upsample_bilinear2d(
     # get dimensions of original image
     n_batch, n_channels, in_h, in_w = input.shape
 
-    out_h = sym_float(output_size[0])
-    out_w = sym_float(output_size[1])
+    out_h = output_size[0]
+    out_w = output_size[1]
 
     # Calculate horizontal and vertical scaling factor
     # TODO: Figure out if scales_h/scales_w matters here
     if out_h > 1:
         if align_corners:
-            h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
+            h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
-            h_scale_factor = in_h / out_h
+            h_scale_factor = (
+                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_h
+            )
     else:
         h_scale_factor = 0.0
 
     if out_w > 1:
         if align_corners:
-            w_scale_factor = (in_w - 1) / (sym_int(out_w) - 1)
+            w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
-            w_scale_factor = in_w / out_w
+            w_scale_factor = (
+                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_w
+            )
     else:
         w_scale_factor = 0.0
 
-    i = torch.arange(sym_int(out_h), dtype=input.dtype, device=input.device)
-    j = torch.arange(sym_int(out_w), dtype=input.dtype, device=input.device)
+    i = torch.arange(out_h, dtype=input.dtype, device=input.device)
+    j = torch.arange(out_w, dtype=input.dtype, device=input.device)
 
     if align_corners:
         x = h_scale_factor * i
@@ -2184,9 +2180,9 @@ def upsample_bilinear2d(
         x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
         y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
 
-    x_floor = torch.floor(x).to(torch.int64)
+    x_floor = x.to(torch.int64)
     x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
-    y_floor = torch.floor(y).to(torch.int64)
+    y_floor = y.to(torch.int64)
     y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
 
     x_view = x.unsqueeze(1)
