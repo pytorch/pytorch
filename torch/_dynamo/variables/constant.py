@@ -76,7 +76,7 @@ class ConstantVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .tensor import SymbolicNumericalVariable
+        from .tensor import SymNodeVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -86,9 +86,9 @@ class ConstantVariable(VariableTracker):
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
-        if any([isinstance(x, SymbolicNumericalVariable) for x in args]):
-            # Promote to SymbolicNumericalVariable for operations involving dynamic shapes.
-            return variables.SymbolicNumericalVariable(
+        if any([isinstance(x, SymNodeVariable) for x in args]):
+            # Promote to SymNodeVariable for operations involving dynamic shapes.
+            return variables.SymNodeVariable(
                 self.as_proxy(), self.value
             ).call_method(tx, name, args, kwargs)
 
@@ -114,7 +114,7 @@ class ConstantVariable(VariableTracker):
             op = getattr(operator, name)
             add_target = const_args[0]
             if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import SymbolicNumericalVariable
+                from .tensor import SymNodeVariable
 
                 # Addition between a non sym and sym makes a sym
                 # sym_num = tx.output.register_attr_or_module(
@@ -123,7 +123,7 @@ class ConstantVariable(VariableTracker):
                 proxy = tx.output.create_proxy(
                     "call_function", op, (self.value, add_target), {}
                 )
-                return SymbolicNumericalVariable.create(tx, proxy, add_target, **options)
+                return SymNodeVariable.create(tx, proxy, add_target, **options)
             return ConstantVariable(op(self.value, add_target), **options)
         elif name == "__len__" and not (args or kwargs):
             return ConstantVariable(len(self.value), **options)

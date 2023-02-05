@@ -423,7 +423,7 @@ class TensorVariable(VariableTracker):
             )
 
 
-class SymbolicNumericalVariable(VariableTracker):
+class SymNodeVariable(VariableTracker):
     """
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
@@ -435,10 +435,10 @@ class SymbolicNumericalVariable(VariableTracker):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = sym_num
-        return SymbolicNumericalVariable(proxy, sym_num, **options)
+        return SymNodeVariable(proxy, sym_num, **options)
 
     def __init__(self, proxy, sym_num, **kwargs):
-        super(SymbolicNumericalVariable, self).__init__(**kwargs)
+        super(SymNodeVariable, self).__init__(**kwargs)
         self.proxy = proxy
         self.sym_num = sym_num
 
@@ -446,7 +446,7 @@ class SymbolicNumericalVariable(VariableTracker):
         return type(self.sym_num)
 
     def unpack_var_sequence(self, tx):
-        super(SymbolicNumericalVariable, self).unpack_var_sequence(tx)
+        super(SymNodeVariable, self).unpack_var_sequence(tx)
 
     def as_proxy(self):
         return self.proxy

@@ -81,7 +81,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    SymbolicNumericalVariable,
+    SymNodeVariable,
     supported_const_comparison_ops,
     supported_tensor_comparison_ops,
     TensorVariable,
@@ -314,7 +314,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, SymbolicNumericalVariable):
+        elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
                 push and self.push(value)
@@ -905,7 +905,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 left,
                 (
                     TensorVariable,
-                    SymbolicNumericalVariable,
+                    SymNodeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -1314,7 +1314,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-        if isinstance(value, SymbolicNumericalVariable):
+        if isinstance(value, SymNodeVariable):
             value = ConstantVariable(str(value.sym_num))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
@@ -1782,7 +1782,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
-                f"inline in skipfiles: {func} | {func.get_name()} {func.get_filename()}"
+                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
         try:

@@ -385,7 +385,7 @@ class SizeVariable(TupleVariable):
         return super(SizeVariable, self).call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import SymbolicNumericalVariable
+        from .tensor import SymNodeVariable
 
         index = arg.as_python_constant()
         if isinstance(index, slice):
@@ -402,7 +402,7 @@ class SizeVariable(TupleVariable):
             items = self.items[index]
 
             def _unpack_into_example(item):
-                if isinstance(item, SymbolicNumericalVariable):
+                if isinstance(item, SymNodeVariable):
                     return item.sym_num
                 return item.as_python_constant()
 
