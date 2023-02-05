@@ -299,3 +299,11 @@ TEST_F(ModuleDictTest, PrettyPrintModuleDict) {
       "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
 }
+
+TEST_F(ModuleDictTest, InvalidAt) {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+      {"linear", Linear(10, 3).ptr()}};
+  ModuleDict dict(ordereddict);
+  ASSERT_THROWS_WITH(
+      dict->at<torch::nn::Dropout2dImpl>("linear"), "Unable to cast module");
+}

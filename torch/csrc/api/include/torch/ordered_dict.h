@@ -196,16 +196,6 @@ class OrderedDict<Key, Value>::Item {
   /// Constructs a new item.
   Item(Key key, Value value) : pair_(std::move(key), std::move(value)) {}
 
-#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 11) && defined(_MSC_VER)
-  /// Related issue: https://github.com/pytorch/pytorch/issues/55266
-  /// Needs to define this function for CUDA < 11.0 on Windows,
-  /// although it usually won't be used actually.
-  Item& operator=(const Item& other) {
-    pair_ = other.pair_;
-    return *this;
-  }
-#endif
-
   /// Returns a reference to the value.
   Value& operator*() {
     return value();
