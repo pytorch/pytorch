@@ -20,12 +20,16 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
     import nvfuser
-    from packaging.version import Version
+    from packaging.version import Version  # type: ignore[import]
 
     nvfuser_version = Version("0.0.0")
     if hasattr(nvfuser, "version"):
-        nvfuser_version = nvfuser.version()
-        from nvfuser import DataType, FusionDefinition, Tensor  # type: ignore[import]
+        nvfuser_version = nvfuser.version()  # type: ignore[attr-defined]
+        from nvfuser import (  # type: ignore[attr-defined, import]
+            DataType,
+            FusionDefinition,
+            Tensor,
+        )
     else:
         from nvfuser._C import (  # type: ignore[import]
             DataType,
@@ -83,7 +87,7 @@ def compute_contiguity(shape, strides):
     are represented by False.
     """
     if hasattr(nvfuser, "version"):
-        from nvfuser import compute_contiguity
+        from nvfuser import compute_contiguity  # type: ignore[attr-defined]
     else:
         from nvfuser._C import compute_contiguity
 

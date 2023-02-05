@@ -146,7 +146,9 @@ def _assert_nvfuser_op_exists(fname: str):
         import nvfuser
 
         if hasattr(nvfuser, "version"):
-            from nvfuser import FusionDefinition as fd  # type: ignore[import]
+            from nvfuser import (  # type: ignore[import, attr-defined]
+                FusionDefinition as fd,
+            )
         else:
             from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
 
@@ -293,7 +295,7 @@ def _sum_nvfuser(
     import nvfuser
 
     if hasattr(nvfuser, "version"):
-        from nvfuser import DataType  # type: ignore[import]
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
     else:
         from nvfuser._C import DataType  # type: ignore[import]
 

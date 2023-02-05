@@ -11,7 +11,7 @@ from torch import sym_float, sym_int, sym_max
 try:
     import nvfuser
     if hasattr(nvfuser, "version"):
-        from nvfuser import DataType  # type: ignore[import]
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
     else:
         from nvfuser._C import DataType  # type: ignore[import]
 
