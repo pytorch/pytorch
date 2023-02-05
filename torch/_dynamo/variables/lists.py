@@ -106,10 +106,9 @@ class BaseListVariable(VariableTracker):
         eq_result = BaseListVariable.list_eq(tx, left, right)
         if op is operator.eq:
             return eq_result
-        elif op is operator.neq:
+        elif op is operator.ne:
             return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
         else:
-            # This function is incorrect for < <= >= >
             unimplemented(f"list_compare {left} {op} {right}")
 
     @staticmethod
