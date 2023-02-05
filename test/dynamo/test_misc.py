@@ -154,7 +154,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torch._dynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
-
     def test_int_shape_binops(self):
         def fn(x):
             # Test reversal by putting int arg first.
