@@ -1010,8 +1010,6 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable(op(left.fn, right.fn))
 
         if isinstance(left, BaseListVariable):
-            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
-                _unimplemented()
             return BaseListVariable.generic_list_compare(left, tx, op, right)
 
         if isinstance(left, TensorVariable):

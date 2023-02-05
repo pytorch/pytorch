@@ -3648,6 +3648,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
+    def test_shape_and_tuple_equality(self):
+        def fn(x, y, t):
+            z = x * y
+            if x.size() == t:
+                return z.cos()
+            return z.sin()
+
+        torch._dynamo.optimize("eager", nopython=True)(fn)(
+            torch.randn([4, 4]), torch.randn([4, 4]), (4, 4)
+        )
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
