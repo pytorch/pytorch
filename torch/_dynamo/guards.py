@@ -65,7 +65,11 @@ CLOSURE_VARS = collections.OrderedDict(
 )
 
 if sys.version_info.minor <= 8:
+    # [Note: Python Version <= 3.8]
+    # This branch should be dropped when we drop support for Python 3.8.
+    # Reason: 'ast.unparse' function was introduced in Python 3.9.
     import astunparse
+
     def _ast_unparse(node: ast.AST) -> str:
         return astunparse.unparse(node).replace("\n", "")
 
