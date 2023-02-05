@@ -1254,11 +1254,38 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             with torch.enable_grad():
+                print("Hello world")  # Cause graph break
                 a = torch.sin(x)
                 b = reversible(a)
                 c = torch.sigmoid(b)
                 c.sum().backward()
                 return x.grad
+
+        x = torch.randn(3, requires_grad=True)
+        x.grad = None
+        with torch.no_grad():
+            ref = fn(x)
+
+        x.grad = None
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        with torch.no_grad():
+            res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_with_on_graph_break_nested(self):
+        def reversible(x):
+            print("Hello world")  # Cause graph break so inline fails
+            return torch.sin(torch.cos(x))
+
+        def fn(x):
+            # nested context manager failed previously
+            with torch.no_grad():
+                with torch.enable_grad():
+                    a = torch.sin(x)
+                    b = reversible(a)
+                    c = torch.sigmoid(b)
+                    c.sum().backward()
+                    return x.grad
 
         x = torch.randn(3, requires_grad=True)
         x.grad = None

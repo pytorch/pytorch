@@ -2752,22 +2752,29 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_autocast_cpu_graph_break_nested(self):
         class MyModule(torch.nn.Module):
+            @staticmethod
+            def mm_breaks(x, y):
+                torch._dynamo.graph_break()
+                return torch.mm(x, y)
+
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cpu")
                 b_float32 = torch.rand((8, 8), device="cpu")
 
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-                    torch._dynamo.graph_break()
                     with torch.autocast(
                         device_type="cpu", dtype=torch.bfloat16, enabled=False
                     ):
-                        torch._dynamo.graph_break()
+                        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                            # Check that nested with non-inlineable function with graph break
+
+                            f_float16_1 = self.mm_breaks(a_float32, b_float32)
                         # We can restore the inner autocast even after graph breaks
                         g_float32 = torch.mm(a_float32, b_float32)
                     # We remember to exit the inner autocast correctly to outer
                     # even after graph breaks
-                    torch._dynamo.graph_break()
-                    f_float16 = torch.mm(a_float32, b_float32)
+                    f_float16 = self.mm_breaks(a_float32, b_float32)
+                    assert(f_float16.dtype == f_float16_1.dtype)
                 return f_float16, g_float32
 
         module = MyModule()

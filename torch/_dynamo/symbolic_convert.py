@@ -367,11 +367,40 @@ def break_graph_if_unsupported(*, push):
 
             for _ in range(push):
                 self.push(UnknownVariable())
+
+            resume_call_insts = self.create_call_resume_at(self.next_instruction)
+
+            # Check if there is a block stack entry with GradModeVariable. And
+            # wrap the instruction causing the graph break inside a try..finally
+            # block. See more details at
+            # https://github.com/pytorch/torchdynamo/issues/207
+            finally_blocks = []
+            for ctx in self.block_stack:
+                if isinstance(ctx.with_context, ContextWrappingVariable):
+                    ctx_variable = ctx.with_context
+                    cg = PyCodegen(self)
+                    init_block, cleanup_ctx = ctx_variable.reconstruct(cg)
+                    finally_blocks.append(cleanup_ctx)
+                    for i in init_block:
+                        print("I", i)
+                    self.output.add_output_instructions(init_block)
+            if len(finally_blocks) > 0:
+                self.output.add_output_instructions([
+                    create_instruction("SETUP_FINALLY", target=finally_blocks[-1][0])
+                ])
             self.output.add_output_instructions([inst])
 
+            if len(finally_blocks) > 0:
+                # Setup the finally blocks in
+                # Add the cleanup instructions from try..finally block
+                finally_block = ContextWrappingVariable.create_finally_block(
+                    finally_blocks, resume_call_insts[0]
+                )
+                self.output.add_output_instructions(finally_block)
             self.output.add_output_instructions(
-                self.create_call_resume_at(self.next_instruction)
+                resume_call_insts,
             )
+            self.output.graph.print_tabular()
 
         return wrapper
 

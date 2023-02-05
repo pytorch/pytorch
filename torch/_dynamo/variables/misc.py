@@ -20,6 +20,7 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from ..bytecode_transformation import Instruction
 
 
 class SuperVariable(VariableTracker):
@@ -183,10 +184,53 @@ class ContextWrappingVariable(VariableTracker):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def reconstruct(self, codegen, target_inst=None):
-        raise NotImplementedError(
-            "Cannot reconstruct a ContextWrappingVariable directly"
-        )
+    def reconstruct(self, codegen):
+        if self.target_values == self.initial_values:
+            return ([], [])
+
+        def set_context_insts(values):
+            attr_source = AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
+            load_set_context_enabling_insts = attr_source.reconstruct(codegen)
+
+            loads = [codegen.create_load_const(val) for val in values]
+
+            return [
+                *load_set_context_enabling_insts,
+                *loads,
+                create_instruction("CALL_FUNCTION", len(values)),
+                create_instruction("POP_TOP"),
+            ]
+
+        init_block = set_context_insts(self.target_values)
+        finally_block = set_context_insts(self.initial_values)
+
+        return (init_block, finally_block)
+    
+    def create_finally_block(
+            finally_blocks: List[Instruction], 
+            resume_at: Instruction
+        ) -> List[Instruction]:
+        # finally and except blocks are given in the reverse order in which they 
+        # must be applied. The required order is from innermost to outer.
+        finally_blocks.reverse()
+        finally_block = [item for sublist in finally_blocks for item in sublist]
+
+        import sys
+        if sys.version_info < (3, 9):
+            return [
+                create_instruction("POP_BLOCK"),
+                codegen.create_begin_finally(),
+                *finally_block,
+                create_instruction("END_FINALLY"),
+            ]
+        else:
+            return [
+                create_instruction("POP_BLOCK"),
+                *finally_block,
+                create_instruction("JUMP_FORWARD", target=resume_at),
+                *finally_block,
+                create_instruction("RERAISE"),
+            ]
 
     def module_name(self):
         raise NotImplementedError("module_name called on base")
