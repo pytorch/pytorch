@@ -4297,32 +4297,31 @@ exit(2)
         not TEST_CUDA or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
         "CUDA >= 11.0 required for graphs",
     )
-    @parametrize("optimizer", (torch.optim.Adam, torch.optim.AdamW))
-    @parametrize("second_param_group_capturable", (True, False))
-    def test_graph_adam_adamw_with_explicit_capturable(self, optimizer, second_param_group_capturable):
-        param1 = torch.nn.Parameter(torch.ones(1, device="cuda"))
-        param2 = torch.nn.Parameter(torch.ones(1, device="cuda"))
-        with torch.no_grad():
-            grad1 = torch.randn_like(param1)
-            grad2 = torch.randn_like(param2)
-        params = [{"params": [param1], "capturable": True}, {"params": [param2], "capturable": second_param_group_capturable}]
-        opt = optimizer(params)
+    def test_graph_adam_adamw_with_explicitly_capturable_param_groups(self):
+        for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW), (True, False)):
+            param1 = torch.nn.Parameter(torch.ones(1, device="cuda"))
+            param2 = torch.nn.Parameter(torch.ones(1, device="cuda"))
+            with torch.no_grad():
+                grad1 = torch.randn_like(param1)
+                grad2 = torch.randn_like(param2)
+            params = [{"params": [param1], "capturable": True}, {"params": [param2], "capturable": second_param_group_capturable}]
+            opt = optimizer(params)
 
-        param1.grad = grad1
-        param2.grad = grad2
-        g = torch.cuda.CUDAGraph()
-        if not second_param_group_capturable:
-            with self.assertRaisesRegex(RuntimeError, "Attempting CUDA graph"):
-                with torch.cuda.graph(g):
-                    opt.step()
-            return
-        with torch.cuda.graph(g):
-            opt.step()
+            param1.grad = grad1
+            param2.grad = grad2
+            g = torch.cuda.CUDAGraph()
+            if not second_param_group_capturable:
+                with self.assertRaisesRegex(RuntimeError, "Attempting CUDA graph"):
+                    with torch.cuda.graph(g):
+                        opt.step()
+                return
+            with torch.cuda.graph(g):
+                opt.step()
 
-        for _ in range(3):
-            param1.grad.copy_(grad1)
-            param2.grad.copy_(grad2)
-            g.replay()
+            for _ in range(3):
+                param1.grad.copy_(grad1)
+                param2.grad.copy_(grad2)
+                g.replay()
 
     @unittest.skipIf(
         (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
