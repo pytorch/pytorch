@@ -49,6 +49,9 @@ runs:
         if [ -f 'usage_log.txt' ]; then
             zip "usage-log-${FILE_SUFFIX}.zip" 'usage_log.txt'
         fi
+        if ls test/**/*.log 1> /dev/null 2>&1; then
+            zip -r "usage-log-${FILE_SUFFIX}.zip" test -i '*.log'
+        fi
 
     # Windows zip
     - name: Zip JSONs for upload
@@ -76,7 +79,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "usage-log-$Env:FILE_SUFFIX.zip" 'usage_log.txt'
+        7z a "usage-log-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\*.log'
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
@@ -102,6 +105,7 @@ runs:
     - name: Store Usage Logs on S3
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
+      continue-on-error: true
       with:
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
@@ -113,6 +117,7 @@ runs:
     - name: Store Test Downloaded JSONs on Github
       uses: actions/upload-artifact@v3
       if: inputs.use-gha
+      continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: test-jsons-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
@@ -123,6 +128,7 @@ runs:
     - name: Store Test Reports on Github
       uses: actions/upload-artifact@v3
       if: inputs.use-gha
+      continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
@@ -136,10 +142,12 @@ runs:
     - name: Store Usage Logs on Github
       uses: actions/upload-artifact@v3
       if: inputs.use-gha
+      continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: ignore
-        path: usage_log.txt
-      continue-on-error: true
+        path: |
+          usage_log.txt
+          test/**/*.log

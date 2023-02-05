@@ -14,6 +14,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.utils._pytree import tree_flatten
 
@@ -133,9 +134,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     # class attribute that handles operator placements propagation
     # rules, keyed by aten op name, value is propagation func
-    _op_to_rules: Dict[
-        str, Callable[["op_dispatch.OpSchema"], "op_dispatch.OutputSharding"]
-    ] = {}
+    _propagator: ShardingPropagator = ShardingPropagator()
 
     # class attribute that handles custom registered ops, all handled
     # custom ops should appear in this table, and overriding the default
@@ -217,23 +216,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        # if we find nn.functional name in dispatch op, dispatch to it instead,
-        # this allow us to override some python level behaviors that wouldn't be
-        # possible in __torch_dispatch__ level.
-        if func.__name__ in DTensor._custom_dispatch_ops:
-            # dispatch to the same table as the name should be different between
-            # torch_function and torch_dispatch
-            return DTensor._custom_dispatch_ops[func.__name__](*args, **kwargs)
-        else:
-            # if not, just do nothing here
-            return super().__torch_function__(func, types, args, kwargs)
-
-    @classmethod
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # check that we are not getting mixed vanilla and Distributed tensors
         arg_list, _ = tree_flatten(args)
@@ -250,7 +232,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             func,
             args,
             kwargs,
-            DTensor._op_to_rules,
+            DTensor._propagator,
             DTensor._custom_dispatch_ops,
         )
 
@@ -294,7 +276,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # in the mesh dimension
         device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
         # convert the local tensor to desired device base on device mesh's device_type
-        local_tensor = local_tensor.to(device_mesh.device_type)
+        if not local_tensor.is_meta:
+            local_tensor = local_tensor.to(device_mesh.device_type)
 
         # set default placements to replicated if not specified
         if placements is None:

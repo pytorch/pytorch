@@ -12,7 +12,6 @@ from typing import (
     Iterator,
     Tuple,
     Dict,
-    Optional,
     List,
     Sequence,
     TypeVar,
@@ -25,6 +24,7 @@ import torch.distributed as dist
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    MultiThreadedTestCase,
     TEST_SKIPS,
     skip_if_lt_x_gpu,
 )
@@ -54,6 +54,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     """
     Test decorator which skips the test unless there's a GPU available to torch.
 
+    >>> # xdoctest: +SKIP
     >>> @skip_unless_torch_gpu
     >>> def test_some_method(self) -> None:
     >>>   ...
@@ -143,15 +144,10 @@ class DTensorTestBase(MultiProcessTestCase):
                 )
 
 
+TestFunc = Callable[[object], object]
+
 # wrapper to initialize comms (processgroup)
-def with_comms(
-    func: Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-        Callable
-    ] = None,
-    backend: Optional[str] = None,
-) -> Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-    Callable
-]:
+def with_comms(func: TestFunc) -> TestFunc:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
@@ -159,18 +155,39 @@ def with_comms(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
         # if backend not specified, and cuda available, then use nccl, else gloo
+        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
+            self.device_type = "cuda"
+        else:
+            self.device_type = "cpu"
+
         pg_backend = (
-            "nccl" if backend is None and torch.cuda.is_available() else "gloo"
+            "nccl" if self.device_type == "cuda" else "gloo"
         )
         if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        self.device_type = "cuda" if pg_backend == "nccl" else "cpu"
         self.init_pg(backend=pg_backend)
         func(self)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper
+
+
+class DTensorOpTestBase(MultiThreadedTestCase):
+    @property
+    def world_size(self) -> int:
+        return NUM_DEVICES
+
+    @property
+    def device_type(self) -> str:
+        return DEVICE_TYPE
+
+    def build_device_mesh(self):
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_threads()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
@@ -290,8 +307,8 @@ class DTensorConverter(object):
                 tree_unflatten(new_args, self.flatten_args_spec),
                 tree_unflatten(new_kwargs, self.flatten_kwargs_spec),
             )
-        except StopIteration:
-            raise StopIteration
+        except StopIteration as e:
+            raise StopIteration from e
 
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]

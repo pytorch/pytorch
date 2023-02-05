@@ -40,6 +40,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - docs_type: cpp
@@ -95,6 +96,8 @@ jobs:
         env:
           GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
+          # sometimes .netrc exists as a directory even though this is the temp folder
+          rm -rf "${RUNNER_TEMP}/.netrc"
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
           echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"

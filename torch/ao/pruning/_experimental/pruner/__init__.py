@@ -3,9 +3,5 @@ from .parametrization import (
     FakeStructuredSparsity,
     BiasHook,
 )
-
-__all__ = [
-    "FakeStructuredSparsity",
-    "BaseStructuredSparsifier",
-    "BiasHook",
-]
+from .saliency_pruner import SaliencyPruner
+from .lstm_saliency_pruner import LSTMSaliencyPruner

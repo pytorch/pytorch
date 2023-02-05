@@ -7,6 +7,7 @@ __all__ = ('merge', 'merge_with', 'valmap', 'keymap', 'itemmap',
            'valfilter', 'keyfilter', 'itemfilter',
            'assoc', 'dissoc', 'assoc_in', 'update_in', 'get_in')
 
+
 def _get_factory(f, kwargs):
     factory = kwargs.pop('factory', dict)
     if kwargs:
@@ -336,6 +337,7 @@ def get_in(keys, coll, default=None, no_default=False):
             raise
         return default
 
+
 def getter(index):
     if isinstance(index, list):
         if len(index) == 1:
@@ -347,6 +349,7 @@ def getter(index):
             return lambda x: ()
     else:
         return operator.itemgetter(index)
+
 
 def groupby(key, seq):
     """ Group a collection by a key function
@@ -382,6 +385,7 @@ def groupby(key, seq):
     for k, v in d.items():
         rv[k] = v.__self__  # type: ignore[var-annotated, attr-defined]
     return rv
+
 
 def first(seq):
     """ The first element in a sequence
