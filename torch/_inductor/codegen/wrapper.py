@@ -6,6 +6,8 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+import sympy
+
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
@@ -14,7 +16,6 @@ from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
-import sympy
 
 pexpr = texpr
 
@@ -287,20 +288,20 @@ class WrapperCodeGen(CodeGen):
 
         if has_triton():
             self.header.splice(
-                f"""
+                """
                 import triton
                 import triton.language as tl
-                from {config.inductor_import}.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
 
             if config.triton.convolution != "aten":
                 self.header.splice(
-                    f"""
-                    from {config.inductor_import}.triton_ops.conv_perf_model import early_config_prune
-                    from {config.inductor_import}.triton_ops.conv_perf_model import estimate_conv_time
-                    from {config.inductor_import}.triton_ops.autotune import conv_heuristics
+                    """
+                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
+                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
+                    from torch._inductor.triton_ops.autotune import conv_heuristics
                     """
                 )
 
@@ -313,6 +314,10 @@ class WrapperCodeGen(CodeGen):
 
         self.allocated = set()
         self.freed = set()
+
+        # maps from reusing buffer to reused buffer
+        self.reuses = dict()
+
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
@@ -346,19 +351,23 @@ class WrapperCodeGen(CodeGen):
             def call(args):
             """
         )
-        with self.wrapper_call.indent():
+        with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline("torch.cuda.synchronize()")
+                self.prefix.writeline("torch.cuda.synchronize()")
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
-                self.wrapper_call.writeline(f"{lhs} = args")
-                self.wrapper_call.writeline("args.clear()")
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
             for name in V.graph.randomness_seeds:
-                self.wrapper_call.writeline(
+                self.prefix.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
                 )
-            V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
+            V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
+
+    def append_precomputed_sizes_to_prefix(self):
+        with self.prefix.indent():
+            V.graph.sizevars.codegen_precomputed_sizes(self.prefix)
 
     def write_get_cuda_stream(self, index):
         name = f"stream{index}"
@@ -438,6 +447,14 @@ class WrapperCodeGen(CodeGen):
             return False
         return True
 
+    def did_reuse(self, buffer, reused_buffer):
+        # Check whether a given buffer was reused by a possible reuser in the wrapper codegen
+        # Can be consulted from inside ir codegen, e.g. to determine whether a copy is needed
+        return (
+            buffer.get_name() in self.reuses
+            and self.reuses[buffer.get_name()] == reused_buffer.get_name()
+        )
+
     def write_reuse_line(self, input_buffer, output_buffer):
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
@@ -446,6 +463,7 @@ class WrapperCodeGen(CodeGen):
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
+        self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.write_reuse_line(input_buffer, output_buffer)
 
     def codegen_cuda_device_guard_enter(self, device_idx):
@@ -476,7 +494,6 @@ class WrapperCodeGen(CodeGen):
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
-        result.splice(self.prefix)
 
         out_names = V.graph.get_output_names()
         with contextlib.ExitStack() as stack:
@@ -496,6 +513,10 @@ class WrapperCodeGen(CodeGen):
             ):
                 # these lines will be pointless
                 self.lines.pop()
+
+            for name, value in V.graph.graph_inputs.items():
+                if hasattr(value, 'data') and isinstance(value.data, ir.ReinterpretView):
+                    self.wrapper_call.writeline(value.data.codegen_reference_mutation())
 
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
@@ -522,6 +543,9 @@ class WrapperCodeGen(CodeGen):
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
+
+        self.append_precomputed_sizes_to_prefix()
+        result.splice(self.prefix)
 
         with result.indent():
             result.splice(self.wrapper_call)
@@ -566,9 +590,11 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                if isinstance(value, sympy.Expr): # Don't need to add symbolic
+                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
                     add_expr_input(name, V.graph.sizevars.size_hint(value))
                 else:
+                    if isinstance(value.data, ir.ReinterpretView):
+                        value = value.data.data
                     shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                     stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
                     add_fake_input(
@@ -640,6 +666,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             '''
             #include <dlfcn.h>
             #include <assert.h>
+
+            template <typename KernelFunc>
+            KernelFunc load_cpp_kernel(const char* so_filename) {
+                KernelFunc kernel_cpp;
+                auto kernel_cpp_lib = dlopen(so_filename, RTLD_NOW);
+                assert(kernel_cpp_lib != nullptr);
+                *(void **) (&kernel_cpp) = dlsym(kernel_cpp_lib, "kernel");
+                return kernel_cpp;
+            }
+
             """
         )
         with self.wrapper_call.indent():
@@ -711,11 +747,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         kernel_path = self.get_kernel_path(kernel)
-
-        self.writeline(f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);')
-        self.writeline(f"assert({name}_lib != nullptr);")
-        self.writeline(f"void (*{name})({arg_types});")
-        self.writeline(f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");')
+        self.writeline(
+            f'static auto {name} = load_cpp_kernel<void (*)({arg_types})>("{kernel_path}");'
+        )
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
