@@ -4312,7 +4312,7 @@ exit(2)
         param2.grad = grad2
         g = torch.cuda.CUDAGraph()
         if not second_param_group_capturable:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Attempting CUDA graph"):
                 with torch.cuda.graph(g):
                     opt.step()
             return
