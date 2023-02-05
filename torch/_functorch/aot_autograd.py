@@ -1689,6 +1689,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 fw_module, flat_args_with_views_handled
             )
 
+        with track_graph_compiling(aot_config, "backward"):
+            # !!! Trigger bw_compiler, args is WRONG
+            # Correct args should be [fw_outs_saved_for_bw, grad_outputs]
+            compiled_bw_func = aot_config.bw_compiler(
+                bw_module,
+                None   # this is a hack
+            )
+
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = None

@@ -1752,6 +1752,94 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
 
+    def test_export_trainig(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, val):
+                out = self.linear(val)
+                out.relu_()
+                loss = out.sum()
+                return loss
+
+        mod = Module()
+        x = torch.randn([3, 3], requires_grad=True)
+
+        torch._dynamo.reset()
+        joint_gm, _  = torch._dynamo.export(mod, x, aten_graph=True, training_mode='joint', tracing_mode='symbolic')
+
+        self.assertExpectedInline(joint_gm.print_readable(), """\
+class functionalized_joint(torch.nn.Module):
+    def forward(self, primals, tangents):
+        primals_1: f32[3, 3], primals_2: f32[3], primals_3: f32[3, 3], tangents_1: f32[], = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1762, code: out = self.linear(val)
+        t: f32[3, 3] = torch.ops.aten.t.default(primals_1);  primals_1 = None
+        addmm: f32[3, 3] = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1763, code: out.relu_()
+        relu: f32[3, 3] = torch.ops.aten.relu.default(addmm);  addmm = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1764, code: loss = out.sum()
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
+        expand: f32[3, 3] = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1763, code: out.relu_()
+        threshold_backward: f32[3, 3] = torch.ops.aten.threshold_backward.default(expand, relu, 0);  expand = relu = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1762, code: out = self.linear(val)
+        t_1: f32[3, 3] = torch.ops.aten.t.default(t);  t = None
+        mm: f32[3, 3] = torch.ops.aten.mm.default(threshold_backward, t_1);  t_1 = None
+        t_2: f32[3, 3] = torch.ops.aten.t.default(threshold_backward)
+        mm_1: f32[3, 3] = torch.ops.aten.mm.default(t_2, primals_3);  t_2 = primals_3 = None
+        t_3: f32[3, 3] = torch.ops.aten.t.default(mm_1);  mm_1 = None
+        sum_2: f32[1, 3] = torch.ops.aten.sum.dim_IntList(threshold_backward, [0], True);  threshold_backward = None
+        view: f32[3] = torch.ops.aten.view.default(sum_2, [3]);  sum_2 = None
+        t_4: f32[3, 3] = torch.ops.aten.t.default(t_3);  t_3 = None
+        return pytree.tree_unflatten([sum_1, t_4, view, mm], self._out_spec)
+        """)
+
+        fw_bw_gms, _  = torch._dynamo.export(mod, x, aten_graph=True, training_mode='split', tracing_mode='symbolic')
+        fw_gm, bw_gm = fw_bw_gms
+
+        self.assertExpectedInline(fw_gm.print_readable(), """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: f32[3, 3], primals_2: f32[3], primals_3: f32[3, 3]):
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1762, code: out = self.linear(val)
+        t: f32[3, 3] = torch.ops.aten.t.default(primals_1);  primals_1 = None
+        addmm: f32[3, 3] = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1763, code: out.relu_()
+        relu: f32[3, 3] = torch.ops.aten.relu.default(addmm);  addmm = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1764, code: loss = out.sum()
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
+        return [sum_1, t, primals_3, relu]
+        """)
+
+        self.assertExpectedInline(bw_gm.print_readable(), """\
+class GraphModule(torch.nn.Module):
+    def forward(self, t: f32[3, 3], primals_3: f32[3, 3], relu: f32[3, 3], tangents_1: f32[]):
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1764, code: loss = out.sum()
+        expand: f32[3, 3] = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1763, code: out.relu_()
+        threshold_backward: f32[3, 3] = torch.ops.aten.threshold_backward.default(expand, relu, 0);  expand = relu = None
+
+        # File: /scratch/bahuang/work/repos/pytorch/test/dynamo/test_export.py:1762, code: out = self.linear(val)
+        t_1: f32[3, 3] = torch.ops.aten.t.default(t);  t = None
+        mm: f32[3, 3] = torch.ops.aten.mm.default(threshold_backward, t_1);  t_1 = None
+        t_2: f32[3, 3] = torch.ops.aten.t.default(threshold_backward)
+        mm_1: f32[3, 3] = torch.ops.aten.mm.default(t_2, primals_3);  t_2 = primals_3 = None
+        t_3: f32[3, 3] = torch.ops.aten.t.default(mm_1);  mm_1 = None
+        sum_2: f32[1, 3] = torch.ops.aten.sum.dim_IntList(threshold_backward, [0], True);  threshold_backward = None
+        view: f32[3] = torch.ops.aten.view.default(sum_2, [3]);  sum_2 = None
+        t_4: f32[3, 3] = torch.ops.aten.t.default(t_3);  t_3 = None
+        return [t_4, view, mm]
+        """)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

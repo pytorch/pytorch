@@ -523,7 +523,7 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", training_mode=None, **kwargs
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
@@ -646,7 +646,45 @@ def export(
             self.current_node = n
             return super().run_node(n)
 
-    if aten_graph:
+    if training_mode:
+        assert training_mode in {'joint', 'split'}, "training_mode must be 'joint' or 'split'"
+        assert aten_graph is True, "training mode only works with aten_graph=True"
+
+        from torch._functorch.aot_autograd import aot_module_simplified
+        from torch._functorch.partitioners import default_partition
+
+        fw_gm, bw_gm, joint_gm = None, None, None
+
+        def graph_saver_forward(gm, fw_args):
+            nonlocal fw_gm
+            fw_gm = gm
+            return gm
+
+        def graph_saver_backward(gm, bw_args):
+            nonlocal bw_gm
+            bw_gm = gm
+            return gm
+
+        def graph_saver_joint(gm, joint_args, *, num_fwd_outputs):
+            nonlocal joint_gm
+            joint_gm = gm
+            return default_partition(gm, joint_args, num_fwd_outputs=num_fwd_outputs)
+
+        aot_module_simplified(
+            graph,
+            graph_captured_input,
+            fw_compiler=graph_saver_forward if training_mode == "split" else None,
+            bw_compiler=graph_saver_backward if training_mode == "split" else None,
+            partition_fn=graph_saver_joint if training_mode == "joint" else None,
+            decompositions=decomposition_table,
+        )
+
+        if training_mode == "joint":
+            return (joint_gm, out_guards)
+        elif training_mode == "split":
+            return ((fw_gm, bw_gm), out_guards)
+
+    elif aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
