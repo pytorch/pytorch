@@ -19,9 +19,16 @@ def model_names(filename: str) -> Set[str]:
             names.add(model_name)
     return names
 
-TIMM_MODEL_NAMES = model_names(os.path.join(os.path.dirname(__file__), "timm_models_list.txt"))
-HF_MODELS_FILE_NAME = model_names(os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt"))
-TORCHBENCH_MODELS_FILE_NAME = model_names(os.path.join(os.path.dirname(__file__), "all_torchbench_models_list.txt"))
+
+TIMM_MODEL_NAMES = model_names(
+    os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
+)
+HF_MODELS_FILE_NAME = model_names(
+    os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
+)
+TORCHBENCH_MODELS_FILE_NAME = model_names(
+    os.path.join(os.path.dirname(__file__), "all_torchbench_models_list.txt")
+)
 
 # timm <> HF disjoint
 assert TIMM_MODEL_NAMES.isdisjoint(HF_MODELS_FILE_NAME)
@@ -29,6 +36,7 @@ assert TIMM_MODEL_NAMES.isdisjoint(HF_MODELS_FILE_NAME)
 assert TIMM_MODEL_NAMES.isdisjoint(TORCHBENCH_MODELS_FILE_NAME)
 # torch <> hf disjoint
 assert TORCHBENCH_MODELS_FILE_NAME.isdisjoint(HF_MODELS_FILE_NAME)
+
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -59,28 +67,35 @@ def parse_args(args=None):
     )
     return parser.parse_known_args(args)
 
+
 if __name__ == "__main__":
-    import sys
     args, unknown = parse_args()
     if args.only:
         name = args.only
         if name in TIMM_MODEL_NAMES:
             import timm_models
-            timm_models.main(sys.argv[1:])
+
+            timm_models.timm_main()
         elif name in HF_MODELS_FILE_NAME:
             import huggingface
-            huggingface.main(sys.argv[1:])
+
+            huggingface.huggingface_main()
         elif name in TORCHBENCH_MODELS_FILE_NAME:
             import torchbench
-            torchbench.main(sys.argv[1:])
+
+            torchbench.torchbench_main()
         else:
-            breakpoint()
             print(f"Illegal model name? {name}")
             exit(-1)
     else:
         import timm_models
-        timm_models.main(sys.argv[1:])
-        import hugginface
-        timm_models.main(sys.argv[1:])
-        import hugginface
-        timm_models.main(sys.argv[1:])
+
+        timm_models.timm_main()
+
+        import huggingface
+
+        huggingface.huggingface_main()
+
+        import torchbench
+
+        torchbench.torchbench_main()

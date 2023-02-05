@@ -373,9 +373,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
-
+def torchbench_main():
     original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)
+
+
+if __name__ == "__main__":
+    torchbench_main()
