@@ -1,5 +1,5 @@
-from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
+from collections import Counter
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -126,7 +126,7 @@ def functional_call(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
         all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
-        repeated_keys = duplicate_keys(all_keys)
+        repeated_keys = [key for key, n in Counter(all_keys).items() if n > 1]
         if len(repeated_keys) > 0:
             raise ValueError(
                 f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
@@ -246,10 +246,3 @@ def construct_stacked_leaf(
     if all_requires_grad:
         result = result.detach().requires_grad_()
     return result
-
-
-def duplicate_keys(keys: Iterable[Any]) -> List[Any]:
-    counts: Dict[Any, int] = defaultdict(int)
-    for key in keys:
-        counts[key] += 1
-    return [key for key, n in counts.items() if n > 1]
