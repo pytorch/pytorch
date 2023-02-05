@@ -5860,6 +5860,13 @@ class TestNLLLoss(TestCase):
         helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
+    def test_cumsum_dim_check(self):
+        x = torch.rand((3, 3), device="mps")
+        self.assertEqual(x.cumsum(1), x.cumsum(-1))
+        self.assertEqual(x.cumsum(0), x.cumsum(-2))
+        self.assertRaises(IndexError, lambda: x.cumsum(2))
+        self.assertRaises(IndexError, lambda: x.cumsum(-3))
+
 class TestNNMPS(NNTestCase):
 
     def _create_basic_net(self):
