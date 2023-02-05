@@ -246,6 +246,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )
 
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_compare_shapes_with_constant(self):
         def compare_shapes(a):
             x = a.shape
@@ -262,9 +263,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(
             "eager", nopython=True, guard_fail_fn=guard_failures
         )(compare_shapes)
-        opt_fn(torch.randn([3, 3]))
-        opt_fn(torch.randn([3, 3]))
-        breakpoint()
+        opt_fn(torch.randn([3, 4]))
+        opt_fn(torch.randn([4, 3]))
         self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
 
 
@@ -3724,6 +3724,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         loaded_model = imp.load_pickle(package_name, resource_name)
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
+
+    def test_shape_and_tuple_equality(self):
+        def fn(x, y, t):
+            z = x * y
+            if x.size() == t:
+                return z.cos()
+            return z.sin()
+
+        torch._dynamo.optimize("eager", nopython=True)(fn)(
+            torch.randn([4, 4]), torch.randn([4, 4]), (4, 4)
+        )
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
