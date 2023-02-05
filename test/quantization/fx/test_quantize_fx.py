@@ -12,6 +12,7 @@ import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
+from torch.fx.graph_module import _USER_PRESERVED_ATTRIBUTES_KEY
 
 # graph mode quantization based on fx
 from torch.ao.quantization.quantize_fx import (
@@ -751,12 +752,15 @@ class TestFuseFx(QuantizationTestCase):
                 .set_backend_pattern_config(conv_bn_res_relu_config2)
             m = fuse_fx(m, backend_config=backend_config)
             self.assertEqual(type(m.conv), torch.nn.Conv2d)
-            # check bn and relu nodes are gone since we replaced the whole pattern to conv
-            node_occurrence = {
-                ns.call_module(torch.nn.BatchNorm2d): 0,
-                ns.call_module(torch.nn.ReLU): 0,
-            }
-            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+            # check bn and relu are gone since we replaced the whole pattern to conv
+            self.assertFalse(hasattr(m, "bn"))
+            self.assertFalse(hasattr(m, "relu"))
+            # # check bn and relu nodes are gone since we replaced the whole pattern to conv
+            # node_occurrence = {
+            #     ns.call_module(torch.nn.BatchNorm2d): 0,
+            #     ns.call_module(torch.nn.ReLU): 0,
+            # }
+            # self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     def test_fusion_pattern_with_multiple_inputs(self):
         """ This test tests two keys in backend_config: root_node_getter and
@@ -2713,8 +2717,8 @@ class TestQuantizeFx(QuantizationTestCase):
             prepare_custom_config=prepare_custom_config_dict)
 
         def assertAttrPreserved(m):
-            self.assertTrue("preserved_attr" in m.meta)
-            self.assertEqual(m.meta["preserved_attr"], 3)
+            self.assertTrue(hasattr(m, "preserved_attr"))
+            self.assertEqual(m.preserved_attr, 3)
 
         assertAttrPreserved(m)
         convert_custom_config_dict = {
@@ -4233,15 +4237,19 @@ class TestQuantizeFx(QuantizationTestCase):
             {"": default_qconfig},
             example_inputs=(torch.randn(1),),
             prepare_custom_config={"preserved_attributes": ["attr"]})
-        # preserved attributes are stored in meta so that it doesn't get lost
+        # preserved attributes are also stored in meta so that it doesn't get lost
         # during deepcopy
-        self.assertTrue("attr" in m.meta)
+        self.assertTrue(hasattr(m, "attr"))
+        self.assertTrue("attr" in m.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m2 = copy.deepcopy(m)
-        self.assertTrue("attr" in m2.meta)
+        self.assertTrue(hasattr(m2, "attr"))
+        self.assertTrue("attr" in m2.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m = convert_fx(m, convert_custom_config={"preserved_attributes": ["attr"]})
-        self.assertTrue("attr" in m.meta)
+        self.assertTrue(hasattr(m, "attr"))
+        self.assertTrue("attr" in m.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m2 = copy.deepcopy(m)
-        self.assertTrue("attr" in m2.meta)
+        self.assertTrue(hasattr(m2, "attr"))
+        self.assertTrue("attr" in m2.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
 
     def test_output_lists_and_dicts(self):
         """Verify that specifying complicated output types does not crash.

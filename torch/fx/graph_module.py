@@ -18,6 +18,8 @@ import warnings
 
 __all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
 
+_USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
@@ -722,8 +724,10 @@ class {module_name}(torch.nn.Module):
             if attr in self.__dict__:
                 setattr(res, attr, copy.deepcopy(self.__dict__[attr], memo))
         res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
+        if _USER_PRESERVED_ATTRIBUTES_KEY in res.meta:
+            for attr_name, attr in res.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
+                setattr(res, attr_name, attr)
         return res
-
 
     def __copy__(self):
         res = GraphModule(self, self.graph)

@@ -2,7 +2,9 @@ from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 
 import torch
+import copy
 from torch.fx import GraphModule
+from torch.fx.graph_module import _USER_PRESERVED_ATTRIBUTES_KEY
 from .fx.tracer import QuantizationTracer
 from .fx.tracer import (  # noqa: F401
     Scope,
@@ -29,8 +31,11 @@ def attach_preserved_attrs_to_model(
         model: Union[GraphModule, torch.nn.Module], preserved_attrs: Dict[str, Any]):
     """ Store preserved attributes to the model.meta so that it can be preserved during deepcopy
     """
-    for attr_name, attr in preserved_attrs.items():
-        model.meta[attr_name] = attr  # type: ignore[operator, index]
+    model.meta[_USER_PRESERVED_ATTRIBUTES_KEY] = copy.copy(preserved_attrs)
+    # set the preserved attributes in the model so that user can call
+    # model.attr as they do before calling fx graph mode quantization
+    for attr_name, attr in model.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
+        setattr(model, attr_name, attr)
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
@@ -512,7 +517,7 @@ def _convert_fx(
 
     _check_is_graph_module(graph_module)
     preserved_attr_names = convert_custom_config.preserved_attributes
-    preserved_attrs = {attr: graph_module.meta[attr] for attr in preserved_attr_names if attr in graph_module.meta}
+    preserved_attrs = {attr: getattr(graph_module, attr) for attr in preserved_attr_names if hasattr(graph_module, attr)}
 
     quantized = convert(
         graph_module,

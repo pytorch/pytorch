@@ -1566,7 +1566,6 @@ def prepare(
     )
     model.recompile()
 
-    preserved_attributes = set(prepare_custom_config.preserved_attributes)
     _save_state(model, node_name_to_qconfig, node_name_to_scope,
                 prepare_custom_config, equalization_node_name_to_qconfig,
                 qconfig_mapping, is_qat, observed_node_names)
