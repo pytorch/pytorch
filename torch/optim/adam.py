@@ -85,7 +85,7 @@ class Adam(Optimizer):
                 if len(state) == 0:
                     state['step'] = (
                         torch.zeros((1,), dtype=torch.float, device=p.device)
-                        if self.defaults['capturable'] or self.defaults['fused']
+                        if group['capturable'] or group['fused']
                         else torch.tensor(0.)
                     )
                     # Exponential moving average of gradient values
@@ -140,25 +140,27 @@ class Adam(Optimizer):
                 max_exp_avg_sqs,
                 state_steps)
 
-            adam(params_with_grad,
-                 grads,
-                 exp_avgs,
-                 exp_avg_sqs,
-                 max_exp_avg_sqs,
-                 state_steps,
-                 amsgrad=group['amsgrad'],
-                 beta1=beta1,
-                 beta2=beta2,
-                 lr=group['lr'],
-                 weight_decay=group['weight_decay'],
-                 eps=group['eps'],
-                 maximize=group['maximize'],
-                 foreach=group['foreach'],
-                 capturable=group['capturable'],
-                 differentiable=group['differentiable'],
-                 fused=group['fused'],
-                 grad_scale=getattr(self, "grad_scale", None),
-                 found_inf=getattr(self, "found_inf", None))
+            adam(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=group['amsgrad'],
+                beta1=beta1,
+                beta2=beta2,
+                lr=group['lr'],
+                weight_decay=group['weight_decay'],
+                eps=group['eps'],
+                maximize=group['maximize'],
+                foreach=group['foreach'],
+                capturable=group['capturable'],
+                differentiable=group['differentiable'],
+                fused=group['fused'],
+                grad_scale=getattr(self, "grad_scale", None),
+                found_inf=getattr(self, "found_inf", None),
+            )
 
         return loss
 
