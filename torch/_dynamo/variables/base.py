@@ -1,8 +1,11 @@
 import collections
+import inspect
+import types
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
 from ..exc import unimplemented
+from ..guards import GuardBuilder
 from ..source import AttrSource, Source
 from ..utils import dict_values, identity, istype, odict_values
 
@@ -221,8 +224,56 @@ class VariableTracker(object, metaclass=HasPostInit):
     def num_parameters(self):
         unimplemented(f"num_parameters: {self}")
 
+    def _getattr_static(self, name):
+        import torch
+
+        if (
+            isinstance(self.value, torch.nn.Module)
+            or "__slots__" in self.value.__class__.__dict__
+        ):
+            # getattr_static doesn't work on these
+            subobj = getattr(self.value, name)
+        else:
+            subobj = inspect.getattr_static(self.value, name)
+        return subobj
+
+    def check_for_getattr(self):
+        import torch
+
+        try:
+            getattr_fn = inspect.getattr_static(type(self.value), "__getattr__")
+        except AttributeError:
+            getattr_fn = None
+        if getattr_fn is torch.nn.Module.__getattr__:
+            # ignore this case of getattr
+            getattr_fn = None
+        return getattr_fn
+
+    def check_for_getattribute(self):
+        try:
+            if isinstance(
+                inspect.getattr_static(type(self.value), "__getattribute__"),
+                types.FunctionType,
+            ):
+                unimplemented(f"{self} with custom __getattribute__")
+        except AttributeError:
+            pass
+
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        unimplemented(f"hasattr: {repr(self)}")
+        if not self.source:
+            unimplemented("hasattr no source")
+        options = VariableTracker.propagate(self)
+        options["guards"].add(
+            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+        )
+        if self.check_for_getattribute() or self.check_for_getattr():
+            unimplemented("hasattr with custom __getattr__")
+
+        try:
+            self._getattr_static(name)
+            return variables.ConstantVariable(True, **options)
+        except AttributeError:
+            return variables.ConstantVariable(False, **options)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

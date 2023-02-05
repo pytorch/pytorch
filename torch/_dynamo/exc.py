@@ -68,6 +68,7 @@ class Unsupported(TorchDynamoException):
 
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
+    print(msg)
     raise Unsupported(msg)
 
 

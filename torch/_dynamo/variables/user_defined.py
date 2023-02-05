@@ -263,37 +263,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
-    def _check_for_getattribute(self):
-        try:
-            if isinstance(
-                inspect.getattr_static(type(self.value), "__getattribute__"),
-                types.FunctionType,
-            ):
-                unimplemented("UserDefinedObjectVariable with custom __getattribute__")
-        except AttributeError:
-            pass
-
-    def _check_for_getattr(self):
-        try:
-            getattr_fn = inspect.getattr_static(type(self.value), "__getattr__")
-        except AttributeError:
-            getattr_fn = None
-        if getattr_fn is torch.nn.Module.__getattr__:
-            # ignore this case of getattr
-            getattr_fn = None
-        return getattr_fn
-
-    def _getattr_static(self, name):
-        if (
-            isinstance(self.value, torch.nn.Module)
-            or "__slots__" in self.value.__class__.__dict__
-        ):
-            # getattr_static doesn't work on these
-            subobj = getattr(self.value, name)
-        else:
-            subobj = inspect.getattr_static(self.value, name)
-        return subobj
-
     def var_getattr(self, tx, name):
         from . import ConstantVariable
         from .builder import VariableBuilder
@@ -301,8 +270,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         options = VariableTracker.propagate(self)
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
-        self._check_for_getattribute()
-        getattr_fn = self._check_for_getattr()
+        self.check_for_getattribute()
+        getattr_fn = self.check_for_getattr()
 
         try:
             subobj = self._getattr_static(name)
@@ -380,22 +349,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return UserDefinedClassVariable(type(self.value), **options)
 
         return variables.GetAttrVariable(self, name, **options)
-
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        if not self.source:
-            unimplemented("hasattr no source")
-        options = VariableTracker.propagate(self)
-        options["guards"].add(
-            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
-        )
-        if self._check_for_getattribute() or self._check_for_getattr():
-            unimplemented("hasattr with custom __getattr__")
-
-        try:
-            self._getattr_static(name)
-            return variables.ConstantVariable(True, **options)
-        except AttributeError:
-            return variables.ConstantVariable(False, **options)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
