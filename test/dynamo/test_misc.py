@@ -245,6 +245,29 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
+
+    def test_compare_shapes_with_constant(self):
+        def compare_shapes(a):
+            x = a.shape
+            if x[0] != 3:
+                return a * 4
+            return a * 3
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(compare_shapes)
+        opt_fn(torch.randn([3, 3]))
+        opt_fn(torch.randn([3, 3]))
+        breakpoint()
+        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
+
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
@@ -1633,6 +1656,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_context_manager(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            with torch.cuda.stream(s):
+                x = torch.relu(x)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2))
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
@@ -3455,6 +3499,39 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(guard_failure is not None)
         self.assertEqual(guard_failure[0], "k == 3")
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_guard_failure_fn_shape_control(self):
+        def fn(x, y):
+            if x.shape[0] < 3:
+                if y.shape[0] < 3:
+                    return x * y
+                else:
+                    return x + y
+            else:
+                return -1
+
+        x = torch.randn([2, 2])
+        y = torch.randn([2, 2])
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        x2 = torch.randn([5, 5])
+        y2 = torch.randn([5, 5])
+
+        opt_fn(x, y)
+        opt_fn(x2, y2)
+
+        self.assertTrue(guard_failure is not None)
+        self.assertEqual(guard_failure[0], "x.size()[0] < 3")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):

@@ -880,13 +880,13 @@ class ShapeEnv(object):
         )
         return self.val_to_var[val]
 
-    # Generates a Python string which, when evaluated in a context that
+    # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
-    # on if the guards evaluated to True or not.  Primarily used by Dynamo,
+    # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()):
+    def produce_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name()) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1027,16 +1027,16 @@ class ShapeEnv(object):
             # negative inferences on shape variables
             exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
-        if exprs:
-            return " and ".join(exprs)
-        else:
-            return "True"
+        return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
-        return eval(code, {}, dict(zip(arg_names, args)))
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        if guards:
+            code = " and ".join(guards)
+            return eval(code, {}, dict(zip(arg_names, args)))
+        return True
 
     def bind_symbols(self, placeholders, args):
         # Given a paired list of placeholders (fake tensors with
