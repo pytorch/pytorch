@@ -385,9 +385,9 @@ def break_graph_if_unsupported(*, push):
                         print("I", i)
                     self.output.add_output_instructions(init_block)
             if len(finally_blocks) > 0:
-                self.output.add_output_instructions([
-                    create_instruction("SETUP_FINALLY", target=finally_blocks[-1][0])
-                ])
+                self.output.add_output_instructions(
+                    [create_instruction("SETUP_FINALLY", target=finally_blocks[-1][0])]
+                )
             self.output.add_output_instructions([inst])
 
             if len(finally_blocks) > 0:

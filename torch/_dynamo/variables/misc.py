@@ -7,7 +7,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
 from .. import config, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_instruction, Instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -20,7 +20,6 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
-from ..bytecode_transformation import Instruction
 
 
 class SuperVariable(VariableTracker):
@@ -189,7 +188,9 @@ class ContextWrappingVariable(VariableTracker):
             return ([], [])
 
         def set_context_insts(values):
-            attr_source = AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
+            attr_source = AttrSource(
+                codegen.tx.import_source(self.module_name()), self.fn_name()
+            )
             load_set_context_enabling_insts = attr_source.reconstruct(codegen)
 
             loads = [codegen.create_load_const(val) for val in values]
@@ -205,17 +206,18 @@ class ContextWrappingVariable(VariableTracker):
         finally_block = set_context_insts(self.initial_values)
 
         return (init_block, finally_block)
-    
+
+    @staticmethod
     def create_finally_block(
-            finally_blocks: List[Instruction], 
-            resume_at: Instruction
-        ) -> List[Instruction]:
-        # finally and except blocks are given in the reverse order in which they 
+        finally_blocks: List[Instruction], resume_at: Instruction
+    ) -> List[Instruction]:
+        # finally and except blocks are given in the reverse order in which they
         # must be applied. The required order is from innermost to outer.
         finally_blocks.reverse()
         finally_block = [item for sublist in finally_blocks for item in sublist]
 
         import sys
+
         if sys.version_info < (3, 9):
             return [
                 create_instruction("POP_BLOCK"),
