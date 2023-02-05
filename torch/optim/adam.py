@@ -112,8 +112,6 @@ class Adam(Optimizer):
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
-            grad_scaler (:class:`torch.cuda.amp.GradScaler`, optional): A GradScaler which is
-                supplied from ``grad_scaler.step(optimizer)``.
         """
         self._cuda_graph_capture_health_check()
 
