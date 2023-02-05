@@ -107,13 +107,6 @@ if(CUDA_FOUND)
   endif()
 endif()
 
-# Find cuDNN.
-if(USE_STATIC_CUDNN)
-  set(CUDNN_STATIC ON CACHE BOOL "")
-else()
-  set(CUDNN_STATIC OFF CACHE BOOL "")
-endif()
-
 # Optionally, find TensorRT
 if(CAFFE2_USE_TENSORRT)
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
@@ -264,48 +257,37 @@ set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cudnn public and private interfaces
+# cudnn interface
 # static linking is handled by USE_STATIC_CUDNN environment variable
-# If library is linked dynamically, than private interface is no-op
-# If library is linked statically:
-#  - public interface would only reference headers
-#  - private interface will contain the actual link instructions
 if(CAFFE2_USE_CUDNN)
+  if(USE_STATIC_CUDNN)
+    set(CUDNN_STATIC ON CACHE BOOL "")
+  else()
+    set(CUDNN_STATIC OFF CACHE BOOL "")
+  endif()
+
   find_package(CUDNN)
 
   if(NOT CUDNN_FOUND)
     message(WARNING
-      "Caffe2: Cannot find cuDNN library. Turning the option off")
+      "Cannot find cuDNN library. Turning the option off")
     set(CAFFE2_USE_CUDNN OFF)
   else()
     if(CUDNN_VERSION VERSION_LESS "7.0.0")
       message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
     endif()
   endif()
-endif()
 
-if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn-public INTERFACE IMPORTED)
-  set_property(
-    TARGET caffe2::cudnn-public PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDNN_INCLUDE_PATH})
-  add_library(caffe2::cudnn-private INTERFACE IMPORTED)
-  set_property(
-    TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDNN_INCLUDE_PATH})
+  add_library(torch::cudnn INTERFACE IMPORTED)
+  target_include_directories(torch::cudnn INTERFACE ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    target_link_libraries(caffe2::cudnn-private INTERFACE ${CUDNN_LIBRARY_PATH}
-      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
-    # Add explicit dependency on cublas to cudnn
-    get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
-    target_link_libraries(caffe2::cudnn-private INTERFACE "${__tmp}")
-    target_link_options(caffe2::cudnn-private INTERFACE
+    target_link_options(torch::cudnn INTERFACE
         "-Wl,--exclude-libs,libcudnn_static.a")
   else()
-  set_property(
-    TARGET caffe2::cudnn-public PROPERTY INTERFACE_LINK_LIBRARIES
-    ${CUDNN_LIBRARY_PATH})
+    target_link_libraries(torch::cudnn INTERFACE ${CUDNN_LIBRARY_PATH})
   endif()
+else()
+  message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
 endif()
 
 # curand
