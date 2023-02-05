@@ -23,7 +23,7 @@ from ..utils import (
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker
+from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import BaseListVariable, ListVariable, TupleVariable
