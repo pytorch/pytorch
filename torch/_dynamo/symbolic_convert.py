@@ -81,9 +81,9 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    SymNodeVariable,
     supported_const_comparison_ops,
     supported_tensor_comparison_ops,
+    SymNodeVariable,
     TensorVariable,
 )
 from .variables.torch import TorchVariable

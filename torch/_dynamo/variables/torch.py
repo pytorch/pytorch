@@ -185,8 +185,8 @@ class TorchVariable(VariableTracker):
             ConstantVariable,
             CUDAStreamContextVariable,
             CUDAStreamVariable,
-            SymNodeVariable,
             GradModeVariable,
+            SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )

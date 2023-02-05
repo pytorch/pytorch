@@ -245,7 +245,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
-
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_compare_shapes_with_constant(self):
         def compare_shapes(a):

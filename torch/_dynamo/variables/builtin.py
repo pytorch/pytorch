@@ -27,7 +27,7 @@ from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import BaseListVariable, ListVariable, TupleVariable
-from .tensor import SymNodeVariable, FakeItemVariable, UnspecializedPythonVariable
+from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -992,12 +992,10 @@ class BuiltinVariable(VariableTracker):
             TensorVariable,
             UserFunctionVariable,
         )
+        from .lists import SizeVariable
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
-        )
-        from .lists import (
-            SizeVariable
         )
 
         op = self.fn
@@ -1016,7 +1014,9 @@ class BuiltinVariable(VariableTracker):
         # x = torch.randn([3, 3])
         # x.size() == (3, 3) # True
         # (3, 3) == x.size() # True
-        if isinstance(left, (SizeVariable, TupleVariable)) and isinstance(right, (TupleVariable, SizeVariable)):
+        if isinstance(left, (SizeVariable, TupleVariable)) and isinstance(
+            right, (TupleVariable, SizeVariable)
+        ):
             return BaseListVariable.generic_list_compare(left, tx, op, right)
 
         if isinstance(left, BaseListVariable):
