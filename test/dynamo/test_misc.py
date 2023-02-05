@@ -266,7 +266,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
         self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
-            
+
 
     def test_builtin_isinstance(self):
         def fn(x):
