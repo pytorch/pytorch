@@ -59,6 +59,8 @@ out.writerow(
         "backend_time",
         "graph_count",
         "op_count",
+        "graph_breaks",
+        "unique_graph_breaks",
     ]
 )
 
@@ -153,9 +155,16 @@ for name, name2, log in chunker(entries, 3):
 
     graph_count = None
     op_count = None
-    if m := re.search(r"Dynamo produced (\d+) graph\(s\) covering (\d+) ops", log):
+    graph_breaks = None
+    unique_graph_breaks = None
+    if m := re.search(
+        r"Dynamo produced (\d+) graphs covering (\d+) ops with (\d+) graph breaks \((\d+) unique\)",
+        log,
+    ):
         graph_count = m.group(1)
         op_count = m.group(2)
+        graph_breaks = m.group(3)
+        unique_graph_breaks = m.group(4)
 
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
@@ -182,6 +191,8 @@ for name, name2, log in chunker(entries, 3):
             backend_time,
             graph_count,
             op_count,
+            graph_breaks,
+            unique_graph_breaks,
         ]
     )
     i += 1
