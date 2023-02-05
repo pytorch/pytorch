@@ -221,7 +221,7 @@ class Optimizer(object):
 
             if (
                 (not getattr(self, "_warned_capturable_if_run_uncaptured", False))
-                and (self.defaults["capturable"] or all(group['capturable'] for group in self.param_groups))
+                and all(group['capturable'] for group in self.param_groups)
                 and (not capturing)
             ):
                 warnings.warn(
