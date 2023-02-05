@@ -31,12 +31,14 @@ if(NOT SYSTEM_PROTOBUF)
   # https://github.com/protocolbuffers/protobuf/commit/0400cca3236de1ca303af38bf81eab332d042b7c
   # changes PROTOBUF_CONSTEXPR to constexpr, which breaks windows
   # build.
-  string(
-    REGEX REPLACE
-    "static constexpr ([^ ]+) ([^ ]+) ="
-    "static \\1 const \\2 ="
-    content
-    "${content}")
+  if(MSVC)
+    string(
+      REGEX REPLACE
+      "static constexpr ([^ ]+) ([^ ]+) ="
+      "static \\1 const \\2 ="
+      content
+      "${content}")
+  endif()
 
   foreach(ns ${NAMESPACES})
     # Insert "const ::std::string& GetEmptyStringAlreadyInited();" within

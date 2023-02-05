@@ -632,11 +632,24 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
 
+    # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
+    # these new ISA features may not be supported on older compilers
+    set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
+    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+
+    # Setting this global PIC flag for all XNNPACK targets.
+    # This is needed for Object libraries within XNNPACK which must
+    # be PIC to successfully link this static libXNNPACK with pytorch
+    set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
-    set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Revert to whatever it was before
+    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
+
     # Workaround for https://github.com/pytorch/pytorch/issues/47292
     if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
       # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
@@ -1321,7 +1334,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -std=c++14)
+    list(APPEND HIP_CXX_FLAGS -std=c++17)
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1585,6 +1598,9 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+    if(NOT MSVC)
+      set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
+    endif()
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
@@ -1631,10 +1647,8 @@ function(add_onnx_tensorrt_subdir)
   set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
   set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
   set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
-  if(FIND_CUDA_MODULE_DEPRECATED)
-    # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
-    set(CMAKE_VERSION "3.9.0")
-  endif()
+  # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
+  set(CMAKE_VERSION "3.9.0")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
   set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
 endfunction()
@@ -1680,15 +1694,7 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
-  if(NOT MSVC)
-    set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
-  endif()
-
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
-  endif()
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
@@ -1696,16 +1702,12 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 
-  if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
-                                   " -D__CUDA_NO_HALF_OPERATORS__"
-                                   " -D__CUDA_NO_HALF_CONVERSIONS__"
-                                   " -D__CUDA_NO_HALF2_OPERATORS__"
-                                   " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-  else()
-    message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
-  endif()
+  message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                                 " -D__CUDA_NO_HALF_OPERATORS__"
+                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
+                                 " -D__CUDA_NO_HALF2_OPERATORS__"
+                                 " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
   string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
@@ -2015,6 +2017,11 @@ if(USE_KINETO)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
+  endif()
+  if(LIBKINETO_NOROCTRACER)
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOROCTRACER")
+  endif()
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
     message(STATUS "Configured Kineto (CPU)")
   else()
     message(STATUS "Configured Kineto")

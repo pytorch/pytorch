@@ -4,6 +4,7 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <chrono>
 #include <exception>
 #include <ratio>
@@ -153,7 +154,7 @@ void checkRemainingTime(
       " ms.");
   if (remainingTime.count() < 0) {
     std::string rankInfo;
-    if (processedRanks.size() > 0) {
+    if (!processedRanks.empty()) {
       rankInfo = c10::str(
           "Successfully processed ranks: ", c10::Join(", ", processedRanks));
     } else {
@@ -445,8 +446,8 @@ std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
   TORCH_CHECK(
       outputTensors_.size() <= 1,
       "work result does not support list of lists, use .getFuture() and value()");
-  return outputTensors_.size() == 0 ? std::vector<at::Tensor>()
-                                    : outputTensors_.at(0);
+  return outputTensors_.empty() ? std::vector<at::Tensor>()
+                                : outputTensors_.at(0);
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
@@ -468,7 +469,7 @@ c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
 void returnFutureWithOutput(
     c10::intrusive_ptr<c10::ivalue::Future>& future,
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
-  if (outputTensors.size() == 0) {
+  if (outputTensors.empty()) {
     future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
     return;
   }
@@ -518,7 +519,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
     // correct timestamps for work that is asynchronously executed.
     : Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
       outputTensors_(std::move(outputTensors)),
-      future_(createFutureAsOutput(outputTensors)) {
+      future_(createFutureAsOutput(outputTensors_)) {
   if (profilingTitle != nullptr) {
     recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
   }
@@ -608,7 +609,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -625,16 +626,16 @@ void socketInitialize() {
 // gracefully fall back to an alternative if it doesn't.
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
   socketInitialize();
-  struct addrinfo hints;
+  struct addrinfo hints {};
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  struct addrinfo* result;
+  struct addrinfo* result = nullptr;
   auto rv = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
   if (rv < 0) {
     return false;
   }
-  struct addrinfo* rp;
+  struct addrinfo* rp = nullptr;
   for (rp = result; rp != nullptr; rp = rp->ai_next) {
     auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
     if (fd == -1) {
@@ -731,7 +732,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : ProcessGroup(rank, size),
+    : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(options),
       stop_(false),
@@ -1846,7 +1847,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
     TORCH_CHECK(false, "ProcessGroupGloo::allgather: " + msg);
   };
 
-  if (inputs.size() == 0) {
+  if (inputs.empty()) {
     invalidArgument("requires non-empty input tensor list");
   }
 
@@ -2198,7 +2199,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
     const auto& sizes = inputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
-    if (outputs.size() != 0) {
+    if (!outputs.empty()) {
       invalidArgument("requires empty output on non-root");
     }
   }
@@ -2244,9 +2245,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       : ProcessGroupGloo::AsyncWork(
             {outputs},
             "gloo:scatter",
-            inputs.size() > 0
-                ? c10::optional<std::vector<at::Tensor>>(inputs[0])
-                : c10::nullopt),
+            !inputs.empty() ? c10::optional<std::vector<at::Tensor>>(inputs[0])
+                            : c10::nullopt),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2382,7 +2382,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
     const auto& sizes = outputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
-    if (inputs.size() != 0) {
+    if (!inputs.empty()) {
       invalidArgument("requires empty input on non-root");
     }
   }
@@ -2453,7 +2453,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
 
   void alltoall(at::Tensor& outputTensor, at::Tensor& inputTensor) {
     const auto scalarType = outputTensor.scalar_type();
-    if (outputCounts.size() == 0 && inputCounts.size() == 0) {
+    if (outputCounts.empty() && inputCounts.empty()) {
       // Gloo alltoall
       gloo::AlltoallOptions opts(context);
       opts.setTag(tag);
