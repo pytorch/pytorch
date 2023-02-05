@@ -14,8 +14,6 @@ clang --version
 
 python tools/stats/export_test_times.py
 
-# symbolize=1: Gives us much better errors when things go wrong
-export ASAN_OPTIONS=detect_leaks=1:detect_stack_use_after_return=1:symbolize=1:detect_odr_violation=0:detect_container_overflow=1
 if [ -n "$(which conda)" ]; then
   export CMAKE_PREFIX_PATH=/opt/conda
 fi
