@@ -245,6 +245,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
+    def test_compare_shapes_tuple(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x == y:
+                return a + 1
+            else:
+                return a + 2
+
+        # Test both ListVariable and ShapeVariable
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_compare_shapes_with_constant(self):
         def compare_shapes(a):
@@ -265,7 +278,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
         self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
-            
 
     def test_builtin_isinstance(self):
         def fn(x):
