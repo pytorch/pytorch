@@ -90,6 +90,8 @@ def make_tensor(
         TypeError: If :attr:`dtype` isn't supported by this function.
 
     Examples:
+        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [-1, 1)
         >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)

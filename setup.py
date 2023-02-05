@@ -95,6 +95,9 @@
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
 #
+#   USE_FLASH_ATTENTION=0
+#     disables building flash attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -211,7 +214,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 7, 0)
+python_min_version = (3, 8, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -335,7 +338,7 @@ def check_submodules():
     def check_for_files(folder, files):
         if not any(os.path.exists(os.path.join(folder, f)) for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive --jobs 0'?")
+            report("Did you run 'git submodule update --init --recursive'?")
             sys.exit(1)
 
     def not_exists_or_empty(folder):
@@ -354,7 +357,7 @@ def check_submodules():
             print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
         except Exception:
             print(' --- Submodule initalization failed')
-            print('Please run:\n\tgit submodule update --init --recursive --jobs 0')
+            print('Please run:\n\tgit submodule update --init --recursive')
             sys.exit(1)
     for folder in folders:
         check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.md", "LICENSE.txt"])
@@ -446,8 +449,8 @@ Please install it via `conda install {module}` or `pip install {module}`
 def check_pydep(importname, module):
     try:
         importlib.import_module(importname)
-    except ImportError:
-        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+    except ImportError as e:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module)) from e
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -536,11 +539,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
+        if cmake_cache_vars['BUILD_EXECUTORCH']:
+            report('-- Building Executorch')
 
         if cmake_cache_vars['USE_ITT']:
             report('-- Using ITT')
         else:
             report('-- Not using ITT')
+
+        if cmake_cache_vars['BUILD_NVFUSER']:
+            report('-- Building nvfuser')
+        else:
+            report('-- Not Building nvfuser')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -623,6 +633,22 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             fileext = os.path.splitext(filename)[1]
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
+        # Copy nvfuser extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "nvfuser._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
                 report("Copying {} from {} to {}".format(ext.name, src, dst))
@@ -749,6 +775,9 @@ class clean(setuptools.Command):
                         break
                     # Ignore lines which begin with '#'.
                 else:
+                    # Don't remove absolute paths from the system
+                    wildcard = wildcard.lstrip('./')
+
                     for filename in glob.glob(wildcard):
                         try:
                             os.remove(filename)
@@ -886,6 +915,8 @@ def configure_extension_build():
         excludes.extend(['caffe2', 'caffe2.*'])
     if not cmake_cache_vars['BUILD_FUNCTORCH']:
         excludes.extend(['functorch', 'functorch.*'])
+    if not cmake_cache_vars['BUILD_NVFUSER']:
+        excludes.extend(['nvfuser', 'nvfuser.*'])
     packages = find_packages(exclude=excludes)
     C = Extension("torch._C",
                   libraries=main_libraries,
@@ -932,6 +963,12 @@ def configure_extension_build():
                 name=str('functorch._C'),
                 sources=[]),
         )
+    if cmake_cache_vars['BUILD_NVFUSER']:
+        extensions.append(
+            Extension(
+                name=str('nvfuser._C'),
+                sources=[]),
+        )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,
@@ -976,6 +1013,7 @@ def print_box(msg):
 def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
+        'filelock',
         'typing_extensions',
         'sympy',
         'networkx',
@@ -989,7 +1027,7 @@ def main():
         if os.path.exists(triton_pin_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['torchtriton==2.0.0+' + triton_pin[:10], 'jinja2']
+                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1151,7 +1189,6 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
-        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
