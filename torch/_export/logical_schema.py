@@ -269,6 +269,18 @@ class Graph:
     symint_values: List[SymIntValue]
 
 
+@dataclass(init=False)
+class Epilogue:
+    inputs: List[TensorArgument]
+
+    # Buffers and parameters that was mutated by the epilogue program
+    mutated_values: List[TensorArgument]
+
+    # Epiloge computes to mutate the parameters and buffers of the GraphModule
+    # Nodes MUST be 'aten.copy_' or 'aten.index_put_'
+    nodes: List[Node]
+
+
 # Maps to fx.GraphModule
 # This the top level construct for the model
 @dataclass(init=False)
@@ -278,6 +290,8 @@ class GraphModule:
     name: str
 
     graph: Graph    # Only one Graph per GraphModule
+
+    epilogue: Epilogue   # Epilogue program for the mutation of parameters and buffers
 
     # maps to GraphModule's meta, which is a Dict[str, Any], but we only support string key and string value.
     metadata : Dict[str, str]
