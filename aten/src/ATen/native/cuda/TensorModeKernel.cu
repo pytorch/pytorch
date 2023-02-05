@@ -18,8 +18,7 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename scalar_t>
 struct ModeImpl {
@@ -283,5 +282,4 @@ void launch_apply_mode_kernel(const TensorBase &values, const TensorBase &indice
   });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

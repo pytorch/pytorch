@@ -358,7 +358,8 @@ std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
   for (auto& it : tensor_map) {
     auto* value = it.second.ptr();
     if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
-      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
+      out.emplace_back(
+          py::cast<std::string>(it.first), toTensorMetadata(value));
     }
   }
   return out;
@@ -402,7 +403,7 @@ void ValueCache::store<CallType::PyModuleCall>(
              recordIfTensor(py::getattr(it.second, "grad", py::none()))});
       }
     }
-    cache.cls_and_parameters_[key] = {cls, params_};
+    cache.cls_and_parameters_[key] = {cls, std::move(params_)};
   }
 }
 
@@ -449,7 +450,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
       }
     }
 
-    cache.cls_and_parameters_[key] = {cls, params};
+    cache.cls_and_parameters_[key] = {cls, std::move(params)};
   }
 }
 
@@ -847,7 +848,7 @@ class PostProcess {
       std::deque<ThreadLocalResults>& tls,
       const ValueCache& value_cache,
       time_t end_time_ns)
-      : end_time_{end_time_ns}, time_converter_{time_converter} {
+      : end_time_{end_time_ns}, time_converter_{std::move(time_converter)} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
           tls[python_tid].trace_keys_, *this, value_cache, python_tid);
@@ -932,7 +933,7 @@ class PostProcess {
   template <EventType E>
   struct State {
     ska::flat_hash_map<TraceKey, ExtraFields<E>> fields_;
-    std::priority_queue<Exit, std::vector<Exit>, std::greater<Exit>> exits_;
+    std::priority_queue<Exit, std::vector<Exit>, std::greater<>> exits_;
   };
 
   template <EventType E>
@@ -973,7 +974,10 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     time_t end_time_ns) {
   value_cache_.trimPrefixes();
   PostProcess post_process(
-      time_converter, thread_local_results_, value_cache_, end_time_ns);
+      std::move(time_converter),
+      thread_local_results_,
+      value_cache_,
+      end_time_ns);
   auto out = post_process.run(enters);
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {

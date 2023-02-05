@@ -53,8 +53,7 @@
 // and then the corresponding value of grad_in[...,i_in_dim,...,i_in_last_dim]
 // gets added up to grad_out[...,i_out_dim,...].
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -150,4 +149,4 @@ void unfold_backward_cpu_kernel(
 
 REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cpu_kernel);
 
-}} // namespace at::native
+} // namespace at::native

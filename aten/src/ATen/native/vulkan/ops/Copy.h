@@ -19,11 +19,11 @@ void pack_vulkan_to_cpu(vTensor& src, Tensor& dst);
 
 Tensor& copy_(Tensor& dst, const Tensor& src);
 
-ops::vTensor to_vulkan(
+vTensor to_vulkan(
     at::Tensor& src,
     const api::StorageType storage_type = api::StorageType::TEXTURE_3D);
 
-at::Tensor from_vulkan(ops::vTensor& v_src);
+at::Tensor from_vulkan(vTensor& v_src);
 
 //
 // Utility functions for memcpy

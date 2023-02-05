@@ -349,10 +349,10 @@ class _DataPipeSerializationWrapper:
     def __len__(self):
         try:
             return len(self._datapipe)
-        except Exception:
+        except Exception as e:
             raise TypeError(
                 "{} instance doesn't have valid length".format(type(self).__name__)
-            )
+            ) from e
 
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):

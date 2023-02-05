@@ -7,23 +7,34 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union
-
-import sympy
-from typing_extensions import Protocol
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch.nn
 from torch import fx
+from torch._guards import (
+    Checkpointable,
+    Guard,
+    GuardsCheckpointState,
+    tracing,
+    TracingContext,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
+from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
-from .guards import Guard, GuardBuilder, TensorReference
+from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source
+from .source import (
+    ConstantSource,
+    is_constant_source,
+    LocalInputSource,
+    LocalSource,
+    ShapeEnvSource,
+)
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -31,29 +42,53 @@ from .utils import (
     clone_inputs,
     count_calls,
     counters,
+    dynamo_timed,
     format_graph_tabular,
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, VariableBuilder, wrap_fx_proxy
+from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
     TensorVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 
 log = logging.getLogger(__name__)
 
 
-# TODO: I think this accepts int arguments too
-class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        ...
+class OutputGraphState(NamedTuple):
+    graphargs: List[GraphArg]
+    tracked_fakes: List[TrackedFake]
+    guard_state: GuardsCheckpointState
+    nn_modules: Optional[Dict[str, torch.nn.Module]]
+    side_effects: SideEffects
+    timestamp: int
 
+    def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
+        for k in self._fields:
+            if k == "guard_state":
+                r = self.guard_state.diff(other.guard_state)
+                if r is not None:
+                    return r
+                continue
+            elif k == "side_effects":
+                r = self.side_effects.diff(other.side_effects)
+                if r is not None:
+                    return r
+                continue
 
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
+            sv = getattr(self, k)
+            ov = getattr(other, k)
+            if sv != ov:
+                return f"{prefix}{k} mismatch: {sv} != {ov}"
+        return None
+
+    # Back compat .guards api
+    @property
+    def guards(self):
+        return self.guard_state.dynamo_guards
 
 
 @functools.lru_cache(None)
@@ -129,7 +164,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer):
+class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -143,10 +178,31 @@ class OutputGraph(fx.Tracer):
         root_tx,
     ):
         super(OutputGraph, self).__init__()
-
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.guards: Set[Guard] = set()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if config.dynamic_shapes:
+            # Register a SHAPE_ENV guard to make sure we setup shape guards
+            # that show up in ShapeEnv
+            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        # tracked_fakes says where any tensor that was wrapped to fake came
+        # from.  It is similar to GraphArg, in that all GraphArgs will get
+        # will get added to TrackedFakes, but TrackedFakes also contains
+        # GraphArgs that got pruned, and things like Tensor attributes which
+        # aren't explicit graph inputs.  Used by shape guard
+        self.tracked_fakes: List[TrackedFake] = []
+        # Although we prune unused graphargs before sending graphs to
+        # compilers, we may have legitimately triggered shape guards
+        # on "unused" inputs that we must keep track of.  So after
+        # remove_unused_graphargs is called, orig_graphargs and
+        # graphargs no longer alias; orig_graphargs is the original
+        # graphargs, and graphargs is the pruned list.  Guard creation
+        # should use original graphargs.
+        self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
@@ -161,17 +217,16 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self._current_tx = []
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
         self.initial_random_state = ()
-        self.unspec_variable_map: Dict[
-            str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
-        ] = {}
-        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
-        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
+        self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        # Maps the source arg position to the grapharg position
+        self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -187,6 +242,14 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
+    @property
+    def shape_env(self):
+        return self.tracing_context.fake_mode.shape_env
+
+    @property
+    def guards(self) -> Set[Guard]:
+        return self.tracing_context.guards_context.dynamo_guards
+
     def push_tx(self, tx):
         self._current_tx.append(tx)
 
@@ -197,12 +260,14 @@ class OutputGraph(fx.Tracer):
     def current_tx(self):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
 
-    def copy_graphstate(self):
+    def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        state = (
+        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
+        state = OutputGraphState(
             list(self.graphargs),
-            set(self.guards),
+            list(self.tracked_fakes),
+            guards_graph_state,
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
@@ -210,16 +275,19 @@ class OutputGraph(fx.Tracer):
         self.timestamp += 1
         return state
 
-    def restore_graphstate(self, state):
+    def restore_graphstate(self, state: OutputGraphState):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
-            self.guards,
+            self.tracked_fakes,
+            guards_state,
             self.nn_modules,
             self.side_effects,
             self.timestamp,
         ) = state
+        self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
+        removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
             if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
@@ -228,6 +296,14 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
+                removed_nodes += 1
+        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
+
+    def add_grapharg(self, arg: GraphArg):
+        curr_pos = len(self.graphargs)
+        self.graphargs.append(arg)
+        if isinstance(arg.source, LocalInputSource):
+            self.pos_to_arg[arg.source.pos] = curr_pos
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -278,21 +354,25 @@ class OutputGraph(fx.Tracer):
             )
 
     def register_attr_or_module(
-        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+        self,
+        target: Union[torch.nn.Module, torch.Tensor, Any],
+        *names,
+        **options,
     ):
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options.get("source", None)
+        assert "source" in options
+        source = options["source"]
         if isinstance(target, torch.Tensor):
-            if source:
+            if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 return wrap_fx_proxy(
-                    self,
+                    self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
@@ -312,7 +392,6 @@ class OutputGraph(fx.Tracer):
             # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
-            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
@@ -367,6 +446,8 @@ class OutputGraph(fx.Tracer):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+
+        log.debug(f"COMPILING GRAPH due to {reason}")
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -424,10 +505,7 @@ class OutputGraph(fx.Tracer):
         if (
             stack_values
             and all(
-                not isinstance(
-                    v, (UnspecializedNumpyVariable, UnspecializedPythonVariable)
-                )
-                for v in stack_values
+                not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
@@ -494,12 +572,11 @@ class OutputGraph(fx.Tracer):
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
 
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-            self.real_value_cache.clear()
+        # free a bit of memory
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+        self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
@@ -507,7 +584,8 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        compiled_fn = self.call_user_compiler(gm)
+        with tracing(self.tracing_context):
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -522,7 +600,7 @@ class OutputGraph(fx.Tracer):
                     else format_graph_tabular(gm.graph)
                 )
                 log.log(
-                    logging.CODE,  # type: ignore[attr-defined]
+                    logging.INFO,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
@@ -536,7 +614,13 @@ class OutputGraph(fx.Tracer):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
+    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        tot = 0
+        for node in gm.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                tot += 1
+        torch._dynamo.utils.increment_op_count(tot)
         try:
             name = (
                 self.compiler_fn.__name__
@@ -628,6 +712,7 @@ class OutputGraph(fx.Tracer):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
+                log.debug(f"REMOVE UNUSED GRAPHARG {arg.source.name()}")
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.remove_node(node)
@@ -650,8 +735,6 @@ class OutputGraph(fx.Tracer):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
-        # Clear cache for conversion of real -> fake tensors
-        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
@@ -667,6 +750,7 @@ class OutputGraph(fx.Tracer):
                 del node.meta["example_value"]
         self.real_value_cache.clear()
         self.name_to_input.clear()
+        self.side_effects.keepalive = []
 
     def create_proxy(
         self,
@@ -689,6 +773,9 @@ class OutputGraph(fx.Tracer):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn"] = target
+
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())
@@ -696,10 +783,7 @@ class OutputGraph(fx.Tracer):
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-
-        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
-        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
-        rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
+        rv.node.stack_trace = " | ".join(msgs)
 
         return rv
 

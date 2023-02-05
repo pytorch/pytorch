@@ -227,8 +227,8 @@ class TestCommunicationHooks(FSDPTest):
             else default_hooks.allreduce_hook
         )
 
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(entry._communication_hook, default_hook)
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            self.assertEqual(fsdp_module._communication_hook, default_hook)
 
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = (
@@ -246,12 +246,12 @@ class TestCommunicationHooks(FSDPTest):
             fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
         # Check dummy hook was registered for the root and all submodules if any
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(entry._communication_hook, dummy_hook)
-            self.assertEqual(entry._communication_hook_state, dummy_state)
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            self.assertEqual(fsdp_module._communication_hook, dummy_hook)
+            self.assertEqual(fsdp_module._communication_hook_state, dummy_state)
 
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry._communication_hook = None
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            fsdp_module._communication_hook = None
 
         in_data = torch.rand(16, 8).cuda()
         loss = fsdp_model_with_hook(in_data).sum()
@@ -260,9 +260,9 @@ class TestCommunicationHooks(FSDPTest):
         with self.assertRaises(AssertionError):
             loss.backward()
 
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry._communication_hook = dummy_hook
-            entry._communication_hook_state = None
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            fsdp_module._communication_hook = dummy_hook
+            fsdp_module._communication_hook_state = None
         # Same as above
         loss = fsdp_model_with_hook(in_data).sum()
         with self.assertRaises(AssertionError):
@@ -398,7 +398,7 @@ class TestCommunicationHooks(FSDPTest):
         loss_mp = fsdp_with_mp(in_data).sum()
         loss_hook.backward()
         # Make sure grads were cast to the parameter's precision
-        self.assertEqual(fsdp_with_hook.params[0].dtype, state.parameter_type)
+        self.assertEqual(fsdp_with_hook.params[0].grad.dtype, state.parameter_type)
         loss_mp.backward()
         optim_hook.step()
         optim_mp.step()
