@@ -286,11 +286,11 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
-  if (selfSlicedSizes.size() > 0) {
+  if (!selfSlicedSizes.empty()) {
     selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
   }
   auto sourceSlicedSizes = source.sizes().vec();
-  if (sourceSlicedSizes.size() > 0) {
+  if (!sourceSlicedSizes.empty()) {
     sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }
   if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
@@ -471,7 +471,7 @@ DEFINE_DISPATCH(scatter_reduce_expanded_index_stub);
 DEFINE_DISPATCH(gather_expanded_index_stub);
 
 static bool all_strides_match(TensorList tensors) {
-  TORCH_CHECK(tensors.size() >= 1);
+  TORCH_CHECK(!tensors.empty());
   auto strides = tensors[0].strides();
   for (auto& tensor : tensors.slice(1)) {
     if (!strides.equals(tensor.strides())) {
@@ -1472,9 +1472,9 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
   auto result = grad.new_zeros_symint(self.sym_sizes());
-  // for composite compliance, use out-of-place variant of
-  // `scatter_add` if index tensor is a Tensor Subclass.
-  if (isTensorSubclassLike(index)) {
+  // for composite, vmap and inductor compliance, use out-of-place variant of
+  // `scatter_add` if index or grad tensors is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({index, grad})) {
     return result.scatter_add(dim, index, grad);
   }
   result.scatter_add_(dim, index, grad);
@@ -2084,7 +2084,7 @@ Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
-  if (dims.size() > 0) {
+  if (!dims.empty()) {
     return (self != 0).sum(dims);
   }
 
