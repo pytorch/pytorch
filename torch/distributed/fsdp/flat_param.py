@@ -1333,6 +1333,16 @@ class FlatParamHandle:
                     self._use_unsharded_grad_views()
                 else:
                     self._use_sharded_grad_views()
+        elif self._training_state == HandleTrainingState.BACKWARD_POST:
+            for fqn, (param_name, module, _) in zip(
+                self.flat_param._fqns, self.flat_param._param_infos
+            ):
+                # if self.rank == 0:
+                #     print(f"De-register {fqn} in {self._training_state}")
+                module._parameters.pop(param_name, None)
+            # if self.rank == 0:
+            #     print(f"Register _flat_param in {self._training_state}")
+            module._parameters["_flat_param"] = self.flat_param
 
     #########
     # VIEWS #
@@ -1422,8 +1432,11 @@ class FlatParamHandle:
                 setattr(module, param_name, param_var)
                 if (
                     self._use_orig_params
-                    and self._training_state == HandleTrainingState.FORWARD
+                    # and
+                    # self._training_state == HandleTrainingState.FORWARD
                 ):
+                    # if self.rank == 0:
+                    #     print(f"Register {self.flat_param._fqns[i]} in {self._training_state}")
                     module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,
@@ -1457,9 +1470,16 @@ class FlatParamHandle:
                 setattr(module, param_name, prim_param)
                 if (
                     self._use_orig_params
-                    and self._training_state == HandleTrainingState.FORWARD
+                    # and
+                    # self._training_state == HandleTrainingState.FORWARD
                 ):
+                    # if self.rank == 0:
+                    #     print(f"Register {self.flat_param._fqns[i]} in {self._training_state}")
                     module._parameters[param_name] = prim_param  # type: ignore[assignment]
+        if self._training_state == HandleTrainingState.FORWARD:
+            # if self.rank == 0:
+            #     print(f"De-register _flat_param in {self._training_state}")
+            module._parameters.pop("_flat_param", None)
 
     def _use_unsharded_grad_views(self) -> None:
         """
@@ -1834,10 +1854,10 @@ class FlatParamHandle:
             flat_param.grad = None
 
     def _deregister_orig_params(self):
-        for (param_name, module, _) in self.flat_param._param_infos:
+        for param_name, module, _ in self.flat_param._param_infos:
             if hasattr(module, param_name):
                 delattr(module, param_name)
-        for (param_name, module, _, _, _, _) in self.flat_param._shared_param_infos:
+        for param_name, module, _, _, _, _ in self.flat_param._shared_param_infos:
             if hasattr(module, param_name):
                 delattr(module, param_name)
 

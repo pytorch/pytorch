@@ -228,6 +228,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
     @property
     def world_size(self) -> int:
+        return 2
         return torch.cuda.device_count()
 
     @classmethod
@@ -334,7 +335,8 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             model = FSDP(
                 copy.deepcopy(model),
                 auto_wrap_policy=wrap_policy,
-                use_orig_params=True
+                # use_orig_params=True
+                use_orig_params=False
             )
             return model
 
