@@ -45,7 +45,7 @@ from torch.testing._internal.common_dtype import floating_types_and
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 import weakref
-
+import collections
 import pickle
 
 
@@ -10343,6 +10343,126 @@ class TestMultithreadAutograd(TestCase):
 
         torch.autograd.gradcheck(fn2, [inp_r, inp_c], check_forward_ad=True)
         torch.autograd.gradcheck(fn2, [inp_c, inp_r], check_forward_ad=True)
+
+class TestNestedCheckpoint(TestCase):
+    @staticmethod
+    def grad(fn):
+        def wrapper(x):
+            with torch.enable_grad():
+                out = fn(x)
+                grad_input = torch.autograd.grad(out, inputs=(x,), create_graph=True)[0]
+            return grad_input
+        return wrapper
+
+    @staticmethod
+    def sum(fn):
+        def wrapped(x):
+            return fn(x).sum()
+        return wrapped
+
+    @staticmethod
+    def checkpoint(fn):
+        def wrapped(*args, **kwargs):
+            return torch.autograd.graph._checkpoint(fn, *args, **kwargs)
+        return wrapped
+
+    def get_tests(self, fn):
+        grad, c = self.grad, self.checkpoint
+
+        tests = (
+            # function <> tuple of function arbitrarily wrapped in checkpoint in various ways
+            (fn, (c(fn), c(c(fn)))),
+            (grad(fn), (grad(c(fn)), grad(c(c(fn))))),
+            (grad(grad(fn)), (grad(c(grad(fn))), c(grad(grad(c(fn)))), grad(c(grad(c(fn)))))),
+            (grad(grad(grad(fn))), (grad(c(grad(grad(c(fn))))), grad(c(grad(c(grad(c(fn)))))))),
+        )
+        return tests
+
+    def check_graph_dies(self, fn):
+        def iter_graph(roots):
+            if not roots:
+                return
+            seen = set()
+            q = collections.deque()
+            for node in roots:
+                if node is not None:
+                    seen.add(node)
+                    q.append(node)
+
+            while q:
+                node = q.popleft()
+                for fn, _idx in node.next_functions:
+                    if fn in seen or fn is None:
+                        continue
+                    seen.add(fn)
+                    q.append(fn)
+
+                yield node
+
+        class Handle():
+            pass
+
+        def scope():
+            a = torch.randn((), requires_grad=True)
+            out = fn(a)
+            refs = []
+            for node in iter_graph([out.grad_fn]):
+                handle = Handle()
+                refs.append(weakref.ref(handle))
+                node.metadata["blah"] = handle
+            return refs
+
+        refs = scope()
+        for ref in refs:
+            self.assertIsNone(ref())
+
+    def test_nested_checkpoint_correct(self):
+        x = torch.ones(1, requires_grad=True)
+
+        def fn(x):
+            return x.sin().exp().sin()
+
+        for expected_fn, actual_fns in self.get_tests(fn):
+            expected = expected_fn(x)
+
+            for actual_fn in actual_fns:
+                actual = actual_fn(x)
+                self.assertTrue(torch.allclose(expected, actual))
+
+    def test_nested_checkpoint_graph_dies(self):
+        def base_fn(x):
+            return x.sin().exp().sin()
+
+        for _, fns in self.get_tests(base_fn):
+            for fn in fns:
+                self.check_graph_dies(fn)
+
+    def test_nested_checkpoint_two_children(self):
+        grad, sum, c = self.grad, self.sum, self.checkpoint
+
+        def f(x):
+            return x.exp().sin()
+
+        def g(x):
+            ret = x.exp().sin()
+            return ret
+
+        def h_checkpointed(x):
+            return c(g)(c(f)(x))
+
+        def h(x):
+            return g(f(x))
+
+        a = torch.randn(3, 3, requires_grad=True)
+        expected = grad(sum(grad(sum(h))))(a)
+        actual = grad(sum(grad(sum(c(h_checkpointed)))))(a)
+        self.assertTrue(torch.allclose(expected, actual))
+
+        actual = grad(sum(c(grad(sum(c(h_checkpointed))))))(a)
+        self.assertTrue(torch.allclose(expected, actual))
+
+        self.check_graph_dies(grad(sum(grad(sum(c(h_checkpointed))))))
+        self.check_graph_dies(grad(sum(c(grad(sum(c(h_checkpointed)))))))
 
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
