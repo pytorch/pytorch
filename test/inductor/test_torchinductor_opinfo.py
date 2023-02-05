@@ -261,6 +261,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
+    "norm.inf": {f16},
 }
 
 

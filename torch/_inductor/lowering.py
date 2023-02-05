@@ -1423,10 +1423,10 @@ make_fallback(aten.to_sparse)
 make_fallback(aten.triangular_solve)
 make_fallback(aten.expand_copy)
 make_fallback(aten.zeros)
+make_fallback(aten.gcd.default)
 
-make_fallback(torch.ops.prims.gcd.default)
-make_fallback(torch.ops.prims.amin)
-make_fallback(torch.ops.prims.shift_right_arithmetic.default)
+# TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
+make_fallback(aten.bitwise_right_shift)
 
 
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
@@ -3789,6 +3789,8 @@ register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.bitwise_left_shift)
+# TODO(fdrocha): once https://github.com/openai/triton/pull/1153 is merged and we advance the triton pin past it
+# this should be uncommented
 # register_pointwise(aten.bitwise_right_shift)
 register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT

@@ -26,10 +26,8 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.sqrt_,
         aten.lcm,
-        aten.gcd,
         aten.clamp_min_,
         aten.sin_,
-        aten.bitwise_right_shift,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}

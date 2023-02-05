@@ -127,9 +127,9 @@ class OpOverrides:
     def bitwise_left_shift(x, y):
         return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
 
-    #    @staticmethod
-    #    def bitwise_right_shift(x, y):
-    #        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
+    @staticmethod
+    def bitwise_right_shift(x, y):
+        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
 
     @staticmethod
     def remainder(a, b):
