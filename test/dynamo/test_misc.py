@@ -3477,6 +3477,39 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_failure is not None)
         self.assertEqual(guard_failure[0], "k == 3")
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_guard_failure_fn_shape_control(self):
+        def fn(x, y):
+            if x.shape[0] < 3:
+                if y.shape[0] < 3:
+                    return x * y
+                else:
+                    return x + y
+            else:
+                return -1
+
+        x = torch.randn([2, 2])
+        y = torch.randn([2, 2])
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        x2 = torch.randn([5, 5])
+        y2 = torch.randn([5, 5])
+
+        opt_fn(x, y)
+        opt_fn(x2, y2)
+
+        self.assertTrue(guard_failure is not None)
+        self.assertEqual(guard_failure[0], "x.size()[0] < 3")
+
     def test_guard_failure_fn2(self):
         def fn(x, y):
             x = x + 1
