@@ -722,7 +722,7 @@ class SkipFilesVariable(VariableTracker):
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            unimplemented("call_function in skip_files " + path)
+            unimplemented(f"call_function {self.value} in skip_files {path}")
 
 
 class TypingVariable(VariableTracker):
