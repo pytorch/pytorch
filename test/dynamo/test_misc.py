@@ -3648,7 +3648,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
-<<<<<<< HEAD
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
