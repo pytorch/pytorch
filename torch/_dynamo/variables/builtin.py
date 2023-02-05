@@ -996,6 +996,9 @@ class BuiltinVariable(VariableTracker):
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
         )
+        from .lists import (
+            SizeVariable
+        )
 
         op = self.fn
 
@@ -1009,7 +1012,16 @@ class BuiltinVariable(VariableTracker):
                 _unimplemented()
             return ConstantVariable(op(left.fn, right.fn))
 
+        # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
+        # x = torch.randn([3, 3])
+        # x.size() == (3, 3) # True
+        # (3, 3) == x.size() # True
+        if isinstance(left, (SizeVariable, TupleVariable)) and isinstance(right, (TupleVariable, SizeVariable)):
+            return BaseListVariable.generic_list_compare(left, tx, op, right)
+
         if isinstance(left, BaseListVariable):
+            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
+                _unimplemented()
             return BaseListVariable.generic_list_compare(left, tx, op, right)
 
         if isinstance(left, TensorVariable):
