@@ -183,13 +183,15 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
+            CUDAStreamContextVariable,
+            CUDAStreamVariable,
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )
 
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -268,6 +270,24 @@ class TorchVariable(VariableTracker):
             assert not (args or kwargs)
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
+            )
+        elif self.value is torch.cuda.stream:
+            log.warning(
+                "torch.cuda.stream() not fully supported, streams may be ignored"
+            )
+            assert len(args) == 1
+            return CUDAStreamContextVariable.create(tx, args[0], **options)
+        elif self.value is torch.cuda.streams.Stream:
+            return wrap_fx_proxy_cls(
+                CUDAStreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.cuda.streams.Stream,
+                    (),
+                    {},
+                ),
+                **options,
             )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")

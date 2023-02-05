@@ -441,6 +441,75 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
+class CUDAStreamContextVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        from .builder import wrap_fx_proxy_cls
+
+        current_stream = wrap_fx_proxy_cls(
+            CUDAStreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.current_stream,
+                (None,),
+                {},
+            ),
+        )
+        return CUDAStreamContextVariable(
+            target_values=[target_value],
+            initial_values=[current_stream],
+            **kwargs,
+        )
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super(CUDAStreamContextVariable, self).__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.target_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.target_values[0].value)
+
+    def exit(self, tx, *args):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.initial_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.initial_values[0].value)
+
+    def fn_name(self):
+        return "cuda.stream"
+
+
+class CUDAStreamVariable(VariableTracker):
+    def __init__(self, proxy, value, **kwargs):
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented("cuda stream")
+
+    def as_proxy(self):
+        return self.proxy
+
+
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
         super(WithExitFunctionVariable, self).__init__(**kwargs)
