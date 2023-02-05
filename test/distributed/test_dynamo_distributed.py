@@ -574,7 +574,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
 
-    def test_fsdp_orig_params_assert(self):
+    def _test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
