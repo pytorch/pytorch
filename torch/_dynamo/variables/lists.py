@@ -100,21 +100,23 @@ class BaseListVariable(VariableTracker):
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def generic_list_compare(left, tx, op, right, **options):
+    def list_compare(tx, op, left, right):
         from .builtin import BuiltinVariable
 
-        if op == "!=":
-            eq_result = BaseListVariable.generic_list_compare(
-                left, tx, "==", right, **options
-            )
+        eq_result = BaseListVariable.list_eq(tx, left, right)
+        if op is operator.eq:
+            return eq_result
+        elif op is operator.neq:
             return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
-        elif op != "==":
+        else:
             # This function is incorrect for < <= >= >
             unimplemented(f"list_compare {left} {op} {right}")
 
-        assert not (
-            left.is_python_constant() and right.is_python_constant()
-        ), "Illegal generic list compare on constant lists"
+    @staticmethod
+    def list_eq(tx, left, right):
+        from .builtin import BuiltinVariable
+
+        options = VariableTracker.propagate(left, right)
 
         # Most list-like variables implement comparison ops the same way,
         # so they can re-use this helper.
@@ -130,13 +132,16 @@ class BaseListVariable(VariableTracker):
         # So, we iterate over the zipped list items.
         comps = []
         for l, r in zip(left.items, right.items):
-            comp = BuiltinVariable(op).call_function(tx, [l, r], {})
+            comp = BuiltinVariable(operator.eq).call_function(tx, [l, r], {})
+            if comp.is_python_constant() and not comp.as_python_constant():
+                # early exit in false case
+                return comp.add_options(options)
             comps.append(comp)
 
         return functools.reduce(
             lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
             comps,
-        )
+        ).add_options(options)
 
 
 class RangeVariable(BaseListVariable):
