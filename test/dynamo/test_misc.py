@@ -245,29 +245,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
-
-    def test_compare_shapes_with_constant(self):
-        def compare_shapes(a):
-            x = a.shape
-            if x[0] != 3:
-                return a * 4
-            return a * 3
-
-        guard_failure = None
-
-        def guard_failures(failure):
-            nonlocal guard_failure
-            guard_failure = failure
-
-        opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
-        )(compare_shapes)
-        opt_fn(torch.randn([3, 3]))
-        opt_fn(torch.randn([3, 3]))
-        breakpoint()
-        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
-
-
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
