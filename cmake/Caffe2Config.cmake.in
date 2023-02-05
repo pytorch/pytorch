@@ -87,7 +87,6 @@ if(@USE_CUDA@)
   # If Caffe2 was compiled with the libraries below, they must
   # be found again when including the Caffe2 target.
   set(CAFFE2_USE_CUDA @USE_CUDA@)
-  set(CAFFE2_USE_CUDNN @USE_CUDNN@)
   set(CAFFE2_USE_TENSORRT @USE_TENSORRT@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")
   if(@CAFFE2_USE_CUDA@ AND NOT CAFFE2_USE_CUDA)
@@ -95,12 +94,6 @@ if(@USE_CUDA@)
       "Your installed Caffe2 version uses CUDA but I cannot find the CUDA "
       "libraries. Please set the proper CUDA prefixes and / or install "
       "CUDA.")
-  endif()
-  if(@CAFFE2_USE_CUDNN@ AND NOT CAFFE2_USE_CUDNN)
-    message(FATAL_ERROR
-      "Your installed Caffe2 version uses cuDNN but I cannot find the cuDNN "
-      "libraries. Please set the proper cuDNN prefixes and / or install "
-      "cuDNN.")
   endif()
   if(@CAFFE2_USE_TENSORRT@ AND NOT CAFFE2_USE_TENSORRT)
     message(FATAL_ERROR
