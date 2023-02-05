@@ -21,14 +21,11 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 if torch.cuda.is_available():
     import nvfuser
     from packaging.version import Version
+
     nvfuser_version = Version("0.0.0")
     if hasattr(nvfuser, "version"):
         nvfuser_version = nvfuser.version()
-        from nvfuser import (  # type: ignore[import]
-            DataType,
-            FusionDefinition,
-            Tensor,
-        )
+        from nvfuser import DataType, FusionDefinition, Tensor  # type: ignore[import]
     else:
         from nvfuser._C import (  # type: ignore[import]
             DataType,
