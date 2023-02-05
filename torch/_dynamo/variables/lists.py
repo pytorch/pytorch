@@ -103,6 +103,15 @@ class BaseListVariable(VariableTracker):
     def generic_list_compare(left, tx, op, right, **options):
         from .builtin import BuiltinVariable
 
+        if op == "!=":
+            eq_result = BaseListVariable.generic_list_compare(
+                left, tx, "==", right, **options
+            )
+            return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
+        elif op != "==":
+            # This function is incorrect for < <= >= >
+            unimplemented(f"list_compare {left} {op} {right}")
+
         assert not (
             left.is_python_constant() and right.is_python_constant()
         ), "Illegal generic list compare on constant lists"
