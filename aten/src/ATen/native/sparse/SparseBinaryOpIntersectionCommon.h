@@ -15,7 +15,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/from_blob.h>
+#include <ATen/ops/tensor.h>
 #include <ATen/ops/result_type.h>
 #endif
 
@@ -151,8 +151,7 @@ template <
   template <typename func_t> class kernel_t,
   typename value_selection_intersection_kernel_t,
   typename index_t = int64_t,
-  bool use_dynamic_shapes = true,
-  int max_static_len = 0>  // only relevant when use_dynamic_shapes is false.
+  int64_t max_static_len = 0>  // only relevant when use_dynamic_shapes is false.
 void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
@@ -267,23 +266,19 @@ void _sparse_binary_op_intersection_kernel_impl(
     );
     auto strides = c10::contiguous_strides(broadcasted_sparse_dim_shape);
 
-    if constexpr (!use_dynamic_shapes) {
+    if constexpr (max_static_len > 0) {
       std::array<int64_t, max_static_len> strides_as_array;
       std::copy(strides.begin(), strides.end(), strides_as_array.begin());
       return strides_as_array;
     } else {
-      auto strides_len = static_cast<int64_t>(strides.size());
-      auto strides_as_tensor = at::from_blob(
-          strides.data(),
-          {strides_len},
-          probably_coalesced._indices().options().device(kCPU).dtype(kLong));
-      strides_as_tensor = strides_as_tensor.to(probably_coalesced.device(), kLong, /*non_blocking=*/false, /*copy=*/true);
+      auto strides_as_tensor = at::tensor(strides, probably_coalesced._indices().options().device(kCPU).dtype(kLong));
+      strides_as_tensor = strides_as_tensor.to(probably_coalesced.device());
       return strides_as_tensor;
     }
   }();
 
   const auto hash_coeffs = [&]() -> auto {
-    if constexpr (!use_dynamic_shapes) {
+    if constexpr (max_static_len > 0) {
       return hash_coeffs_storage;
     } else {
       return hash_coeffs_storage.template data_ptr<int64_t>();
@@ -625,18 +620,18 @@ void _sparse_binary_op_intersection_kernel_out(
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
   // 10 sparse dims should be more than enough?
-  constexpr int max_sparse_dims = 2 * c10::kDimVectorStaticSize;
+  constexpr int64_t max_sparse_dims = static_cast<int64_t>(2 * c10::kDimVectorStaticSize);
 
   BOOL_TO_INDEX_TYPE1(is_32bit_indexing, [&]() {
       using index_t = index_t0;
 
       if (max_sparse_dims > x.sparse_dim()) {
         _sparse_binary_op_intersection_kernel_impl<
-          kernel_t, value_selection_intersection_kernel_t, index_t, /*use_dynamic_shapes=*/false, max_sparse_dims>(
+          kernel_t, value_selection_intersection_kernel_t, index_t, max_sparse_dims>(
             res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
       } else {
         _sparse_binary_op_intersection_kernel_impl<
-          kernel_t, value_selection_intersection_kernel_t, index_t, /*use_dynamic_shapes=*/true>(
+          kernel_t, value_selection_intersection_kernel_t, index_t>(
             res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
       }
   });
