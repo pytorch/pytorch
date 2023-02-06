@@ -648,6 +648,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn=fn1, nargs=1, expected_ops=3
         )
 
+    def test_range_with_shape(self):
+        def fn(a):
+            for i in range(1, a.shape[0]):
+                a += 1
+            return a
+
+        # expect 1 more op (size call) for dynamic
+        return torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=9, expected_ops_dynamic=10
+        )
+
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
