@@ -5,10 +5,10 @@ import functools
 import inspect
 import itertools
 import operator
+import os
 import warnings
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import os
 
 import torch
 import torch._C
@@ -20,17 +20,18 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
-from torch.onnx import _type_utils
+from torch.onnx import _constants, _type_utils
+from torch.onnx._internal import _beartype
 from torch.utils import _pytree
-from torch.onnx._internal import _beartype, jit_utils, registration
-# NOTE: _mode_utils is not allowed to be imported module
-from torch.utils._mode_utils import no_dispatch
 
 try:
     import onnx
-    import onnxscript
+    import onnxscript  # type: ignore[import]
     from onnxscript import evaluator, opset18
-    from onnxscript.function_libs.torch_aten import graph_building, ops
+    from onnxscript.function_libs.torch_aten import (  # type: ignore[import]
+        graph_building,
+        ops,
+    )
 
     # TODO: Handle imports
 except ImportError:
@@ -188,6 +189,7 @@ def _create_op_overload_to_exporter_key_table() -> Dict[
 
             if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
                 continue
+
             exporter_look_up_key = op_overload_packet._qualified_op_name
             if _ATENLIB_FUNCTIONS.get(exporter_look_up_key) is None:
                 # This aten op doesn't have ONNX exporter.
@@ -204,7 +206,9 @@ def _create_op_overload_to_exporter_key_table() -> Dict[
                 # different exporter keys.
 
                 table[op_overload] = op_overload_packet._qualified_op_name
+    # TODO(justinchuby): is baddbmm different?
     table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
+    return table
 
 
 class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
@@ -283,6 +287,7 @@ def _module_expansion_symbolic_trace(
     concrete_args: Optional[Dict[str, Any]] = None,
 ) -> "torch.fx.GraphModule":
     """Trace a callable into FX graph.
+
     When "root" is torch.nn.Module, calls to its submodule (type: torch.nn.Module) will be
     expanded into operators (e.g., torch.matmul, torch.add, +, and -) to simplify graph
     structure.
@@ -319,8 +324,6 @@ def _module_expansion_symbolic_trace(
 
 # Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
 # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
-# In subsequent code, torch.ops.aten.add.Tensor's exporter is found by
-# registration.registry.get_function_group("aten::add").
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
 
@@ -431,7 +434,7 @@ def _wrap_fx_args_as_onnxscript_args(
         if isinstance(arg, torch.fx.Node):
             # Create a concreate test tensor based on the fake tensor
 
-            with no_dispatch():
+            with torch.utils._mode_utils.no_dispatch():
                 torch_args.append(torch.randn_like(arg.meta["val"]))
         else:
             torch_args.append(arg)
@@ -439,7 +442,11 @@ def _wrap_fx_args_as_onnxscript_args(
     return (graph_args, graph_kwargs, tuple(torch_args), torch_kwargs)
 
 
-def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
+def _fill_tensor_meta(
+    onnxscript_values,
+    name: str,
+    expected_values: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
@@ -447,7 +454,6 @@ def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
         zip(flat_onnxscript_values, flat_expected_values)
     ):
         # Only set shape for now as we don't need type information.
-        # TODO(justinchuby): Propagate shape/type
         onnxscript_value.shape = tuple(expected_value.size())
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
@@ -464,7 +470,7 @@ def _validate_op_between_ort_torch(
     # TODO(titaiwang): Change ORTEvaluator to ReferenceEvaluator
     # Symbolic_fn should have the same output as node.target (torch ops)
     with evaluator.default_as(evaluator.ort_evaluator):
-        expected_outputs = node.target(*torch_args, **torch_kwargs)
+        expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
         numpy_args = [
             arg.numpy() if isinstance(arg, torch.Tensor) else arg for arg in torch_args
         ]
@@ -525,7 +531,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             ):
                 onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
                 index = node.args[1]
-                output = onnx_tensor_tuple[index]
+                output = onnx_tensor_tuple[index]  # type: ignore[index]
                 assert (
                     output is not None
                 ), f"Node creates None with target={node.target} and name={node.name}"
@@ -559,7 +565,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
                 torch_kwargs,
             ) = _wrap_fx_args_as_onnxscript_args(node, fx_name_to_onnxscipt_value)
             with evaluator.default_as(tracer):
-                output: Union[
+                output: Union[  # type: ignore[no-redef]
                     graph_building.TorchScriptTensor,
                     Tuple[graph_building.TorchScriptTensor],
                 ] = symbolic_fn(*onnx_args, **onnx_kwargs)
@@ -698,7 +704,7 @@ def _rename_placeholder_targets(
 @_beartype.beartype
 def _export(
     module: torch.fx.GraphModule,
-    opset_version: int = None,
+    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
     *args,
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
@@ -721,7 +727,7 @@ def _export(
     # Run FakeTensorProp on decomposed_module.
     # Symbolic output of the i-th node can be accessed via
     # decomposed_module.graph.nodes[i].meta["val"]
-    decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
+    decomposed_module = _shape_inference_with_fake_tensor(decomposed_module, *args)
 
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -950,7 +956,7 @@ def export_without_parameters_and_buffers(
     *args,
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
-    opset_version: int = None,
+    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
@@ -960,8 +966,6 @@ def export_without_parameters_and_buffers(
     Tuple[Any, ...],
     Tuple[Any, ...],
 ]:
-    if opset_version is None:
-        opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
 
     graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
         module, *args, **kwargs
