@@ -128,6 +128,13 @@ COPY ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
+# (optional) Intall lintrunner and
+ARG LINTER
+COPY ./common/install_linter.sh install_linter.sh
+RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
+RUN rm install_linter.sh
+ENV INSTALLED_LINTER ${LINTER}
+
 COPY ./common/install_openssl.sh install_openssl.sh
 RUN bash ./install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl

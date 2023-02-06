@@ -234,6 +234,11 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linter)
+    ANACONDA_PYTHON_VERSION=3.11
+    CONDA_CMAKE=yes
+    LINTER=yes
+    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
