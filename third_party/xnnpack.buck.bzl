@@ -35,6 +35,8 @@ load(
     "PROD_SSE_MICROKERNEL_SRCS",
     "PROD_SSSE3_MICROKERNEL_SRCS",
     "PROD_XOP_MICROKERNEL_SRCS",
+    "ALL_NEONFMA_AARCH64_MICROKERNEL_SRCS",
+    "ALL_NEON_AARCH64_MICROKERNEL_SRCS",
 )
 
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
@@ -99,6 +101,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
+            "-DXNN_ENABLE_GEMM_M_SPECIALIZATION=0",
         ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
@@ -131,6 +134,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
+            "-DXNN_ENABLE_JIT=0",
+            "-DXNN_ENABLE_SPARSE=0",
+            "-DXNN_ENABLE_MEMOPT",
         ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
@@ -1474,7 +1480,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "ukernels_neon_aarch64",
-        srcs = PROD_AARCH64_NEON_MICROKERNEL_SRCS,
+        srcs = ALL_NEON_AARCH64_MICROKERNEL_SRCS,
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.c"),
             ("XNNPACK/src", "**/*.h"),
@@ -1590,6 +1596,47 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     )
 
     fb_xplat_cxx_library(
+        name = "ukernels_neonfma_aarch64",
+        srcs = ALL_NEONFMA_AARCH64_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(android-armv8|iphoneos-armv8)$",
+                [
+                    "-march=armv8-a",
+                    "-mfpu=neon-fp-armv8",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+        ],
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_asm_aarch32",
         srcs = AARCH32_ASM_MICROKERNEL_SRCS,
         headers = subdir_glob([
@@ -1686,6 +1733,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_neon_fp16",
             ":ukernels_neon_fp16arith_aarch64",
             ":ukernels_neon_v8",
+            ":ukernels_neonfma_aarch64",
         ],
     )
 
@@ -1749,6 +1797,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_neon_fp16arith_aarch64",
             ":ukernels_neon_v8",
             ":ukernels_scalar_aarch32",
+            ":ukernels_neonfma_aarch64",
         ],
     )
 
@@ -1821,15 +1870,27 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_NO_X8_OPERATORS",
             "-DXNN_NO_XX_OPERATORS",
             "-DXNN_ENABLE_MEMOPT",
+            "-DXNN_ENABLE_SPARSE=0",
+            "-DXNN_ENABLE_JIT=0",
+            "-DXNN_ENABLE_ASSEMBLY",
+            "-DXNN_ENABLE_GEMM_M_SPECIALIZATION",
+            "-DXNN_ENABLE_ARM_DOTPROD",
         ],
         srcs = [
             "XNNPACK/src/allocator.c",
             "XNNPACK/src/init.c",
-            "XNNPACK/src/memory-planner.c",
-            "XNNPACK/src/operator-delete.c",
-            "XNNPACK/src/runtime.c",
-            "XNNPACK/src/subgraph.c",
-            "XNNPACK/src/tensor.c",
+            "XNNPACK/src/params.c",
+            "XNNPACK/src/operator-run.c",
+            "XNNPACK/src/microparams-init.c",
+            "XNNPACK/src/binary-elementwise-config.c",
+            "XNNPACK/src/packing.c",
+            "XNNPACK/src/indirection.c",
+            "XNNPACK/src/cache.c",
+            "XNNPACK/src/mutex.c",
+            "XNNPACK/src/operator-utils.c",
+            "XNNPACK/src/memory.c",
+            "XNNPACK/src/hardware-config.c",
+            "XNNPACK/src/x8-lut-config.c",
         ] + LOGGING_SRCS,
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = (WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS) if XNNPACK_WINDOWS_AVX512F_ENABLED else WINDOWS_FLAGS,
