@@ -407,6 +407,12 @@ _default_fp32_placeholder_qconfig = QConfig(
     weight=PlaceholderObserver.with_args(dtype=torch.float32)
 )
 
+_default_quint8_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.quint8),
+    # operators using this qconfig doesn't have weights
+    weight=None,
+)
+
 def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "

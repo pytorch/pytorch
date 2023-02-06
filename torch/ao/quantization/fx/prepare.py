@@ -120,6 +120,18 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
+# note: the following default target dtype info dicts are temporary,
+# should be moved to the new programmable API class soon
+_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO = {
+    "input_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation,
+    "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation
+}
+
+_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
+    "input_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
+    "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
+}
+
 def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
@@ -429,17 +441,11 @@ def _get_target_activation_dtype_for_node(
             # this is OK because we are using this as a way to encode the dtypes of input
             # tensor, we won't actually insert these observers in the graph and won't
             # actually call calculate_qparams
-            return {
-                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-            }
+            return copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
         else:
             # if dtype is fp32 (default), do nothing
             # note: other dtypes are not supported
-            return {
-                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32)
-            }
+            return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     elif node.op in ('call_module', 'call_method', 'call_function'):
         args_have_no_tensors = \
@@ -478,32 +484,20 @@ def _get_target_activation_dtype_for_node(
                 "bias_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=bias_dtype),
                 "output_act_obs_or_fq_ctr": qconfig.activation,
             }
-        return {
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-        }
+        return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     elif node.op == 'get_attr':
-        return {
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-        }
+        return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     elif node.op == 'output':
         # Note: creating placeholder observer here is temporary, it will be moved
         # to the new programmable API when that is ready
         if output_node_to_output_index[node] in output_quantized_idxs:
-            return {
-                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-            }
+            return copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
         else:
             # if dtype is fp32 (default), do nothing
             # note: other dtypes are not supported
-            return {
-                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float32),
-            }
+            return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     else:
         raise AssertionError(f'need to handle {node.format_node()}')
@@ -1211,13 +1205,8 @@ def insert_observers_for_model(
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
     processed_nodes: Set[Node] = set()
     # initalize target_dtype_info
-    DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO = \
-        torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig
     for node in model.graph.nodes:
-        node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO.activation,
-            "output_act_obs_or_fq_ctr": DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO.activation
-        }
+        node.meta["target_dtype_info"] = copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     inputs_seen_counter = 0
     outputs_seen_counter = 0
@@ -1264,10 +1253,7 @@ def insert_observers_for_model(
             # this is OK because we are using this as a way to encode the dtypes of input
             # tensor, we won't actually insert these observers in the graph and won't
             # actually call calculate_qparams
-            node.meta["target_dtype_info"] = {
-                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-            }
+            node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
         elif node.op in ("call_module", "call_method", "call_function"):
             args_have_no_tensors = \
                 all_node_args_have_no_tensors(
@@ -1278,10 +1264,7 @@ def insert_observers_for_model(
                     "output_act_obs_or_fq_ctr": None,
                 }
         elif node.op == "output" and output_node_to_output_index[node] in output_quantized_idxs:
-            node.meta["target_dtype_info"] = {
-                "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-                "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.quint8),
-            }
+            node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
     # Step 2.2, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
@@ -1308,7 +1291,7 @@ def insert_observers_for_model(
             _set_target_dtype_info_for_matched_node_pattern(
                 matched_node_pattern,
                 last_node,
-                DEFAULT_QCONFIG_FOR_TARGET_DTYPE_INFO,
+                torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig,
                 backend_config,
                 placeholder_node_to_input_index,
                 output_node_to_output_index,
