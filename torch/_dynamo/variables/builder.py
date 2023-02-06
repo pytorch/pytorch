@@ -962,6 +962,11 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)
+    elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
+        from . import CUDAStreamVariable
+
+        proxy.node.meta["example_value"] = example_value
+        return CUDAStreamVariable(proxy, example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
