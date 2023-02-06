@@ -8764,9 +8764,6 @@ class TestConsistency(TestCase):
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
 
-        # failure in average pooling when both ceilMode and includeZeroPadToAverage are True
-        'nn.functional.adaptive_avg_pool1d': [torch.float32],
-        'nn.functional.adaptive_avg_pool2d': [torch.float32],
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
 
@@ -8943,7 +8940,7 @@ class TestConsistency(TestCase):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
-                if any(s in str(e).lower() for s in ["int64", "macos 13"]):
+                if any(s in str(e).lower() for s in ["int64", "macos 13", "adaptive pool mps"]):
                     self.skipTest(f"Expected Runtime Error: {str(e)}")
 
                 if not generate_new_truth:
