@@ -824,6 +824,28 @@ class ShapeEnv(object):
     def create_symintnode(self, sym: "sympy.Expr"):
         return SymInt(SymNode(sym, self, int))
 
+    def create_sym_number(self, val, source):
+        if isinstance(val, int):
+            return self.create_symint(val, source)
+        elif isinstance(val, float):
+            return self.create_symfloat(val, source)
+        else:
+            raise AssertionError(f'unrecognized type {type(val)}')
+
+    def create_symint(self, val, source):
+        # these symints are NOT duck typed, we don't expect them to
+        # necessarily have any relationship to sizes
+        symbol = Symbol(f"s{len(self.var_to_val)}", integer=True)
+        symbol.sources.append(source)
+        self.var_to_val[symbol] = sympy.Integer(val)
+        return SymInt(SymNode(symbol, self, int))
+
+    def create_symfloat(self, val, source):
+        symbol = Symbol(f"s{len(self.var_to_val)}")
+        symbol.sources.append(source)
+        self.var_to_val[symbol] = sympy.Float(val)
+        return SymFloat(SymNode(symbol, self, float))
+
     def create_unbacked_symfloat(self):
         symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
@@ -834,6 +856,7 @@ class ShapeEnv(object):
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         return SymInt(SymNode(symbol, self, int))
 
+    # TODO: rename this so that it's clear this is a SIZE symbol
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
@@ -965,8 +988,8 @@ class ShapeEnv(object):
         # not be available to inner levels.  For example, Dynamo can guard on
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
-        def track_symint(source, val):
-            if isinstance(val, SymInt):
+        def track_sym(source, val):
+            if isinstance(val, SymTypes):
                 s = val.node.expr
 
                 if isinstance(s, sympy.Symbol):
@@ -976,21 +999,21 @@ class ShapeEnv(object):
 
                 input_guards.append((source, s))
             else:
-                input_guards.append((source, sympy.Integer(val)))
+                input_guards.append((source, sympy.sympify(val)))
 
         for t, source in zip(placeholders, sources):
             assert isinstance(source, Source)
             if t is None:
                 continue
-            if isinstance(t, SymInt):
-                track_symint(source, t)
+            if isinstance(t, SymTypes):
+                track_sym(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
             for i, s in enumerate(t.size()):
-                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
+                track_sym(TensorPropertySource(source, TensorProperty.SIZE, i), s)
             for i, s in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+                track_sym(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
+            track_sym(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),

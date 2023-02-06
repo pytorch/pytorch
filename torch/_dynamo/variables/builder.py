@@ -720,17 +720,16 @@ class VariableBuilder:
         else:
             if (
                 config.dynamic_shapes
-                and isinstance(value, int)
+                and isinstance(value, (int, float))
                 and not is_constant_source(self.get_source())
             ):
                 shape_env = self.tx.output.shape_env
-                wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source)
+                wrapped_value = shape_env.create_sym_number(
+                    value, source=self.source
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float
             else:
                 # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)

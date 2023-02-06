@@ -942,8 +942,18 @@ inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
 }
 
 inline double PythonArgs::toDouble(int i) {
-  if (!args[i])
+  if (!args[i]) {
     return signature.params[i].default_double;
+  }
+  // HACK: we allow symbolic type but will force
+  // a guard.  Remove this when SymFloat supported
+  // in native_functions.yaml
+  if (torch::is_symfloat(py::handle(args[i]))) {
+    return py::cast<c10::SymFloat>(args[i]).guard_float(__FILE__, __LINE__);
+  }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return py::cast<c10::SymInt>(args[i]).guard_int(__FILE__, __LINE__);
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 

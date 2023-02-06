@@ -779,6 +779,12 @@ auto FunctionParameter::check(
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
+      // HACK: we allow symbolic type but will force
+      // a guard.  Remove this when SymFloat supported
+      // in native_functions.yaml
+      if (torch::is_symint(py::handle(obj)) || torch::is_symfloat(py::handle(obj))) {
+        return true;
+      }
       if (THPVariable_Check(obj)) {
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
