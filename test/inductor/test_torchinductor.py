@@ -6388,6 +6388,28 @@ if HAS_CPU:
                 assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
                 assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
 
+        def test_assert(self):
+            def fn(a):
+                assert torch.isfinite(a).all(), "tensor contains infinite or NaN!"
+                return a
+
+            args = (torch.rand([1, 3, 16, 16]),)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(*args), opt_fn(*args)))
+
+        def test_assert2(self):
+            def fn(x):
+                b = x.sin()
+                assert x[0] == 3, "First dim need to be 3"
+                return x.cos() + b
+
+            args1 = (torch.Tensor([3, 4, 5]),)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(*args1), opt_fn(*args1)))
+
+            with self.assertRaisesRegex(AssertionError, ""):
+                opt_fn(torch.Tensor([4, 4, 5]))
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton

@@ -220,30 +220,49 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+def get_value(value):
+    is_data_dependent = False
+    output = None
+    try:
+        output = value.get_real_value().item()
+    except Exception as e:
+        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+            is_data_dependent = True
+    return output, is_data_dependent
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        if (
-            config.rewrite_assert_with_torch_assert
-            and _detect_and_normalize_assert_statement(self, truth_fn, push)
-        ):
-            error_msg: VariableTracker = self.pop()
-            self.output.guards.update(error_msg.guards)
-            # Skip over things like `assert True`
-            if value.is_python_constant() and bool(value.as_python_constant()):
+        if config.rewrite_assert_with_torch_assert:
+            need_rewrite = True
+            if getattr(self.output.compiler_fn, "__name__") == "inductor":
+                output, is_data_dependent = get_value(value)
+                if not is_data_dependent and output:
+                    self.jump(inst)
+                    return
+                if is_data_dependent:
+                    need_rewrite = False
+            if need_rewrite and _detect_and_normalize_assert_statement(
+                self, truth_fn, push
+            ):
+                error_msg: VariableTracker = self.pop()
+                self.output.guards.update(error_msg.guards)
+                # Skip over things like `assert True`
+                if value.is_python_constant() and bool(value.as_python_constant()):
+                    self.jump(inst)
+                    return
+
+                # Manually insert torch._assert instead of python assert and jump over
+                # assert related instructions as we don't need them anymore.
+                self.output.create_proxy(
+                    "call_function",
+                    torch._assert,
+                    *proxy_args_kwargs((value, error_msg), {}),
+                )
                 self.jump(inst)
                 return
-
-            # Manually insert torch._assert instead of python assert and jump over
-            # assert related instructions as we don't need them anymore.
-            self.output.create_proxy(
-                "call_function",
-                torch._assert,
-                *proxy_args_kwargs((value, error_msg), {}),
-            )
-            self.jump(inst)
-            return
 
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
