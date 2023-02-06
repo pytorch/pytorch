@@ -234,7 +234,7 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linter)
+  pytorch-linux-focal-linter)
     ANACONDA_PYTHON_VERSION=3.11
     CONDA_CMAKE=yes
     LINTER=yes

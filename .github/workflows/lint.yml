@@ -14,7 +14,7 @@ on:
       docker-image-name:
         required: true
         type: string
-        default: "pytorch-linter"
+        default: pytorch-linux-focal-linter
         description: Name of the docker image to run lint.
 
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
