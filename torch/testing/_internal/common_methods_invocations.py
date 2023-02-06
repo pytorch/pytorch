@@ -11520,7 +11520,7 @@ op_db: List[OpInfo] = [
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose1d),
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
@@ -11564,7 +11564,7 @@ op_db: List[OpInfo] = [
            # `ref` for this function is backward of
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
@@ -11612,7 +11612,7 @@ op_db: List[OpInfo] = [
            # `ref` for this function is backward of
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose3d),
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
@@ -16747,7 +16747,7 @@ op_db: List[OpInfo] = [
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
-        dtypes=floating_types_and(torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
@@ -17493,7 +17493,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
-        'segment_reduce',
+        '_segment_reduce',
+        aten_name='segment_reduce',
         variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17512,7 +17513,8 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
-        'segment_reduce',
+        '_segment_reduce',
+        aten_name='segment_reduce',
         variant_test_name='offsets',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
