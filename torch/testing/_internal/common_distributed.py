@@ -1025,9 +1025,10 @@ class MultiThreadedTestCase(TestCase):
         # every thread have the same value. This would be relevant when we use op db tests, where it
         # needs those states to be set i.e. using instantiate_device_type_tests()
         # TODO: figure out a better way to do this
-        self._tls = threading.local()
-        self._tls.precision = TestCase._precision
-        self._tls.rel_tol = TestCase._rel_tol
+        if hasattr(self, "_tls"):
+            self._tls = threading.local()
+            self._tls.precision = TestCase._precision
+            self._tls.rel_tol = TestCase._rel_tol
 
         self.run_test_with_threaded_pg(test_name, rank, world_size)
 
