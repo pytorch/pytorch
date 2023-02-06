@@ -1,32 +1,19 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import importlib
 import unittest
 
 import torch
 
 import torch._dynamo
+import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
+from torch._dynamo.backends.ipex import has_ipex
+from torch._dynamo.backends.onnxrt import has_onnxruntime
+from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
-
-def has_onnxruntime():
-    try:
-        importlib.import_module("onnxruntime")
-        return True
-    except ImportError:
-        return False
-
-
-def has_ipex():
-    try:
-        importlib.import_module("intel_extension_for_pytorch")
-        return True
-    except ImportError:
-        return False
 
 
 class Seq(torch.nn.Module):
@@ -166,7 +153,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     def test_aot_cudagraphs(self):
-        self._check_backend_works("aot_cudagraphs")
+        self._check_backend_works("cudagraphs")
 
     @requires_cuda()
     def test_aot_ts_nvfuser(self):
@@ -179,6 +166,14 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     def test_nvprims_aten(self):
         self._check_backend_works("nvprims_aten")
+
+    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
+    def test_onnxrt(self):
+        self._check_backend_works("onnxrt")
+
+    @unittest.skipIf(not has_tvm(), "requires tvm")
+    def test_tvm(self):
+        self._check_backend_works("tvm")
 
 
 class NormalizeIRTests(torch._dynamo.test_case.TestCase):

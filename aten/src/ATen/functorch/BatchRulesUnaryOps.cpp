@@ -177,8 +177,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(leaky_relu);
   UNARY_POINTWISE(log_sigmoid);
   UNARY_POINTWISE_ALL(relu);
-  UNARY_POINTWISE_ALL(relu6);
-  UNARY_POINTWISE_ALL(selu);
   UNARY_POINTWISE_ALL(celu);
   UNARY_POINTWISE(gelu);
   UNARY_POINTWISE_ALL(sigmoid);
