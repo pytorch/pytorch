@@ -114,6 +114,7 @@ unary_list = [
     torch.nn.GELU(approximate="tanh"),
     torch.nn.ReLU6(),
     torch.nn.SiLU(),
+    torch.nn.Hardsigmoid(),
     lambda x: F.relu(x),
     lambda x: F.sigmoid(x),
     lambda x: F.tanh(x),
@@ -124,6 +125,7 @@ unary_list = [
     lambda x: F.gelu(x, approximate="tanh"),
     lambda x: F.relu6(x),
     lambda x: F.silu(x),
+    lambda x: F.hardsigmoid(x),
     lambda x: torch.relu(x),
     lambda x: torch.sigmoid(x),
     lambda x: torch.tanh(x),
@@ -1046,6 +1048,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    def test_arange5(self):
+        def fn(step, device):
+            return torch.arange(512, -512, step, device=device)
+
+        compiled_fn = torch._dynamo.optimize()(fn)
+
+        # NOTE: use assertEqual to check dtypes which self.common doesn't do
+        for step in (-1, -1.0):
+            expect = fn(step, self.device)
+            actual = compiled_fn(step, self.device)
+            self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual)
+
+    def test_arange6(self):
+        def fn(x):
+            return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
+
+        # Test that float arguments are truncated to int when dtype is set explicitly
+        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        self.common(fn, (make_arg(1, dtype=torch.float32),))
+        self.common(fn, (make_arg(1, dtype=torch.int64),))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
@@ -1732,18 +1756,57 @@ class CommonTemplate:
                 (v,),
             )
 
+    def test_upsample_cat_conv(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu upsample_cat_conv test")
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.upsample = torch.nn.UpsamplingNearest2d(scale_factor=2)
+                self.conv = torch.nn.Conv2d(
+                    8,
+                    5,
+                    kernel_size=1,
+                    padding=0,
+                    stride=1,
+                    dilation=1,
+                    **kwargs,
+                )
+
+            def forward(self, x, y):
+                x = self.upsample(x)
+                z = torch.cat([x, y], dim=1)
+                z = self.conv(z)
+                return z
+
+        v1 = torch.randn([8, 2, 12, 26])
+        v2 = torch.randn([8, 6, 24, 52])
+
+        with torch.no_grad():
+            self.common(
+                M().eval(),
+                (v1, v2),
+            )
+
     def test_conv2d_packed(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d packed test")
 
         x_shape = (1, 3, 56, 56)
-        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
-        v = torch.randn(x_shape, dtype=torch.float32)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
+        for mode_train in [True, False]:
+            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
+                mode=mode_train
             )
+            v = torch.randn(x_shape, dtype=torch.float32)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     @slow()
     def test_conv2d_unary(self):
@@ -1781,6 +1844,7 @@ class CommonTemplate:
             [1, 4],
             ["same", 0],
             test_memory_format,
+            [True, False],
         )
 
         for (
@@ -1791,6 +1855,7 @@ class CommonTemplate:
             groups,
             padding,
             memory_format,
+            mode_train,
         ) in options:
             oC = 32 * groups
             iC = 3 * groups
@@ -1804,7 +1869,7 @@ class CommonTemplate:
                 dilation=dilation,
                 groups=groups,
                 bias=bias,
-            ).eval()
+            ).train(mode=mode_train)
 
             # TODO: add bf16 test for cpu path?
             # TODO: this test fails when requires_grad=False
@@ -1878,6 +1943,7 @@ class CommonTemplate:
             [1, 4],
             ["same", 0],
             test_memory_format,
+            [True, False],
         )
 
         for (
@@ -1889,6 +1955,7 @@ class CommonTemplate:
             groups,
             padding,
             memory_format,
+            mode_train,
         ) in options:
             oC = 32 * groups
             iC = 3 * groups
@@ -1903,7 +1970,7 @@ class CommonTemplate:
                 padding,
                 bias,
                 kernel_size=kernel_size,
-            ).eval()
+            ).train(mode=mode_train)
             mod = mod.to(memory_format=memory_format)
             # TODO: add bf16 test
             v = torch.randn(x_shape, dtype=torch.float32).to(
@@ -1916,7 +1983,7 @@ class CommonTemplate:
                 )
 
     def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
         for input_shape, bias in options:
             mod = torch.nn.Sequential(
                 torch.nn.Linear(input_shape[-1], 30, bias=bias)
@@ -3697,6 +3764,15 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[2, 4, 4, 4], dtype=torch.float32),)
         )
 
+    def test_constant_pad_float64(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/93351
+        def fn(input):
+            v1 = torch.nn.functional.pad(input, pad=(1, 0))
+            return torch.gt(v1, input)
+
+        x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
+        self.common(fn, (x,))
+
     def test_l1_loss(self):
         def fn(a, b):
             return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
@@ -5166,6 +5242,26 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_lerp(self):
+        # non-contiguous inputs for lerp
+        def fn0(i0, i1):
+            x1 = i0.transpose(-2, -3)
+            return torch.lerp(i1, x1, 70000)
+
+        # contiguous inputs for lerp
+        def fn1(i0, i1):
+            return torch.lerp(i1, i0, 70000)
+
+        def compare(fn, inputs):
+            compiled = torch._dynamo.optimize("inductor")(fn)
+            expected = fn(*inputs)
+            actual = compiled(*inputs)
+            self.assertEqual(expected, actual)
+            self.assertEqual(expected.stride(), actual.stride())
+
+        compare(fn0, [torch.rand(10, 3, 10), torch.rand(3, 10, 10)])
+        compare(fn1, [torch.rand(3, 10, 10), torch.rand(3, 10, 10)])
+
     def test_unspec_inputs(self):
         if self.device == "cpu":
             raise unittest.SkipTest("segfault with CPU backend")
@@ -5364,6 +5460,10 @@ test_skips = {
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_cat_conv_dynamic_shapes": (
+        "cpu",
+        "cuda",
+    ),  # upsample does not support dynamic shapes yet (#92667)
     "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_dynamic_shapes": ("cpu", "cuda"),
