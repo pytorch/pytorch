@@ -333,11 +333,12 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
-    # AssertionError: expected size 5==5, stride 5==1 at dim=0
+    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
+    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
+    # In test_meta.py there is a mechanism to skipping strides checks for some ops
+    # (including _linalg_svd), possibly we should have something similar here
     "linalg.cond": {f32, f64},
-    # AssertionError: expected size 5==5, stride 5==1 at dim=0
     "linalg.svdvals": {f32, f64},
-    # AssertionError: expected size 5==5, stride 5==1 at dim=0
     "norm.nuc": {f32, f64},
 }
 
