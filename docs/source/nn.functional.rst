@@ -56,6 +56,7 @@ Non-linear activation functions
     :toctree: generated
     :nosignatures:
 
+    scaled_dot_product_attention
     threshold
     threshold_
     relu
