@@ -249,18 +249,18 @@ jobs:
           cache-dependency-path: |
             **/requirements.txt
             **/requirements-flake8.txt
-            **/.circleci/docker/requirements-ci.txt
+            **/.ci/docker/requirements-ci.txt
             **/.github/requirements-gha-cache.txt
       - name: Install dependencies
         # mypy and boto3 versions copied from
-        # .circleci/docker/common/install_conda.sh
+        # .ci/docker/common/install_conda.sh
         run: |
           set -eux
           pip install -r requirements.txt
           pip install boto3==1.19.12
           pip install typing-extensions==3.10 --user
           pip install -r requirements-flake8.txt --user
-          pip install rockset==0.8.10 --user
+          pip install rockset==1.0.3 --user
           pip install -r requirements.txt --user
           pip install mypy==0.960 --user
           make setup_lint
