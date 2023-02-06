@@ -74,6 +74,7 @@ class TestFSDPSharedParams(FSDPTest):
             self._test_shared_params,
         )
 
+    @skip_if_lt_x_gpu(2)
     def test_parent_child_shared_params(self):
         """
         Tests the case of parent-child shared parameters for ``fully_shard``.
