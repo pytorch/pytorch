@@ -1632,6 +1632,30 @@ def linearize(fn, *primals) -> Tuple[Any, Callable]:
     graph = make_fx(trace_fn)(flat_tangents)
     const_folded_graph = const_fold.split_const_subgraphs(graph)
 
+    flat_primals_shape = tuple(p.shape for p in flat_primals)
+    flat_primals_device = tuple(p.device for p in flat_primals)
+    flat_primals_dtype = tuple(p.dtype for p in flat_primals)
+
+    def forward_ad_checks(flat_tangents):
+        for idx, t in enumerate(flat_tangents):
+            if t.shape != flat_primals_shape[idx]:
+                msg = (f"tangent:{idx} with shape {t.shape} in flattened "
+                       f"pytree doesn't match the shape {flat_primals_shape[idx]} "
+                       "of the corresponding primal.")
+                raise RuntimeError(msg)
+
+            if t.device != flat_primals_device[idx]:
+                msg = (f"tangent:{idx} with device {t.device} in flattened "
+                       f"pytree doesn't match the device {flat_primals_device[idx]} "
+                       "of the corresponding primal.")
+                raise RuntimeError(msg)
+
+            if t.dtype != flat_primals_dtype[idx]:
+                msg = (f"tangent:{idx} with dtype {t.dtype} in flattened "
+                       f"pytree doesn't match the dtype {flat_primals_dtype[idx]} "
+                       "of the corresponding primal.")
+                raise RuntimeError(msg)
+
     # jvp_fn : callable to return
     #   It takes care of checking the argspec of tangents,
     #   calling the folded fx graph and unflattening fx graph output
@@ -1640,6 +1664,8 @@ def linearize(fn, *primals) -> Tuple[Any, Callable]:
         if tangent_argspec != primals_argspec:
             raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
                                f"the same argspec as the primals {primals_argspec}")
+
+        forward_ad_checks(flat_tangents)
 
         flat_output = const_folded_graph(*flat_tangents)
         # const folded graph can return flat output,

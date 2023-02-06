@@ -20,7 +20,7 @@ import sys
 import unittest
 import warnings
 import math
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing import make_tensor
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2573,8 +2573,10 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @dtypes(torch.float)
-    def test_linearize_errors(self, device, dtype):
+    @onlyCUDA
+    def test_linearize_errors(self):
+        dtype = torch.float
+        device = torch.device('cpu')
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
 
@@ -2585,6 +2587,15 @@ class TestLinearize(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "to have the same argspec as the primals"):
             jvp_fn((x_t, x_t))
+
+        with self.assertRaisesRegex(RuntimeError, "in flattened pytree doesn't match the shape"):
+            jvp_fn(x_t.unsqueeze(0))
+
+        with self.assertRaisesRegex(RuntimeError, "in flattened pytree doesn't match the dtype"):
+            jvp_fn(x_t.to(torch.double))
+
+        with self.assertRaisesRegex(RuntimeError, "in flattened pytree doesn't match the device"):
+            jvp_fn(x_t.to(torch.device('cuda')))
 
 # The tests here follow the cases in [Forward Grad View/inplace]
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/autograd/autograd_meta.cpp#L18-L43
