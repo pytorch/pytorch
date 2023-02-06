@@ -2490,7 +2490,7 @@ class ExternKernel(InputsKernel):
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
