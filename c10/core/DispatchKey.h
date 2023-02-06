@@ -2,11 +2,8 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Exception.h>
 #include <ostream>
 #include <string>
-#include <vector>
 
 namespace c10 {
 
