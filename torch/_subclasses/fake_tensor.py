@@ -277,7 +277,6 @@ class FakeTensorConverter(object):
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
-    # You must have created the FakeTensorMode with allow_meta == True
     def __call__(
         self,
         fake_mode,
@@ -398,9 +397,7 @@ def local_scalar_dense(fake_mode, func, arg):
     lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
 )
 def data_dep(fake_mode, func, *args, **kwargs):
-    if fake_mode.throw_on_data_dependent_ops:
-        raise DataDependentOutputException(func)
-    return NotImplemented
+    raise DataDependentOutputException(func)
 
 
 # Bool Indices get Expanded as Masks
@@ -546,6 +543,13 @@ class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
+
+    @property
+    def device(self):
+        if self.fake_mode.in_kernel_invocation:
+            return torch.device("meta")
+        else:
+            return self.fake_device
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -740,17 +744,15 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         *,
         allow_fallback_kernels=True,
-        allow_meta=False,
-        throw_on_data_dependent_ops=True,
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
-        self.allow_meta = allow_meta
 
-        # TODO: delete arg and default to true. waiting on dynamo perf regression testing
-        self.throw_on_data_dependent_ops = throw_on_data_dependent_ops
+        import torch._functorch.config
+
+        self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
 
         # A flag that controls, whether we want to invoke ops on mix of
         # real weights/global variables and fake inputs
@@ -770,6 +772,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -1055,6 +1058,7 @@ class FakeTensorMode(TorchDispatchMode):
             t.numel() <= CONSTANT_NUMEL_LIMIT
             and not t.is_sparse
             and not isinstance(t, FakeTensor)
+            and not t.device.type == "meta"
         )
 
     def invalidate_written_to_constants(
