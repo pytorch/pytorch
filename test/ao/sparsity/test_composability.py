@@ -435,7 +435,7 @@ class TestFxComposability(TestCase):
         # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(fqn_to_module(mod, "5"), torch.ao.nn.intrinsic.LinearReLU))
         self.assertEqual(mod(example).shape, torch.Size([1, 4, 4, 4]))
-        self.assertTrue(isinstance(fqn_to_module(mod, "5.0"), torch.ao.nn.quantized._reference.Linear))
+        self.assertTrue(isinstance(fqn_to_module(mod, "5.0"), torch.ao.nn.quantized.reference.Linear))
 
         # check that module was actually sparsified
         cur_sparsity = _calculate_sparsity(fqn_to_module(mod, "5.0.weight"))
@@ -572,7 +572,7 @@ class TestFxComposability(TestCase):
         # check that final module is the expected quantized module and that the model runs
         self.assertTrue(isinstance(fqn_to_module(mod, "5"), torch.ao.nn.intrinsic.LinearReLU))
         self.assertEqual(mod(example).shape, torch.Size([1, 4, 4, 4]))
-        self.assertTrue(isinstance(fqn_to_module(mod, "5.0"), torch.ao.nn.quantized._reference.Linear))
+        self.assertTrue(isinstance(fqn_to_module(mod, "5.0"), torch.ao.nn.quantized.reference.Linear))
 
         # check that module was actually sparsified
         cur_sparsity = _calculate_sparsity(fqn_to_module(mod, "5.0.weight"))
