@@ -327,8 +327,8 @@ struct ExtraFields<EventType::Kineto> {
   };
 
   std::string name_;
-  int64_t duration_us_{};
-  uint64_t correlation_id_{};
+  int64_t duration_us_{0};
+  uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
   std::weak_ptr<Result> linked_activity_{};
