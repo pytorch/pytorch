@@ -461,17 +461,6 @@ if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
 endif()
 
-# OpenMP flags for NVCC with Clang-cl
-if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
-  AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Xclang" "-fopenmp")
-  if(MSVC_TOOLSET_VERSION LESS 142)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp")
-  else()
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp:experimental")
-  endif()
-endif()
-
 # Debug and Release symbol support
 if(MSVC)
   if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
