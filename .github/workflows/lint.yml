@@ -92,10 +92,15 @@ jobs:
           cache-dependency-path: |
             **/requirements.txt
       - name: Install dependencies
+        uses: nick-fields/retry@v2.8.2
         id: requirements
-        run: |
-          pip install -r requirements.txt --user
-          sudo apt-get install -y doxygen
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            pip install -r requirements.txt --user
+            sudo apt-get install -y doxygen
       - name: Ensure no non-breaking spaces (nonretryable)
         if: always()
         run: |
