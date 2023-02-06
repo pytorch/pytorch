@@ -515,7 +515,9 @@ class WrapperCodeGen(CodeGen):
                 self.lines.pop()
 
             for name, value in V.graph.graph_inputs.items():
-                if hasattr(value, 'data') and isinstance(value.data, ir.ReinterpretView):
+                if hasattr(value, "data") and isinstance(
+                    value.data, ir.ReinterpretView
+                ):
                     self.wrapper_call.writeline(value.data.codegen_reference_mutation())
 
             # codegen allocations in two passes

@@ -1879,8 +1879,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                     if config.use_dynamic_shapes:
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
-                            bw_module, all_args_list, AOTConfig(aot_config.bw_compiler,
-                            None, None, aot_config.decompositions, 0, aot_config.aot_id)
+                            bw_module, all_args_list, AOTConfig(
+                                aot_config.bw_compiler, None, None,
+                                aot_config.decompositions, 0, aot_config.aot_i
+                            )
                         )
                     else:
                         context = disable_autocast_manager if disable_amp else nullcontext
