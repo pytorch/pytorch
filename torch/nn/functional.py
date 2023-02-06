@@ -4847,6 +4847,27 @@ Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
+Note:
+    This function calls into one of three backends:
+        1.) .. _ `FlashAttention`: https://arxiv.org/abs/2205.14135
+        2.) .. _ `Memory-Efficient-Attention`: https://github.com/facebookresearch/xformers
+        3.) An eager pytorch definition defined in c++
+    The default behavior of this function attempts to call the most performant implemenation for the given inputs.
+    However, there are indivindual constraints on the inputs for each of the fused kernels. If a user wants
+    to ensure that a specific backend is used, there exists global
+    functions to enable/disable indvidual backends. For example to disable the FlashAttention the user would call
+    :func:`~torch.backends.cuda.enable_flash_sdp` enable_flash_sdp(False). There also exists a
+    :func:`~torch.backends.cuda.sdp_kernel` context manager to enable/disable the backend for a specific scope.
+
+    If a user wants to enforce that one of the fused implementations is used a user can disable the math fallback
+    and if for some reason a fused implementation is not available, the function will throw an error with
+    the reason why the fused implementation was not used.
+
+Note:
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes)
+    + r"""
+
 Args:
      query (Tensor): Query tensor; shape (N, ..., L, E)
      key (Tensor): Key tensor; shape (N, ..., S, E)
