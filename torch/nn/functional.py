@@ -4843,17 +4843,18 @@ scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention, r"""
 scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
 
-.. warning:: This function is beta and subject to change.
-
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
+
+.. warning:: This function is beta and subject to change.
 
 Note:
     This function calls into one of three backends:
         1.) .. _ `FlashAttention`: https://arxiv.org/abs/2205.14135
         2.) .. _ `Memory-Efficient-Attention`: https://github.com/facebookresearch/xformers
         3.) An eager pytorch definition defined in c++
+
     The default behavior of this function attempts to call the most performant implemenation for the given inputs.
     However, there are indivindual constraints on the inputs for each of the fused kernels. If a user wants
     to ensure that a specific backend is used, there exists global
@@ -4871,21 +4872,20 @@ Note:
     + r"""
 
 Args:
-     query (Tensor): Query tensor; shape (N, ..., L, E)
-     key (Tensor): Key tensor; shape (N, ..., S, E)
-     value (Tensor): Value tensor; shape (N, ..., S, E)
-     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-         is supported, where a value of True indicates that the element *should* take part in attention.
-     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-     is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
+    query (Tensor): Query tensor; shape (N, ..., L, E)
+    key (Tensor): Key tensor; shape (N, ..., S, E)
+    value (Tensor): Value tensor; shape (N, ..., S, E)
+    attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
+        is supported, where a value of True indicates that the element *should* take part in attention.
+    dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+    is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
 
 
 Returns:
-        output (Tensor): Attention output; shape (N, ..., L, E)
+    output (Tensor): Attention output; shape (N, ..., L, E)
 
 Shape legend:
-    N: Batch size
-    ...: Any number of other batch dimensions (optional)
+    N: Batch size ... : Any number of other batch dimensions (optional)
     S: Source sequence length
     L: Target sequence lengthE: Embedding dimension
 
