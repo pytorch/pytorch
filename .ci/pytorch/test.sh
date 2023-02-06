@@ -126,7 +126,18 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0:detect_container_overflow=0:check_initialization_order=true:debug=true
+    # Suppress some hard to solve indirect leaks
+    export LSAN_SUPPRESSION_FILE="${TORCH_TEST_DIR}/suppression/lsan.supp"
+    mkdir -p "$(dirname "${LSAN_SUPPRESSION_FILE}")"
+    echo "leak:torch::lazy::IrUtilNode::AddOperand" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    echo "leak:torch::jit" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    echo "leak:_PyObject_Malloc" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    echo "leak:_PyObject_Realloc" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    echo "leak:list_resize" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    echo "leak:python" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    echo "leak:pybind11::cpp_function" | tee --append "${LSAN_SUPPRESSION_FILE}"
+    export LSAN_OPTIONS="fast_unwind_on_malloc=0:suppressions=${LSAN_SUPPRESSION_FILE}"
+    export ASAN_OPTIONS=detect_leaks=1:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0:detect_container_overflow=0:check_initialization_order=true:debug=true
     export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
