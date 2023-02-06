@@ -643,7 +643,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if node.op in ("call_function", "call_method", "call_module"):
                 tot += 1
         torch._dynamo.utils.increment_op_count(tot)
-        try:
+        # try:
+        if True:
             name = (
                 self.compiler_fn.__name__
                 if hasattr(self.compiler_fn, "__name__")
@@ -692,9 +693,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
-        except Exception as e:
-            compiled_fn = gm.forward
-            raise BackendCompilerFailed(self.compiler_fn, e) from e
+        # except Exception as e:
+        #     compiled_fn = gm.forward
+        #     raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def fake_example_inputs(self) -> List[torch.Tensor]:

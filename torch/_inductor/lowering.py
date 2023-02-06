@@ -80,6 +80,7 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
+        aten._int_addmm,
     ]
 )
 
@@ -189,6 +190,7 @@ def _register_lowering(
             fn in fallbacks for fn in aten_fn
         )
 
+        print("aten_fn: ", aten_fn, " type_promotion_kind: ", type_promotion_kind)
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
                 dtype = torch.bool

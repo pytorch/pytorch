@@ -322,6 +322,9 @@ class Loops(IRNode):
 
     @classmethod
     def create(cls, *args, **kwargs):
+        # if kwargs['dtype'] == torch.int8:
+        #     import pdb; pdb.set_trace()
+        # print("kwargs[dtype]: ", kwargs['dtype'], " CREATEEE :", str(args), " - ", str(kwargs))
         return TensorBox.create(cls(*args, **kwargs))
 
     @staticmethod

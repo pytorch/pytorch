@@ -3826,6 +3826,11 @@
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
 - func: _int_addmm(Tensor mat1, Tensor mat2) -> Tensor
+  structured_delegate: mm.out
+  variants: function, method
+  tags: core
+
+- func: _int_addmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CUDA: _int_addmm_out_cuda
 

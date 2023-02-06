@@ -663,6 +663,7 @@ class AlgorithmSelectorCache(DiskCache):
         autotuning results on.
         """
         sizevars = V.graph.sizevars
+        # print("node.inner_fn: ", node.inner_fn)
         return (
             node.get_device().type,
             str(node.get_dtype()),
