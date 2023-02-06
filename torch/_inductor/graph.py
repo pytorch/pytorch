@@ -568,6 +568,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if dynamo_config.output_code:
             log.info("Output code: %s", mod.__file__)
+
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
