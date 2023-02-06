@@ -44,6 +44,7 @@
 #include <thread>
 #include <typeinfo>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace autograd {
@@ -675,7 +676,7 @@ void GraphTask::exec_post_processing() {
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
   // any grad on its device's current stream.
-  if (leaf_streams.size() > 0) {
+  if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_streams() stashed streams for all device IDs that already
       // had a CUDA context before the GraphTask executed. For inactive devices,
@@ -757,8 +758,8 @@ static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.tensor_pre_hooks()) {
     inputs = (*hook)(inputs);
   }
-  for (const auto& hook : fn.retains_grad_hooks()) {
-    inputs = (*hook)(inputs);
+  for (const auto& pair : fn.retains_grad_hooks()) {
+    inputs = (*pair.second)(inputs);
   }
   return inputs;
 }
@@ -968,7 +969,9 @@ void Engine::evaluate_function(
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
         captured_grad = new_inputs[capture.input_idx_];
-        for (auto& hook : capture.hooks_) {
+        // NOTE [Deprecated capture hooks]
+        for (const auto& hook :
+             capture.DO_NOT_USE_DEPRECATED_get_capture_hooks()) {
           captured_grad = (*hook)(captured_grad);
         }
         if (opt_parent_stream) {
@@ -1006,7 +1009,7 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
            << "th output.";
@@ -1209,10 +1212,11 @@ auto Engine::execute(
         input_stream,
         opt_next_stream);
 
-    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
+    execute_with_graph_task(
+        graph_task, std::move(graph_root), std::move(input_buffer));
   } else {
     execute_with_graph_task(
-        graph_task, graph_root, InputBuffer(variable_list()));
+        graph_task, std::move(graph_root), InputBuffer(variable_list()));
   }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
@@ -1541,9 +1545,9 @@ void GraphTask::init_to_execute(
   captured_vars_.resize(output_idx);
 
   struct Frame {
-    Frame(Node* fn) : fn_(fn), next_next_fn_(0) {}
-    Node* fn_;
-    size_t next_next_fn_;
+    Frame(Node* fn) : fn_(fn) {}
+    Node* fn_{};
+    size_t next_next_fn_{};
 
     Node* get_next_fn() {
       const auto& next = fn_->next_edges();
