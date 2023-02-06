@@ -1164,12 +1164,13 @@ class AOTConfig:
     keep_inference_input_mutations: bool
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    _fw_metadata, _out = run_functionalized_fw_and_collect_metadata(
-        flat_fn,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
-    )(
-        *flat_args
-    )
+    with enable_python_dispatcher():
+        _fw_metadata, _out = run_functionalized_fw_and_collect_metadata(
+            flat_fn,
+            keep_input_mutations=aot_config.keep_inference_input_mutations,
+        )(
+            *flat_args
+        )
 
     _input_info = _fw_metadata.input_info
 
