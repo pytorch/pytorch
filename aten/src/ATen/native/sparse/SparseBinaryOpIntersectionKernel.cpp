@@ -80,9 +80,13 @@ struct CPUValueSelectionIntersectionKernel {
                     const auto* ptr_lhs_begin = ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride;
                     const auto* ptr_rhs_begin = ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride;
 
-                    at::acc_type<scalar_t, /*is_gpu=*/false> res_values = 0;
+                    using accscalar_t = at::acc_type<scalar_t, /*is_gpu=*/false>;
+                    accscalar_t res_values = 0;
+                    accscalar_t lhs_values = static_cast<accscalar_t>(*ptr_lhs_begin);
+                    accscalar_t rhs_values;
                     for (int64_t c = 0; c < count; ++c) {
-                      res_values += binary_op_t::apply(*ptr_lhs_begin, *ptr_rhs_begin);
+                      rhs_values = static_cast<accscalar_t>(*ptr_rhs_begin);
+                      res_values += binary_op_t::apply(lhs_values, rhs_values);
                       ptr_rhs_begin += rhs_nnz_stride;
                     }
                     *ptr_res_values = static_cast<scalar_t>(res_values);

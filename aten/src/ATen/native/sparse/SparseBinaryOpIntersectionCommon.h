@@ -417,12 +417,13 @@ void _sparse_binary_op_intersection_kernel_impl(
   }();
 
   const auto res_indices = source._indices().clone();
+  const auto binary_op_res_dtype = at::result_type(source._values(), probably_coalesced._values());
   const auto res_values = value_selection_intersection_kernel_t::apply(
-      source._values(),
+      source._values().to(binary_op_res_dtype),
       nnz_arange.narrow(-1, 0, source._nnz()),
-      probably_coalesced._values(),
+      probably_coalesced._values().to(binary_op_res_dtype),
       intersection_first_idx.to(nnz_arange.scalar_type()),
-      intersection_count);
+      intersection_count).to(res.scalar_type());
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = source.dense_dim();
   const auto& res_shape = broadcasted_shape;
