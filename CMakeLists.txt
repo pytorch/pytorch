@@ -361,7 +361,10 @@ endif()
 if(WIN32)
   set(USE_TENSORPIPE OFF)
   message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
-
+  if(USE_FAST_NVCC)
+    set(USE_FAST_NVCC OFF)
+    message(WARNING "FAST_NVCC cannot be used on Windows. Set it to OFF")
+  endif()
   if(USE_DISTRIBUTED AND NOT DEFINED ENV{libuv_ROOT})
     find_library(
       libuv_tmp_LIBRARY
