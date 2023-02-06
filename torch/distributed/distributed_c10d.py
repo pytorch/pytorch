@@ -297,7 +297,7 @@ _pg_map: Dict[ProcessGroup, Tuple[str, Optional[Store]]] = {}
 _pg_names: Dict[ProcessGroup, str] = {}
 _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
-_pg_backend_map: Dict[ProcessGroup, str] = {}
+_pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
 
 class _World:
@@ -353,6 +353,15 @@ class _World:
         """
         global _pg_group_ranks
         return _pg_group_ranks
+
+    @property
+    def pg_backend_config(self) -> Dict[ProcessGroup, str]:
+        """
+        Process group's backend config
+        TODO don't expose the map, expose fine grained ops
+        """
+        global _pg_backend_config
+        return _pg_backend_config
 
     @property
     def group_count(self) -> int:
@@ -717,7 +726,7 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
         pg = group
     if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
-    backend_config = _pg_backend_map.get(pg, None)
+    backend_config = _world.pg_backend_config.get(pg)
     assert backend_config is not None
     return str(backend_config)
 
@@ -1067,7 +1076,7 @@ def _new_process_group_helper(
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    _pg_backend_map[pg] = str(backend_config)
+    _world.pg_backend_config[pg] = str(backend_config)
     return pg
 
 
@@ -1082,7 +1091,6 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                                         be destroyed.
     """
     global _world
-    global _pg_backend_map
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
@@ -1101,7 +1109,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_map.clear()
         _world.pg_names.clear()
         _world.pg_group_ranks.clear()
-        _pg_backend_map.clear()
+        _world.pg_backend_config.clear()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1116,7 +1124,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
-        del _pg_backend_map[pg]
+        del _world.pg_backend_config[pg]
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:
