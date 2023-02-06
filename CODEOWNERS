@@ -64,7 +64,7 @@ nn/qat/ @jerryzh168
 /test/onnx/ @bowenbao @abock
 
 # Docker
-/.circleci/docker/ @jeffdaily
+/.ci/docker/ @jeffdaily
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
