@@ -208,6 +208,30 @@ class Shard(Placement):
             ]
         return torch.cat(gathered_list, dim=self.dim)  # type: ignore[arg-type]
 
+    def _exchange_tensor(
+        self,
+        input_tensor_list: List[torch.Tensor],
+        num_chunks: int,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+    ) -> List[torch.Tensor]:
+        my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
+        num_chunks = mesh.size(dim=mesh_dim)
+        # TODO: what should happen if rank is not in the mesh?
+        # see issue https://github.com/pytorch/tau/pull/492
+        assert (
+            my_coordinate is not None
+        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+        output_tensor_list = [
+            torch.empty_like(tensor) for tensor in input_tensor_list
+        ]
+        mesh.all_to_all(
+            output_tensor_list,
+            input_tensor_list,
+            mesh_dim=mesh_dim
+        )
+        return output_tensor_list
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
             return False

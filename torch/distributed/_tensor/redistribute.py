@@ -58,8 +58,7 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
             isinstance(current, Shard)
             and isinstance(target, Shard)
             and (
-                current.dim != target.dim
-                or repeat_dim_current[current.dim] != repeat_dim_target[target.dim]
+                repeat_dim_current[current.dim] != repeat_dim_target[target.dim]
             )
         ):
             # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
@@ -140,10 +139,23 @@ def _redistribute_with_local_tensor(
                 ), f"Current placement should be shard but found {current}"
                 shard_spec = cast(Shard, current)
                 if shard_spec.dim != target_placement.dim:
-                    # TODO: enable this with all_to_all
-                    raise NotImplementedError(
-                        "Changing sharding dim is not supported yet!"
+                    shards, _ = target_placement._split_tensor(
+                        local_tensor,
+                        num_chunks,
+                        with_padding=False,
+                        contiguous=True,
                     )
+                    print(f"before exchange: {shards}")
+                    shards = target_placement._exchange_tensor(
+                        shards,
+                        num_chunks,
+                        device_mesh,
+                        i,
+                        #with_padding=False,
+                        #contiguous=False,
+                    )
+                    print(f"after exchange: {shards}")
+                    new_local_tensor = torch.cat(shards, dim=shard_spec.dim)
 
         elif target.is_partial():
             if current.is_replicate():

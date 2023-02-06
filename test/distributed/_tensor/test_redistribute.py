@@ -249,6 +249,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
                     )
 
                 for outputs in all_outputs:
+                    print(f"input {inputs} -> output {outputs}")
                     # redistribute on target outputs
                     dt2 = dt.redistribute(device_mesh, outputs)
 
@@ -266,6 +267,80 @@ class MultiDimRedistributeTest(DTensorTestBase):
                                 num_sums *= mesh_shape.size(idx)
                         expected = num_sums * full_tensor
                         self.assertEqual(local_full, expected)
+
+    @with_comms
+    def test_2d_mesh_change_reshuffling(self):
+        assert self.world_size % 2 == 0
+        devices = torch.arange(self.world_size)
+        old_mesh_shape = devices.reshape(2, -1)
+        new_mesh_shape = old_mesh_shape.transpose(0, 1)
+        old_mesh = DeviceMesh(self.device_type, old_mesh_shape)
+        new_mesh = DeviceMesh(self.device_type, new_mesh_shape)
+        inp_size = [2, 4]
+        local_tensor = torch.rand(inp_size, device=self.device_type)
+        placements = [Replicate()] * 2
+        dist_tensor = distribute_tensor(local_tensor, old_mesh, placements)
+        with self.assertRaises(NotImplementedError):
+            dist_tensor = dist_tensor.redistribute(new_mesh, placements)
+
+    @with_comms
+    def test_1d_shard_dim_change_reshuffling(self):
+        assert self.world_size % 2 == 0
+        devices = torch.arange(self.world_size)
+        mesh_shape = devices
+        device_mesh = DeviceMesh(self.device_type, mesh_shape)
+        inp_size = [8, 8]
+        local_tensor = torch.rand(inp_size, device=self.device_type)
+        old_placements = [Shard(0)]
+        new_placements = [Shard(1)]
+        dist_tensor = distribute_tensor(local_tensor, device_mesh, old_placements)
+        self.assertEqual(dist_tensor.to_local().size(), (1, 8))
+        dist_tensor = dist_tensor.redistribute(device_mesh, new_placements)
+        self.assertEqual(dist_tensor.to_local().size(), (8, 1))
+        dist_tensor = dist_tensor.redistribute(device_mesh, [Replicate()])
+        self.assertEqual(local_tensor, dist_tensor.to_local())
+
+    @with_comms
+    def test_2d_shard_dim_change_reshuffling(self):
+        assert self.world_size % 2 == 0
+        devices = torch.arange(self.world_size)
+        mesh_shape = devices.reshape(2, -1)
+        device_mesh = DeviceMesh(self.device_type, mesh_shape)
+        inp_size = [4, 4]
+        local_tensor = torch.rand(inp_size, device=self.device_type)
+        old_placements = [Shard(0), Replicate()]
+        new_placements = [Shard(1), Replicate()]
+        dist_tensor = distribute_tensor(local_tensor, device_mesh, old_placements)
+        self.assertEqual(dist_tensor.to_local().size(), (2, 4))
+        print(f"before. rank {self.rank}: {dist_tensor.to_local()}")
+        dist_tensor = dist_tensor.redistribute(device_mesh, new_placements)
+        self.assertEqual(dist_tensor.to_local().size(), (4, 2))
+        print(f"after. rank {self.rank}: {dist_tensor.to_local()}")
+        dist_tensor = dist_tensor.redistribute(device_mesh, [Replicate(), Replicate()])
+        if self.rank == 0:
+            print(local_tensor)
+        self.assertEqual(local_tensor, dist_tensor.to_local())
+
+    @with_comms
+    def test_2d_shard_dim_change_reshuffling_2(self):
+        assert self.world_size % 2 == 0
+        devices = torch.arange(self.world_size)
+        mesh_shape = devices.reshape(2, -1)
+        device_mesh = DeviceMesh(self.device_type, mesh_shape)
+        inp_size = [4, 4]
+        local_tensor = torch.rand(inp_size, device=self.device_type)
+        old_placements = [Replicate(), Shard(0)]
+        new_placements = [Shard(1), Replicate()]
+        dist_tensor = distribute_tensor(local_tensor, device_mesh, old_placements)
+        self.assertEqual(dist_tensor.to_local().size(), (1, 4))
+        print(f"before. rank {self.rank}: {dist_tensor.to_local()}")
+        dist_tensor = dist_tensor.redistribute(device_mesh, new_placements)
+        self.assertEqual(dist_tensor.to_local().size(), (4, 2))
+        print(f"after. rank {self.rank}: {dist_tensor.to_local()}")
+        dist_tensor = dist_tensor.redistribute(device_mesh, [Replicate(), Replicate()])
+        if self.rank == 0:
+            print(local_tensor)
+        self.assertEqual(local_tensor, dist_tensor.to_local())
 
 
 if __name__ == "__main__":
