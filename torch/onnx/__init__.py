@@ -26,7 +26,6 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset16,
     symbolic_opset17,
     utils,
-    verification,
 )
 
 from ._exporter_states import ExportTypes
@@ -49,7 +48,6 @@ __all__ = [
     "symbolic_helper",
     "utils",
     "errors",
-    "verification",
     # All opsets
     "symbolic_caffe2",
     "symbolic_opset7",
