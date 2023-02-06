@@ -9,41 +9,6 @@ from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 __all__ = ["functional_call"]
 
-# We avoid typing module here because module attributes are declared as Union[Parameter, Tensor] by default
-# and using other types causes mypy errors
-# TODO: remove this unreferenced function when `torch.nn.utils._stateless` is removed
-def _change_class(module, params_and_buffers) -> None:
-    warnings.warn(
-        "The function `torch.nn.utils.stateless._change_class` is private "
-        "and it is deprecated now. It may be removed in a future release.",
-        DeprecationWarning,
-    )
-    cls = module.__class__
-    attr_to_path: Dict[str, str] = module._attr_to_path
-
-    def _getattribute(self, name: str) -> Any:
-        if name in attr_to_path:
-            return params_and_buffers[attr_to_path[name]]
-        return cls.__getattribute__(self, name)
-
-    def _setattr(self, name: str, value: Any) -> None:
-        if name in attr_to_path:
-            params_and_buffers[attr_to_path[name]] = value
-        else:
-            return cls.__setattr__(self, name, value)
-
-    param_cls = type(
-        f"StatelessReplacer{cls.__name__}",
-        (cls,),
-        {
-            "__getattribute__": _getattribute,
-            "__setattr__": _setattr,
-        },
-    )
-
-    module.__class__ = param_cls
-    module._orig_class = cls
-
 
 def _untie_named_tensors_map(
     module: "torch.nn.Module",
@@ -102,8 +67,7 @@ def _untie_named_tensors_map(
             len(tied_names.intersection(given_names_for_tied_tensors)) > 1
             # Only raise an error if the user passed multiple values for the same tied tensor.
             # If all given values are the same, don't raise.
-            and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
-            != 1
+            and len({parameters_and_buffers[tied_name] for tied_name in tied_names}) != 1
         ):
             raise ValueError(
                 f"functional_call got multiple values for keys {sorted(tied_names)}, "
@@ -115,9 +79,7 @@ def _untie_named_tensors_map(
     untied_parameters_and_buffers = parameters_and_buffers.copy()
     for given_name in given_names_for_tied_tensors:
         for tied_name in tied_names_map[given_name]:
-            untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
-                given_name
-            ]
+            untied_parameters_and_buffers[tied_name] = parameters_and_buffers[given_name]
     return untied_parameters_and_buffers
 
 
@@ -130,26 +92,20 @@ def _reparametrize_module(
     strict: bool = False,
 ) -> Iterator[None]:
     if tie_weights:
-        untied_parameters_and_buffers = _untie_named_tensors_map(
-            module, parameters_and_buffers
-        )
+        untied_parameters_and_buffers = _untie_named_tensors_map(module, parameters_and_buffers)
     else:
         untied_parameters_and_buffers = parameters_and_buffers
 
     accessor = NamedMemberAccessor(module)
     if strict:
-        missing_keys, unexpected_keys = accessor.check_keys(
-            untied_parameters_and_buffers
-        )
+        missing_keys, unexpected_keys = accessor.check_keys(untied_parameters_and_buffers)
         error_msgs = []
         if len(unexpected_keys) > 0:
             error_msgs.append(
                 "Unexpected key(s): {}.".format(", ".join(map(repr, unexpected_keys)))
             )
         if len(missing_keys) > 0:
-            error_msgs.append(
-                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
-            )
+            error_msgs.append("Missing key(s): {}.".format(", ".join(map(repr, missing_keys))))
         if len(error_msgs) > 0:
             raise RuntimeError(
                 "Error(s) in reparametrizing for {}:\n\t{}".format(
@@ -176,27 +132,6 @@ def _reparametrize_module(
                 for k in parameters_and_buffers
                 if k in new_parameters_and_buffers
             }
-        )
-
-
-# TODO: remove this unreferenced function when `torch.nn.utils._stateless` is removed
-def _apply_func_submodules(
-    func: Callable[..., None],
-    module: "torch.nn.Module",
-    path: List[str],
-    full_path: str,
-    args: Tuple,
-):
-    warnings.warn(
-        "The function `torch.nn.utils.stateless._apply_func_submodules` is private "
-        "and it is deprecated now. It may be removed in a future release.",
-        DeprecationWarning,
-    )
-    if len(path) == 1:
-        func(module, path[0], full_path, *args)
-    else:
-        _apply_func_submodules(
-            func, getattr(module, path[0]), path[1:], full_path, args
         )
 
 

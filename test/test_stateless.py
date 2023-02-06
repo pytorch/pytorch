@@ -856,28 +856,6 @@ class TestStatelessFunctionalAPI(TestCase):
 
 
 class TestStatelessDeprecation(TestCase):
-    def test_private_stateless_warns(self):
-        script = """
-import torch
-import warnings
-
-with warnings.catch_warnings(record=True) as w:
-    from torch.nn.utils import _stateless
-
-exit(len(w))
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),)
-        except subprocess.CalledProcessError as e:
-            self.assertEqual(e.returncode, 1)
-        else:
-            self.assertTrue(False, "No warning was raised.")
-
     def test_stateless_functional_call_warns(self):
         m = torch.nn.Linear(1, 1)
         params = dict(m.named_parameters())
