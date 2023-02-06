@@ -745,21 +745,22 @@ struct HelperInterpBase {
   static inline void _compute_weights_aa(
     const int64_t i, const int64_t input_size, const scalar_t scale, const scalar_t support,
     scalar_t* wt_ptr, const int64_t max_interp_size, aa_filter_fn_t filter_fn,
-    int64_t& xmin, int64_t& xsize, bool antialias, bool align_corners
+    int64_t& xmin, int64_t& xsize, bool antialias, double align_corners_delta
   ) {
 
-    scalar_t d = (align_corners) ? 0.5 : 0.0;
-    scalar_t center = scale * (i + 0.5 - d);
+    // align_corners_delta is 0.5 for uint8 and align_corners=true and antialias=false
+    //                     is 0.0 otherwise
+    scalar_t center = scale * (i + 0.5 - align_corners_delta);
     scalar_t total_w = 0.0;
     scalar_t invscale = (scale >= 1.0 && antialias) ? 1.0 / scale : 1.0;
     xmin = std::max(
-        static_cast<int64_t>(center - support + 0.5 + d), static_cast<int64_t>(0));
-    xsize = std::min(static_cast<int64_t>(center + support + 0.5 + d), input_size) -
-        xmin;
+        static_cast<int64_t>(center - support + 0.5 + align_corners_delta), static_cast<int64_t>(0));
+    xsize = std::min(
+        static_cast<int64_t>(center + support + 0.5 + align_corners_delta), input_size) - xmin;
 
     int64_t j = 0;
     for (; j < xsize; j++) {
-      scalar_t w = filter_fn((j + xmin - center + 0.5 - d) * invscale);
+      scalar_t w = filter_fn((j + xmin - center + 0.5 - align_corners_delta) * invscale);
       wt_ptr[j] = w;
       total_w += w;
     }
@@ -787,7 +788,7 @@ struct HelperInterpBase {
   static inline std::tuple<std::vector<Tensor>, int> _compute_indices_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
     int64_t reshape_dim, scalar_t scale,
-    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_corners
+    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, double align_corners_delta
   ) {
 
     std::vector<Tensor> output;
@@ -847,7 +848,7 @@ struct HelperInterpBase {
           xmin,
           xmax,
           antialias,
-          align_corners);
+          align_corners_delta);
 
       idx_ptr_xmin[i] = xmin * stride;
       idx_ptr_size[i] = xmax;
@@ -909,8 +910,9 @@ struct HelperInterpBase {
         input_size, output_size, align_corners, opt_scale);
 
     std::vector<Tensor> indices_weights;
+    auto align_corners_delta = (align_corners && !antialias) ? 0.5 : 0.0;
     std::tie(indices_weights, interp_size) = HelperInterpBase::_compute_indices_weights_aa<double, aa_filter_fn_t, sizeof(int16_t)>(
-        input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners);
+        input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners_delta);
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f64 = indices_weights[3];
@@ -1168,7 +1170,7 @@ struct HelperInterpLinear : public HelperInterpBase {
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>,
             /*antialias=*/true,
-            /*align_corners=*/align_corners);
+            /*align_corners_delta=*/0.0);
       }
     );
     return indices_weights;
@@ -1299,7 +1301,7 @@ struct HelperInterpCubic : public HelperInterpBase {
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>,
             /*antialias=*/true,
-            /*align_corners*/align_corners);
+            /*align_corners_delta*/0.0);
       }
     );
     return indices_weights;
@@ -1874,7 +1876,7 @@ void cpu_upsample_genNd_backward_aa(
           ymin,
           ysize,
           /*antialias=*/true,
-          /*align_corners=*/align_corners);
+          /*align_corners_delta=*/0.0);
 
       for (const auto ow : c10::irange(output_width)) {
         F::_compute_weights_aa(
@@ -1888,7 +1890,7 @@ void cpu_upsample_genNd_backward_aa(
             xmin,
             xsize,
             /*antialias=*/true,
-            /*align_corners=*/align_corners);
+            /*align_corners_delta=*/0.0);
 
         for (const auto c : c10::irange(begin, end)) {
           scalar_t grad_output_value =
