@@ -54,6 +54,7 @@ __all__ = [
     "batch_norm",
     "bernoulli",
     "bitwise_not",
+    "bitwise_or",
     "bmm",
     "broadcast_tensors",
     "bucketize",
@@ -152,6 +153,7 @@ __all__ = [
     "lstm",
     "lt",
     "masked_fill",
+    "masked_fill_",
     "matmul",
     "max_pool1d_with_indices",
     "max_pool2d_with_indices",
@@ -2084,6 +2086,24 @@ def bitwise_not(g: jit_utils.GraphContext, input):
             input,
         )
     return g.op("Not", input)
+
+
+@_onnx_symbolic("aten::bitwise_or")
+@_beartype.beartype
+def bitwise_or(g, self, other):
+    if not symbolic_helper._is_bool(self):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values. self: ",
+            self,
+        )
+    if not symbolic_helper._is_bool(other):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values. other: ",
+            other,
+        )
+    return g.op("Or", self, other)
 
 
 @_beartype.beartype
@@ -5482,6 +5502,12 @@ def masked_fill(g: jit_utils.GraphContext, self, mask, value):
     mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
+
+
+@_onnx_symbolic("aten::masked_fill_")
+@_beartype.beartype
+def masked_fill_(g: jit_utils.GraphContext, self, mask, value):
+    return masked_fill(g, self, mask, value)
 
 
 @_onnx_symbolic("aten::index")
