@@ -8,7 +8,9 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map, tree_map_only
+from torch.fx.experimental import const_fold
+from torch.fx.experimental.proxy_tensor import make_fx
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
@@ -1600,3 +1602,48 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
         finally:
             _func_decrement_nesting()
     return wrapped
+
+@exposed_in("torch.func")
+def linearize(fn, *primals) -> Tuple[Any, Callable]:
+    # Note: We evaluate `fn` twice.
+    # Once for returning the output and other while
+    # tracing the graph.
+    # If this becomes a bottle-neck, we should update
+    # make_fx such that it also returns the output.
+
+    output = fn(*primals)
+    _, output_spec = tree_flatten(output)
+
+    flat_primals, primals_argspec = tree_flatten(primals)
+
+    # tangents for tracing
+    flat_tangents = tuple(p.new_empty(()).expand_as(p) for p in flat_primals)
+
+    # function to trace
+    def trace_fn(flat_tangents):
+        with fwAD.dual_level():
+            flat_duals = tuple(fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents))
+            duals = tree_unflatten(flat_duals, primals_argspec)
+            output = fn(*duals)
+            tangents = tree_map_only(torch.Tensor, lambda t: fwAD.unpack_dual(t)[1], output)
+
+        return tangents
+
+    graph = make_fx(trace_fn)(flat_tangents)
+    const_folded_graph = const_fold.split_const_subgraphs(graph)
+
+    # jvp_fn : callable to return
+    #   It takes care of checking the argspec of tangents,
+    #   calling the folded fx graph and unflattening fx graph output
+    def jvp_fn(*tangents):
+        flat_tangents, tangent_argspec = tree_flatten(tangents)
+        if tangent_argspec != primals_argspec:
+            raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
+                                f"the same argspec as the primals {primals_argspec}")
+
+        flat_output = const_folded_graph(*flat_tangents)
+        # const folded graph can return flat output,
+        # so transform output.
+        return tree_unflatten(flat_output, output_spec)
+
+    return output, jvp_fn
