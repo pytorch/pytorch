@@ -17493,7 +17493,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
-        'segment_reduce',
+        '_segment_reduce',
+        aten_name='segment_reduce',
         variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17512,7 +17513,8 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
-        'segment_reduce',
+        '_segment_reduce',
+        aten_name='segment_reduce',
         variant_test_name='offsets',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
