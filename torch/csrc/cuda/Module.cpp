@@ -1072,9 +1072,8 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
+        at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
   }

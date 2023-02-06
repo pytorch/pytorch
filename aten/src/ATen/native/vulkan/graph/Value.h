@@ -4,7 +4,8 @@
 
 #include <ATen/native/vulkan/api/Context.h>
 #include <ATen/native/vulkan/api/Tensor.h>
-#include <ATen/native/vulkan/graph/Staging.h>
+
+#include <ATen/native/vulkan/graph/Constant.h>
 #include <ATen/native/vulkan/graph/Types.h>
 
 namespace at {
@@ -34,24 +35,25 @@ struct Value final {
     } u;
 
     vTensor as_tensor;
-    TensorStaging as_staging;
+    api::StorageBuffer as_staging;
+    TensorRef as_tensorref;
 
     Payload() : u() {}
     ~Payload() {}
   };
 
  public:
-  /*
-   Copy constructor and assignment (disabled)
-  */
+  //
+  // Copy constructor and assignment (disabled)
+  //
 
   Value(const Value& rhs) = delete;
   Value& operator=(const Value&) = delete;
 
-  /*
-   Move constructor and assignment; Move assignment is disabled but construction
-   is implemented to allow for use in container types.
-  */
+  //
+  // Move constructor and assignment; Move assignment is disabled but
+  // construction is implemented to allow for use in container types.
+  //
 
   Value& operator=(Value&&) = delete;
 
@@ -60,7 +62,9 @@ struct Value final {
       new (&payload.as_tensor) vTensor(std::move(rhs.payload.as_tensor));
     } else if (rhs.isStaging()) {
       new (&payload.as_staging)
-          TensorStaging(std::move(rhs.payload.as_staging));
+          api::StorageBuffer(std::move(rhs.payload.as_staging));
+    } else if (rhs.isTensorRef()) {
+      payload.as_tensorref = std::move(rhs.payload.as_tensorref);
     } else {
       payload.u = rhs.payload.u;
     }
@@ -68,21 +72,31 @@ struct Value final {
     rhs.clearToNone();
   }
 
-  /*
-   Destructor
-  */
+  //
+  // Accessors
+  //
+
+  inline TypeTag type() const {
+    return tag;
+  }
+
+  //
+  // Destructor
+  //
 
   ~Value() {
     if (this->isTensor()) {
       payload.as_tensor.~vTensor();
     } else if (this->isStaging()) {
-      payload.as_staging.~TensorStaging();
+      payload.as_staging.~StorageBuffer();
+    } else if (this->isTensorRef()) {
+      payload.as_tensorref.~TensorRef();
     }
   }
 
-  /*
-   Tensor
-  */
+  //
+  // Tensor
+  //
 
   Value(vTensor&& t) : tag(TypeTag::TENSOR) {
     new (&payload.as_tensor) vTensor(std::move(t));
@@ -93,38 +107,63 @@ struct Value final {
   }
 
   inline vTensor& toTensor() {
-    if (!isTensor()) {
-      throw 1;
-    }
+    VKGRAPH_CHECK(
+        isTensor(),
+        "Expected value to have type TENSOR, got ",
+        tag,
+        " instead.");
     return payload.as_tensor;
   }
 
-  /*
-   Staging
-  */
+  //
+  // Staging
+  //
 
-  Value(TensorStaging&& t) : tag(TypeTag::STAGING) {
-    new (&payload.as_staging) TensorStaging(std::move(t));
+  Value(api::StorageBuffer&& t) : tag(TypeTag::STAGING) {
+    new (&payload.as_staging) api::StorageBuffer(std::move(t));
   }
 
   inline bool isStaging() const {
     return TypeTag::STAGING == tag;
   }
 
-  inline TensorStaging& toStaging() {
-    if (!isStaging()) {
-      throw 1;
-    }
+  inline api::StorageBuffer& toStaging() {
+    VKGRAPH_CHECK(
+        isStaging(),
+        "Expected value to have type STAGING, got ",
+        tag,
+        " instead.");
     return payload.as_staging;
+  }
+
+  //
+  // TensorRef
+  //
+
+  Value(TensorRef&& t) : tag(TypeTag::TENSORREF) {
+    payload.as_tensorref = std::move(t);
+  }
+
+  inline bool isTensorRef() const {
+    return TypeTag::TENSORREF == tag;
+  }
+
+  inline TensorRef& toTensorRef() {
+    VKGRAPH_CHECK(
+        isTensorRef(),
+        "Expected value to have type TENSORREF, got ",
+        tag,
+        " instead.");
+    return payload.as_tensorref;
   }
 
  private:
   Payload payload;
   TypeTag tag;
 
-  /*
-   Utility Functions
-  */
+  //
+  // Utility Functions
+  //
 
   inline void clearToNone() noexcept {
     payload.u.as_int = 0;

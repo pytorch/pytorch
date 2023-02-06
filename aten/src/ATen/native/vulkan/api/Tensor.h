@@ -104,14 +104,12 @@ class vTensor final {
   // Copy Constructor and Assignment; Ideally copying  would be disabled
   // (see the reasoning for move assignment below) but it is required for
   // compatibility with OpaqueTensorImpl
-  vTensor(const vTensor& other) noexcept;
-  vTensor& operator=(const vTensor& other) noexcept;
+  vTensor(const vTensor& other) = default;
+  vTensor& operator=(const vTensor& other) = default;
 
-  // Move Constructor; Move Assignment is deliberately not defined because
-  // 1. It is not required for vTensor to be used in container classes
-  // 2. Enforce a usage pattern where memory owned by vTensor cannot be changed
-  // once constructed
-  vTensor(vTensor&& other) noexcept;
+  // Move Constructor and assignment
+  vTensor(vTensor&& other) = default;
+  vTensor& operator=(vTensor&& other) = default;
 
   // Used for passing buffer sizes and strides data to shaders
   struct BufferMetadata {

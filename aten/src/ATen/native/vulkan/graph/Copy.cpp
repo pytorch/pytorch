@@ -4,16 +4,31 @@ namespace at {
 namespace native {
 namespace vulkan {
 
-CopyNode::CopyNode(ValueRef from, ValueRef to) {
+void add_copy_node(
+    ComputeGraph& graph,
+    const ValueRef from,
+    const ValueRef to) {
+  graph.execute_nodes().emplace_back(new CopyNode(from, to));
+}
+
+ValueRef add_copy_node(ComputeGraph& graph, const ValueRef from) {
+  IntArrayRef out_sizes = graph.get_val_sizes(from);
+  c10::ScalarType out_dtype = graph.get_val_dtype(from);
+  ValueRef to = graph.add_tensor(out_sizes, out_dtype);
+  add_copy_node(graph, from, to);
+  return to;
+}
+
+CopyNode::CopyNode(const ValueRef from, const ValueRef to) {
   inputs_.emplace_back(from);
   outputs_.emplace_back(to);
 }
 
-void CopyNode::encode(ComputeGraph* graph) {
+void CopyNode::encode_execute(ComputeGraph* graph) const {
   api::PipelineBarrier pipeline_barrier{};
 
-  vTensor& from_tensor = graph->tensor_at(inputs_[0]);
-  vTensor& to_tensor = graph->tensor_at(outputs_[0]);
+  vTensor& from_tensor = graph->get_val(inputs_[0]).toTensor();
+  vTensor& to_tensor = graph->get_val(outputs_[0]).toTensor();
 
   graph->context()->submit_copy<api::VulkanImage, api::VulkanImage>(
       // pipeline barrier

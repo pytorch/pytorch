@@ -2,9 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/api/Tensor.h>
-#include <ATen/native/vulkan/graph/Staging.h>
+#include <ostream>
 
 namespace at {
 namespace native {
@@ -15,7 +13,17 @@ namespace vulkan {
  * not support as many types. However, the core design is the same; it is a
  * tagged union over the types supported by the Vulkan Graph type.
  */
-enum class TypeTag : uint32_t { NONE, TENSOR, STAGING, INT, DOUBLE, BOOL };
+enum class TypeTag : uint32_t {
+  NONE,
+  TENSOR,
+  STAGING,
+  TENSORREF,
+  INT,
+  DOUBLE,
+  BOOL,
+};
+
+std::ostream& operator<<(std::ostream& out, const TypeTag& tag);
 
 } // namespace vulkan
 } // namespace native

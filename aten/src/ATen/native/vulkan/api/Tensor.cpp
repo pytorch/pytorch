@@ -266,47 +266,6 @@ vTensor::vTensor(
           gpu_sizes_,
           dtype_)) {}
 
-vTensor::vTensor(const vTensor& other) noexcept
-    : dtype_{other.dtype_},
-      memory_format_{other.memory_format_},
-      sizes_{other.sizes_},
-      strides_{other.strides_},
-      gpu_sizes_{other.gpu_sizes_},
-      gpu_strides_{other.gpu_strides_},
-      metadata_uniform_{other.metadata_uniform_},
-      is_quantized_{other.is_quantized_},
-      q_scale_{other.q_scale_},
-      q_zero_point_{other.q_zero_point_},
-      view_{other.view_} {}
-
-vTensor& vTensor::operator=(const vTensor& other) noexcept {
-  dtype_ = other.dtype_;
-  memory_format_ = other.memory_format_;
-  sizes_ = other.sizes_;
-  strides_ = other.strides_;
-  gpu_strides_ = other.gpu_strides_;
-  metadata_uniform_ = other.metadata_uniform_;
-  is_quantized_ = other.is_quantized_;
-  q_scale_ = other.q_scale_;
-  q_zero_point_ = other.q_zero_point_;
-  view_ = other.view_;
-
-  return *this;
-}
-
-vTensor::vTensor(vTensor&& other) noexcept
-    : dtype_{other.dtype_},
-      memory_format_{other.memory_format_},
-      sizes_(std::move(other.sizes_)),
-      strides_(std::move(other.strides_)),
-      gpu_sizes_(std::move(other.gpu_sizes_)),
-      gpu_strides_(std::move(other.gpu_strides_)),
-      metadata_uniform_(std::move(other.metadata_uniform_)),
-      is_quantized_{other.is_quantized_},
-      q_scale_{other.q_scale_},
-      q_zero_point_{other.q_zero_point_},
-      view_(std::move(other.view_)) {}
-
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {

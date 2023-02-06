@@ -54,8 +54,16 @@ class Error : public std::exception {
 } // namespace native
 } // namespace at
 
-#define VKGRAPH_THROW(...)           \
-  throw ::at::native::vulkan::Error( \
-      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, __VA_ARGS__);
+#define VKGRAPH_THROW(...)                                   \
+  throw ::at::native::vulkan::Error(                         \
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+      c10::str(__VA_ARGS__));
+
+#define VKGRAPH_CHECK(cond, ...)                               \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                        \
+    throw ::at::native::vulkan::Error(                         \
+        {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+        c10::str(__VA_ARGS__));                                \
+  }
 
 #endif /* USE_VULKAN_API */

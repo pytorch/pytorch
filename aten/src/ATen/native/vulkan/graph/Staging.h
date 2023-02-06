@@ -2,55 +2,26 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/api/Tensor.h>
+#include <ATen/native/vulkan/graph/Graph.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 
-/*
- * Input and output tensors require staging buffers when transferring data to
- * and from the CPU. This struct is a straightforward pair of a vTensor and a
- * StorageBuffer to provide an easy interface for moving data into and out of
- * input/output tensors.
- */
-struct TensorStaging {
- public:
-  explicit TensorStaging(
-      api::Context* context,
-      IntArrayRef sizes,
-      c10::ScalarType dtype,
-      api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
+//
+// Functions to memcpy data into staging buffer
+//
 
-  TensorStaging(TensorStaging&&) noexcept;
-
-  ~TensorStaging() {}
-
-  vTensor tensor;
-  // Keep the StorageBuffer in a unique_ptr to enable move construction so that
-  // TensorStaging can be stored in container types.
-  std::unique_ptr<api::StorageBuffer> staging;
-
-  //
-  // Data pointer to/from staging
-  //
-
-  void ptr_to_staging(void* src);
-  void staging_to_ptr(void* dst);
-
-  //
-  // Staging to/from GPU
-  //
-
-  void record_copy_to_gpu(api::Context* context);
-  void record_copy_from_gpu(api::Context* context);
-
- private:
-  void memcpy_to_mapping(void* src, api::MemoryMap& dst_mapping);
-  void memcpy_from_mapping(api::MemoryMap& src_mapping, void* dst);
-};
+void memcpy_to_mapping(
+    const void* src,
+    api::MemoryMap& dst_mapping,
+    const size_t nbytes,
+    const c10::ScalarType dtype);
+void memcpy_from_mapping(
+    const api::MemoryMap& src_mapping,
+    void* dst,
+    const size_t nbytes,
+    const c10::ScalarType dtype);
 
 //
 // Utility functions for memcpy
@@ -58,21 +29,57 @@ struct TensorStaging {
 
 template <typename T>
 void memcpy_to_mapping_impl(
-    void* src,
+    const void* src,
     api::MemoryMap& dst_mapping,
-    size_t nbytes) {
+    const size_t nbytes) {
   T* data_ptr = dst_mapping.template data<T>();
-  memcpy(data_ptr, reinterpret_cast<T*>(src), nbytes);
+  memcpy(data_ptr, reinterpret_cast<const T*>(src), nbytes);
 }
 
 template <typename T>
 void memcpy_from_mapping_impl(
     api::MemoryMap& src_mapping,
     void* dst,
-    size_t nbytes) {
+    const size_t nbytes) {
   T* data_ptr = src_mapping.template data<T>();
   memcpy(reinterpret_cast<T*>(dst), data_ptr, nbytes);
 }
+
+//
+// Functions to copy data into and out of a staging buffer
+//
+
+void copy_ptr_to_staging(
+    const void* src,
+    api::StorageBuffer& staging,
+    const size_t nbytes);
+void copy_staging_to_ptr(
+    api::StorageBuffer& staging,
+    void* dst,
+    const size_t nbytes);
+
+//
+// Functions to record copying data between a staging buffer and a vTensor
+//
+
+void encode_copy_to_vtensor(
+    api::Context* context,
+    api::StorageBuffer& staging,
+    vTensor& tensor);
+void encode_copy_from_vtensor(
+    api::Context* context,
+    vTensor& tensor,
+    api::StorageBuffer& staging);
+
+/*
+ * OpNode that allows copying data into and out of a staging buffer.
+ */
+class StagingNode : public virtual OpNode {
+ public:
+  explicit StagingNode(ValueRef from, ValueRef to);
+
+  void encode_execute(ComputeGraph* graph) const override;
+};
 
 } // namespace vulkan
 } // namespace native

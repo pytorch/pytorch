@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/graph/Graph.h>
+#include <ATen/native/vulkan/graph/Staging.h>
 
 namespace at {
 namespace native {
@@ -10,63 +11,119 @@ ComputeGraph::ComputeGraph(GraphConfig config)
           api::runtime()->default_adapter_i(),
           config_.context_config)},
       values_{},
-      nodes_{} {
+      prepack_nodes_{},
+      execute_nodes_{},
+      inputs_{},
+      outputs_{} {
   context_->set_cmd(/*reusable = */ true);
 }
 
 ComputeGraph::~ComputeGraph() {
   values_.clear();
-  nodes_.clear();
+
+  prepack_nodes_.clear();
+  execute_nodes_.clear();
+
   context_->flush();
 }
 
-void ComputeGraph::add_input_tensor(IntArrayRef& sizes, c10::ScalarType dtype) {
+ValueRef ComputeGraph::add_tensor(
+    const IntArrayRef sizes,
+    const c10::ScalarType dtype) {
   ValueRef idx(values_.size());
-  values_.emplace_back(TensorStaging(context(), sizes, dtype));
-  inputs_.emplace_back(idx);
+  values_.emplace_back(vTensor(context(), sizes, dtype));
+  return idx;
 }
 
-void ComputeGraph::add_output_tensor(
-    IntArrayRef& sizes,
-    c10::ScalarType dtype) {
+ValueRef ComputeGraph::add_tensorref(
+    const IntArrayRef sizes,
+    const c10::ScalarType dtype,
+    const void* const data) {
   ValueRef idx(values_.size());
-  values_.emplace_back(TensorStaging(context(), sizes, dtype));
-  outputs_.emplace_back(idx);
+  values_.emplace_back(TensorRef(sizes, dtype, data));
+  return idx;
 }
 
-void ComputeGraph::copy_into_input(ValueRef idx, void* data) {
-  Value& in_val = get_val(inputs_[idx]);
-  in_val.toStaging().ptr_to_staging(data);
+ValueRef ComputeGraph::add_staging(
+    const c10::ScalarType dtype,
+    const size_t numel) {
+  ValueRef idx(values_.size());
+  values_.emplace_back(api::StorageBuffer(context(), dtype, numel));
+  return idx;
 }
 
-void ComputeGraph::copy_from_output(ValueRef idx, void* data) {
-  Value& out_val = get_val(outputs_[idx]);
-  out_val.toStaging().staging_to_ptr(data);
-}
-
-void ComputeGraph::encode() {
-  // For each input, encode CPU to GPU transfer if it is a TensorStaging
-  for (ValueRef input_ref : inputs_) {
-    Value& in_val = get_val(input_ref);
-    if (in_val.isStaging()) {
-      in_val.toStaging().record_copy_to_gpu(context());
-    }
+ValueRef ComputeGraph::set_input_tensor(
+    const ValueRef idx,
+    const bool use_staging) {
+  if (use_staging) {
+    vTensor& tensor = get_val(idx).toTensor();
+    ValueRef staging_idx = add_staging(tensor.dtype(), tensor.gpu_numel());
+    execute_nodes_.emplace_back(new StagingNode(staging_idx, idx));
+    inputs_.push_back(staging_idx);
+    return staging_idx;
   }
+  inputs_.push_back(idx);
+  return idx;
+}
 
-  for (std::unique_ptr<OpNode>& node : nodes_) {
-    node->encode(this);
+ValueRef ComputeGraph::set_output_tensor(
+    const ValueRef idx,
+    const bool use_staging) {
+  if (use_staging) {
+    vTensor& tensor = get_val(idx).toTensor();
+    ValueRef staging_idx = add_staging(tensor.dtype(), tensor.gpu_numel());
+    execute_nodes_.emplace_back(new StagingNode(idx, staging_idx));
+    outputs_.push_back(staging_idx);
+    return staging_idx;
   }
+  outputs_.push_back(idx);
+  return idx;
+}
 
-  // For each output, encode GPU to CPU transfer if it is a TensorStaging
-  for (ValueRef output_ref : outputs_) {
-    Value& out_val = get_val(output_ref);
-    if (out_val.isStaging()) {
-      out_val.toStaging().record_copy_from_gpu(context());
-    }
+void ComputeGraph::copy_into_staging(
+    const ValueRef idx,
+    const void* data,
+    const size_t numel) {
+  Value& in_val = get_val(idx);
+  api::StorageBuffer& staging = in_val.toStaging();
+  size_t nbytes = numel * c10::elementSize(staging.dtype());
+  copy_ptr_to_staging(data, staging, nbytes);
+}
+
+void ComputeGraph::copy_from_staging(
+    const ValueRef idx,
+    void* data,
+    const size_t numel) {
+  Value& out_val = get_val(idx);
+  api::StorageBuffer& staging = out_val.toStaging();
+  size_t nbytes = numel * c10::elementSize(staging.dtype());
+  copy_staging_to_ptr(staging, data, nbytes);
+}
+
+void ComputeGraph::encode_prepack() {
+  for (std::unique_ptr<OpNode>& node : prepack_nodes_) {
+    node->encode_prepack(this);
   }
 }
 
-void ComputeGraph::execute() {
+void ComputeGraph::prepack() const {
+  // Submit and execute the command buffer
+  api::VulkanFence fence = context_->fences().get_fence();
+  context_->submit_cmd_to_gpu(fence.get_submit_handle(), /*final_use = */ true);
+  fence.wait();
+
+  // Flush the context and obtain a new command buffer
+  context_->flush();
+  context_->set_cmd(/*reusable = */ true);
+}
+
+void ComputeGraph::encode_execute() {
+  for (std::unique_ptr<OpNode>& node : execute_nodes_) {
+    node->encode_execute(this);
+  }
+}
+
+void ComputeGraph::execute() const {
   api::VulkanFence fence = context_->fences().get_fence();
   context_->submit_cmd_to_gpu(fence.get_submit_handle());
   fence.wait();
