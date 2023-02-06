@@ -104,7 +104,7 @@ def convert_shape_to_symint(
         if isinstance(i, int)
         else int(i)
         if isinstance(i, sympy.Integer)
-        else V.graph.sizevars.shape_env.create_symintnode(i)
+        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
         for i in lst
     ]
 

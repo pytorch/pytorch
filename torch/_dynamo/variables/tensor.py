@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
+from torch.fx.experimental.symbolic_shapes import guard_int
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -452,9 +453,7 @@ class DynamicShapeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        if not isinstance(self.dyn_shape, torch.SymInt):
-            return self.dyn_shape
-        return output_graph.shape_env.evaluate_expr(self.dyn_shape.node.expr)
+        return guard_int(self.dyn_shape)
 
     def call_method(
         self,
