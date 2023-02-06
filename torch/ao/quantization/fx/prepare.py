@@ -588,7 +588,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 # qconfig_dict and backend_config to support more general configurations
                 # of dynamic quantization, e.g. dynamically quantizing second input, third
                 # input etc.
-                arg_as_input_target_is_dynamic and arg is node.args[0]
+                arg_as_input_target_is_dynamic
             )
 
     else:

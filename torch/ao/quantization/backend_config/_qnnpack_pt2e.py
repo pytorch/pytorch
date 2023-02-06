@@ -13,12 +13,24 @@ weighted_op_quint8_dtype_config = DTypeConfig(
     weight_dtype=torch.qint8,
     bias_dtype=torch.float,
 )
+
+default_dynamic_int8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.float,
+    weight_dtype=torch.qint8,
+    bias_dtype=torch.float,
+    # currently the dtype check is not yet enabled, so we provided the dtype_configs but
+    # it is not really used yet,
+    # we will enable it a bit later after we moved everything to backend_config_dict
+    is_dynamic=True,
+)
+
 from typing import List
 
 def get_linear_configs():
     linear_configs = []
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [weighted_op_quint8_dtype_config]
+    dtype_configs = [weighted_op_quint8_dtype_config, default_dynamic_int8_dtype_config]
 
     # TODO: need to fix the way we insert observers for this pattern
     # should be solved in the new fusion API
@@ -60,6 +72,7 @@ def get_linear_configs():
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 0})
     )
+
     return linear_configs
 
 def get_conv_configs():

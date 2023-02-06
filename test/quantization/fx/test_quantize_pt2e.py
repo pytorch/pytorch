@@ -17,6 +17,7 @@ from torch.ao.quantization import (
     QConfig,
     default_observer,
     default_per_channel_weight_observer,
+    default_dynamic_qconfig,
 )
 from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
@@ -291,6 +292,89 @@ class TestQuantizePT2E(QuantizationTestCase):
                 ns.call_function(torch.ops.aten.mul.Tensor),
                 # conv op
                 ns.call_function(torch.ops.aten.convolution.default),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=node_list,
+                expected_node_occurrence=node_occurrence
+            )
+
+    def test_q_dq_dynamic_decomposition(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            example_inputs = (torch.randn(1, 3),)
+
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            qconfig = torch.ao.quantization.per_channel_dynamic_qconfig
+            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m(*example_inputs)
+            m = convert_pt2e(m)
+            m(*example_inputs)
+            node_occurrence = {
+                # for input for the linear
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 1,
+                # for weight of linear
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 1,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+            }
+            node_list = [
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel),
+                ns.call_function(torch.ops.aten.addmm.default),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=node_list,
+                expected_node_occurrence=node_occurrence
+            )
+            m = make_fx(m, decomposition_table=quant_decomp)(*copy.deepcopy(example_inputs))
+            node_occurrence = {
+                # check both q/dq are decomposed
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 0,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel.default): 0,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 0,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 0,
+            }
+            node_list = [
+                # ops in quantize_per_tensor
+                ns.call_function(torch.ops.aten.mul.Tensor),
+                ns.call_function(torch.ops.aten.round.default),
+                ns.call_function(torch.ops.aten.add.Tensor),
+                ns.call_function(torch.ops.aten.clamp.default),
+                # ops in dequantize_per_tensor
+                ns.call_function(torch.ops.aten.sub.Tensor),
+                ns.call_function(torch.ops.aten.mul.Tensor),
+                # some ops in quantize_per_channel
+                ns.call_function(torch.ops.aten.add.Tensor),
+                ns.call_function(torch.ops.aten.clamp.default),
+                ns.call_function(torch.ops.aten.select.int),
+                ns.call_function(torch.ops.aten.permute.default),
+                # some ops in dequantize_per_channel
+                ns.call_function(torch.ops.aten.permute.default),
+                ns.call_function(torch.ops.aten.select.int),
+                ns.call_function(torch.ops.aten.sub.Tensor),
+                ns.call_function(torch.ops.aten.mul.Tensor),
+                # linear op
+                ns.call_function(torch.ops.aten.addmm.default),
             ]
             self.checkGraphModuleNodes(
                 m,

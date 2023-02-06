@@ -125,6 +125,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     is_dynamic = False
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
+    print("is dynamic:", is_dynamic)
 
     if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
             (not is_dynamic):
