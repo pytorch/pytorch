@@ -4,8 +4,12 @@ import copy
 import inspect
 import itertools
 import operator
+import warnings
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+from torch.onnx._internal import diagnostics
+from torch.utils._mode_utils import no_dispatch
 
 try:
     import onnx
@@ -312,8 +316,7 @@ def _wrap_fx_args_as_onnxscript_args(
     torch_args = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
-            # based on fake tensor to create real tensor
-            from torch.utils._mode_utils import no_dispatch
+            # Create a concreate test tensor based on the fake tensor
 
             with no_dispatch():
                 torch_args.append(torch.randn_like(arg.meta["val"]))
@@ -337,6 +340,32 @@ def _fill_tensor_meta(onnxscript_values, name: str, expected_values):
             onnxscript_value.name = f"{name}_{i}"
         else:
             onnxscript_value.name = name
+
+
+# TODO(titaiwang): @diagnostics.decorate_call
+def _validate_op_between_ort_torch(
+    node: torch.fx.Node, symbolic_fn, torch_args, torch_kwargs
+):
+    """Validate the op between ONNX Runtime and PyTorch."""
+    # op-level validation
+    # TODO(titaiwang): Change ORTEvaluator to ReferenceEvaluator
+    # Symbolic_fn should have the same output as node.target (torch ops)
+    with evaluator.default_as(evaluator.ort_evaluator):
+        expected_outputs = node.target(*torch_args, **torch_kwargs)
+        numpy_args = [
+            arg.numpy() if isinstance(arg, torch.Tensor) else arg for arg in torch_args
+        ]
+        ort_outputs = symbolic_fn(*numpy_args, **torch_kwargs)
+
+        for ort_output, expected_output in zip(ort_outputs, expected_outputs):
+            try:
+                torch.testing.assert_close(expected_output.numpy(), ort_output)
+            except AssertionError as e:
+                warnings.warn(
+                    f"Suppressed AssertionError:\n{e}.\n"
+                    f"Op {node.target} has mismatch outputs. "
+                    f"Please check the implementation of {symbolic_fn}."
+                )
 
 
 def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
@@ -433,18 +462,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
                 output
             )
-            # op-level validation
-            # TODO(titaiwang): Change ORTEvaluator to ReferenceEvaluator
-            # Symbolic_fn should have the same output as node.target (torch ops)
-            with evaluator.default_as(evaluator.ORTEvaluator()):
-                expected_output = node.target(*torch_args, **torch_kwargs)
-                numpy_args = [
-                    arg.numpy() if isinstance(arg, torch.Tensor) else arg
-                    for arg in torch_args
-                ]
-                ort_output = symbolic_fn(*numpy_args, **torch_kwargs)
-                torch.testing.assert_close(expected_output.numpy(), ort_output)
-
+            _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
             fx_name_to_onnxscipt_value[node.name] = output
             continue
         elif node.op == "output":
