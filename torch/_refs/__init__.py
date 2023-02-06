@@ -83,6 +83,8 @@ __all__ = [
     "index_fill_",
     "isfinite",
     "isinf",
+    "isposinf",
+    "isneginf",
     "isnan",
     "isreal",
     "i0",
@@ -612,8 +614,10 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
-        return logical_or(isinf(real(a)), isinf(imag(a)))
-    return logical_not(logical_or(isnan(a), isfinite(a)))
+        return torch.logical_or(isinf(torch.real(a)), isinf(torch.imag(a)))
+    if utils.is_float_dtype(a.dtype):
+        return torch.abs(a) == float("inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -623,8 +627,8 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
     if utils.is_float_dtype(a.dtype):
-        return eq(a, float("inf"))
-    return zeros_like(a, dtype=torch.bool)
+        return a == float("inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -634,8 +638,8 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
     if utils.is_float_dtype(a.dtype):
-        return eq(a, float("-inf"))
-    return zeros_like(a, dtype=torch.bool)
+        return a == float("-inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -734,7 +738,7 @@ def nan_to_num(
     assert isinstance(a, TensorLike)
 
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
-        return clone(a)
+        return a.clone()
 
     if nan is None:
         nan = 0.0
@@ -745,14 +749,9 @@ def nan_to_num(
     if neginf is None:
         neginf = torch.finfo(a.dtype).min
 
-    result = where(isnan(a), nan, a)
-
-    is_neg = signbit(a)
-    is_neginf = bitwise_and(isinf(a), is_neg)
-    result = where(is_neginf, neginf, result)
-
-    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
-    result = where(is_posinf, posinf, result)
+    result = torch.where(torch.isnan(a), nan, a)  # type: ignore[call-overload]
+    result = torch.where(torch.isneginf(a), neginf, result)  # type: ignore[call-overload]
+    result = torch.where(torch.isposinf(a), posinf, result)  # type: ignore[call-overload]
     return result
 
 
