@@ -55,11 +55,11 @@ def _module_wrap_policy(
     module_classes: Set[Type[nn.Module]],
 ) -> bool:
     """
-    This auto wrap policy wraps every module that is an instance of any type in
-    ``module_classes`` as its own FSDP instance. The root module given by
-    ``module`` is always wrapped as an FSDP instance regardless. Since the
-    wrapping proceeds bottom up, each FSDP instance manages the parameters in
-    its subtree excluding any already managed by a child FSDP instance.
+    This policy wraps every module that is an instance of any type in
+    ``module_classes``. The root module given by ``module`` is always wrapped
+    regardless. Since the wrapping proceeds following a post-order traversal
+    (~bottom up), each wrap includes the parameters in its subtree excluding
+    any already assigned to a child wrap.
 
     Args:
         module (nn.Module): Current module being considered.
@@ -84,6 +84,7 @@ class ModuleWrapPolicy(_FSDPPolicy):
     """This is a wrapper around :func:`_module_wrap_policy`."""
 
     def __init__(self, module_classes: Set[Type[nn.Module]]):
+        super().__init__()
         self._policy: Callable = functools.partial(
             _module_wrap_policy,
             module_classes=module_classes,

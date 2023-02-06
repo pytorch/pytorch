@@ -443,7 +443,7 @@ def _init_param_handles_from_module(
     a fully sharded module, and some of its submodules may be as well,
     depending on ``policy``. See [Note: Fully Sharded Module].
     """
-    fully_sharded_module_to_states = _get_fully_sharded_module_to_states(
+    fully_sharded_module_to_states, _ = _get_fully_sharded_module_to_states(
         root_module,
         policy,
         state._ignored_modules,
@@ -459,9 +459,11 @@ def _init_param_handles_from_module(
     # using auto wrapping, which also represents a valid reverse toplogical
     # sort order, but the difference does not matter.
     materialized_module = False
-    for fully_sharded_module, (params, buffers) in reversed(
-        fully_sharded_module_to_states.items()
-    ):
+    for submodule in reversed(list(root_module.modules())):
+        if submodule not in fully_sharded_module_to_states:
+            continue
+        fully_sharded_module = submodule
+        params, buffers = fully_sharded_module_to_states[fully_sharded_module]
         # Materialize the module if needed
         is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
             fully_sharded_module, state._ignored_params
@@ -532,11 +534,15 @@ def _init_param_handle_from_params(
         state.process_group,
         state._use_orig_params,
     )
-    # TODO: Can simplify call `shard()` in the `FlatParamHandle` ctor
     handle.shard()
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
+    # if state._use_exec_order:
+    #     # For this path, multiple module keys can share the same handle value
+    #     for module in handle._root_modules:
+    #         state._fully_sharded_module_to_handles[module].append(handle)
+    # else:
     state._fully_sharded_module_to_handles[handle._fully_sharded_module].append(handle)
     num_fully_sharded_module_handles = len(
         state._fully_sharded_module_to_handles[handle._fully_sharded_module]

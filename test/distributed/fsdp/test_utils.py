@@ -6,7 +6,7 @@ import unittest
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import List
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -160,22 +160,102 @@ class TestGetSubmoduleToStates(TestCase):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))  # equivalent to one matmul
 
-    def test_get_fully_sharded_module_to_states(self):
+    def test_get_fully_sharded_module_to_states_parent_child_sharing(self):
         """
         Tests the helper function ``_get_fully_sharded_module_states()`` that
-        performs the pseudo-auto-wrapping for the non-wrapper path.
+        performs the pseudo-auto-wrapping for the non-wrapper path in the
+        presence of parent-child shared parameters.
 
         NOTE: This test is hard coded against ``Model``.
         """
         model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.PARENT_CHILD)
+        (
+            fully_sharded_module_to_states,
+            shared_param_to_lca_module,
+        ) = self._get_fully_sharded_module_to_states(model, (nn.Sequential,))
 
+        # - Root module `model`
+        self.assertIn(model, fully_sharded_module_to_states)
+        root_states = fully_sharded_module_to_states[model]
+        self.assertEqual(root_states.params, [model.lin.weight])
+        self.assertEqual(root_states.buffers, [])
+        # - `seq1`
+        self.assertIn(model.seq1, fully_sharded_module_to_states)
+        seq1_states = fully_sharded_module_to_states[model.seq1]
+        self.assertEqual(
+            seq1_states.params, [model.seq1[0].weight, model.seq1[1].weight]
+        )
+        self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
+        # - `seq2`
+        self.assertIn(model.seq2, fully_sharded_module_to_states)
+        seq2_states = fully_sharded_module_to_states[model.seq2]
+        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
+        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
+        # - `seq2[0]`
+        self.assertIn(model.seq2[0], fully_sharded_module_to_states)
+        seq2_0_states = fully_sharded_module_to_states[model.seq2[0]]
+        self.assertEqual(seq2_0_states.params, [])
+        self.assertEqual(seq2_0_states.buffers, [])
+
+        self.assertEqual(len(shared_param_to_lca_module), 1)
+        self.assertIn(model.seq2[0][0].weight, shared_param_to_lca_module)
+        self.assertIn(model.lin.weight, shared_param_to_lca_module)  # same reference
+        self.assertEqual(shared_param_to_lca_module[model.seq2[0][0].weight], model)
+
+    def test_get_fully_sharded_module_to_states_sibling_sharing(self):
+        """
+        Tests the helper function ``_get_fully_sharded_module_states()`` that
+        performs the pseudo-auto-wrapping for the non-wrapper path in the
+        presence of sibling shared parameters.
+
+        NOTE: This test is hard coded against ``Model``.
+        """
+        model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.SIBLING)
+        (
+            fully_sharded_module_to_states,
+            shared_param_to_lca_module,
+        ) = self._get_fully_sharded_module_to_states(model, (nn.Sequential,))
+
+        # - Root module `model`
+        self.assertIn(model, fully_sharded_module_to_states)
+        root_states = fully_sharded_module_to_states[model]
+        self.assertEqual(
+            set(root_states.params), {model.lin.weight, model.seq1[0].weight}
+        )
+        self.assertEqual(root_states.buffers, [])
+        # - `seq1`
+        self.assertIn(model.seq1, fully_sharded_module_to_states)
+        seq1_states = fully_sharded_module_to_states[model.seq1]
+        self.assertEqual(seq1_states.params, [model.seq1[1].weight])
+        self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
+        # - `seq2`
+        self.assertIn(model.seq2, fully_sharded_module_to_states)
+        seq2_states = fully_sharded_module_to_states[model.seq2]
+        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
+        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
+        # - `seq2[0]`
+        self.assertIn(model.seq2[0], fully_sharded_module_to_states)
+        seq2_0_states = fully_sharded_module_to_states[model.seq2[0]]
+        self.assertEqual(seq2_0_states.params, [])
+        self.assertEqual(seq2_0_states.buffers, [])
+
+        self.assertEqual(len(shared_param_to_lca_module), 1)
+        self.assertIn(model.seq2[0][0].weight, shared_param_to_lca_module)
+        self.assertIn(model.seq1[0].weight, shared_param_to_lca_module)
+        self.assertEqual(shared_param_to_lca_module[model.seq2[0][0].weight], model)
+
+    def _get_fully_sharded_module_to_states(
+        self,
+        model: nn.Module,
+        module_classes: Tuple[nn.Module, ...],
+    ) -> Tuple[Dict, Dict]:
         # Compute the mapping from fully sharded module to states according to
         # a logical module wrap policy
-        module_classes = (nn.Sequential,)
         auto_wrap_policy = ModuleWrapPolicy(set(module_classes))
-        fully_sharded_module_to_states = _get_fully_sharded_module_to_states(
-            model, auto_wrap_policy, set(), set()
-        )
+        (
+            fully_sharded_module_to_states,
+            shared_param_to_lca_module,
+        ) = _get_fully_sharded_module_to_states(model, auto_wrap_policy, set(), set())
         # Check the number of submodules with states in the mapping
         num_submodules_with_states = sum(
             isinstance(submodule, module_classes) for submodule in model.modules()
@@ -183,41 +263,16 @@ class TestGetSubmoduleToStates(TestCase):
         if not isinstance(model, module_classes):
             num_submodules_with_states += 1  # always include the root
         assert num_submodules_with_states == 4, f"{num_submodules_with_states}"
-        self.assertEqual(
-            len(fully_sharded_module_to_states), num_submodules_with_states
-        )
 
-        # Check the mapping, i.e. that the dict order follows `model.modules()`
-        # order and that the contents are expected
-        fully_sharded_modules = list(fully_sharded_module_to_states.keys())
-        expected_fully_sharded_modules = [
+        # Check the mapping's keys are expected
+        fully_sharded_modules = set(fully_sharded_module_to_states.keys())
+        expected_fully_sharded_modules = {
             module
             for module in model.modules()
-            if isinstance(module, nn.Sequential) or module is model
-        ]
+            if isinstance(module, module_classes) or module is model
+        }
         self.assertEqual(expected_fully_sharded_modules, fully_sharded_modules)
-        # - Root module `model`
-        self.assertEqual(fully_sharded_modules[0], model)
-        root_states = fully_sharded_module_to_states[fully_sharded_modules[0]]
-        self.assertEqual(root_states.params, [model.lin.weight])
-        self.assertEqual(root_states.buffers, [])
-        # - `seq1`
-        self.assertEqual(fully_sharded_modules[1], model.seq1)
-        seq1_states = fully_sharded_module_to_states[fully_sharded_modules[1]]
-        self.assertEqual(
-            seq1_states.params, [model.seq1[0].weight, model.seq1[1].weight]
-        )
-        self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
-        # - `seq2`
-        self.assertEqual(fully_sharded_modules[2], model.seq2)
-        seq2_states = fully_sharded_module_to_states[fully_sharded_modules[2]]
-        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
-        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
-        # - `seq2[0]`
-        self.assertEqual(fully_sharded_modules[3], model.seq2[0])
-        seq2_0_states = fully_sharded_module_to_states[fully_sharded_modules[3]]
-        self.assertEqual(seq2_0_states.params, [])  # shared parameter
-        self.assertEqual(seq2_0_states.buffers, [])
+        return fully_sharded_module_to_states, shared_param_to_lca_module
 
 
 instantiate_parametrized_tests(TestUtils)

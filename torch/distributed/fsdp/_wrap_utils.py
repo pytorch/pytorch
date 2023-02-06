@@ -6,6 +6,7 @@ from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
+from torch.distributed.fsdp._shared_param_utils import get_shared_param_info_to_lca
 from torch.distributed.fsdp._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
@@ -78,28 +79,30 @@ def _get_fully_sharded_module_to_states(
     auto_wrap_policy: _FSDPPolicy,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-) -> Dict[nn.Module, FullyShardedModuleState]:
+) -> Tuple[Dict[nn.Module, FullyShardedModuleState], Dict[nn.Parameter, nn.Module]]:
     """
-    Returns a mapping from fully sharded module to its parameters, buffers,
-    parameter names, and buffer names, where each entry logically represents a
+    Returns two data structures: (1) is a mapping from fully sharded module to
+    its parameters and buffers, where each entry logically represents a
     grouping according to the given auto wrap policy and ignored
     modules/parameters. However, this method does not actually perform any
-    module wrapping.
+    module wrapping. (2) is a mapping from shared parameter to its lowest
+    common ancestor (LCA) module.
 
-    The mapped-to values are the states from the subtree rooted at the
-    corresponding submodule key, excluding child submodules in the mapping and
-    ignored state. Sibling submodules cannot be grouped together. The parameter
-    and buffer names are prefixed starting from the submodule.
+    For (1), the mapped-to values are the states from the subtree rooted at the
+    corresponding fully sharded module key, excluding child submodules in the
+    mapping and ignored state. The parameter and buffer names are prefixed
+    starting from the fully sharded module.
 
-    Each non-ignored parameter and buffer appears exactly once in the returned
-    ``dict``, and the ``dict`` is ordered by increasing tree depth. A mapped-to
-    parameter list may be empty if the fully sharded module has no parameters
-    or if its parameters were assigned to a parent fully sharded module
-    instead.
+    Each non-ignored parameter and buffer appears exactly once in (1), and for
+    simplicity, (1) does not provide any ordering guarantees for its keys. The
+    function consuming the dict should ensure to iterate over it in an
+    appropraite order. A mapped-to parameter list may be empty if the fully
+    sharded module has no parameters or if its parameters were assigned to a
+    parent fully sharded module instead.
     """
     # Record the modules to wrap without actually wrapping
-    wrapped_modules_set: Set[nn.Module] = set()  # these are only logically wrapped
-    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules_set)
+    wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
+    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
     if auto_wrap_policy is not None:
         _recursive_wrap(
             root_module,
@@ -110,34 +113,45 @@ def _get_fully_sharded_module_to_states(
             only_wrap_children=False,
         )
     # Always include the root module even if not wrapped by the given policy
-    wrapped_modules_set.add(root_module)
+    if root_module not in wrapped_modules:
+        wrapped_modules.append(root_module)
 
     fully_sharded_module_to_states = collections.OrderedDict()
-    visited_params = set()
-    for ignored_param in ignored_params:
-        visited_params.add(ignored_param)
+    visited_params = set(ignored_params)  # shallow copy
     visited_buffers = set()
-    # Construct `wrapped_modules` to follow `.modules()` order to ensure that
-    # downstream data structures (`._handles`) match those of the wrapper path.
-    # NOTE: Since `.modules()` follows a depth-first order, which is a
-    # topological sort, and we iterate over `wrapped_modules` following that
-    # order, parent-child shared parameters are assigned to the parent module.
-    wrapped_modules: List[nn.Module] = []
-    for module in root_module.modules():
-        if module in wrapped_modules_set:
-            wrapped_modules.append(module)
-    for submodule in wrapped_modules:
-        # Perform a DFS from `submodule` and record all unvisited state that is
-        # not already associated with another module in `wrapped_modules`. We
-        # use DFS to follow the `.modules()` order.
+    visited_modules = set(ignored_modules)  # shallow copy
+
+    shared_param_info_to_lca = get_shared_param_info_to_lca(root_module, ignored_params)
+    shared_params: Set[nn.Parameter] = set()
+    lca_module_to_shared_params = collections.defaultdict(list)
+    shared_param_to_lca_module: Dict[nn.Parameter, nn.Module] = {}
+    for shared_param_info, lca_module in shared_param_info_to_lca.items():
+        shared_param = shared_param_info.param
+        shared_params.add(shared_param)
+        lca_module_to_shared_params[lca_module].append(shared_param)
+        shared_param_to_lca_module[shared_param] = lca_module
+    visited_params.update(shared_params)  # finished handling shared parameters
+
+    # Constructing `wrapped_modules` with `_recursive_wrap()` follows a
+    # post-order traversal (~bottom up). We iterate following this order so
+    # that each shared parameter is assigned to the *lowest* module in
+    # `wrapped_modules` that is a parent of or equal to the shared parameter's
+    # LCA module.
+    wrapped_modules_set = set(wrapped_modules)
+    for fully_sharded_module in wrapped_modules:
+        # Perform a DFS from `fully_sharded_module` and record all unvisited
+        # state that is not already associated with another module in
+        # `wrapped_modules`. A BFS also works since we do not enforce ordering
+        # guarantees in the returned dict.
         deque: Deque[Tuple[nn.Module, str]] = collections.deque()
-        deque.append((submodule, ""))
+        deque.append((fully_sharded_module, ""))
         params: List[nn.Parameter] = []
         buffers: List[torch.Tensor] = []
         while len(deque) > 0:
             module, prefix = deque.popleft()
+            visited_modules.add(module)
             # Reverse `named_children()`, use `appendleft()`, and add to the
-            # deque before processing to perform non-recursive DFS
+            # deque before processing to run left-to-right non-recursive DFS
             for child_module_name, child_module in reversed(
                 list(module.named_children())
             ):
@@ -151,21 +165,26 @@ def _get_fully_sharded_module_to_states(
                 if buffer not in visited_buffers:
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
-        fully_sharded_module_to_states[submodule] = FullyShardedModuleState(
+            # Assign a shared parameter to this module if the walk visits its
+            # LCA module, and remove the entry to be sure to not also assign to
+            # another module.
+            params.extend(lca_module_to_shared_params.get(module, []))
+            lca_module_to_shared_params.pop(module, None)
+        fully_sharded_module_to_states[fully_sharded_module] = FullyShardedModuleState(
             params, buffers
         )
-    return fully_sharded_module_to_states
+    return fully_sharded_module_to_states, shared_param_to_lca_module
 
 
 def _record_module_wrapper_cls(
-    wrapped_modules_set: Set[nn.Module],
+    wrapped_modules: List[nn.Module],
     module: nn.Module,
     **kwargs,
 ) -> nn.Module:
     """
     This defines a pseudo-wrapper class to be passed to ``_recursive_wrap()``
-    that records the wrapped module to the input ``wrapped_modules_set``
-    without actually wrapping with a class.
+    that records the wrapped module to the input ``wrapped_modules`` without
+    actually wrapping with a class.
     """
-    wrapped_modules_set.add(module)
+    wrapped_modules.append(module)
     return module

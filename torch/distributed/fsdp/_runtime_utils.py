@@ -477,7 +477,6 @@ def _post_forward_reshard(
     # Do not free the root's parameters in the post-forward for `FULL_SHARD`
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
-
     free_unsharded_flat_params = [
         not state._is_root
         and handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
