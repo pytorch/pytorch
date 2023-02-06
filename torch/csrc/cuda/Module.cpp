@@ -1067,8 +1067,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+    using MallocFuncType = int(void**, size_t, int, cudaStream_t);
+    using FreeFuncType = int(void*, size_t, int, cudaStream_t);
     std::function<MallocFuncType> malloc_fn =
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =

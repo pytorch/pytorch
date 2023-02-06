@@ -28,8 +28,8 @@ _AllocationMetadata::_AllocationMetadata(
 // This avoids having to link against libtorch for C++ based custom allocators
 // And also use this from python
 CUDAPluggableAllocator::CUDAPluggableAllocator(
-    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn)
+    std::function<int(void**, size_t, int, cudaStream_t)> alloc_fn,
+    std::function<int(void*, size_t, int, cudaStream_t)> free_fn)
     : alloc_fn_(alloc_fn), free_fn_(free_fn) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
@@ -88,7 +88,9 @@ void* CUDAPluggableAllocator::malloc(
     size_t size,
     int device,
     cudaStream_t stream) {
-  void* r = alloc_fn_(size, device, stream);
+  void* r = nullptr;
+  int error = alloc_fn_(&r, size, device, stream);
+  TORCH_CHECK(error != 0, "Memory allocation failed with error " + std::to_string(error));
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
     allocation_metadata_.emplace(r, _AllocationMetadata(size, device, stream));
@@ -329,8 +331,8 @@ getCurrentAllocator() {
 // TODO: add more functions in the argument
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
-    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
+    std::function<int(void**, size_t, int, cudaStream_t)> alloc_fn,
+    std::function<int(void*, size_t, int, cudaStream_t)> free_fn) {
   std::shared_ptr<CUDAPluggableAllocator> allocator(
       new CUDAPluggableAllocator(alloc_fn, free_fn));
   allocator->init(device_count);
