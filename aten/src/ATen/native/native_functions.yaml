@@ -14614,7 +14614,8 @@
 
 # Collectives
 - func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int stride) -> Tensor
-  python_module: distributed.functional
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
   dispatch:
     CompositeExplicitAutograd: all_reduce
   variants: function

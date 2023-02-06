@@ -1,11 +1,12 @@
-import weakref
+from typing import Any, Tuple, Union, List, cast
 
 import torch
+from torch.autograd import Function
+from torch.utils.weak import WeakIdKeyDictionary
 import torch.distributed as dist
 
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
-from typing import Any, Tuple, Union, List, cast
 
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
@@ -27,30 +28,7 @@ Issues:
 FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
 """
 
-# FIXME we do this way cuz we can't use tensor __eq__, we want id()
-# TODO use a weakref callback and switch from tensor->work to tensor->cuda event
-class IdKeyWeakDict:
-    def __init__(self):
-        self.kvs = []
-
-    def add(self, key, val):
-        self.kvs.append((weakref.ref(key), val))
-
-    def get_and_remove(self, key):
-        new_arr = []
-        val = None
-        for k, v in self.kvs:
-            this_k = k()
-            if this_k is None:
-                continue
-            if id(this_k) == id(key):
-                val = v
-            else:
-                new_arr.append((k, v))
-        self.kvs = new_arr
-        return val
-
-tensor_to_work = IdKeyWeakDict()
+tensor_to_work = WeakIdKeyDictionary()
 
 lib = torch.library.Library("tr_c10d", "DEF")
 lib.define("wait(Tensor self) -> Tensor")
@@ -59,8 +37,9 @@ impl_lib_cpu = torch.library.Library("tr_c10d", "IMPL", "CPU")
 impl_lib_cuda = torch.library.Library("tr_c10d", "IMPL", "CUDA")
 
 def _wait_tensor(tensor: torch.Tensor):
-    w = tensor_to_work.get_and_remove(tensor)
+    w = tensor_to_work.get(tensor)
     if w:
+        del tensor_to_work[tensor]
         w.wait()
     return tensor
 
@@ -119,8 +98,6 @@ def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
 
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, stride):
-    print(f"{c10d.get_rank()} :: ALLREDUCE")
-
     op = _str_to_reduce_op(reduceOp)
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, stride)
     assert group is not None
@@ -129,7 +106,7 @@ def _all_reduce(self, reduceOp, tag, ranks, stride):
     work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
 
     global tensor_to_work
-    tensor_to_work.add(inplace_tensor, work)
+    tensor_to_work[inplace_tensor] = work
     return inplace_tensor
 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
@@ -179,6 +156,24 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 
     return (tag, rankset, stride)
 
+
+class _WrapTensor(Function):
+    """
+    Autograd function to ensure autograd works through the wrapping
+    """
+    @staticmethod
+    def forward(ctx, tensor, reduceOp, stride):
+        ctx.reduceOp = reduceOp.upper()
+        ctx.stride = stride
+        return AsyncCollectiveTensor(tensor)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.reduceOp == "SUM":
+            grad_output = grad_output / ctx.stride
+        return (grad_output, None, None)
+
+
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -186,7 +181,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
 
     The input tensor is left unmodified.
 
-    Rank can be one of:
+    Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
         ProcessGroup: Will perform a collective using the ranks and tag of the PG.
@@ -195,9 +190,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
-
-
     """
     tag, rankset, stride = _expand_group(group, tag)
-    tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, rankset, stride)
-    return AsyncCollectiveTensor(tensor)
+    tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, stride)  # type: ignore[attr-defined]
+    return _WrapTensor.apply(tensor, reduceOp, stride)
