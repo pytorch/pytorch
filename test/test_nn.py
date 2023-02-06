@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
 
+
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -9576,6 +9577,7 @@ class TestNNDeviceType(NNTestCase):
     def test_masked_softmax_devices_parity(self):
         # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
         # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
+
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
             # mask_type == 0 => attention mask of shape LxL
