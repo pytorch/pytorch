@@ -612,4 +612,3 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.quantized.dynamic.modules
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
-   :noindex:
