@@ -664,13 +664,14 @@ class ExportOptions:
     Attributes:
         opset_version: The export ONNX version.
         use_binary_format: Whether to Return ModelProto in binary format.
+        decomposition_table: The decomposition table for graph ops. Default is for torch ops, including aten and prim.
     """
 
     opset_version: int = ONNX_GLOBALS.export_onnx_opset_version
     use_binary_format: bool = True
-    decomposition_table: Dict[
-        torch_ops.OpOverload, Callable
-    ] = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
+    decomposition_table: Dict[torch_ops.OpOverload, Callable] = dataclasses.field(
+        default_factory=lambda: _ONNX_FRIENDLY_DECOMPOSITION_TABLE
+    )
 
 
 @_beartype.beartype

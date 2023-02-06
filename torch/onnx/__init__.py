@@ -28,7 +28,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     utils,
 )
 
-from ._exporter_states import ExportTypes
+from ._exporter_states import ExportTypes, SymbolicContext
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
