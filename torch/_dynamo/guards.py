@@ -22,7 +22,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import FloorDiv, SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -637,13 +637,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-                ("floor", math.floor),
-                ("ceiling", math.ceil),
-                ("Eq", direct_equality),
-                ("Ne", direct_negation),
-                ("Mod", sympy.Mod),
-                ("FloorDiv", FloorDiv),
-            ]
+            ] + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
