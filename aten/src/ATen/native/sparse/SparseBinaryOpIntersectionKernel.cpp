@@ -43,7 +43,7 @@ struct CPUValueSelectionIntersectionKernel {
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx,
-      const c10::optional<Tensor>& intersection_counts = c10::nullopt) {
+      const Tensor& intersection_counts) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,

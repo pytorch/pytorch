@@ -95,7 +95,7 @@ TensorIterator make_value_selection_intersection_iter(
     const Tensor& lhs_select_idx,
     const Tensor& rhs_values,
     const Tensor& rhs_select_idx,
-    const c10::optional<Tensor>& intersection_counts_opt = c10::nullopt) {
+    const Tensor& intersection_counts) {
   const auto res_values_sizes = [&]() -> std::vector<int64_t> {
     auto sizes = infer_size(
         // keep nnz dim
@@ -123,14 +123,6 @@ TensorIterator make_value_selection_intersection_iter(
     values_strides[0] = 0;
     return values.as_strided(values_sizes, values_strides);
   };
-
-  const auto intersection_counts = [&intersection_counts_opt, &lhs_select_idx]() -> Tensor {
-    if (intersection_counts_opt.has_value()) {
-      return *intersection_counts_opt;
-    } else {
-      return at::ones(lhs_select_idx.sizes(), lhs_select_idx.options().dtype(kLong));
-    }
-  }();
 
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
