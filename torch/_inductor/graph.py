@@ -418,11 +418,11 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
-            print("num_users: ", num_users)
-            # if num_users > 1 and isinstance(result, TensorBox):
-            if isinstance(result, TensorBox):
+            # print("num_users: ", num_users)
+            if num_users > 1 and isinstance(result, TensorBox):
+            # if isinstance(result, TensorBox):
                 for user in n.users:
-                    print("user.target: ", user.target)
+                    # print("user.target: ", user.target)
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
                         # This inclusion is somewhat controversial (from

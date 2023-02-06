@@ -120,7 +120,7 @@ def tuned_int_addmm(mat1, mat2, *, layout=None):
     # import pdb; pdb.set_trace()
     # res = autotune_select_algorithm(choices, [mat1, mat2], layout)
     # return res
-    print("layout: ", layout)
+    # print("layout: ", layout)
     # import pdb; pdb.set_trace()
     return choices[0].output_node()
 
