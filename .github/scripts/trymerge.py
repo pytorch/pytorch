@@ -1133,9 +1133,8 @@ def gen_new_issue_link(
             f"template={urllib.parse.quote(template)}")
 
 
-def read_merge_and_flaky_rules(repo: Optional[GitRepo], org: str, project: str) -> Tuple[List[MergeRule], List[FlakyRule]]:
+def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     repo_relative_rules_path = MERGE_RULE_PATH
-    rc = None
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -1143,24 +1142,21 @@ def read_merge_and_flaky_rules(repo: Optional[GitRepo], org: str, project: str) 
             reader=json.load,
         )
         content = base64.b64decode(json_data["content"])
-        rc = yaml.safe_load(content)
+        return [MergeRule(**x) for x in yaml.safe_load(content)]
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
             print(f"{rules_path} does not exist, returning empty rules")
-            return [], []
+            return []
         with open(rules_path) as fp:
             rc = yaml.safe_load(fp)
-    merge_rules = []
-    flaky_rules = []
-    for x in rc:
-        try:
-            merge_rules.append(MergeRule(**x))
-        except Exception as e:
-            if "flaky_rules_location_url" in x:
-                flaky_rules = get_flaky_rules(x["flaky_rules_location_url"], 3)
+        return [MergeRule(**x) for x in rc]
 
-    return merge_rules, flaky_rules
+
+def read_flaky_rules() -> List[FlakyRule]:
+    # NOTE: This is currently hardcoded, can be extended to do per repo rules
+    FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
+    return get_flaky_rules(FLAKY_RULES_URL)
 
 
 def find_matching_merge_rule(
@@ -1181,7 +1177,8 @@ def find_matching_merge_rule(
     )
     reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
 
-    rules, flaky_rules = read_merge_and_flaky_rules(repo, pr.org, pr.project)
+    rules = read_merge_rules(repo, pr.org, pr.project)
+    flaky_rules = read_flaky_rules()
     if not rules:
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
@@ -1635,7 +1632,7 @@ def merge(pr_num: int, repo: GitRepo,
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
-    _, flaky_rules = read_merge_and_flaky_rules(repo, pr.org, pr.project)
+    flaky_rules = read_flaky_rules()
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
