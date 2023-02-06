@@ -1041,6 +1041,32 @@ class TestFSDPStateDict(FSDPTest):
         for module in FSDP.fsdp_modules(fsdp):
             self.assertEqual(module._state_dict_type, StateDictType.FULL_STATE_DICT)
 
+    @skip_if_lt_x_gpu(2)
+    def test_local_state_dict_with_empty_ranks(self):
+        class Model(Module):
+            def __init__(self):
+                super().__init__()
+                self.my_tensor = torch.full((1,), 3.1415926)
+                self.my_parameter = nn.Parameter(self.my_tensor)
+
+            def forward(self, x):
+                return self.my_parameter
+
+        model = FSDP(Model().cuda())
+        with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+            out = model(None)
+            out.backward()
+
+            state_dict = deepcopy(model.state_dict())
+            with torch.no_grad():
+                with FSDP.summon_full_params(model):
+                    self.assertEqual(model.my_parameter.item(), 3.1415926)
+                    model.my_parameter.copy_(torch.full((1,), 1.75).cuda())
+                    self.assertEqual(model.my_parameter.item(), 1.75)
+            model.load_state_dict(state_dict)
+            with FSDP.summon_full_params(model):
+                self.assertEqual(model.my_parameter.item(), 3.1415926)
+
 
 instantiate_parametrized_tests(TestFSDPStateDict)
 
