@@ -459,6 +459,8 @@ def wrap_key(f, tensors, tracer):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         if len(flat_proxies) == len(flat_tensors) + 1:
+            # When f is a wrapper for a torch.nn.Module, the wrapped module will
+            # be passed as flat_proxies[0]. We discard it here and only wraps the inputs
             assert isinstance(flat_proxies[0], torch.nn.Module)
             flat_proxies = flat_proxies[1:]
         assert len(flat_proxies) == len(flat_tensors)

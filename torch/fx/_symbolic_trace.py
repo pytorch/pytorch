@@ -548,7 +548,7 @@ class Tracer(TracerBase):
         # the function to get to the innermost callable.
         fn_for_analysis = inspect.unwrap(root_fn)
         if isinstance(fn_for_analysis, torch.nn.Module):
-            fn_for_analysis = getattr(fn_for_analysis, self.traced_func_name)
+            fn_for_analysis = getattr(type(fn_for_analysis), self.traced_func_name)
             is_module = True
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
@@ -696,25 +696,30 @@ class Tracer(TracerBase):
         old_is_fx_tracing_flag = _is_fx_tracing_flag
         _is_fx_tracing_flag = True
         try:
-            if isinstance(root, torch.nn.Module):
-                self.root = root
 
+            # When root is essentially a wrapper over a nn.Module, we set up self.root
+            # as the wrapped module to keep the attr access path the same.
+            # Otherwise, we create an empty nn.Module as self.root.
+            unwrapped = inspect.unwrap(root)
+            if isinstance(unwrapped, torch.nn.Module):
                 assert hasattr(
-                    type(root), self.traced_func_name
-                ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+                    type(unwrapped), self.traced_func_name
+                ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(unwrapped).__name__}"
 
-                fn = getattr(type(root), self.traced_func_name)
-                self.root_module_name = root._get_name()
-                self.submodule_paths = {mod: name for name, mod in root.named_modules()}
-            else:
-                unwrapped = inspect.unwrap(root)
-                if isinstance(unwrapped, torch.nn.Module):
-                    self.root = unwrapped
-                    self.root_module_name = unwrapped._get_name()
-                    self.submodule_paths = {mod: name for name, mod in self.root.named_modules()}
+                self.root = unwrapped
+                self.root_module_name = self.root._get_name()
+                self.submodule_paths = {mod: name for name, mod in self.root.named_modules()}
+
+                # We'd like to trace the traced_func_name attr when root is a nn.Module
+                # and trace the wrapper function otherwise
+                if isinstance(root, torch.nn.Module):
+                    traced_fn = getattr(type(root), self.traced_func_name)
                 else:
-                    self.root = torch.nn.Module()
-                fn = root
+                    traced_fn = root
+
+            else:
+                self.root = torch.nn.Module()
+                traced_fn = root
 
             tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
@@ -734,11 +739,11 @@ class Tracer(TracerBase):
 
             collect_tensor_attrs(self.root, [])
 
-            assert isinstance(fn, FunctionType)
+            assert isinstance(traced_fn, FunctionType)
 
-            fn_globals = fn.__globals__  # run before it gets patched
-            fn, args = self.create_args_for_root(
-                fn, isinstance(root, torch.nn.Module), concrete_args
+            fn_globals = traced_fn.__globals__  # run before it gets patched
+            traced_fn, args = self.create_args_for_root(
+                traced_fn, isinstance(root, torch.nn.Module), concrete_args
             )
 
             parameter_proxy_cache: Dict[
@@ -784,9 +789,9 @@ class Tracer(TracerBase):
                 self.create_node(
                     "output",
                     "output",
-                    (self.create_arg(fn(*args)),),
+                    (self.create_arg(traced_fn(*args)),),
                     {},
-                    type_expr=fn.__annotations__.get("return", None),
+                    type_expr=traced_fn.__annotations__.get("return", None),
                 )
 
             self.submodule_paths = None
