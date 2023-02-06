@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/DeviceGuard.h>
 #include <ATen/TypeDefault.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/fused_adam_amsgrad_impl.cuh>
@@ -33,11 +34,13 @@ void _fused_adam_kernel_cuda_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
         "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+    OptionalDeviceGuard device_guard(device_of(params));
     _fused_adam_amsgrad_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize, grad_scale, found_inf);
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs}),
         "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
+    OptionalDeviceGuard device_guard(device_of(params));
     _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize, grad_scale, found_inf);
   }
 }
