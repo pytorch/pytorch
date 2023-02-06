@@ -494,7 +494,7 @@ def run_test(
         )
 
     print_log_file(test_module, log_path, failed=(ret_code != 0))
-    os.remove(log_path)
+    #os.remove(log_path)
     return ret_code
 
 

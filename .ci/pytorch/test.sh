@@ -184,7 +184,7 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
 fi
 
 test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
+  time python test/run_test.py --continue-through-error --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
 }
 
@@ -194,13 +194,13 @@ test_python_shard() {
     exit 1
   fi
 
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --continue-through-error --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
+  time python test/run_test.py --continue-through-error --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
 }
 
@@ -213,7 +213,7 @@ test_dynamo_shard() {
   python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
-  time python test/run_test.py --dynamo \
+  time python test/run_test.py --continue-through-error --dynamo \
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
@@ -242,15 +242,15 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
+  python test/run_test.py --continue-through-error --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
   python tools/dynamo/verify_dynamo.py
-  python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
+  python test/run_test.py --continue-through-error --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --continue-through-error --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -580,7 +580,7 @@ test_distributed() {
   pytest test/inductor/test_torchinductor.py -k test_multi_gpu
 
   echo "Testing distributed python tests"
-  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --continue-through-error --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$SHARD_NUMBER" == 1 ]]; then
@@ -861,7 +861,7 @@ test_benchmarks() {
 
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
-  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose
+  time python test/run_test.py --continue-through-error --include test_cpp_extensions_aot_ninja --verbose
   assert_git_not_dirty
 }
 

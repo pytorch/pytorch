@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -124,6 +125,7 @@ if COLLECT_EXPECT:
 # for the default test, and a tuple of two strings for variants
 
 inductor_skips = defaultdict(dict)
+inductor_skips_rocm = defaultdict(dict)
 
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -146,6 +148,31 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+}
+
+inductor_skips_rocm["cuda"] = {
+    "cummax": {f16, f32, f64},
+    "cummin": {f16, f32, f64},
+    "gather": {f16, f32, f64},
+    "index_add": {f16, f32, f64, i32, i64},
+    "index_select": {f16, f32, f64, i32, i64},
+    "nanquantile": {f16, f32, f64, i32, i64},
+    "embedding": {f16, f32, f64, i32, i64},
+    "nn.functional.embedding": {f16, f32, f64, i32, i64},
+    "nn.functional.interpolate.bilinear": {f16, f32, f64, i32, i64},
+    "nn.functional.interpolate.nearest": {f16, f32, f64, i32, i64},
+    "nn.functional.upsample_bilinear": {f16, f32, f64, i32, i64},
+    "nn.functional.upsample_nearest": {f16, f32, f64, i32, i64},
+    "quantile": {f16, f32, f64, i32, i64},
+    "scatter_add": {f16, f32, f64, i32, i64},
+    "scatter_reduce.amax": {f16, f32, f64, i32, i64},
+    "scatter_reduce.amin": {f16, f32, f64, i32, i64},
+    "scatter_reduce.mean": {f16, f32, f64, i32, i64},
+    "scatter_reduce.sum": {f16, f32, f64, i32, i64},
+    "take_along_dim": {f16, f32, f64, i32, i64},
+    "linalg_pinv_hermitian": {f16},
+    "tanh": {f16},
+    "logcumsumexp": {f16, f32},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -513,6 +540,10 @@ class TestInductorOpInfo(TestCase):
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
+        elif TEST_WITH_ROCM and dtype in inductor_skips_rocm[device_type].get(
+            op_name, set()
+        ):
+            test_expect = ExpectedTestResult.SKIP
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[

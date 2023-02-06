@@ -110,6 +110,7 @@ def check_cuda():
     return cuda_ver if torch.version.hip is None else "None"
 
 
+
 def check_rocm():
     import torch
 
@@ -139,6 +140,7 @@ def check_rocm():
         )
 
     return rocm_ver if torch.version.hip else "None"
+
 
 
 def check_dynamo(backend, device, err_msg):
@@ -204,6 +206,8 @@ _SANITY_CHECK_ARGS = (
 
 
 def main():
+    import torch
+
     python_ver = check_python()
     torch_ver = check_torch()
     cuda_ver = check_cuda()
