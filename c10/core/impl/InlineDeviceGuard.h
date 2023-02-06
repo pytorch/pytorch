@@ -4,6 +4,8 @@
 // InlineOptionalDeviceGuard.
 #ifdef USE_CUDA
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#endif
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
