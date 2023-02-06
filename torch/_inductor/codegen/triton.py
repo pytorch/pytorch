@@ -229,6 +229,66 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.erf({x})"
 
     @staticmethod
+    def cosh(x):
+        return f"tl.libdevice.cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"tl.libdevice.sinh({x})"
+
+    @staticmethod
+    def acos(x):
+        return f"tl.libdevice.acos({x})"
+
+    @staticmethod
+    def acosh(x):
+        return f"tl.libdevice.acosh({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"tl.libdevice.asin({x})"
+
+    @staticmethod
+    def asinh(x):
+        return f"tl.libdevice.asinh({x})"
+
+    @staticmethod
+    def atan2(x, y):
+        return f"tl.libdevice.atan2({x}, {y})"
+
+    @staticmethod
+    def atan(x):
+        return f"tl.libdevice.atan({x})"
+
+    @staticmethod
+    def atanh(x):
+        return f"tl.libdevice.atanh({x})"
+
+    @staticmethod
+    def copysign(x, y):
+        return f"tl.libdevice.copysign({x}, {y})"
+
+    @staticmethod
+    def erfc(x):
+        return f"tl.libdevice.erfc({x})"
+
+    @staticmethod
+    def hypot(x, y):
+        return f"tl.libdevice.hypot({x}, {y})"
+
+    @staticmethod
+    def log10(x):
+        return f"tl.libdevice.log10({x})"
+
+    @staticmethod
+    def nextafter(x, y):
+        return f"tl.libdevice.nextafter({x}, {y})"
+
+    @staticmethod
+    def special_modified_bessel_i0(x):
+        return f"tl.libdevice.cyl_bessel_i0({x})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
