@@ -1421,6 +1421,7 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.expand_copy)
 make_fallback(aten.zeros)
 make_fallback(aten.gcd.default)
+make_fallback(aten._linalg_eigh)
 
 # TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
 make_fallback(aten.bitwise_right_shift)
