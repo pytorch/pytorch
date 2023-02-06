@@ -3801,6 +3801,59 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, int_neg, 2)
 
+    def test_has_attr_torch(self):
+        def fn_custom_get_attr(x, y):
+            if hasattr(torch.ops.aten, "mul"):
+                x = x * y
+                return x
+            else:
+                return x
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "hasattr with custom __getattr__",
+        ):
+            torch._dynamo.testing.standard_test(self, fn_custom_get_attr, 2)
+
+        def fn_safe(x, y):
+            if hasattr(torch.version, "git_version"):
+                x = x * y
+                return x
+            else:
+                return x
+
+        torch._dynamo.testing.standard_test(self, fn_safe, 2)
+
+    def test_has_attr_func(self):
+        def outer_custom_fn(x, y):
+            return x * y
+
+        outer_custom_fn.fake_attr = 3
+
+        def getattr_func(x, y):
+            z = outer_custom_fn(x, y)
+            if hasattr(outer_custom_fn, "fake_attr"):
+                return -z
+            return z
+
+        torch._dynamo.testing.standard_test(self, getattr_func, 2)
+
+    def test_has_attr_module(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        tm = TestModule()
+        tm.some_val = -1
+
+        def getattr_func(x, y):
+            z = tm.forward(x, y)
+            if hasattr(tm, "fake_attr"):
+                return z * tm.some_val
+            return z
+
+        torch._dynamo.testing.standard_test(self, getattr_func, 2)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod

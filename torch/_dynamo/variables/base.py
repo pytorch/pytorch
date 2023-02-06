@@ -227,14 +227,20 @@ class VariableTracker(object, metaclass=HasPostInit):
     def _getattr_static(self, name):
         import torch
 
+        if hasattr(self, "value"):
+            value = self.value
+        elif hasattr(self, "fn"):
+            # For function types
+            # TODO(voz) maybe call them all value?
+            value = self.fn
         if (
-            isinstance(self.value, torch.nn.Module)
-            or "__slots__" in self.value.__class__.__dict__
+            isinstance(value, torch.nn.Module)
+            or "__slots__" in value.__class__.__dict__
         ):
             # getattr_static doesn't work on these
-            subobj = getattr(self.value, name)
+            subobj = getattr(value, name)
         else:
-            subobj = inspect.getattr_static(self.value, name)
+            subobj = inspect.getattr_static(value, name)
         return subobj
 
     def check_for_getattr(self):
