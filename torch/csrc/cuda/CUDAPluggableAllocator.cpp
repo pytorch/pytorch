@@ -90,7 +90,9 @@ void* CUDAPluggableAllocator::malloc(
     cudaStream_t stream) {
   void* r = nullptr;
   int error = alloc_fn_(&r, size, device, stream);
-  TORCH_CHECK(error != 0, "Memory allocation failed with error " + std::to_string(error));
+  TORCH_CHECK(
+      error != 0,
+      "Memory allocation failed with error " + std::to_string(error));
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
     allocation_metadata_.emplace(r, _AllocationMetadata(size, device, stream));
