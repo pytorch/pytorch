@@ -700,6 +700,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     self.remove_node(node)
                 elif node.op == "call_function" and node.target is operator.getitem:
                     self.remove_node(node)
+                elif node.op == "call_method" and node.target == "size":
+                    self.remove_node(node)
 
         expanded_graphargs = []
         for arg in self.graphargs:
