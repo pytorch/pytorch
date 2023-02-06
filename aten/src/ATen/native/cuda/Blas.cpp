@@ -684,57 +684,58 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
   }
 }
 
+
 // Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const Scalar& beta, const Scalar& alpha) {
-TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
-  TORCH_CHECK(mat1.size(0) > 16, "mat1.size(0) needs to be greater than 16, but got ", mat1.size(0));
-  TORCH_CHECK(mat1.size(1) > 0 && mat1.size(1) % 8 == 0, "mat1.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat1.size(1));
-  TORCH_CHECK(mat1.size(1) == mat2.size(0), "mat1.size(1) needs to match mat2.size(0) but got ", mat1.size(1), " and ", mat2.size(0));
+void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
+  TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
+  TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
   TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
 
   // std::cout << "Calling _int_addmm_out_cuda" << std::endl;
-//  Tensor result = at::empty({mat1.size(0), mat2.size(1)}, mat1.options().dtype(at::kInt));
-  // Tensor bias = at::empty({mat2.size(1)}, mat1.options());
+//  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  // Tensor bias = at::empty({mat2.size(1)}, self.options());
   // result.fill_(0);
   // bias.fill_(0);
 
   TORCH_CHECK(result.dtype() == at::kInt, "Expected result dtype to be of type kInt but got ", result.dtype());
-  TORCH_CHECK(result.size(0) == mat1.size(0), "Expected result.size(0) to be ", mat1.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(0) == self.size(0), "Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
   TORCH_CHECK(result.size(1) == mat2.size(1), "Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
-  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef self_sizes = self.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   bool transpose_result;
   c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
-  bool transpose_mat1;
+  bool transpose_self;
   bool transpose_mat2;
-  auto mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
-  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+  auto self_ = prepare_matrix_for_cublas(transpose_result ? mat2 : self, transpose_self, transpose_result);
+  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? self : mat2, transpose_mat2, transpose_result);
 
   if (transpose_result) {
-    transpose_mat1 = !transpose_mat1;
+    transpose_self = !transpose_self;
     transpose_mat2 = !transpose_mat2;
-    mat1_sizes = mat1_->sizes();
+    self_sizes = self_->sizes();
     mat2_sizes = mat2_->sizes();
   }
 
-  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
-  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
+  int64_t m = self_sizes[transpose_result ? 1 : 0];
+  int64_t k = self_sizes[transpose_result ? 0 : 1];
   int64_t n = mat2_sizes[transpose_result ? 0 : 1];
-  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
+  int64_t self_ld = self_->stride((transpose_self == transpose_result) ? 1 : 0);
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
 
-  // addmm_out_cuda_impl(result, self, mat1, mat2, 1.0, 1.0);
+  // addmm_out_cuda_impl(result, self, self, mat2, 1.0, 1.0);
 
   at::cuda::blas::gemm_and_bias<int8_t, int32_t, nullptr_t>(
-      transpose_mat1,
+      transpose_self,
       transpose_mat2,
       m,
       n,
       k,
       1.0, //alpha.to<at::opmath_type<scalar_t>>(),
-      mat1_->data_ptr<int8_t>(),
-      mat1_ld,
+      self_->data_ptr<int8_t>(),
+      self_ld,
       mat2_->data_ptr<int8_t>(),
       mat2_ld,
       // self.data_ptr<scalar_t>(),
@@ -748,6 +749,12 @@ TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tenso
   TORCH_CHECK(false, "_int_addmm_out_cuda not compiled for this platform.");
 #endif
 
+  // return result;
+}
+
+Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  _int_mm_out_cuda(self, mat2, result);
   return result;
 }
 

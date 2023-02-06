@@ -101,9 +101,10 @@ def mm_args(mat1, mat2, *others, layout=None):
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
+        mat1_dtype = mat1.get_dtype()
         layout = FixedLayout(
             mat1.get_device(),
-            mat1.get_dtype(),
+            torch.int32 if mat1_dtype == torch.int8 else mat1_dtype,
             [*b, m, n],
         )
 
