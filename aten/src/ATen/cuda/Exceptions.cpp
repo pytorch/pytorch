@@ -43,7 +43,7 @@ C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
   return "<unknown>";
 }
 
-#ifdef defined(ROCM_VERSION) && ROCM_VERSION >= 50500
+#ifdef USE_ROCM
 C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error) {
   if (error == HIPBLAS_STATUS_SUCCESS) {
     return "HIPBLAS_STATUS_SUCCESS";
