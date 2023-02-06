@@ -1236,6 +1236,52 @@ size_t getExpandedVectorization(
   return max_supported_vector_size;
 }
 
+size_t getVectorizationFactor(
+    SchedulerRuntimeInfo& runtime_info,
+    TensorView* reference_tv,
+    HeuristicSummary* data_cache,
+    int break_point) {
+  auto vectorizable_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
+          data_cache, [&reference_tv]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getInputsOutputsWithInnerDim(
+                    reference_tv, true, true));
+          });
+
+  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
+
+  size_t vectorize_factor = std::numeric_limits<size_t>::max();
+
+  for (auto tv : vectorizable_inputs_outputs) {
+    const auto tv_vectorize_factor =
+        runtime_info.getInnerDimVectorizableWidth(tv);
+    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
+  }
+
+  if (vectorize_factor == std::numeric_limits<size_t>::max()) {
+    vectorize_factor = 1;
+  }
+
+  auto vectorize_maps_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
+          data_cache, [&reference_tv]() {
+            return std::make_unique<
+                std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>>(
+                vectorize_helper::getAllVectorizedMapsOf(reference_tv));
+          });
+
+  vectorize_factor = vectorize_helper::getExpandedVectorization(
+      vectorize_maps_entry.get(),
+      runtime_info,
+      vectorizable_inputs_outputs,
+      reference_tv,
+      break_point,
+      vectorize_factor);
+
+  return vectorize_factor;
+}
+
 } // namespace vectorize_helper
 } // namespace cuda
 } // namespace fuser

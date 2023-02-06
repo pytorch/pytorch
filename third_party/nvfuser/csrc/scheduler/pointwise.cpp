@@ -130,17 +130,6 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     n_elems *= elem_counts[ref_i];
   }
 
-  // Create maps to all inputs and outputs based on largest_out (starting at all
-  // positions of largest_out) to see how much of those dimensions map to inputs
-  // and outputs in a way that could be vectorized.
-  auto vectorize_maps_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
-          data_cache, [&largest_out]() {
-            return std::make_unique<
-                std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>>(
-                vectorize_helper::getAllVectorizedMapsOf(largest_out));
-          });
-
   // If zero dimensional or zero size, return default parameters
   if (TensorDomain::noReductions(
           TensorDomain::noBroadcasts(largest_out->domain()->domain()))
@@ -157,6 +146,14 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
       return std::make_unique<scheduler_utils::BroadcastMultipleInformation>();
     });
     broadcast_info.get();
+
+    auto vectorize_maps_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
+            data_cache, [&largest_out]() {
+              return std::make_unique<std::vector<
+                  vectorize_helper::ContiguousInnerDimensionsMapper>>(
+                  vectorize_helper::getAllVectorizedMapsOf(largest_out));
+            });
 
     // All cache entries that are expected to be generated in the pointwise
     // scheduler by registry.cpp::HeuristicSummary::validate() must be created
@@ -348,35 +345,13 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     }
   }
 
-  // Vectorizing innermost domains
-
   // Don't try to vectorize if it's not recommended
   params->unroll_factor = 1;
 
-  // Compute maximum vectorize factor that can be used
-  size_t vectorize_factor = max_unroll_factor;
-  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
-
-  for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor =
-        runtime_info.getInnerDimVectorizableWidth(tv);
-    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
-  }
-
-  auto expanded_vector_word_size = vectorize_helper::getExpandedVectorization(
-      vectorize_maps_entry.get(),
-      runtime_info,
-      vectorizable_inputs_outputs,
-      largest_out,
-      break_point,
-      vectorize_factor);
-
-  expanded_vector_word_size = std::min(
-      static_cast<size_t>(max_unroll_factor), expanded_vector_word_size);
-
-  if (expanded_vector_word_size > vectorize_factor) {
-    vectorize_factor = expanded_vector_word_size;
-  }
+  const auto vectorize_factor = std::min(
+      static_cast<size_t>(max_unroll_factor),
+      vectorize_helper::getVectorizationFactor(
+          runtime_info, largest_out, data_cache, break_point));
 
   if (vectorize_factor == 1) {
     params->vectorize = false;

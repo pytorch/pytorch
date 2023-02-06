@@ -923,16 +923,6 @@ std::shared_ptr<ReductionParams> getReductionHeuristics(
       !tv_inps.empty(),
       "Tried to schedule a fusion with no tensor inputs, currently not supported.");
 
-  auto vectorizable_inputs_outputs_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
-          data_cache, [&reduction_tv]() {
-            return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getInputsOutputsWithInnerDim(
-                    reduction_tv, true, true));
-          });
-
-  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
-
   auto unrollable_inputs_outputs_entry =
       HeuristicSummaryEntry<HeuristicCompileTime::UnrollableInputsAndOutputs>(
           data_cache, [&reduction_tv]() {
@@ -943,38 +933,11 @@ std::shared_ptr<ReductionParams> getReductionHeuristics(
 
   auto& unrollable_inputs_outputs = unrollable_inputs_outputs_entry.get();
 
-  // Create maps to all inputs and outputs based on largest_out (starting at all
-  // positions of largest_out) to see how much of those dimensions map to inputs
-  // and outputs in a way that could be vectorized.
-  auto vectorize_maps_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
-          data_cache, [&reduction_tv]() {
-            return std::make_unique<
-                std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>>(
-                vectorize_helper::getAllVectorizedMapsOf(reduction_tv));
-          });
-
-  // Vectorize as much as we can
-  size_t vectorize_factor = std::numeric_limits<size_t>::max();
-
-  for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor =
-        runtime_info.getInnerDimVectorizableWidth(tv);
-    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
-  }
-
-  if (vectorize_factor == std::numeric_limits<size_t>::max()) {
-    vectorize_factor = 1;
-  }
-
-  // Try expanding vectorization to contig merged domains
-  vectorize_factor = vectorize_helper::getExpandedVectorization(
-      vectorize_maps_entry.get(),
+  const auto vectorize_factor = vectorize_helper::getVectorizationFactor(
       runtime_info,
-      vectorizable_inputs_outputs,
       reduction_tv,
-      (int)(reduction_tv->nDims() - properties.inner_most_dimension_ndims),
-      vectorize_factor);
+      data_cache,
+      (int)(reduction_tv->nDims() - properties.inner_most_dimension_ndims));
 
   // Base max dtype and n_tensor_inputs on tensors that are vectorizable (i.e.
   // share inner dimension with data pattern we're looking at).

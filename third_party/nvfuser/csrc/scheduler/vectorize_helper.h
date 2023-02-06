@@ -17,6 +17,7 @@ namespace fuser {
 namespace cuda {
 
 class SchedulerRuntimeInfo;
+class HeuristicSummary;
 
 namespace vectorize_helper {
 
@@ -599,6 +600,12 @@ size_t getExpandedVectorization(
     TensorView* reference_tv,
     int break_point,
     size_t default_word_size);
+
+size_t getVectorizationFactor(
+    SchedulerRuntimeInfo& runtime_info,
+    TensorView* reference_tv,
+    HeuristicSummary* data_cache,
+    int break_point);
 
 } // namespace vectorize_helper
 } // namespace cuda
