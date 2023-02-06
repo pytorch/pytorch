@@ -544,6 +544,13 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
 
+    @property
+    def device(self):
+        if self.fake_mode.in_kernel_invocation:
+            return torch.device("meta")
+        else:
+            return self.fake_device
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors
@@ -765,6 +772,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
