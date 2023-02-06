@@ -37,8 +37,8 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
-    "method_to_operator", "hint_int",
+    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
+    "method_to_operator", "hint_int", "SYMPY_INTERP",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -107,25 +107,35 @@ def _handle_sym_dispatch(func, args, kwargs):
 def hint_int(a):
     if isinstance(a, torch.SymInt):
         return a.node.require_hint()
-    assert type(a) is int
+    assert type(a) is int, a
     return a
+
+def guard_scalar(a):
+    if isinstance(a, (SymBool, bool)):
+        return guard_bool(a)
+    elif isinstance(a, (SymInt, int)):
+        return guard_int(a)
+    elif isinstance(a, (SymFloat, float)):
+        return guard_float(a)
+    else:
+        raise AssertionError(f"unrecognized scalar {a}")
 
 def guard_bool(a):
     if isinstance(a, SymBool):
         return a.node.guard_bool("", 0)  # NB: uses Python backtrace
-    assert type(a) is bool
+    assert type(a) is bool, a
     return a
 
 def guard_int(a):
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
-    assert type(a) is int
+    assert type(a) is int, a
     return a
 
 def guard_float(a):
     if isinstance(a, SymFloat):
         return a.node.guard_float("", 0)  # NB: uses Python backtrace
-    assert isinstance(a, float)
+    assert isinstance(a, float), a
     return a
 
 # Drop in replacement for math.sqrt
@@ -561,6 +571,23 @@ def method_to_operator(method):
     else:
         op = getattr(operator, method_attr)
     return op
+
+SYMPY_INTERP = {
+    'Eq': operator.eq,
+    'Ne': operator.ne,
+    'Gt': operator.gt,
+    'Lt': operator.lt,
+    'Le': operator.le,
+    'Ge': operator.ge,
+    'Min': min,
+    'Max': max,
+    'Mod': operator.mod,
+    'FloorDiv': operator.floordiv,
+    'TrueDiv': operator.truediv,
+    'IsNonOverlappingAndDenseIndicator': is_non_overlapping_and_dense_indicator,
+    'floor': math.floor,
+    'ceiling': math.ceil,
+}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
