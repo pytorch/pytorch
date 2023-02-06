@@ -266,25 +266,26 @@ class BuiltinVariable(VariableTracker):
         # Special cases - lower precedence but still prefer these over constant folding
 
         # List-like addition (e.g. [1, 2] + [3, 4])
+        def tuple_add_handler(tx, a, b, options):
+            return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+
         list_like_addition_handlers = [
             # NB: Prefer the tuple-specific logic over base logic because of
             # some SizeVariable weirdness. Specifically, the tuple-specific logic
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
             (
+                (TupleVariable, TupleVariable),
+                tuple_add_handler,
+            ),
+            (
                 (TupleVariable, ConstantVariable),
-                lambda tx, a, b, options: TupleVariable(
-                    a.items + list(b.unpack_var_sequence(tx)), **options
-                ),
+                tuple_add_handler,
             ),
             (
                 (ConstantVariable, TupleVariable),
                 lambda tx, a, b, options: TupleVariable(
                     list(a.unpack_var_sequence(tx)) + b.items, **options
                 ),
-            ),
-            (
-                (TupleVariable, TupleVariable),
-                lambda tx, a, b, options: TupleVariable(a.items + b.items, **options),
             ),
             (
                 (BaseListVariable, BaseListVariable),
@@ -307,9 +308,6 @@ class BuiltinVariable(VariableTracker):
                 ),
             )
 
-        def tuple_iadd_handler(tx, a, b, options):
-            return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
-
         list_like_iadd_handlers = [
             (
                 (ListVariable, VariableTracker),
@@ -317,11 +315,11 @@ class BuiltinVariable(VariableTracker):
             ),
             (
                 (TupleVariable, TupleVariable),
-                tuple_iadd_handler,
+                tuple_add_handler,
             ),
             (
                 (TupleVariable, ConstantVariable),
-                tuple_iadd_handler,
+                tuple_add_handler,
             ),
         ]
         op_handlers[operator.iadd].extend(list_like_iadd_handlers)
