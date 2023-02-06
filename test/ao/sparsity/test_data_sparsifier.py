@@ -213,7 +213,7 @@ class _BaseDataSparsiferTestCase(TestCase):
             weight = sparsifier._extract_weight(data)
             weight.data = weight + torch.randn(*weight.shape)
             contained_data = sparsifier.get_data(name=name)
-            assert id(weight.data) == id(contained_data.data)
+            assert weight.data.storage().data_ptr() == contained_data.data.storage().data_ptr()
             assert torch.all(contained_data == weight)
 
 
