@@ -1093,14 +1093,11 @@ def skipIfRocmVersionLessThan(version=None):
     return dec_fn
 
 # Temporary function to simplify adding support to 3.11
-def skipIfPython311(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if sys.version_info < (3, 11):
-            fn(*args, **kwargs)
-        else:
-            raise unittest.SkipTest("Test does not run on python 3.11")
-    return wrapper
+def xfailIfPython311(fn):
+    if sys.version_info < (3, 11):
+        return fn
+    else:
+        return unittest.expectedFailure(fn)
 
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)

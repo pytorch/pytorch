@@ -30,7 +30,7 @@ from torch.utils._traceback import report_compile_source_on_error
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, skipIfPython311
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, xfailIfPython311
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -884,7 +884,7 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
-    @skipIfPython311
+    @xfailIfPython311
     def test_basic(self):
         source = '''\
 def f(x):
