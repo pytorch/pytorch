@@ -34,6 +34,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
+
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
     r"""
@@ -49,11 +50,22 @@ def use_deterministic_algorithims(mode: bool, warn_only: bool):
         raise err
     finally:
         torch.use_deterministic_algorithms(previous_mode, warn_only=previous_warn_only)
+
+
 # Found in torch/testing/_comparison.py
 default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
 
 isSM86Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 6)
+
+
+def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
+    deviation = true_value - computed_value
+    deviation = torch.abs(deviation / true_value)
+    # Fill in the nans with the default rtol
+    torch.nan_to_num_(deviation, nan=default_rtol[computed_value.dtype])
+    return deviation.max().item()
+
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -448,7 +460,8 @@ class TestTransformers(NNTestCase):
             # test case 3, multiple layers with norm
             # d_model = 4
             norm = nn.LayerNorm(4)
-            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=enable_nested_tensor).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm,
+                                          enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -466,7 +479,8 @@ class TestTransformers(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=enable_nested_tensor).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm,
+                                          enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -602,7 +616,6 @@ class TestTransformers(NNTestCase):
                 )  # 0 == not relu or gelu
 
                 norm_first = one_encoder_layer.norm_first
-
 
                 # TODO: make this a bit less janky. but for now we initialize with an empty tensor.
                 if(not is_incremental_decoding):
@@ -1013,10 +1026,8 @@ class TestTransformers(NNTestCase):
         outputs = encoder(inputs, mask=causal_mask)
         mock_layer.assert_called_with(ANY, src_mask=ANY, is_causal=True, src_key_padding_mask=ANY)
 
-
         # check expected numerical values with all kernels
         self.is_causal_kernels(["math"], device)
-
 
     def is_causal_kernels(self, kernels, device):
         def ones_tensor(*shape):
@@ -1049,6 +1060,7 @@ class TestTransformers(NNTestCase):
     def test_is_causal_gpu(self):
         device = 'cuda'
         self.is_causal_kernels(["math", "meff"], device)
+
 
 class TestSDPA(NNTestCase):
     """ Used to test the functionality of scaled_dot_product_attention
@@ -1294,7 +1306,8 @@ class TestSDPA(NNTestCase):
     def test_sdp_math_gradcheck(self, contiguous_inputs: bool):
 
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
-        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda",
+                              dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
         query, key, value = qkv.chunk(3, dim=-1)
@@ -1319,7 +1332,8 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     def test_sdp_mem_efficient_grad_against_math(self, contiguous_inputs: bool, is_causal: bool):
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
-        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda",
+                              dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
         qkv_lp = qkv.detach().clone().to(torch.float32).requires_grad_()
@@ -1366,7 +1380,8 @@ class TestSDPA(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_sdp_flash_attention_grad_against_math(self, contiguous_inputs: bool, is_causal: bool, dtype: torch.dtype):
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
-        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda",
+                              dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
         qkv_lp = qkv.detach().clone().to(dtype).requires_grad_()
@@ -1648,32 +1663,34 @@ class TestSDPA(NNTestCase):
 
         # [Note] Fused Tolerances
         # Establish the numerical error between the "true" high precision math output
-        # and the low precision math reference. We use this reference for the rtol
-        # And we use the default atol for the low precision type.
-        # We then provide a fudge factor of 2 and 4 for gradients respectively to account
+        # and the low precision math reference. We use this reference for the atol
+        # And we use the default rtol for the low precision type.
+        # We then provide a fudge factor for gradients respectively to account
         # for the use of the fused kernel rather than the eager implemntation.
-        output_ref_tolerance = max(torch.abs(out_ref.to(out_lp_ref.dtype) - out_lp_ref).max().item(),
-                                   default_atol[out.dtype])
+        out_deviation = out_ref - out_lp_ref
+        output_ref_atol = max(torch.abs(out_deviation).max().item(), default_atol[out.dtype])
+        output_ref_rtol = max(get_rtol(out_ref, out_lp_ref), default_rtol[out.dtype])
 
-        # TODO: Investigate why grad_q needs a larger atol
-        grad_q_ref_tolerance = max(torch.abs(query_ref.grad.to(query_ref_lp.dtype) - query_ref_lp.grad).max().item(),
-                                   3 * default_atol[out.dtype])
+        grad_q_deviation = query_ref.grad - query_ref_lp.grad
+        grad_q_ref_atol = max(torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
+        grad_q_ref_rtol = max(get_rtol(query_ref.grad, query_ref_lp.grad), default_rtol[out.dtype])
 
-        grad_k_ref_tolerance = max(torch.abs(key_ref.to(key_ref_lp.dtype) - key_ref_lp.grad).max().item(),
-                                   default_atol[out.dtype])
-        grad_v_ref_tolerance = max(torch.abs(value_ref.to(value_ref_lp.dtype) - value_ref_lp.grad).max().item(),
-                                   default_atol[out.dtype])
+        # TODO: Investigate why grad_k needs larger tolerances
+        grad_k_deviation = key_ref.grad - key_ref_lp.grad
+        grad_k_ref_atol = max(7 * torch.abs(grad_k_deviation).max().item(), 7 * default_atol[out.dtype])
+        grad_k_ref_rtol = max(7 * get_rtol(key_ref.grad, key_ref_lp.grad), 7 * default_rtol[out.dtype])
 
-        # TODO: Investigate why 10*rtol is needed
-        rtol = 10 * default_rtol[out.dtype]
+        grad_v_deviation = value_ref.grad - value_ref_lp.grad
+        grad_v_ref_atol = max(torch.abs(grad_v_deviation).max().item(), default_atol[out.dtype])
+        grad_v_ref_rtol = max(get_rtol(value_ref.grad, value_ref_lp.grad), default_rtol[out.dtype])
 
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_tolerance, rtol=rtol)
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_tolerance, rtol=rtol)
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
         self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_tolerance, rtol=rtol)
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_tolerance, rtol=rtol)
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
     @parametrize("batch_size", [1, 8])
@@ -1742,28 +1759,30 @@ class TestSDPA(NNTestCase):
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         # See [Note] Fused Tolerances above
-        output_ref_tolerance = max(torch.abs(out_ref.to(out_lp_ref.dtype) - out_lp_ref).max().item(),
-                                   default_atol[out.dtype])
+        out_deviation = out_ref - out_lp_ref
+        output_ref_atol = max(torch.abs(out_deviation).max().item(), default_atol[out.dtype])
+        output_ref_rtol = max(get_rtol(out_ref, out_lp_ref), default_rtol[out.dtype])
 
-        # TODO: Investigate why grad_q needs a larger atol
-        grad_q_ref_tolerance = max(torch.abs(query_ref.grad.to(query_ref_lp.dtype) - query_ref_lp.grad).max().item(),
-                                   4 * default_atol[out.dtype])
+        # TODO: Investigate why grad_q needs larger tolerances
+        grad_q_deviation = query_ref.grad - query_ref_lp.grad
+        grad_q_ref_atol = max(2 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
+        grad_q_ref_rtol = max(get_rtol(query_ref.grad, query_ref_lp.grad), default_rtol[out.dtype])
 
-        grad_k_ref_tolerance = max(torch.abs(key_ref.to(key_ref_lp.dtype) - key_ref_lp.grad).max().item(),
-                                   default_atol[out.dtype])
-        grad_v_ref_tolerance = max(torch.abs(value_ref.to(value_ref_lp.dtype) - value_ref_lp.grad).max().item(),
-                                   default_atol[out.dtype])
-        # TODO: Investigate why 10*rtol is needed at least there is a few failures where 1 element
-        # is wrong and the 10 is needed. Maybe just distribution in larger tensors?
-        rtol = 10 * default_rtol[out.dtype]
+        grad_k_deviation = key_ref.grad - key_ref_lp.grad
+        grad_k_ref_atol = max(torch.abs(grad_k_deviation).max().item(), default_atol[out.dtype])
+        grad_k_ref_rtol = max(get_rtol(key_ref.grad, key_ref_lp.grad), default_rtol[out.dtype])
 
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_tolerance, rtol=rtol)
+        grad_v_deviation = value_ref.grad - value_ref_lp.grad
+        grad_v_ref_atol = max(torch.abs(grad_v_deviation).max().item(), default_atol[out.dtype])
+        grad_v_ref_rtol = max(get_rtol(value_ref.grad, value_ref_lp.grad), default_rtol[out.dtype])
+
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_tolerance, rtol=rtol)
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
         self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_tolerance, rtol=rtol)
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_tolerance, rtol=rtol)
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
