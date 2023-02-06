@@ -542,9 +542,9 @@ class TestNumericSuiteEager(QuantizationTestCase):
         float_model.to('cpu')
         float_model.eval()
         float_model.fuse_model()
-        float_model.qconfig = torch.quantization.default_qconfig
+        float_model.qconfig = torch.ao.quantization.default_qconfig
         img_data = [(torch.rand(2, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        qmodel = quantize(float_model, torch.quantization.default_eval_fn, [img_data], inplace=False)
+        qmodel = quantize(float_model, torch.ao.quantization.default_eval_fn, [img_data], inplace=False)
 
         wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
 
