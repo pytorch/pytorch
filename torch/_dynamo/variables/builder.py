@@ -676,17 +676,20 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
+        tensor_proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
+            proxy=tensor_proxy,
             example_value=value,
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
         )
+        assert "tensor_dict" not in tensor_proxy.node.meta
+        tensor_proxy.node.meta["tensor_dict"] = value.__dict__
 
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
@@ -878,8 +881,6 @@ def wrap_fx_proxy_cls(
         specialized_props["specialized_value"] = specialized_value
 
         options.update(specialized_props)
-        assert "tensor_dict" not in proxy.node.meta
-        proxy.node.meta["tensor_dict"] = example_value.__dict__
         return target_cls(proxy, **options)
     elif (
         hasattr(proxy.node.target, "__name__")
@@ -1004,9 +1005,6 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
-        for k, v in e.__dict__.items():
-            if k not in fake_e.__dict__:
-                fake_e.__dict__[k] = v
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e
