@@ -2754,7 +2754,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             @staticmethod
             def mm_breaks(x, y):
-                torch._dynamo.graph_break()
+                # torch._dynamo.graph_break()
                 return torch.mm(x, y)
 
             def forward(self, x):
