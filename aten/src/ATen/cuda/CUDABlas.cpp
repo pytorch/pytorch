@@ -574,7 +574,7 @@ namespace {
 // hipify maps hipDataType -> hipDataType, but hipblaslt expects hipblasDatatype_t
 #define hipDataType hipblasDatatype_t
 // hipblaslt returns hipblasStatus_t, but hipify of TORCH_CUDABLAS_CHECK expects rocblas_status
-#define FAKE_TORCH_CUDABLAS_CHECK(EXPR)                         \
+#define WORKAROUND_TORCH_CUDABLAS_CHECK(EXPR)                         \
   do {                                                          \
     hipblasStatus_t __err = EXPR;                               \
     TORCH_CHECK(__err == HIPBLAS_STATUS_SUCCESS,                \
@@ -590,7 +590,7 @@ namespace {
 // hipify maps rocblas_status to rocblas_status, but we need hipblasStatus_t.
 #define LT_RET_TYPE hipblasStatus_t
 #else
-#define FAKE_TORCH_CUDABLAS_CHECK(EXPR) TORCH_CUDABLAS_CHECK
+#define WORKAROUND_TORCH_CUDABLAS_CHECK(EXPR) TORCH_CUDABLAS_CHECK
 #define LT_RET_TYPE cublasSt
 #endif
 
@@ -602,7 +602,7 @@ template <typename T, LT_RET_TYPE (*destructor)(T*)>
 struct CuBlasLtDeleter {
   void operator()(T* x) {
     if (x != nullptr) {
-      FAKE_TORCH_CUDABLAS_CHECK(destructor(x));
+      WORKAROUND_TORCH_CUDABLAS_CHECK(destructor(x));
     }
   }
 };
@@ -629,7 +629,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
       cublasComputeType_t compute_type,
       cudaDataType_t scale_type) {
     cublasLtMatmulDesc_t raw_descriptor = nullptr;
-    FAKE_TORCH_CUDABLAS_CHECK(
+    WORKAROUND_TORCH_CUDABLAS_CHECK(
         cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
     descriptor_.reset(raw_descriptor);
   }
@@ -645,7 +645,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
       uint64_t cols,
       int64_t ld) {
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
-    FAKE_TORCH_CUDABLAS_CHECK(
+    WORKAROUND_TORCH_CUDABLAS_CHECK(
         cublasLtMatrixLayoutCreate(&raw_descriptor, type, rows, cols, ld));
     descriptor_.reset(raw_descriptor);
   }
@@ -657,7 +657,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
  public:
   CuBlasLtMatmulPreference() {
     cublasLtMatmulPreference_t raw_descriptor = nullptr;
-    FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
+    WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
 };
@@ -704,13 +704,13 @@ void gemm_and_bias(
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),
       CUBLASLT_MATMUL_DESC_TRANSA,
       &transa,
       sizeof(transa)));
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),
       CUBLASLT_MATMUL_DESC_TRANSB,
       &transb,
@@ -723,12 +723,12 @@ void gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),
       CUBLASLT_MATMUL_DESC_EPILOGUE,
       &epilogue,
       sizeof(epilogue)));
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),
       CUBLASLT_MATMUL_DESC_BIAS_POINTER,
       &bias,
@@ -744,7 +744,7 @@ void gemm_and_bias(
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
   size_t workspaceSize = 1024 * 1024;
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
       &workspaceSize,
@@ -758,7 +758,7 @@ void gemm_and_bias(
   int returnedResult = 0;
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
       Adesc.descriptor(),
@@ -773,7 +773,7 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  FAKE_TORCH_CUDABLAS_CHECK(cublasLtMatmul(
+  WORKAROUND_TORCH_CUDABLAS_CHECK(cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
       &alpha_val,
