@@ -1618,6 +1618,29 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         Returns a ``(output, jvp_fn)`` tuple containing the output of ``func``
         applied to ``primals`` and a function that computes the jvp of
         ``func`` evaluated at ``primals``.
+
+    linearize is useful if jvp is to be computed multiple times at ``primals``. However,
+    to achieve this, linearize saves intermediate computation and has higher memory requrements
+    than directly applying `jvp`. So, if all the ``tangents`` are known, it maybe more efficient
+    to compute vmap(jvp) instead of using linearize.
+
+    .. note::
+        linearize evaluates ``func`` twice. Please file an issue for an implementation
+        with a single evaluation.
+
+    Example::
+        >>> import torch
+        >>> from torch.func import linearize
+        >>> def fn(x):
+        ...     return x.sin()
+        ...
+        >>> output, jvp_fn = linearize(fn, torch.zeros(3,0))
+        >>> jvp_fn(torch.ones(3, 3))
+        tensor([[1., 1., 1.],
+                [1., 1., 1.],
+                [1., 1., 1.]])
+        >>>
+
     '''
     # Note: We evaluate `fn` twice.
     # Once for returning the output and other while
