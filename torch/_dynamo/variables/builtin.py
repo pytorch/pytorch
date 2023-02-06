@@ -166,6 +166,27 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
+    def _inplace_binops():
+        fns = {
+            operator.ipow: "__ipow__",
+            operator.imul: "__imul__",
+            operator.imatmul: "__imatmul__",
+            operator.ifloordiv: "__ifloordiv__",
+            operator.itruediv: "__itruediv__",
+            operator.imod: "__imod__",
+            operator.iadd: "__iadd__",
+            operator.iconcat: "__iconcat__",
+            operator.isub: "__isub__",
+            operator.ilshift: "__ilshift__",
+            operator.irshift: "__irshift__",
+            operator.iand: "__iand__",
+            operator.ixor: "__ixor__",
+            operator.ior: "__ior__",
+        }
+        return fns
+
+    @staticmethod
+    @functools.lru_cache(None)
     def _binop_handlers():
         # Multiple dispatch mechanism defining custom binop behavior for certain type
         # combinations. Handlers are attempted in order, and will be used if the type checks
@@ -174,34 +195,49 @@ class BuiltinVariable(VariableTracker):
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers = {}
-        for (
-            op,
-            (forward_name, reverse_name),
-        ) in BuiltinVariable._reversible_binops().items():
+        for (op, magic_method_names) in itertools.chain(
+            BuiltinVariable._inplace_binops().items(),
+            BuiltinVariable._reversible_binops().items(),
+        ):
             handlers = []
 
             # User-defined args (highest precedence)
-            def user_defined_handler(
-                tx, a, b, options, forward_name=forward_name, reverse_name=reverse_name
-            ):
-                # Manually handle reversing logic if needed (e.g. call __radd__)
+            if isinstance(magic_method_names, tuple):
+                # Reversible binary ops have forward / backward magic methods
+                forward_name, reverse_name = magic_method_names
 
-                # TODO: If we expand this to handle tensor args, we need to manually
-                # handle cases like this:
-                #
-                # class A(int):
-                #     def __radd__(self, other):
-                #         print("woof")
-                # torch.randn(3) + A(3)
-                #
-                # In this example, A.__radd__() is not called -> nothing is printed, because
-                # Tensor.__add__ only does a subtype test against int and will ignore the subclass.
-                # To be fully correct, we should not call A.__radd__() here, and there may be
-                # other cases to reason about and add exceptions for.
-                if isinstance(a, UserDefinedVariable):
+                def user_defined_handler(
+                    tx,
+                    a,
+                    b,
+                    options,
+                    forward_name=forward_name,
+                    reverse_name=reverse_name,
+                ):
+                    # Manually handle reversing logic if needed (e.g. call __radd__)
+
+                    # TODO: If we expand this to handle tensor args, we need to manually
+                    # handle cases like this:
+                    #
+                    # class A(int):
+                    #     def __radd__(self, other):
+                    #         print("woof")
+                    # torch.randn(3) + A(3)
+                    #
+                    # In this example, A.__radd__() is not called -> nothing is printed, because
+                    # Tensor.__add__ only does a subtype test against int, ignoring the subclass.
+                    # To be fully correct, we should not call A.__radd__() here, and there may be
+                    # other cases to reason about and add exceptions for.
+                    if isinstance(a, UserDefinedVariable):
+                        return a.call_method(tx, forward_name, [b], {})
+                    else:
+                        return b.call_method(tx, reverse_name, [a], {})
+
+            else:
+                forward_name = magic_method_names
+
+                def user_defined_handler(tx, a, b, options, forward_name=forward_name):
                     return a.call_method(tx, forward_name, [b], {})
-                else:
-                    return b.call_method(tx, reverse_name, [a], {})
 
             handlers.append(
                 ((UserDefinedVariable, VariableTracker), user_defined_handler)
@@ -230,15 +266,20 @@ class BuiltinVariable(VariableTracker):
         # Special cases - lower precedence but still prefer these over constant folding
 
         # List-like addition (e.g. [1, 2] + [3, 4])
+        def tuple_add_handler(tx, a, b, options):
+            return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+
         list_like_addition_handlers = [
             # NB: Prefer the tuple-specific logic over base logic because of
             # some SizeVariable weirdness. Specifically, the tuple-specific logic
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
             (
+                (TupleVariable, TupleVariable),
+                tuple_add_handler,
+            ),
+            (
                 (TupleVariable, ConstantVariable),
-                lambda tx, a, b, options: TupleVariable(
-                    a.items + list(b.unpack_var_sequence(tx)), **options
-                ),
+                tuple_add_handler,
             ),
             (
                 (ConstantVariable, TupleVariable),
@@ -247,15 +288,41 @@ class BuiltinVariable(VariableTracker):
                 ),
             ),
             (
-                (TupleVariable, TupleVariable),
-                lambda tx, a, b, options: TupleVariable(a.items + b.items, **options),
-            ),
-            (
                 (BaseListVariable, BaseListVariable),
                 lambda tx, a, b, options: type(a)(a.items + b.items, **options),
             ),
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
+
+        def list_iadd_handler(tx, a, b, options):
+            if not a.mutable_local or not b.has_unpack_var_sequence(tx):
+                # Handler doesn't apply
+                return None
+
+            return tx.replace_all(
+                a,
+                ListVariable(
+                    list(a.items) + list(b.unpack_var_sequence(tx)),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
+
+        list_like_iadd_handlers = [
+            (
+                (ListVariable, VariableTracker),
+                list_iadd_handler,
+            ),
+            (
+                (TupleVariable, TupleVariable),
+                tuple_add_handler,
+            ),
+            (
+                (TupleVariable, ConstantVariable),
+                tuple_add_handler,
+            ),
+        ]
+        op_handlers[operator.iadd].extend(list_like_iadd_handlers)
 
         # List-like expansion (e.g. [1, 2, 3] * 3)
         def expand_list_like(tx, lst, const, options):
@@ -466,10 +533,9 @@ class BuiltinVariable(VariableTracker):
             )
             return out
 
-        # Handle functions that are reversible (e.g. __add__ / __radd__)
+        # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
-        reversible_binops = self._reversible_binops()
-        if self.fn in reversible_binops:
+        if self.fn in self._reversible_binops() or self.fn in self._inplace_binops():
             assert len(kwargs) == 0 and len(args) == 2
 
             # Try to find a handler for the arg types; otherwise, fall through to constant handler
@@ -477,7 +543,9 @@ class BuiltinVariable(VariableTracker):
                 self.fn, args[0], args[1]
             )
             if binop_handler:
-                return binop_handler(tx, args[0], args[1], options)
+                res = binop_handler(tx, args[0], args[1], options)
+                if res is not None:
+                    return res
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
@@ -695,9 +763,6 @@ class BuiltinVariable(VariableTracker):
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
-
-    def call_iadd(self, tx, *args, **kwargs):
-        return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
 
     def call_getitem(self, tx, *args, **kwargs):
         if self.unspec_python_args(*args, **kwargs):
