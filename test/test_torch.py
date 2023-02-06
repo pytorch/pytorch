@@ -1527,7 +1527,7 @@ else:
 
     # warn_only=False correctly raises RuntimeError: put_ does not have a deterministic implementation
     # warn_only=True logs warning from the FallbackKernel: torch.ops.aten.put_.default, instead of as UserWarning:
-    # [W Context.cpp:77] Warning: put_ does not have a deterministic implementation
+    # [W Context.cpp:%(lineno)] Warning: put_ does not have a deterministic implementation
     @skipIfTorchInductor("warning is logged from the FallbackKernel: torch.ops.aten.put_.default when warn_only=True")
     def test_nondeterministic_alert_put_accumulate(self, device):
         a = torch.randn(10, device=device)
