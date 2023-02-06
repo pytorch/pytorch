@@ -21,10 +21,14 @@ SymTypes = (SymInt, SymFloat, SymBool)
 
 log = logging.getLogger(__name__)
 
+class GuardOnDataDependentSymNode(RuntimeError):
+    pass
+
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
+    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -33,7 +37,8 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "FloorDiv", "guard_int", "wrap_node",
+    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
+    "method_to_operator",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -99,10 +104,22 @@ def _handle_sym_dispatch(func, args, kwargs):
     finally:
         SYM_FUNCTION_MODE = mode
 
+def guard_bool(a):
+    if isinstance(a, SymBool):
+        return a.node.guard_bool("", 0)  # NB: uses Python backtrace
+    assert type(a) is bool
+    return a
+
 def guard_int(a):
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
     assert type(a) is int
+    return a
+
+def guard_float(a):
+    if isinstance(a, SymFloat):
+        return a.node.guard_float("", 0)  # NB: uses Python backtrace
+    assert isinstance(a, float)
     return a
 
 # Drop in replacement for math.sqrt
@@ -215,31 +232,69 @@ class SymNode:
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
-        raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
+        if len(self.expr.free_symbols) == 0:
+            return int(self.expr)
+        raise RuntimeError(f"Trying to extract a concrete int out of a symbolic int {self.expr}")
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return int(self.shape_env.evaluate_expr(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return int(r)
+        except Exception:
+            log.warn(f"Failed to convert to int: {r}")
+            raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return float(self.shape_env.evaluate_expr(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return float(r)
+        except Exception:
+            log.warn(f"Failed to convert to float: {r}")
+            raise
 
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         # TODO: why is the replace needed here?
-        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+        r = self.shape_env.evaluate_expr(self.shape_env.replace(self.expr))
+        try:
+            return bool(r)
+        except Exception:
+            log.warn(f"Failed to convert to bool: {r}")
+            raise
 
     def bool_(self):
-        # TODO: why is the replace needed here?
-        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+        return self.guard_bool("", 0)
 
 
 if HAS_SYMPY:
+    # Overloaded to be compatible with regular Python.
+    # https://github.com/pytorch/pytorch/issues/90900
+    class Pow(sympy.Function):
+        @classmethod
+        def eval(cls, base, exp):
+            if exp.is_zero:
+                return sympy.Integer(1)
+            elif base.is_zero and exp < 0:
+                raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
+            else:
+                return base ** exp
+
+    # Overloaded to be compatible with regular Python.
+    # https://github.com/pytorch/pytorch/issues/90900
+    class TrueDiv(sympy.Function):
+        @classmethod
+        def eval(cls, base, divisor):
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+            else:
+                return base / divisor
+
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -249,23 +304,67 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
-        def _sympystr(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer.parenthesize(lhs, self.precedence)
-            rhs_str = printer.parenthesize(rhs, self.precedence)
-            return f"{lhs_str}//{rhs_str}"
+        # Default return type for SymPy assumptions.
+        # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+        is_real = True
 
+        @property
+        def base(self):
+            return self.args[0]
+
+        @property
+        def divisor(self):
+            return self.args[1]
+
+        def _sympystr(self, printer):
+            base = printer.parenthesize(self.base, self.precedence)
+            divisor = printer.parenthesize(self.divisor, self.precedence)
+            return f"{base}//{divisor}"
+
+        # SymPy assumptions based on argument types.
+        def _eval_is_real(self):
+            return fuzzy_or([self.base.is_real, self.divisor.is_real])
+
+        def _eval_is_integer(self):
+            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
+
+        # Automatic evaluation.
+        # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
-            if divisor == 1:
+            def check_supported_type(x):
+                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                    raise TypeError(
+                        f"unsupported operand type(s) for //: "
+                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                        f", expected integer or real")
+
+            check_supported_type(base)
+            check_supported_type(divisor)
+
+            # We don't provide the same error message as in Python because SymPy
+            # makes it difficult to check the types.
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+
+            if base.is_zero:
+                return sympy.S.Zero
+            if base.is_integer and divisor == 1:
                 return base
+            if base.is_real and divisor == 1:
+                return sympy.floor(base)
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+                return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
+
+            if isinstance(base, sympy.Add):
+                for a in base.args:
+                    gcd = sympy.gcd(a, divisor)
+                    if gcd == divisor:
+                        return FloorDiv(base - a, divisor) + a / gcd
 
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
@@ -273,12 +372,23 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
+    # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
+    # Because we do not have the ability to guard on the stride permutation
+    # at the moment, it is hard to make further inferences when this is true,
+    # as although we know the tensor is contiguous in *some* layout, we don't
+    # know which one (however, you could, for example, make the inference that
+    # reshaping this to a 1D tensor can be guard-free.)
     class IsNonOverlappingAndDenseIndicator(sympy.Function):
         is_integer = True
 
         @classmethod
         def eval(cls, *args):
             assert len(args) % 2 == 0
+            # TODO: it is possible to make progress evaluating this guard
+            # even if not all of the inputs are known.  For example, a 2D
+            # tensor with non-0/1 sizes but strides (0, 1) is definitely
+            # false, because we know its numel > 1 but it's broadcasted
+            # in dim 0.
             if all(isinstance(a, sympy.Integer) for a in args):
                 dim = len(args) // 2
                 sizes = args[0:dim]
@@ -289,9 +399,23 @@ if HAS_SYMPY:
                 ))
             return None
 
+# TODO: This is hotpath but manually computed.  We can in fact short circuit
+# this entirely if we have the input tensor by simply testing the appropriate
+# property on the tensor
+def is_non_overlapping_and_dense_indicator(*args):
+    dim = len(args) // 2
+    sizes = args[0:dim]
+    strides = args[dim:]
+    return int(eval_is_non_overlapping_and_dense(sizes, strides))
+
+@lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
-        return sympy.expand(r)
+        try:
+            return sympy.expand(r)
+        except RecursionError:
+            log.warning(f"RecursionError in sympy.expand({r})")
+            return r
     else:
         return r
 
@@ -301,10 +425,10 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
-    'pow': lambda a, b: a ** b,
+    'pow': lambda a, b: Pow(a, b),
     'and': lambda a, b: a & b,
     'or': lambda a, b: a | b,
-    'truediv': lambda a, b: a / b,
+    'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
@@ -389,7 +513,35 @@ magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
-always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
+def method_to_operator(method):
+    if method in magic_methods_on_operator_with_trailing_underscore:
+        method_attr = f"{method}_"
+    else:
+        method_attr = method
+    if method in magic_methods_on_submodule:
+        op = getattr(torch.fx.experimental.symbolic_shapes, method_attr)
+    elif method in magic_methods_on_math:
+        op = getattr(math, method_attr)
+    else:
+        op = getattr(operator, method_attr)
+    return op
+
+SYMPY_INTERP = {
+    'Eq': operator.eq,
+    'Ne': operator.ne,
+    'Gt': operator.gt,
+    'Lt': operator.lt,
+    'Le': operator.le,
+    'Ge': operator.ge,
+    'Min': min,
+    'Max': max,
+    'Mod': operator.mod,
+    'FloorDiv': operator.floordiv,
+    'TrueDiv': operator.truediv,
+    'IsNonOverlappingAndDenseIndicator': is_non_overlapping_and_dense_indicator,
+}
+
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
 
@@ -415,11 +567,7 @@ def _make_node_magic(method, func):
         method_attr = method
 
     def binary_magic_impl(self, other):
-        if method in magic_methods_on_submodule:
-            op = getattr(sys.modules[__name__], method_attr)
-        else:
-            assert method not in magic_methods_on_math
-            op = getattr(operator, method_attr)
+        op = method_to_operator(method)
         if SYM_FUNCTION_MODE:
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, SymTypes), type(r)
@@ -436,10 +584,19 @@ def _make_node_magic(method, func):
             raise
         out = safe_expand(out)
         pytype: Type
+        # This is not strictly correct. In Python, a**b may return complex when
+        # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
+        # returns a float while both arguments are ints: 2**(-1). Also, max and
+        # min do not type promote. To avoid having data-dependent control flow
+        # here, we just set the type to float if one of the args is a float. In
+        # case of a type mismatch, we assume that it will be detected during
+        # evaluation.
         if method in always_float_magic_methods:
             pytype = float
         elif method in always_bool_magic_methods:
             pytype = bool
+        elif self.pytype is float or other.pytype is float:
+            pytype = float
         else:
             pytype = self.pytype
 
@@ -447,12 +604,7 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in magic_methods_on_math:
-                op = getattr(math, method_attr)
-            elif method in magic_methods_on_submodule:
-                op = getattr(sys.modules[__name__], method_attr)
-            else:
-                op = getattr(operator, method_attr)
+            op = method_to_operator(method)
             r = _handle_sym_dispatch(op, (wrap_node(self),), {})
             assert isinstance(r, SymTypes), type(r)
             return r.node
@@ -608,6 +760,8 @@ if HAS_SYMPY:
             return self.source_ref(self.symbol_to_source[expr][0])
 
 
+TLS = threading.local()
+
 
 class ShapeEnv(object):
     def __init__(self):
@@ -623,20 +777,19 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
-        self.tls = threading.local()
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
 
     def _suppress_guards_tls(self):
-        return getattr(self.tls, "suppress_guards", False)
+        return getattr(TLS, "suppress_guards", False)
 
     @contextmanager
     def suppress_guards(self):
-        self.tls.suppress_guards = True
+        TLS.suppress_guards = True
         try:
             yield
         finally:
-            self.tls.suppress_guards = False
+            TLS.suppress_guards = False
 
     def _get_key(self):
         """
@@ -762,13 +915,22 @@ class ShapeEnv(object):
         )
         return self.val_to_var[val]
 
-    # Generates a Python string which, when evaluated in a context that
+    # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
-    # on if the guards evaluated to True or not.  Primarily used by Dynamo,
+    # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()):
+    #
+    # For convenience in testing, a source is allowed to be a str,
+    # in which case we will assume it is a LocalSource
+    #
+    # simplified lets you omit duck sizing, equality and 0/1 guards.
+    # This is useful for testing when you don't care about the boilerplate
+    # guards, and it may be helpful for user output too (be careful though;
+    # some equality guards are nontrivial!  It would be nice to get simplified
+    # output to print them too)
+    def produce_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name(), *, simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -861,6 +1023,9 @@ class ShapeEnv(object):
                 input_guards.append((source, sympy.Integer(val)))
 
         for t, source in zip(placeholders, sources):
+            if isinstance(source, str):
+                from torch._dynamo.source import LocalSource
+                source = LocalSource(source)
             assert isinstance(source, Source)
             if t is None:
                 continue
@@ -874,21 +1039,23 @@ class ShapeEnv(object):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
+        exprs = []
+
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
-        exprs = []
-        for source, expr in input_guards:
-            # Small optimization
-            if (
-                isinstance(expr, Symbol) and
-                expr in symbol_to_source and
-                source == symbol_to_source[expr][0]
-            ):
-                continue
-            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
-            exprs.append(f"{source_ref(source)} == {sexpr}")
+        if not simplified:
+            for source, expr in input_guards:
+                # Small optimization
+                if (
+                    isinstance(expr, Symbol) and
+                    expr in symbol_to_source and
+                    source == symbol_to_source[expr][0]
+                ):
+                    continue
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -903,22 +1070,23 @@ class ShapeEnv(object):
                 raise
 
         # 3. Every symbol must not be equal to 0/1
-        for sources in symbol_to_source.values():
-            assert sources
-            # We must assert that each symbol is not zero or one, as we make
-            # negative inferences on shape variables
-            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+        if not simplified:
+            for sources in symbol_to_source.values():
+                assert sources
+                # We must assert that each symbol is not zero or one, as we make
+                # negative inferences on shape variables
+                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
-        if exprs:
-            return " and ".join(exprs)
-        else:
-            return "True"
+        return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
-        return eval(code, {}, dict(zip(arg_names, args)))
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        if guards:
+            code = " and ".join(guards)
+            return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
+        return True
 
     def bind_symbols(self, placeholders, args):
         # Given a paired list of placeholders (fake tensors with
@@ -1031,7 +1199,7 @@ class ShapeEnv(object):
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
                 if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = base / divisor
+                    div_replacements[atom] = sympy.floor(base / divisor)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
@@ -1055,9 +1223,10 @@ class ShapeEnv(object):
             f"Data dependent variable '{s}' allocated at:\n{s.stack}"
             for s in expr.free_symbols
         )
-        return RuntimeError(
+        return GuardOnDataDependentSymNode(
             f"\n\n{accesses}\n"
-            "RuntimeError: It appears that you're trying to get a value out of symbolic int/float "
+            "GuardOnDataDependentSymNode: It appears that you're trying to get "
+            "a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr}.  "
             "Scroll up to see where each of these data-dependent accesses originally occurred."
@@ -1107,26 +1276,28 @@ class ShapeEnv(object):
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        try:
-            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
-            if len(solutions) != 1:
-                return
-            solution = solutions[0][free[0]]
-            if all(t.is_integer for t in sympy.preorder_traversal(solution)):
-                new_var = self._find(solution)
-                self.replacements[cast(sympy.Symbol, free[0])] = new_var
-        except NotImplementedError:
-            if expr.has(sympy.Mod):
-                mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                try:
-                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
-                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
-                        self.divisible.add(mod_expr)
-                except NotImplementedError:
-                    pass
-            return
-        except RecursionError:
-            log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+        if not expr.has(sympy.Mod):
+            try:
+                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+                if len(solutions) != 1:
+                    return
+                solution = solutions[0][free[0]]
+                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                    new_var = self._find(solution)
+                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
+            except NotImplementedError:
+                pass
+            except RecursionError:
+                log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+        if expr.has(sympy.Mod):
+            mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+            try:
+                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                    self.divisible.add(mod_expr)
+            except NotImplementedError:
+                pass
+        return
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):

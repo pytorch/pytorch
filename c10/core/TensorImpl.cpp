@@ -111,7 +111,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-      storage_offset_(0),
+
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
@@ -123,6 +123,7 @@ TensorImpl::TensorImpl(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
@@ -136,7 +137,7 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-      storage_offset_(0),
+
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
@@ -560,56 +561,42 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
 }
 
 // Glue compute
-// NB: intentionally not using bitwise operators.  Using bitwise operators
-// currently impedes ShapeEnv from getting crucial equalities which cause
-// python test/functorch/test_aotdispatch.py -k
-// test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
-// very slowly.  I think probably we just need to be able to reason through
-// And/Or, and then we can switch these to be symbolic.
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  return extra_meta_->is_contiguous_ |
+      extra_meta_->is_channels_last_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_contiguous_3d_dim5(
     identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_contiguous_.guard_bool(
-             __FILE__, __LINE__) &&
-      compute_channels_last_contiguous_3d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  return ~extra_meta_->is_channels_last_contiguous_ &
+      compute_channels_last_contiguous_3d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
-             __FILE__, __LINE__) &&
-      compute_strides_like_channels_last_2d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  return ~extra_meta_->is_channels_last_3d_contiguous_ &
+      compute_strides_like_channels_last_2d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__) &&
-      compute_strides_like_channels_last_3d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  return ~extra_meta_->is_channels_last_ &
+      compute_strides_like_channels_last_3d(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim5(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  return extra_meta_->is_contiguous_ |
+      extra_meta_->is_channels_last_contiguous_ |
+      extra_meta_->is_channels_last_3d_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_anydim(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  return extra_meta_->is_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 void TensorImpl::release_resources() {
@@ -979,7 +966,8 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   newCapacity[0] = std::max(
       newDims[0],
       static_cast<int64_t>(std::ceil(
-          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+          static_cast<float>(sizes_and_strides_.size_at_unchecked(0)) *
+          (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
   Resize(std::move(newCapacity));
