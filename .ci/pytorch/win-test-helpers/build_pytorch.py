@@ -37,6 +37,23 @@ def append_multiple_lines(file_name, lines_to_append):
             # Append element at the end of file
             file_object.write(line)
 
+if os.environ['DEBUG'] == '1':
+    os.environ['BUILD_TYPE'] = 'debug'
+else:
+    os.environ['BUILD_TYPE'] = 'release'
+
+if 'BUILD_ENVIRONMENT' not in os.environ:
+    os.environ['CONDA_PARENT_DIR'] = str(os.getcwd())
+else:
+    os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
+
+
+os.environ['PATH'] = 'C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;' +\
+    'C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files' +\
+        '\\Amazon\\AWSCLI;C:\\Program Files\\Amazon\\AWSCLI\\bin;' + os.environ['PATH']
+
+os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation-helpers'
+
 
 '''
 :: This inflates our log size slightly, but it is REALLY useful to be
@@ -53,12 +70,41 @@ subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', she
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
+# test vars
+os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
+
+if 'LIB' in os.environ:
+    os.environ['LIB'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\lib;' + os.environ['LIB']
+else:
+    os.environ['LIB'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\lib'
+
+if 'BUILD_ENVIRONMENT' not in os.environ:
+    os.environ['CONDA_PARENT_DIR'] = str(os.getcwd())
+else:
+    os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
+
+os.environ['INSTALL_FRESH_CONDA'] = '1'
+
+os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
+    '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
+
 
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
+
+try:
+    os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
+        '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
+
+    result = subprocess.run('conda env list', shell=True)
+    result.check_returncode()
+
+except Exception as e:
+    None
+
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
@@ -106,6 +152,8 @@ if os.environ['USE_CUDA'] == '1':
     os.environ['PATH'] = os.environ['CUDA_PATH'] + '\\bin;' + os.environ['CUDA_PATH'] +\
         '\\libnvvp;' + os.environ['PATH']
 
+os.environ['DISTUTILS_USE_SDK'] = '1'
+os.environ['PATH'] = os.environ['TMP_DIR_WIN'] + '\\bin;' + os.environ['PATH']
 
 '''
 :: Target only our CI GPU machine's CUDA arch to speed up the build, we can overwrite with env var
@@ -117,9 +165,15 @@ if 'TORCH_CUDA_ARCH_LIST' not in os.environ:
 
 
 # The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
+os.environ['SCCACHE_IDLE_TIMEOUT'] = '0'
+os.environ['SCCACHE_IGNORE_SERVER_IO_ERROR'] = '1'
 subprocess.run('sccache --stop-server', shell=True)
 subprocess.run('sccache --start-server', shell=True)
 subprocess.run('sccache --zero-stats', shell=True)
+os.environ['CC'] = 'sccache-cl'
+os.environ['CXX'] = 'sccache-cl'
+
+os.environ['CMAKE_GENERATOR'] = 'Ninja'
 
 
 if os.environ['USE_CUDA'] == '1':
