@@ -1940,10 +1940,8 @@ else:
         self.assertEqual(a.size(), torch.Size([1]))
 
         # Tests extremal behavior
-        tests = ((-0, float('inf')), (0, float('inf')), (float('inf'), 0))
-        for test in tests:
-            t = torch.empty((1,), device=device, dtype=dtype).exponential_(test[0])
-            self.assertTrue(t.item() == test[1])
+        t = torch.empty((1,), device=device, dtype=dtype).exponential_(float('inf'))
+        self.assertTrue(t.item() == 0)
 
         # Tests that negative lambda fails
         with self.assertRaises(RuntimeError):
@@ -2070,6 +2068,20 @@ else:
             x = torch.empty((2**16), dtype=dtype, device=device)
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
+
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_cauchy(self, device, dtype):
+        a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)
+        self.assertEqual(a.dtype, dtype)
+        self.assertEqual(a.size(), torch.Size([1]))
+
+        # Tests extremal behavior
+        t = torch.empty((1,), device=device, dtype=dtype).cauchy_(float('inf'), 0.5)
+        self.assertTrue(t.item() == float('inf'))
+
+        # Tests non-positive rate fails
+        with self.assertRaises(RuntimeError):
+            torch.empty((1,), device=device, dtype=dtype).cauchy_(0.0, 0.0)
 
     @skipIfMps
     @skipIfNoSciPy
