@@ -12,7 +12,7 @@ import torch
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
@@ -257,7 +257,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if isinstance(example, torch.SymInt):
+        if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
             return expr
