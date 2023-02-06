@@ -5744,7 +5744,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
             if "ignore_index" in kwargs and torch.all(target == kwargs["ignore_index"]):
                 # make sure at least one item in target is not ignored
-                target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
+                target[0] = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
 
         yield SampleInput(input, target, **kwargs)
 
@@ -16747,7 +16747,7 @@ op_db: List[OpInfo] = [
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
-        dtypes=floating_types_and(torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
