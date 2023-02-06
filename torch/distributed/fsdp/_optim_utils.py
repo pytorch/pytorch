@@ -302,6 +302,23 @@ def _flatten_optim_state_dict(
     ``FlatParameter`` 's optimizer states are sharded, and otherwise, they are
     kept unsharded.
 
+    If ``use_orig_params`` is True, each rank will have all FSDP-managed
+    parameters but some of these parameters may be empty due to the sharding.
+    For a regular optim.Optimizer, states for those empty parameters will
+    not be initialized. So, when aggregating the FQNs across ranks, no assert
+    will be raised on a rank even if it does not have all the states -- it is
+    valid and FSDP know how to aggregate them. However, FSDP has to ignore
+    handling those parameters that are not managed by FSDP and do not exist on
+    the local rank -- it is managed by other parallelism and FSDP does not
+    know ho to handle/aggregate them.
+
+    Note that ``_flatten_tensor_optim_state`` does not need ``optim`` to
+    flatten/shard the state. However, NamedOptimizer and KeyedOptimizer require
+    all the states even if the corresponding parameters are empty. To this end,
+    ``optim`` will be used to to get the initial state of the empty parameters.
+    ``optim`` should only be non-None if the ``optim` is KeyedOptimizer or
+    NamedOptimizer.
+
     Returns:
         Dict[str, Any]: The flattened optimizer state dict.
     """
@@ -353,9 +370,10 @@ def _flatten_optim_state_dict(
                     shard_state,
                 )
             key = _OptimStateKey(tuple(unflat_param_names), True)
+            # Only include non-empty states since as expected by
+            # `torch.optim.Optimizer` s unless the optimizer is KeyedOptimizer
+            # or NamedOptimizer.
             if flat_state:
-                # Only include non-empty states since as expected by
-                # `torch.optim.Optimizer` s
                 flat_osd_state[key] = flat_state
             elif optim is not None:  # NamedOptimizer or KeyedOptimizer case.
                 assert len(unflat_param_names) == 1
@@ -1364,6 +1382,16 @@ def _optim_state_dict(
     contain parameter IDs mapping but a mapping from parameter FQNs to parameter
     states. This API finds the mapping from FQNs to parameters if the optimizer
     is a ``NamedOptimizer``.
+
+    If ``use_orig_params`` is True, each rank will have all FSDP-managed
+    parameters but some of these parameters may be empty due to the sharding.
+    For a regular optim.Optimizer, states for those empty parameters will
+    not be initialized. So, when aggregating the FQNs across ranks, no assert
+    will be raised on a rank even if it does not have all the states -- it is
+    valid and FSDP know how to aggregate them. However, FSDP has to ignore
+    handling those parameters that are not managed by FSDP and do not exist on
+    the local rank -- it is managed by other parallelism and FSDP does not
+    know ho to handle/aggregate them.
 
     Args:
         model (nn.Module): Root module (which may or may not be a
