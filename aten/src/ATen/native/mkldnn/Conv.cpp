@@ -913,27 +913,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
 
-static inline std::vector<int64_t> padding_r(
-    IntArrayRef padding, IntArrayRef output_padding)
-{
-  // ConvTranpose padding adjustment
-  //
-  // PyTorch uses padding/output_padding:
-  //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
-  //
-  // MKLDNN uses padding_l/padding_r:
-  //   osize = (isize - 1) * stride - padding_l - padding_r + dilation * (kernel_size - 1) + 1
-  //
-  // So: padding_l = padding, padding_r = padding - output_padding
-  //
-  auto dim = padding.size();
-  std::vector<int64_t> pad_r(dim);
-  for (const auto d : c10::irange(dim)) {
-    pad_r[d] = padding[d] - output_padding[d];
-  }
-  return pad_r;
-}
-
 Tensor mkldnn_convolution_transpose(
     const Tensor& input,
     const Tensor& weight,
