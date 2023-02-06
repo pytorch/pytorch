@@ -610,6 +610,8 @@ class BuiltinVariable(VariableTracker):
             def guard_if_dyn(arg):
                 if isinstance(arg, DynamicShapeVariable):
                     return arg.evaluate_expr(tx.output)
+                elif isinstance(arg, ConstantVariable):
+                    return arg.as_python_constant()
                 return arg
 
             args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
