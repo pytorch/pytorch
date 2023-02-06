@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/AccumulateType.h>
 
 namespace at::native {
 
@@ -28,10 +29,10 @@ FUNCAPI INLINE bool MulOp::apply(bool a, bool b) {
   return a && b;
 }
 
-struct LhsProjOp {
+struct RhsProjOp {
   template <typename scalar_t>
   static FUNCAPI scalar_t apply(scalar_t a, scalar_t b) {
-    return a;
+    return b;
   }
 };
 
@@ -95,13 +96,15 @@ void binary_op_intersection_kernel(
     const auto rhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_rhs_select_idx_bytes + offsets[4]);
     const auto count = *reinterpret_cast<const int64_t*>(ptr_intersction_counts_bytes + offsets[5]);
 
-    if (count) {
-      *ptr_res_values = binary_op_t::apply(
-          *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
-          *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
-    } else {
-      *ptr_res_values = 0;
+    const auto* RESTRICT ptr_lhs_begin = ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride;
+    const auto* RESTRICT ptr_rhs_begin = ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride;
+
+    at::acc_type<scalar_t, /*is_gpu=*/true> res_values = 0;
+    for (int64_t c = 0; c < count; ++c) {
+      res_values += binary_op_t::apply(*ptr_lhs_begin, *ptr_rhs_begin);
+      ptr_rhs_begin += rhs_nnz_stride;
     }
+    *ptr_res_values = static_cast<scalar_t>(res_values);
   };
 
   launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -161,8 +164,8 @@ void sparse_mask_intersection_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y) {
-  using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
-  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
+  using CUDAValueRhsProjKernel = CUDAValueSelectionIntersectionKernel<RhsProjOp>;
+  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueRhsProjKernel>(
       result, x, y, true
   );
 }

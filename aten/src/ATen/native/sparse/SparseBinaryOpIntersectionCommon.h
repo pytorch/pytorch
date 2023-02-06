@@ -174,7 +174,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   // If the op and sum are not commutative, coalesce is required.
   // If restrict_indices_to_rhs is true, x needs to be coalesced so that
   // (x.coalesce() intersection y union y).indices().counts() == y.indices().counts().
-  const Tensor x = (!commutes_with_sum || restrict_indices_to_rhs) ? x_.coalesce() : x_;
+  const Tensor x = x_.coalesce();
   const Tensor y = [&]() -> Tensor {
     auto rhs = commutes_with_sum ? y_ : y_.coalesce();
     if (restrict_indices_to_rhs) {
@@ -424,168 +424,23 @@ void _sparse_binary_op_intersection_kernel_impl(
     return std::make_tuple(intersection_count, intersection_first_idx);
   }();
 
-  // Intersection is all we need in such a case.
-  if (restrict_indices_to_rhs) {
-    const auto res_indices = source._indices().clone();
-    const auto res_values = value_selection_intersection_kernel_t::apply(
-        probably_coalesced._values(),
-        intersection_first_idx.to(nnz_arange.scalar_type()),
-        source._values(),
-        nnz_arange.narrow(-1, 0, source._nnz()),
-        intersection_count);
-    const auto res_sparse_dim = source.sparse_dim();
-    const auto res_dense_dim = source.dense_dim();
-    const auto& res_shape = broadcasted_shape;
-    const auto res_nnz = source._nnz();
-
-    auto* res_sparse_impl = get_sparse_impl(res);
-    res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
-    res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
-    res_sparse_impl->set_nnz_and_narrow(res_nnz);
-    res._coalesced_(y_.is_coalesced() || !commutes_with_sum);
-    return;
-  }
-
-  // Using intersection_count and intersection_first_idx,
-  // form indices selected_source and selected_probably_coalesced such that
-  // res.values = op(
-  //  source.values.index_select(0, selected_source),
-  //  probably_coalesced.values.index_select(0, selected_probably_coalesced)) and
-  // res.indices = selected_source_sparse_indices, which is also equivalent to
-  // res.indices = source.indices.index_select(1, selected_source).
-  Tensor selected_source, selected_source_sparse_indices, selected_probably_coalesced;
-  std::tie(selected_source, selected_source_sparse_indices, selected_probably_coalesced)
-    = [&]() -> std::tuple<Tensor, Tensor, Tensor> {
-    // Thread offset = shifted_offset - shift.
-    // This computation is fused in kernels below.
-
-    const auto shifted_offset = intersection_count.cumsum(-1);
-
-    // NOTE: unavoidable sync to get to know the result's shape.
-    const auto intersection_nnz = static_cast<int64_t>(
-        // shifted_offset is a 1-dim tensor, potentially empty
-        shifted_offset.size(0)
-        ? shifted_offset.select(-1, -1).template item<int64_t>()
-        : 0);
-
-    auto selected_buffer = at::empty({2, intersection_nnz}, intersection_count.options());
-    auto selected_source = selected_buffer.select(0, 0);
-    auto selected_probably_coalesced = selected_buffer.select(0, 1);
-    const auto source_sparse_indices = source._indices();
-    auto selected_source_sparse_indices = at::empty({source.sparse_dim(), intersection_nnz},
-        source_sparse_indices.options().memory_format(at::MemoryFormat::Contiguous));
-    const auto source_idx = nnz_arange.narrow(-1, 0, source._nnz());
-    auto dummy = at::empty({1}, source_idx.options());
-
-    auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)
-      .check_all_same_dtype(false)
-      .add_owned_output(dummy.expand_as(source_idx))
-      .add_input(source_idx) // index_t
-      .add_input(intersection_count) // int64_t
-      .add_input(intersection_first_idx) // int64_t
-      .add_input(shifted_offset) // int64_t
-      .build();
-
-    {
-      auto* RESTRICT ptr_selected_source = selected_source.data_ptr<int64_t>();
-      auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<int64_t>();
-      const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();
-
-      auto* RESTRICT ptr_selected_source_sparse_indices = selected_source_sparse_indices.data_ptr<index_t>();
-      // Non-const because of Gcc5/Clang5 issues
-      auto selected_source_sparse_indices_nnz_stride = selected_source_sparse_indices.stride(1);
-      auto selected_source_sparse_indices_dim_stride = selected_source_sparse_indices.stride(0);
-
-      const auto* RESTRICT ptr_source_sparse_indices = source_sparse_indices.data_ptr<index_t>();
-      // Non-const because of Gcc5/Clang5 issues
-      auto source_sparse_indices_nnz_stride = source_sparse_indices.stride(1);
-      auto source_sparse_indices_dim_stride = source_sparse_indices.stride(0);
-
-      KernelLauncher::launch(iter,
-          // NOTE: capture by value required by CUDA
-          [=] FUNCAPI (
-            index_t idx,
-            int64_t count,
-            int64_t first_match_idx,
-            int64_t shifted_offset) -> index_t {
-          const auto offset = shifted_offset - count;
-          auto* RESTRICT ptr_selected_source_idx_out = ptr_selected_source + offset;
-          auto* RESTRICT ptr_selected_probably_coalesced_idx_out = ptr_selected_probably_coalesced + offset;
-          const auto* RESTRICT ptr_argsort_idx = ptr_argsort + first_match_idx;
-
-          auto* RESTRICT ptr_selected_source_sparse_indices_out =
-            ptr_selected_source_sparse_indices + offset * selected_source_sparse_indices_nnz_stride;
-          const auto* RESTRICT ptr_source_sparse_indices_in =
-            ptr_source_sparse_indices + idx * source_sparse_indices_nnz_stride;
-
-          for (int64_t i = 0; i < count; ++i) {
-            *ptr_selected_source_idx_out++ = idx;
-            *ptr_selected_probably_coalesced_idx_out++ = *ptr_argsort_idx++;
-
-            // res_indices = source._indices().index_select(1, selected_source)
-            // The code below fuses this computation with forming
-            // selected_source and selected_probably_coalesced.
-            for (int64_t d = 0; d < sparse_dim; ++d) {
-              ptr_selected_source_sparse_indices_out[d * selected_source_sparse_indices_dim_stride]
-                = ptr_source_sparse_indices_in[d * source_sparse_indices_dim_stride];
-            }
-            ptr_selected_source_sparse_indices_out += selected_source_sparse_indices_nnz_stride;
-          }
-
-          return 0;
-      });
-    }
-
-    return std::make_tuple(selected_source, selected_source_sparse_indices, selected_probably_coalesced);
-  }();
-
-  const auto res_indices = selected_source_sparse_indices;
-
-  // Value intersection
-  const auto binary_op_res_dtype = at::result_type(
+  const auto res_indices = source._indices().clone();
+  const auto res_values = value_selection_intersection_kernel_t::apply(
       source._values(),
-      probably_coalesced._values());
-  // We would like to respect order in value intersection.
-  auto [lhs, lhs_selected, rhs, rhs_selected] = [&]() -> auto {
-    // Either source <=> x, ...
-    if (source.is_same(x)) {
-      return std::make_tuple(source, selected_source, probably_coalesced, selected_probably_coalesced);
-    // ... or source <=> y.
-    } else {
-      return std::make_tuple(probably_coalesced, selected_probably_coalesced, source, selected_source);
-    }
-  }();
-  auto res_values = value_selection_intersection_kernel_t::apply(
-      lhs._values().to(binary_op_res_dtype), // promote for better accuracy
-      lhs_selected,
-      rhs._values().to(binary_op_res_dtype), // promote for better accuracy
-      rhs_selected);
-  // Convert back if the promoted dtype is different from res.dtype.
-  // This could happen for in-place usage cases.
-  res_values = res_values.to(res.scalar_type());
-
+      nnz_arange.narrow(-1, 0, source._nnz()),
+      probably_coalesced._values(),
+      intersection_first_idx.to(nnz_arange.scalar_type()),
+      intersection_count);
   const auto res_sparse_dim = source.sparse_dim();
-  const auto res_dense_dim = res_values.dim() - 1;
+  const auto res_dense_dim = source.dense_dim();
   const auto& res_shape = broadcasted_shape;
-  const auto res_nnz = selected_source.numel();
+  const auto res_nnz = source._nnz();
 
   auto* res_sparse_impl = get_sparse_impl(res);
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_sparse_impl->set_nnz_and_narrow(res_nnz);
-  // Result is coalesced iff arguments are coalesced, conditioned on the fact
-  // that we do not check that intersection hash values are sorted and unique.
-  // <= : intersection contains only unique indices (or empty), and the algorithm's
-  // behavior is order-preserving. So, the result has only unique indices (or empty) which are sorted.
-  // => : proof by contraposition. The contrapositive statement reads
-  // `there is an uncoalesced argument => result is not coalesced`.
-  // If both arguments are uncoalesced, the result is clearly uncoalesced again
-  // thanks to the order-preserving behavior of the algorithm.
-  // Otherwise we have a coalesced argument `probably_coalesced` and an uncoalesced `source`.
-  // Since the matching beahavior of the algorithm respects the order of `source`, the result
-  // will be as coalesced as `source` is, which is uncoalesced.
-  res._coalesced_(source.is_coalesced() && probably_coalesced.is_coalesced());
+  res._coalesced_(y_.is_coalesced() || !commutes_with_sum);
 }
 
 template <

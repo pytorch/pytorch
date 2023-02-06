@@ -3,6 +3,7 @@
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/AccumulateType.h>
 
 namespace at {
 namespace native {
@@ -28,10 +29,10 @@ bool MulOp::apply(bool a, bool b) {
   return a && b;
 }
 
-struct LhsProjOp {
+struct RhsProjOp {
   template <typename scalar_t>
   static scalar_t apply(scalar_t a, scalar_t b) {
-    return a;
+    return b;
   }
 };
 
@@ -69,21 +70,22 @@ struct CPUValueSelectionIntersectionKernel {
 
                   for (int64_t i = 0; i < n; ++i) {
                     // Exctract data
-                    auto* RESTRICT ptr_res_values = reinterpret_cast<scalar_t*>(ptr_res_values_bytes);
+                    auto* ptr_res_values = reinterpret_cast<scalar_t*>(ptr_res_values_bytes);
                     const auto* ptr_lhs_values = reinterpret_cast<const scalar_t*>(ptr_lhs_values_bytes);
                     const auto lhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_lhs_select_idx_bytes);
                     const auto* ptr_rhs_values = reinterpret_cast<const scalar_t*>(ptr_rhs_values_bytes);
                     const auto rhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_rhs_select_idx_bytes);
                     const auto count = *reinterpret_cast<const int64_t*>(ptr_intersection_counts_bytes);
 
-                    // Apply op
-                    if (count) {
-                      *ptr_res_values = binary_op_t::apply(
-                          *(ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride),
-                          *(ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride));
-                    } else {
-                      *ptr_res_values = 0;
+                    const auto* ptr_lhs_begin = ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride;
+                    const auto* ptr_rhs_begin = ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride;
+
+                    at::acc_type<scalar_t, /*is_gpu=*/false> res_values = 0;
+                    for (int64_t c = 0; c < count; ++c) {
+                      res_values += binary_op_t::apply(*ptr_lhs_begin, *ptr_rhs_begin);
+                      ptr_rhs_begin += rhs_nnz_stride;
                     }
+                    *ptr_res_values = static_cast<scalar_t>(res_values);
 
                     // Advance
                     ptr_res_values_bytes += strides[0];
@@ -116,8 +118,8 @@ void sparse_mask_intersection_out_cpu_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y) {
-  using CPUValueLhsProjKernel = CPUValueSelectionIntersectionKernel<LhsProjOp>;
-  _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueLhsProjKernel>(
+  using CPUValueRhsProjKernel = CPUValueSelectionIntersectionKernel<RhsProjOp>;
+  _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueRhsProjKernel>(
       result, x, y, true
   );
 }
