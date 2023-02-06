@@ -2,11 +2,8 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Exception.h>
 #include <ostream>
 #include <string>
-#include <vector>
 
 namespace c10 {
 
@@ -39,6 +36,7 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(Meta, extra)                                \
+  _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)

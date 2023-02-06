@@ -183,6 +183,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_GPT2_large",
     "hf_T5_large",
     "timm_vision_transformer_large",
+    "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
 
@@ -322,6 +323,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in SKIP
             ):
                 continue

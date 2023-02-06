@@ -8,6 +8,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
@@ -28,12 +29,12 @@
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
-#include <ATen/ops/_sparse_mask_helper_native.h>
 #include <ATen/ops/_validate_sparse_coo_tensor_args_native.h>
 #include <ATen/ops/_values_native.h>
 #include <ATen/ops/clone_native.h>
@@ -61,6 +62,7 @@
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/ones.h>
 #endif
 
 namespace at {
@@ -82,6 +84,11 @@ int64_t dense_dim_sparse(const SparseTensor& self) {
 
 bool is_coalesced_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->coalesced();
+}
+
+bool is_coalesced_default(const Tensor& self) {
+  TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
+  return false;
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
@@ -112,11 +119,19 @@ Tensor indices_sparse(const Tensor& self) {
   return get_sparse_impl(self)->indices().alias();
 }
 
+Tensor indices_default(const Tensor& self) {
+  TORCH_CHECK(false, "indices expected sparse coordinate tensor layout but got ", self.layout());
+}
+
 Tensor values_sparse(const Tensor& self) {
   TORCH_CHECK(
       self.is_coalesced(),
       "Cannot get values on an uncoalesced tensor, please call .coalesce() first");
   return get_sparse_impl(self)->values().alias();
+}
+
+Tensor values_default(const Tensor& self) {
+  TORCH_CHECK(false, "values expected sparse tensor layout but got ", self.layout());
 }
 
 /******************************************************************************
@@ -506,7 +521,7 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
@@ -518,20 +533,20 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     case kStrided:
       return self;
     case kSparse:
-      return dense_to_sparse(self, self.dim());
+      return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
     case kSparseCsr:
-      return self.to_sparse_csr();
+      return self.to_sparse_csr(dense_dim_opt);
     case kSparseCsc:
-      return self.to_sparse_csc();
+      return self.to_sparse_csc(dense_dim_opt);
     case kSparseBsr:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsr(*blocksize);
+        return self.to_sparse_bsr(*blocksize, dense_dim_opt);
       }
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
       break;
     case kSparseBsc:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsc(*blocksize);
+        return self.to_sparse_bsc(*blocksize, dense_dim_opt);
       }
       break;
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
@@ -540,7 +555,7 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     }
     AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
   }
-  return dense_to_sparse(self, self.dim());
+  return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
 }
 
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
@@ -630,6 +645,7 @@ SparseTensor& copy_sparse_(
 }
 
 SparseTensor coalesce(const SparseTensor& self) {
+  TORCH_CHECK(self.layout() == kSparse, "coalesce expected sparse coordinate tensor layout but got ", self.layout());
   // See NOTE: [ coalesce autograd ]
   if (self.is_coalesced()) {
     return self;
@@ -727,186 +743,37 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   return dst;
 }
 
-// --------------------------------------------------------------------
-// sparse_mask(D, S) -> S
-//
-// Filter Tensor D by S.indices() and output a SparseTensor.
-// D and S must share the same shape.
-// --------------------------------------------------------------------
+DEFINE_DISPATCH(sparse_mask_intersection_out_stub);
 
-template <typename scalar_t>
-void inline sparse_mask_out_cpu_kernel(
-    Tensor& r_values,
-    const Tensor& t,
-    const int64_t r_nnz,
-    const int64_t sparse_dim,
-    const Tensor& mask_indices) {
-  auto r_values_accessor = r_values.accessor<scalar_t, 1>();
-  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-  scalar_t* t_ptr = t.data_ptr<scalar_t>();
-  auto t_strides = t.strides();
-
-  at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      int64_t idx = 0;
-      for (const auto d : c10::irange(sparse_dim)) {
-        idx += mask_indices_accessor[d][i] * t_strides[d];
-      }
-      r_values_accessor[i] = t_ptr[idx];
-    }
-  });
-}
-
-SparseTensor& sparse_mask_out_cpu(
-    SparseTensor& r,
-    const Tensor& t,
-    const SparseTensor& mask) {
-  TORCH_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
+SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   TORCH_CHECK(
       mask.sizes().equals(t.sizes()),
-      "sparse_mask: operands have incompatible sizes; self has size ",
+      "sparse_mask(): operands have incompatible sizes; self has size ",
       t.sizes(),
       " but mask has size ",
       mask.sizes());
-  AT_ASSERT(!t.is_cuda()); // we were supposed to have dispatched on this
-  TORCH_CHECK(
-      !r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
-  TORCH_CHECK(
-      !mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
-  at::resize_as_sparse_(r, mask);
-  if (mask._nnz() == 0) {
-    return r.zero_();
-  }
-  int64_t dim = t.dim();
-  int64_t sparse_dim = mask.sparse_dim();
-  Tensor mask_indices = mask._indices();
-  Tensor mask_values = mask._values();
-  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
-  alias_into_sparse(r, mask_indices.clone(), r_values);
-  r._coalesced_(mask.is_coalesced());
-  int64_t r_nnz = mask._nnz();
-  get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
 
-  if (t.numel() ==
-      0) { // if t is an empty tensor, there is no need to mask its elements
-    return r;
+  if (!mask.numel()) {
+    return mask.clone().to(t.device(), t.scalar_type());
   }
 
-  if (dim > sparse_dim) {
-    // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices
-    // ]. Keeping this implementation because it is faster than
-    // flatten_indices()
-    Tensor indices = at::zeros({mask._nnz()}, mask_indices.options());
-    for (const auto d : c10::irange(mask.sparse_dim())) {
-      indices.mul_(mask.size(d));
-      indices.add_(mask_indices.select(0, d));
-    }
-
-    std::vector<int64_t> view_size(1 + mask.dense_dim());
-    view_size[0] = -1;
-    for (const auto d : c10::irange(mask.dense_dim())) {
-      view_size[d + 1] = mask.size(mask.sparse_dim() + d);
-    }
-
-    Tensor t_view = t.view(view_size);
-    // TODO: Re-audit this; it used to be an indexSelect directly into r_values
-    at::index_select_out(r_values, t_view, 0, indices);
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
-      sparse_mask_out_cpu_kernel<scalar_t>(
-          r_values, t, r_nnz, sparse_dim, mask_indices);
-    });
-  }
-  return r;
-}
-
-SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
-  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
-  sparse_mask_out_cpu(r, t, mask);
-  return r;
-}
-
-Tensor sparse_mask_helper_cpu(
-    const SparseTensor& t,
-    const Tensor& mask_indices) {
-  /*
-    This is a helper function which filter values from `t._values()` using the
-    `mask_indices`. This CPU implementation uses a simple hash_map to filter
-    values by matching the `mask_indices` with the indices at tensor input `t`.
-
-    Inputs:
-      `t`             - coalesced sparse tensor input
-      `mask_indices`  - mask indices tensor
-
-    Note: The nnz in the output tensor will be same as the `mask_indices`. So it
-    will works independently if the mask is coalesced or not.
-  */
-  TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
-  TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
-  TORCH_CHECK(
-      mask_indices.dim() == t._indices().dim(),
-      "mask_indices: operands have incompatible indices dim; self has dim ",
-      t._indices().dim(),
-      " but mask has dim ",
-      mask_indices.dim());
-  TORCH_CHECK(
-      mask_indices.is_contiguous(), "mask_indices: mask is not contiguous");
-
-  int64_t r_nnz = mask_indices.size(1);
-  auto t_v = t._values();
-  auto vsize = t_v.sizes().vec();
-  vsize[0] = r_nnz;
-
-  Tensor r_values = at::zeros(vsize, t_v.options());
-  auto t_i = t._indices();
-  auto t_nnz = t._nnz();
-
-  std::unordered_map<int64_t, int64_t> t_flatten_indices =
-      std::unordered_map<int64_t, int64_t>{};
-  auto full_size = t.sizes();
-  auto ti_flattened_indices = at::sparse::flatten_indices(t_i, full_size);
-
-  // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this
-  // flatten value `index` to the original position `i`
-  for (const auto i : c10::irange(t_nnz)) {
-    int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
-    t_flatten_indices[index] = i;
+  if (t.layout() == at::kSparse) {
+    TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
+                "sparse_mask(): the number of sparse dimensions in `self` ",
+                "should match that of the `mask`. ",
+                "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
+                "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
+    auto res = at::empty({0}, t.options());
+    sparse_mask_intersection_out_stub(res.device().type(), res, t, mask);
+    return res;
   }
 
-  // Step 2: Filter `t._values()` values by matching the flatten `mask_indices`
-  // with the flatten `t._indices()` using the hash_map `t_flatten_indices`
-
-  auto flattened_mask_indices =
-      at::sparse::flatten_indices(mask_indices, full_size);
-
-  const auto copy_iter = TensorIteratorConfig()
-    .add_output(r_values)
-    .add_input(t_v)
-    .resize_outputs(false)
-    .declare_static_shape(r_values.sizes(), /*squash_dims=*/0)
-    .build();
-
-  at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
-    TensorIterator copy_iter_local(copy_iter);
-    const auto r_values_data = reinterpret_cast<char*>(r_values.data_ptr());
-    const auto t_values_data = reinterpret_cast<char*>(t_v.data_ptr());
-    const auto r_values_stride = r_values.strides()[0] * r_values.element_size();
-    const auto t_values_stride = t_v.strides()[0] * t_v.element_size();
-
-    for (const auto i : c10::irange(start, end)) {
-      int64_t index = flattened_mask_indices.data_ptr<int64_t>()[i];
-      auto iter = t_flatten_indices.find(index);
-      if (iter != t_flatten_indices.end()) {
-        // r_values[i].copy_(t_v[iter->second])
-        copy_iter_local.unsafe_replace_operand(
-            0, r_values_data + i * r_values_stride);
-        copy_iter_local.unsafe_replace_operand(
-            1, t_values_data + iter->second * t_values_stride);
-        copy_stub(kCPU, copy_iter_local, /*non_blocking=*/false);
-      }
-    }
-  });
-  return r_values;
+  const auto mask_values = mask._values();
+  auto mask_template = at::sparse_coo_tensor(
+      mask._indices(),
+      at::ones({1}, mask_values.options()).expand_as(mask_values),
+      mask.sizes())._coalesced_(mask.is_coalesced());
+  return t.mul(mask_template).to(t.scalar_type());
 }
 
 Tensor empty_like_sparse_coo(

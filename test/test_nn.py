@@ -13,6 +13,7 @@ from itertools import product
 from functools import partial
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
+from unittest import SkipTest
 
 import torch
 
@@ -164,6 +165,35 @@ class TestNN(NNTestCase):
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
+    def test_module_super_init(self):
+        class MyMixin:
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.mixin_init = True
+
+        class MyModuleWithMixinBefore(MyMixin, nn.Module):
+            def __init__(self):
+                super().__init__()
+
+        class MyModuleWithMixinAfter(nn.Module, MyMixin):
+            def __init__(self):
+                super().__init__()
+
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertFalse(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+
+        nn.Module.call_super_init = True
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertTrue(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+        nn.Module.call_super_init = False
+
+        MyModuleWithMixinBefore.call_super_init = True
+        MyModuleWithMixinAfter.call_super_init = True
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertTrue(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+        MyModuleWithMixinBefore.call_super_init = False
+        MyModuleWithMixinAfter.call_super_init = False
+
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self):
@@ -218,25 +248,24 @@ class TestNN(NNTestCase):
         self.assertIsNotNone(module.weight.grad)
         self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         module.zero_grad()
-        self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
+        self.assertIsNone(module.weight.grad)
 
         module.bias.requires_grad = True
         module.zero_grad()
-        self.assertIsNotNone(module.weight.grad)
+        self.assertIsNone(module.weight.grad)
         self.assertIsNone(module.bias.grad)
         module(i).sum().backward()
         self.assertIsNotNone(module.weight.grad)
         self.assertIsNotNone(module.bias.grad)
         self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         self.assertGreater(module.bias.grad.data.abs().sum(), 0)
-        module.zero_grad()
+        module.zero_grad(set_to_none=False)   # Force set to zeros.
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
-        # Force set to None.
-        module.zero_grad(set_to_none=True)
+        module.zero_grad()
         self.assertIsNone(module.weight.grad)
-
+        self.assertIsNone(module.bias.grad)
 
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -1653,85 +1682,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(TypeError, assign_weight)
         # This should work though
         l2.weight = Parameter(torch.randn(10, 10))
-
-    def test_clip_grad_norm(self):
-        l = nn.Linear(10, 10)
-        max_norm = 2
-
-        def compute_norm(norm_type):
-            norm_type = float(norm_type)
-            if norm_type != inf:
-                total_norm = 0
-                for p in l.parameters():
-                    total_norm += p.grad.data.abs().pow(norm_type).sum()
-                return pow(total_norm, 1. / norm_type)
-            else:
-                return max(p.grad.data.abs().max() for p in l.parameters())
-
-        def compare_scaling(grads):
-            p_scale = [p.grad.data.div(g).view(-1) for p, g in zip(l.parameters(), grads)]
-            scale = torch.cat(p_scale)
-            self.assertEqual(scale.std(), 0)
-            return scale[0]
-
-        grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
-        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
-            for p, g in zip(l.parameters(), grads):
-                p._grad = g.clone().view_as(p.data)
-            norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
-            norm_after = compute_norm(norm_type)
-            self.assertEqual(norm, norm_before)
-            self.assertEqual(norm_after, max_norm)
-            self.assertLessEqual(norm_after, norm_before)
-            compare_scaling(grads)
-
-        # Small gradients should be left unchanged
-        grads = torch.rand(10, 10).div(10000), torch.ones(10).div(500)
-        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
-            for p, g in zip(l.parameters(), grads):
-                p.grad.data.copy_(g)
-            norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
-            norm_after = compute_norm(norm_type)
-            self.assertEqual(norm, norm_before)
-            self.assertEqual(norm_before, norm_after)
-            self.assertLessEqual(norm_after, max_norm)
-            scale = compare_scaling(grads)
-            self.assertEqual(scale, 1)
-
-        # Should accept a single Tensor as input
-        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
-        g = torch.arange(1., 101).view(10, 10)
-        p1._grad = g.clone()
-        p2._grad = g.clone()
-        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
-            clip_grad_norm_(p1, max_norm, norm_type=norm_type)
-            clip_grad_norm_([p2], max_norm, norm_type=norm_type)
-            self.assertEqual(p1.grad, p2.grad)
-
-    def test_clip_grad_value(self):
-        l = nn.Linear(10, 10)
-        clip_value = 2.5
-
-        grad_w, grad_b = torch.arange(-50., 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
-        for grad_list in [[grad_w, grad_b], [grad_w, None]]:
-            for p, g in zip(l.parameters(), grad_list):
-                p._grad = g.clone().view_as(p.data) if g is not None else g
-
-            clip_grad_value_(l.parameters(), clip_value)
-            for p in filter(lambda p: p.grad is not None, l.parameters()):
-                self.assertLessEqual(p.grad.data.max(), clip_value)
-                self.assertGreaterEqual(p.grad.data.min(), -clip_value)
-
-        # Should accept a single Tensor as input
-        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
-        g = torch.arange(-50., 50).view(10, 10).div_(5)
-        p1._grad = g.clone()
-        p2._grad = g.clone()
-        clip_grad_value_(p1, clip_value)
-        clip_grad_value_([p2], clip_value)
-        self.assertEqual(p1.grad, p2.grad)
 
     def test_parameters_to_vector(self):
         conv1 = nn.Conv2d(3, 10, 5)
@@ -5003,7 +4953,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper(self, shape, torch.bfloat16, False)
             helper(self, shape, torch.bfloat16, True)
 
-    @parametrize_test('bn_module', [torch.nn.BatchNorm2d, torch.nn.SyncBatchNorm])
+    @parametrize_test(
+        'bn_module',
+        [
+            subtest(torch.nn.BatchNorm2d, name="BatchNorm2d"),
+            subtest(torch.nn.SyncBatchNorm, name="SyncBatchNorm"),
+        ],
+    )
     def test_batchnorm_non_contig_cpu(self, bn_module):
         input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
         input = input.permute(0, 2, 1, 3)
@@ -6383,29 +6339,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out_t_5 = m(in_t_9[:, :, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
 
-    def test_upsamplingTrilinear3d(self):
-        for align_corners in [True, False]:
-            kwargs = dict(mode='trilinear', align_corners=align_corners)
-
-            for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
-                # test float scale factor up & downsampling
-                for scale_factor in [0.5, 1.5, 2]:
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                    in_t = torch.ones(1, 2, 2, 2, 2).contiguous(memory_format=memory_format)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    with warnings.catch_warnings(record=True) as w:
-                        out_t = m(in_t)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size, out_size), out_t.data)
-                    # Assert that memory format is carried through to the output
-                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-
-                    input = torch.randn(1, 2, 2, 2, 2, requires_grad=True)
-                    self.assertEqual(
-                        F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                        F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                    gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9, 9)
@@ -6608,9 +6541,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         elif weight_layout == torch.sparse_csc:
             module.weight = nn.Parameter(module.weight.to_sparse_csc())
         elif weight_layout == torch.sparse_bsr:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsr(2, 2))
+            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
         elif weight_layout == torch.sparse_bsc:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsc(2, 2))
+            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
         elif weight_layout == torch.sparse_coo:
             module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:
@@ -8331,6 +8264,34 @@ class TestNNDeviceType(NNTestCase):
         helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, True)
 
     @onlyNativeDeviceTypes
+    def test_GroupNorm_memory_format(self, device):
+        # Tests for regression reported in https://github.com/pytorch/pytorch/issues/92166
+
+        def helper(input_format, grad_format, B=2, C=4, W=4, H=4):
+            import copy
+            net_orig = torch.nn.GroupNorm(B, C).to(device=device)
+            net = copy.deepcopy(net_orig)
+            x_orig = torch.rand(B, C, W, H, device=device, requires_grad=True)
+            grad_orig = torch.rand(B, C, W, H, device=device)
+            x = x_orig.clone().detach().to(memory_format=input_format).requires_grad_(True)
+            grad = grad_orig.detach().to(memory_format=grad_format)
+
+            y = net(x)
+            y.backward(grad)
+
+            y_orig = net_orig(x_orig)
+            y_orig.backward(grad_orig)
+
+            self.assertEqual(y, y_orig)
+            # TODO: Fix me, CPU should produce valid results here, but it is not
+            if device != "cpu":
+                self.assertEqual(x.grad, x_orig.grad)
+
+        for input_format in [torch.contiguous_format, torch.channels_last]:
+            for grad_format in [torch.contiguous_format, torch.channels_last]:
+                helper(input_format, grad_format)
+
+    @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):
         def group_norm_ref(X, gamma, beta, groups, channels, eps):
             batch_size = X.size()[0]
@@ -9232,7 +9193,6 @@ class TestNNDeviceType(NNTestCase):
 
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last, "nearest")
-        # Uncomment below once F.interpolate is updated
         helper(torch.contiguous_format, "nearest-exact")
         helper(torch.channels_last, "nearest-exact")
 
@@ -9295,7 +9255,7 @@ class TestNNDeviceType(NNTestCase):
 
         def helper(memory_format, mode):
             m = nn.Upsample(size=4, mode=mode)
-            in_t = torch.ones(1, 2, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
             in_uint8_t = torch.ones(
                 1, 2, 2, 2, 2, dtype=torch.uint8, device=device
             ).contiguous(memory_format=memory_format)
@@ -9307,6 +9267,8 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(expected_output.to(torch.uint8), out_uint8_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+            out_t.backward(torch.randn_like(out_t))
+            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
             input = torch.randn(
                 1, 2, 2, 2, 2, requires_grad=True, device=device
@@ -9401,11 +9363,13 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
-    def test_upsamplingBilinear2d(self, device, antialias, align_corners):
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @onlyNativeDeviceTypes
+    def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        kwargs = dict(mode='bilinear', align_corners=align_corners, antialias=antialias)
+        kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             # test float scale factor up & downsampling
             for scale_factor in [0.5, 1.5, 2]:
@@ -9413,7 +9377,8 @@ class TestNNDeviceType(NNTestCase):
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 with warnings.catch_warnings(record=True) as w:
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                self.assertEqual(torch.ones(2, 3, out_size, out_size, device=device), out_t.data)
+                expected_out = torch.ones(2, 3, out_size, out_size, device=device)
+                self.assertEqual(expected_out, out_t)
                 # Assert that memory format is carried through to the output
                 self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
                 out_t.backward(torch.randn_like(out_t))
@@ -9477,27 +9442,6 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
-    @parametrize_test("antialias", [True, False])
-    @parametrize_test("align_corners", [True, False])
-    def test_upsamplingBicubic2d(self, device, antialias, align_corners):
-        kwargs = dict(mode='bicubic', align_corners=align_corners, antialias=antialias)
-        # test float scale factor up & downsampling
-        # for scale_factor in [0.5, 1, 1.5, 2]:
-        for scale_factor in [2, ]:
-            in_t = torch.ones(2, 3, 8, 8, device=device)
-            out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            expected_out = torch.ones(2, 3, out_size, out_size, device=device)
-            self.assertEqual(expected_out, out_t, atol=1e-5, rtol=0)
-
-            if torch.device(device).type == 'cuda':
-                # Bicubic backward is nondeterministic because of atomicAdd usage
-                nondet_tol = 1e-5
-            else:
-                nondet_tol = 0.0
-            inpt = torch.ones(2, 3, 8, 8, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [inpt], nondet_tol=nondet_tol)
-
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8., device=device).view(1, 2, 2, 2)
@@ -9530,6 +9474,33 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingTrilinear3d(self, device, align_corners):
+        kwargs = dict(mode='trilinear', align_corners=align_corners)
+
+        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 2, 2, 2, 2, device=device)
+                in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
+                expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device)
+                self.assertEqual(expected_out, out_t)
+                # Assert that memory format is carried through to the output
+                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+                out_t.backward(torch.randn_like(out_t))
+                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+
+                input = torch.randn(1, 2, 2, 2, 2, requires_grad=True)
+                self.assertEqual(
+                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -11486,7 +11457,8 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @deviceCountAtLeast(2)
-    def test_clip_grad_norm_multi_device(self, devices):
+    @parametrize_test('foreach', (False, True))
+    def test_clip_grad_norm_multi_device(self, devices, foreach):
         class TestModel(nn.Module):
             def __init__(self):
                 super(TestModel, self).__init__()
@@ -11502,8 +11474,8 @@ class TestNNDeviceType(NNTestCase):
                 p.grad = torch.ones_like(p)
             for p in ref_model.parameters():
                 p.grad = torch.ones_like(p)
-            norm = clip_grad_norm_(test_model.parameters(), 0.5, norm_type=norm_type)
-            expected = clip_grad_norm_(ref_model.parameters(), 0.5, norm_type=norm_type)
+            norm = clip_grad_norm_(test_model.parameters(), 0.5, norm_type=norm_type, foreach=foreach)
+            expected = clip_grad_norm_(ref_model.parameters(), 0.5, norm_type=norm_type, foreach=foreach)
             self.assertEqual(norm, expected)
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
@@ -12054,6 +12026,91 @@ class TestNNDeviceType(NNTestCase):
                 cm = torch.no_grad()
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
+
+    @parametrize_test('foreach', (False, True))
+    def test_clip_grad_value(self, foreach, device):
+        if torch.device(device).type == 'xla' and foreach:
+            raise SkipTest('foreach not supported on XLA')
+
+        l = nn.Linear(10, 10).to(device)
+        clip_value = 2.5
+
+        grad_w, grad_b = torch.arange(-50., 50, device=device).view(10, 10).div_(5), torch.ones(10, device=device).mul_(2)
+        for grad_list in [[grad_w, grad_b], [grad_w, None]]:
+            for p, g in zip(l.parameters(), grad_list):
+                p._grad = g.clone().view_as(p.data) if g is not None else g
+
+            clip_grad_value_(l.parameters(), clip_value, foreach=foreach)
+            for p in filter(lambda p: p.grad is not None, l.parameters()):
+                self.assertLessEqual(p.grad.data.max(), clip_value)
+                self.assertGreaterEqual(p.grad.data.min(), -clip_value)
+
+        # Should accept a single Tensor as input
+        p1, p2 = torch.randn(10, 10, device=device), torch.randn(10, 10, device=device)
+        g = torch.arange(-50., 50, device=device).view(10, 10).div_(5)
+        p1._grad = g.clone()
+        p2._grad = g.clone()
+        clip_grad_value_(p1, clip_value, foreach=foreach)
+        clip_grad_value_([p2], clip_value, foreach=foreach)
+        self.assertEqual(p1.grad, p2.grad)
+
+    @parametrize_test('foreach', (False, True))
+    @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
+    def test_clip_grad_norm(self, norm_type, foreach, device):
+        if torch.device(device).type == 'xla' and foreach:
+            raise SkipTest('foreach not supported on XLA')
+
+        l = nn.Linear(10, 10).to(device)
+        max_norm = 2
+
+        def compute_norm(norm_type):
+            norm_type = float(norm_type)
+            if norm_type != inf:
+                total_norm = 0
+                for p in l.parameters():
+                    total_norm += p.grad.data.abs().pow(norm_type).sum()
+                return pow(total_norm, 1. / norm_type)
+            else:
+                return max(p.grad.data.abs().max() for p in l.parameters())
+
+        def compare_scaling(grads):
+            p_scale = [p.grad.data.div(g).view(-1) for p, g in zip(l.parameters(), grads)]
+            scale = torch.cat(p_scale)
+            self.assertEqual(scale.std(), 0)
+            return scale[0]
+
+        grads = torch.arange(1., 101, device=device).view(10, 10), torch.ones(10, device=device).div(1000)
+        for p, g in zip(l.parameters(), grads):
+            p._grad = g.clone().view_as(p.data)
+        norm_before = compute_norm(norm_type)
+        norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type, foreach=foreach)
+        norm_after = compute_norm(norm_type)
+        self.assertEqual(norm, norm_before)
+        self.assertEqual(norm_after, max_norm)
+        self.assertLessEqual(norm_after, norm_before)
+        compare_scaling(grads)
+
+        # Small gradients should be left unchanged
+        grads = torch.rand(10, 10, device=device).div(10000), torch.ones(10, device=device).div(500)
+        for p, g in zip(l.parameters(), grads):
+            p.grad.data.copy_(g)
+        norm_before = compute_norm(norm_type)
+        norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type, foreach=foreach)
+        norm_after = compute_norm(norm_type)
+        self.assertEqual(norm, norm_before)
+        self.assertEqual(norm_before, norm_after)
+        self.assertLessEqual(norm_after, max_norm)
+        scale = compare_scaling(grads)
+        self.assertEqual(scale, 1)
+
+        # Should accept a single Tensor as input
+        p1, p2 = torch.randn(10, 10, device=device), torch.randn(10, 10, device=device)
+        g = torch.arange(1., 101, device=device).view(10, 10)
+        p1._grad = g.clone()
+        p2._grad = g.clone()
+        clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
+        clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
+        self.assertEqual(p1.grad, p2.grad)
 
 
 class TestFunctionalPickle(TestCase):

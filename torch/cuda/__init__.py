@@ -70,6 +70,15 @@ if hasattr(torch._C, '_CudaDeviceProperties'):
 else:
     _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
 
+if hasattr(torch._C, '_cuda_exchangeDevice'):
+    _exchange_device = torch._C._cuda_exchangeDevice
+else:
+    def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without CUDA support")
+
+
 # Global variables dynamically populated by native code
 has_magma: bool = False
 has_half: bool = False
@@ -278,7 +287,20 @@ def check_error(res: int) -> None:
         raise CudaError(res)
 
 
-class device(object):
+class _DeviceGuard:
+    def __init__(self, index: int):
+        self.idx = index
+        self.prev_idx = -1
+
+    def __enter__(self):
+        self.prev_idx = torch.cuda._exchange_device(self.idx)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        torch.cuda._exchange_device(self.prev_idx)
+        return False
+
+
+class device:
     r"""Context-manager that changes the selected device.
 
     Args:
@@ -291,17 +313,10 @@ class device(object):
         self.prev_idx = -1
 
     def __enter__(self):
-        if self.idx == -1:
-            return
-        self.prev_idx = torch.cuda.current_device()
-        if self.prev_idx != self.idx:
-            torch.cuda.set_device(self.idx)
-        if not torch.jit.is_scripting():
-            _lazy_init()
+        self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.prev_idx != self.idx:
-            torch.cuda.set_device(self.prev_idx)
+        torch.cuda._exchange_device(self.prev_idx)
         return False
 
 
@@ -470,7 +485,7 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    torch._C._cuda_setStream(stream._cdata)
+    torch._C._cuda_setStream(stream_id=stream.stream_id, device_index=stream.device_index, device_type=stream.device_type)
 
 def _parse_visible_devices() -> Set[int]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
@@ -598,8 +613,9 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     _lazy_init()
-    return Stream(_cdata=torch._C._cuda_getCurrentStream(
-        _get_device_index(device, optional=True)))
+    streamdata = torch._C._cuda_getCurrentStream(
+        _get_device_index(device, optional=True))
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])
 
 
 def default_stream(device: Optional[_device_t] = None) -> Stream:
@@ -612,8 +628,9 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     _lazy_init()
-    return Stream(_cdata=torch._C._cuda_getDefaultStream(
-        _get_device_index(device, optional=True)))
+    streamdata = torch._C._cuda_getDefaultStream(
+        _get_device_index(device, optional=True))
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])
 
 
 def current_blas_handle():

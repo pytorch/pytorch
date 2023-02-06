@@ -1088,6 +1088,34 @@ class TestBinaryUfuncs(TestCase):
                 actual, expect, exact_device=False, exact_dtype=exact_dtype
             )
 
+    @dtypes(*complex_types())
+    def test_complex_div_underflow_overflow(self, device, dtype):
+        # test to make sure the complex division does not produce underflow or overflow
+        # in the intermediate of its calculations
+        # NOTE: the calculation still produces an error if the number is greater than
+        # finfo.max / 2, but hopefully people realized that it's a dangerous region to work with
+        finfo = torch.finfo(dtype)
+        nom_lst = [complex(finfo.min / 2, finfo.min / 2),
+                   complex(finfo.max / 2, finfo.max / 2),
+                   complex(finfo.tiny, finfo.tiny),
+                   complex(finfo.tiny, 0.0),
+                   complex(0.0, 0.0)]
+        denom_lst = [complex(finfo.min / 2, finfo.min / 2),
+                     complex(finfo.max / 2, finfo.max / 2),
+                     complex(finfo.tiny, finfo.tiny),
+                     complex(0.0, finfo.tiny),
+                     complex(finfo.tiny, finfo.tiny)]
+        expected_lst = [complex(1.0, 0.0),
+                        complex(1.0, 0.0),
+                        complex(1.0, 0.0),
+                        complex(0.0, -1.0),
+                        complex(0.0, 0.0)]
+        nom = torch.tensor(nom_lst, dtype=dtype, device=device)
+        denom = torch.tensor(denom_lst, dtype=dtype, device=device)
+        expected = torch.tensor(expected_lst, dtype=dtype, device=device)
+        res = nom / denom
+        self.assertEqual(res, expected)
+
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA

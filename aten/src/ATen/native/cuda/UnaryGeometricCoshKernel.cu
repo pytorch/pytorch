@@ -9,10 +9,9 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-const char cosh_name[] = "cosh";
+CONSTEXPR_EXCEPT_WIN_CUDA char cosh_name[] = "cosh";
 void cosh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -52,5 +51,4 @@ void cosh_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

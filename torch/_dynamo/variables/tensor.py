@@ -1,5 +1,7 @@
+import inspect
 import itertools
 import operator
+import types
 from typing import Dict, List
 
 import torch.fx
@@ -11,6 +13,7 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 
 from ..utils import (
+    fqn,
     get_fake_value,
     get_real_value,
     HAS_NUMPY,
@@ -22,6 +25,21 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
+
+supported_tensor_comparison_ops = {
+    ">": operator.gt,
+    "<": operator.lt,
+    ">=": operator.ge,
+    "<=": operator.le,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+supported_const_comparison_ops = {
+    "is": operator.is_,
+    "is not": operator.is_not,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
 
 
 class TensorVariable(VariableTracker):
@@ -154,41 +172,6 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
-        # TODO: reimplement the T/H/mT/mH by generating a function call
-        # to torch.Tensor.{T/H/mT/mH}.__get__
-        elif name in ("T", "H"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "H"
-                else self
-            )
-            args_list = [
-                variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
-            ]
-            args = [variables.TupleVariable(args_list)]
-            result = out.call_method(tx, "permute", args, {})
-        elif name in ("mT", "mH"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "mH"
-                else self
-            )
-            if self.ndim > 0:
-                args = [
-                    variables.ConstantVariable(-2),
-                    variables.ConstantVariable(-1),
-                ]
-                result = out.call_method(tx, "transpose", args, {})
-            else:
-                result = out.call_method(tx, "t", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
@@ -197,6 +180,37 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+
+        # For attributes (not methods) that were not caught in the special handling above,
+        # (e.g. tensor.real), we handle these generically, assuming that the output type is
+        # a tensor.
+        if result is None:
+
+            def try_generic_attr_handling():
+                from .builder import wrap_fx_proxy
+                from .misc import GetAttrVariable
+
+                try:
+                    static_attr = inspect.getattr_static(torch.Tensor, name)
+                except NameError:
+                    return None
+
+                # Make sure this is an attribute, not a method.
+                # type(torch.Tensor.H) should be "getset_descriptor"
+                # This is a because of CPython implementation, see THPVariableType:
+                # these attributes are implemented under tp_getset, which appear
+                # as `getset_descriptor`s, (compared to, say, methods which appear
+                # as `method_descriptor`s)
+                if type(static_attr) != types.GetSetDescriptorType:
+                    return None
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                    **options,
+                )
+
+            result = try_generic_attr_handling()
 
         if result is None:
             raise NotImplementedError()
@@ -272,6 +286,25 @@ class TensorVariable(VariableTracker):
                 constant_result = ConstantVariable(
                     f"torch.{tensortype.__name__}", **options
                 )
+        elif (
+            name == "type"
+            and len(args) == 1
+            and fqn(type(args[0].as_python_constant())) == "torch.tensortype"
+        ):
+            # torch.FloatTensor, etc. are all of type "torch.tensortype".
+            # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
+            # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
+            tensor_type = args[0].as_python_constant()
+            tensor_type_const = ConstantVariable(fqn(tensor_type), **options)
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self, tensor_type_const], kwargs),
+                ),
+                **options,
+            )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
@@ -299,37 +332,18 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
-        elif name == "item":
-            if config.capture_scalar_outputs:
-                example_value = get_fake_value(self.proxy.node, tx)
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_method",
-                        "item",
-                        (self.as_proxy(),),
-                        {},
-                    ),
-                    example_value=example_value,
-                    **options,
-                )
-            else:
-                unimplemented(f"Tensor.{name}")
+        elif name == "item" and not config.capture_scalar_outputs:
+            unimplemented(f"Tensor.{name}")
+        elif (
+            name == "item"
+            and config.capture_scalar_outputs
+            and not config.dynamic_shapes
+        ):
+            raise AssertionError(
+                "To capture_scalar_outputs, you must also set dynamic_shapes = True"
+            )
         elif name == "__len__":
-            if self.size:
-                assert not config.dynamic_shapes
-                return ConstantVariable(self.size[0], **options)
-            else:
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function",
-                        len,
-                        (self.as_proxy(),),
-                        {},
-                    ),
-                    **options,
-                )
+            return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
             tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
@@ -440,7 +454,7 @@ class DynamicShapeVariable(VariableTracker):
     def evaluate_expr(self, output_graph):
         if not isinstance(self.dyn_shape, torch.SymInt):
             return self.dyn_shape
-        return output_graph.shape_env.evaluate_expr(self.dyn_shape.get_pyobj().expr)
+        return output_graph.shape_env.evaluate_expr(self.dyn_shape.node.expr)
 
     def call_method(
         self,
