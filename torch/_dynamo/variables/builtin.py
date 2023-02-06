@@ -27,7 +27,7 @@ from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import BaseListVariable, ListVariable, TupleVariable
-from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
+from .tensor import SymNodeVariable, FakeItemVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -962,17 +962,6 @@ class BuiltinVariable(VariableTracker):
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
 
-    # neg is a constant fold function, so we only get here if constant fold is not valid
-    def call_neg(self, tx, a):
-        if isinstance(a, SymNodeVariable):
-            return SymNodeVariable.create(
-                tx,
-                (operator.neg)(a.as_proxy()),
-                sym_num=None,
-            )
-        # None no-ops this handler and lets the driving function proceed
-        return None
-
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
@@ -996,6 +985,9 @@ class BuiltinVariable(VariableTracker):
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
+        )
+        from .lists import (
+            SizeVariable
         )
 
         op = self.fn
