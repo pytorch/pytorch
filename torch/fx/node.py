@@ -73,6 +73,9 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     name = func.__name__
     module = _find_module_of_method(func)
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
+    # Fixup segment_reduce mismatch
+    if module == "torch" and name == "segment_reduce":
+        name = "_" + name
     return f'{module}.{name}'
 
 def _format_arg(arg, max_list_len=float('inf')) -> str:
