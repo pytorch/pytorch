@@ -1,3 +1,5 @@
+import functools
+import operator
 from typing import Dict, List, Optional
 
 import torch
@@ -96,6 +98,36 @@ class BaseListVariable(VariableTracker):
             return variables.ConstantVariable(result, **options)
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
+
+    @staticmethod
+    def generic_list_compare(left, tx, op, right, **options):
+        from .builtin import BuiltinVariable
+
+        assert not (
+            left.is_python_constant() and right.is_python_constant()
+        ), "Illegal generic list compare on constant lists"
+
+        # Most list-like variables implement comparison ops the same way,
+        # so they can re-use this helper.
+        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
+        # but `tuple([2]) != list([2])`
+        if len(left.items) != len(right.items):
+            return ConstantVariable(False, **options)
+        if len(left.items) == 0:
+            return ConstantVariable(True, **options)
+
+        # Generic list comparison works by iterating over left aka self and right the compared-to list.
+        # If we hit here, their lengths are the same and they cannot be expressed as python constants.
+        # So, we iterate over the zipped list items.
+        comps = []
+        for l, r in zip(left.items, right.items):
+            comp = BuiltinVariable(op).call_function(tx, [l, r], {})
+            comps.append(comp)
+
+        return functools.reduce(
+            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
+            comps,
+        )
 
 
 class RangeVariable(BaseListVariable):
