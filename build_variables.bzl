@@ -821,7 +821,6 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/eval_frame.c",
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
-    "torch/csrc/dynamo/c_abi.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
