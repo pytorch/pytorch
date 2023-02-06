@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <torch/library.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
 
@@ -521,7 +522,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   // other_t += convolution(...), other_t = unary(other_t)
   TORCH_CHECK(
       input_t.ndimension() == 4 || input_t.ndimension() == 5,
-      "mkldnn_convolution_add_: currently only support 2d and 3d")
+      "mkldnn_convolution_pointwise_binary_: currently only support 2d and 3d")
   TORCH_CHECK(
       binary_attr == "add",
       "mkldnn_convolution_pointwise_binary_: only support binary op fusion")
@@ -884,6 +885,84 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
 
+namespace functionalization {
+
+Tensor& mkldnn_convolution_pointwise_binary_(
+    const Tensor& input_t,
+    Tensor& other_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view binary_attr,
+    c10::optional<at::Scalar> alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
+  // other_t += convolution(...), other_t = unary(other_t)
+  TORCH_CHECK(
+      input_t.ndimension() == 4 || input_t.ndimension() == 5,
+      "functional mkldnn_convolution_pointwise_binary_: currently only support 2d and 3d")
+  TORCH_CHECK(
+      binary_attr == "add",
+      "mkldnn_convolution_pointwise_binary_: only support binary op fusion")
+  TORCH_CHECK(
+      !alpha.has_value() || alpha.value().to<float>() == 1.0,
+      "functional mkldnn_convolution_pointwise_binary_: the alpha value for the binary op should be none(meaning 1.0) or 1.0");
+  TORCH_CHECK(
+      !unary_attr.has_value() || unary_attr.value() == "relu",
+      "functional mkldnn_convolution_pointwise_binary_: only support none or relu unary op fusion after binary op");
+  bool is_functional_inputs = true;
+  is_functional_inputs &= at::functionalization::impl::isFunctionalTensor(input_t);
+  is_functional_inputs &= at::functionalization::impl::isFunctionalTensor(other_t);
+  is_functional_inputs &= at::functionalization::impl::isFunctionalTensor(weight_t);
+  is_functional_inputs &= at::functionalization::impl::isFunctionalTensor(bias_opt);
+
+  TORCH_CHECK(
+      is_functional_inputs,
+      "functionalization mkldnn_convolution_pointwise_binary_: the all inputs should be FunctionalTensor")
+   at::Tensor input_;
+  at::functionalization::impl::sync(input_t);
+  input_ = at::functionalization::impl::from_functional_tensor(input_t);
+
+  at::Tensor other_;
+  at::functionalization::impl::sync(other_t);
+  other_ = at::functionalization::impl::from_functional_tensor(other_t);
+
+  at::Tensor weight_;
+  at::functionalization::impl::sync(weight_t);
+  weight_ = at::functionalization::impl::from_functional_tensor(weight_t);
+
+  c10::optional<at::Tensor> bias_;
+  at::functionalization::impl::sync(bias_opt);
+  bias_ = at::functionalization::impl::from_functional_tensor(bias_opt);
+
+  at::AutoDispatchSkipFunctionalize guard;
+  Tensor conv_output, tmp_output;
+  if (weight_.is_mkldnn()) {
+    conv_output = at::native::mkldnn_convolution(
+        input_, weight_, bias_, padding, stride, dilation, groups);
+  } else {
+    conv_output = at::convolution(
+        input_, weight_, bias_, stride, padding, dilation, false, 0, groups);
+  }
+
+  if (unary_attr.has_value()) {
+    tmp_output = other_.add(conv_output).relu();
+  } else {
+    tmp_output = other_.add(conv_output);
+  }
+
+  at::functionalization::impl::replace_(other_t, conv_output);
+  at::functionalization::impl::commit_update(other_t);
+  at::functionalization::impl::sync(other_t);
+  return other_t;
+}
+
+}
+
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
@@ -919,6 +998,14 @@ TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise_meta));
 }
+
+
+TORCH_LIBRARY_IMPL(mkldnn, Functionalize, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_FN(functionalization::mkldnn_convolution_pointwise_binary_));
+}
+
 }}  // namespace at::native
 
 #endif
