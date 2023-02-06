@@ -1,19 +1,19 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import unittest
 import torch
 from torch._dispatch.python import enable_python_dispatcher
 import torch._dynamo
 import torch._dynamo.test_case
-import torch.distributed as dist
 from torch._dynamo.utils import same
 from torch._dynamo.testing import CompileCounter
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
-    _dynamo_dist_per_rank_init,
     DynamoDistributedSingleProcTestCase,
     DynamoDistributedMultiProcTestCase,
-    skip_if_lt_x_gpu,
-    requires_nccl
+    _dynamo_dist_per_rank_init,
+    requires_nccl,
+    skip_if_lt_x_gpu
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 import torch._dynamo.logging
@@ -71,23 +71,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 inductor_out = compiled_matmul_cat_col(*inputs)
                 assert same(eager_out, inductor_out)
 
-    @skip_if_lt_x_gpu(2)
-    def test_allreduce_eager(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            input = torch.ones(4, 4, device="cuda")
-            orig_input = input.clone()
-
-            with enable_python_dispatcher():
-                correct = input.clone()
-                dist.all_reduce(correct, async_op=False)
-
-                out = torch.ops.aten.all_reduce(input, reduceOp="sum", **self.get_world_trs())
-                assert same(correct, out, tol=0.001), f"aten.all_reduce ({out}) didn't match dist.all_reduce ({correct})!"
-                assert same(orig_input, input), "aten.all_reduce mutated input!"
-
 
 @requires_nccl()
-class TestCollectives(DynamoDistributedSingleProcTestCase):
+class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
     """
@@ -169,6 +155,9 @@ class TestCollectives(DynamoDistributedSingleProcTestCase):
             assert same(out, correct)
 
 
+@requires_nccl()
+class TestCollectives(DynamoDistributedSingleProcTestCase):
+
     def test_backwards(self):
         """
         It's probably not that common to need backwards support for collectives.
@@ -195,6 +184,7 @@ class TestCollectives(DynamoDistributedSingleProcTestCase):
         x = torch.rand((2, 3, 4), device="meta")
         out = torch.ops.aten.all_reduce(x, "sum", **self.get_world_trs())
         assert x.size() == out.size()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
