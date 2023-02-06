@@ -1156,7 +1156,7 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
 def read_flaky_rules() -> List[FlakyRule]:
     # NOTE: This is currently hardcoded, can be extended to do per repo rules
     FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
-    return get_flaky_rules(FLAKY_RULES_URL)
+    return _get_flaky_rules(FLAKY_RULES_URL)
 
 
 def find_matching_merge_rule(
@@ -1319,13 +1319,13 @@ def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
 
 
-def get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
+def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
     try:
         return [FlakyRule(**rule) for rule in fetch_json_list(url)]
     except Exception as e:
         print(f"Could not download {url} because: {e}.")
         if num_retries > 0:
-            return get_flaky_rules(url, num_retries=num_retries - 1)
+            return _get_flaky_rules(url, num_retries=num_retries - 1)
         return []
 
 
