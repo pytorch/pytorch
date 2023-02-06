@@ -1604,14 +1604,28 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     return wrapped
 
 @exposed_in("torch.func")
-def linearize(fn, *primals) -> Tuple[Any, Callable]:
+def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
+    '''
+    Returns the value of ``func`` at ``primals`` and linear approximation
+    at ``primals``.
+
+    Args:
+        func (Callable): A Python function that takes one or more arguments.
+        primals (Tensors): Positional arguments to ``func`` that must all be
+            Tensors. These are the values at which the function is linearly approximated.
+
+    Returns:
+        Returns a ``(output, jvp_fn)`` tuple containing the output of ``func``
+        applied to ``primals`` and a function that computes the jvp of
+        ``func`` evaluated at ``primals``.
+    '''
     # Note: We evaluate `fn` twice.
     # Once for returning the output and other while
     # tracing the graph.
     # If this becomes a bottle-neck, we should update
     # make_fx such that it also returns the output.
 
-    output = fn(*primals)
+    output = func(*primals)
     _, output_spec = tree_flatten(output)
 
     flat_primals, primals_argspec = tree_flatten(primals)
@@ -1624,14 +1638,15 @@ def linearize(fn, *primals) -> Tuple[Any, Callable]:
         with fwAD.dual_level():
             flat_duals = tuple(fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents))
             duals = tree_unflatten(flat_duals, primals_argspec)
-            output = fn(*duals)
+            output = func(*duals)
             tangents = tree_map_only(torch.Tensor, lambda t: fwAD.unpack_dual(t)[1], output)
 
         return tangents
 
-    graph = make_fx(trace_fn)(flat_tangents)
-    const_folded_graph = const_fold.split_const_subgraphs(graph)
+    jvp_graph = make_fx(trace_fn)(flat_tangents)
+    const_folded_jvp_graph = const_fold.split_const_subgraphs(jvp_graph)
 
+    # Hold only the meta-data regarding the primals.
     flat_primals_shape = tuple(p.shape for p in flat_primals)
     flat_primals_device = tuple(p.device for p in flat_primals)
     flat_primals_dtype = tuple(p.dtype for p in flat_primals)
@@ -1667,7 +1682,7 @@ def linearize(fn, *primals) -> Tuple[Any, Callable]:
 
         forward_ad_checks(flat_tangents)
 
-        flat_output = const_folded_graph(*flat_tangents)
+        flat_output = const_folded_jvp_graph(*flat_tangents)
         # const folded graph can return flat output,
         # so transform output.
         return tree_unflatten(flat_output, output_spec)
