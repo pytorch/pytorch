@@ -37,6 +37,7 @@ load(
     "PROD_XOP_MICROKERNEL_SRCS",
     "ALL_NEONFMA_AARCH64_MICROKERNEL_SRCS",
     "ALL_NEON_AARCH64_MICROKERNEL_SRCS",
+    "PROD_SCALAR_MICROKERNEL_SRCS",
 )
 
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
@@ -1637,6 +1638,47 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     )
 
     fb_xplat_cxx_library(
+        name = "prod_scalar_microkernel",
+        srcs = PROD_SCALAR_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(android-armv8|iphoneos-armv8)$",
+                [
+                    "-march=armv8-a",
+                    "-mfpu=neon-fp-armv8",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+        ],
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_asm_aarch32",
         srcs = AARCH32_ASM_MICROKERNEL_SRCS,
         headers = subdir_glob([
@@ -1827,6 +1869,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":subgraph",
             ":tables",
             ":ukernels_scalar",
+            ":prod_scalar_microkernel",
             third_party("cpuinfo"),
             third_party("pthreadpool"),
         ] + select({
