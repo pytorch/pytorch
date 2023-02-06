@@ -1639,7 +1639,7 @@ def linearize(fn, *primals) -> Tuple[Any, Callable]:
         flat_tangents, tangent_argspec = tree_flatten(tangents)
         if tangent_argspec != primals_argspec:
             raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
-                                f"the same argspec as the primals {primals_argspec}")
+                               f"the same argspec as the primals {primals_argspec}")
 
         flat_output = const_folded_graph(*flat_tangents)
         # const folded graph can return flat output,
