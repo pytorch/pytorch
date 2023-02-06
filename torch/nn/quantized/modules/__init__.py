@@ -1,7 +1,7 @@
 r"""Quantized Modules
 
 Note::
-    The `torch.ao.nn.quantized` namespace is in the process of being deprecated.
+    The `torch.nn.quantized` namespace is in the process of being deprecated.
     Please, use `torch.ao.nn.quantized` instead.
 """
 
@@ -21,7 +21,7 @@ from torch.ao.nn.quantized.modules import Quantize, DeQuantize
 
 # The following imports are needed in case the user decides
 # to import the files directly,
-# s.a. `from torch.ao.nn.quantized.modules.conv import ...`.
+# s.a. `from torch.nn.quantized.modules.conv import ...`.
 # No need to add them to the `__all__`.
 from torch.ao.nn.quantized.modules import activation
 from torch.ao.nn.quantized.modules import batchnorm
