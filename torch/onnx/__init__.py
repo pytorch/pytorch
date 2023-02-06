@@ -26,10 +26,10 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset16,
     symbolic_opset17,
     utils,
+    verification,
 )
 
-# TODO(After 1.13 release): Remove the deprecated SymbolicContext
-from ._exporter_states import ExportTypes, SymbolicContext
+from ._exporter_states import ExportTypes
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
@@ -49,6 +49,7 @@ __all__ = [
     "symbolic_helper",
     "utils",
     "errors",
+    "verification",
     # All opsets
     "symbolic_caffe2",
     "symbolic_opset7",
