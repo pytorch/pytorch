@@ -1610,7 +1610,7 @@ class TestFSDPOptimState(FSDPTest):
         state_dicts = []
 
         # Train one batch and see if optim_state_dict are the same.
-        batch = torch.rand(5, 8).cuda()
+        batch = torch.rand(5, 8, device=torch.device("cuda"))
         for model, optim in zip(models, optims):
             # Eagerly initialize the states
             for param in model.parameters():
