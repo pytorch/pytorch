@@ -21,11 +21,12 @@ concurrency:
 
 jobs:
   build-wheel:
+    name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -107,11 +108,6 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.github-token }}
     steps:
-      - name: Download Build Artifacts (3.7)
-        uses: actions/download-artifact@v3
-        with:
-          name: "pytorch-triton-wheel-3.7"
-          path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.8)
         uses: actions/download-artifact@v3
         with:
@@ -148,11 +144,12 @@ jobs:
               aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
              done
   build-conda:
+    name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.7", "3.8", "3.9", "3.10" ]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
