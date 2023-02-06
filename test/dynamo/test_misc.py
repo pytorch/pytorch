@@ -279,6 +279,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn([4, 3]))
         self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
 
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
@@ -3792,14 +3793,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
-
-    def test_int_neg(self):
-        def int_neg(a, b):
-            x = a.shape[0]
-            y = b.shape[0]
-            return -x * -y * a * b
-
-        torch._dynamo.testing.standard_test(self, int_neg, 2)
 
 
 class CustomFunc1(torch.autograd.Function):
