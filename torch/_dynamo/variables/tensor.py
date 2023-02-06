@@ -6,7 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_int
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -453,7 +453,7 @@ class DynamicShapeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        return guard_int(self.dyn_shape)
+        return guard_scalar(self.dyn_shape)
 
     def call_method(
         self,
