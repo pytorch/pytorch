@@ -91,10 +91,17 @@ jobs:
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Install requirements
+      - name: Install dependencies
+        uses: nick-fields/retry@v2.8.2
         id: requirements
-        run: pip install -r requirements.txt --user
-      - name: Ensure no non-breaking spaces
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            pip install -r requirements.txt --user
+            sudo apt-get install -y doxygen
+      - name: Ensure no non-breaking spaces (nonretryable)
         if: always()
         run: |
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
@@ -111,7 +118,6 @@ jobs:
       - name: C++ docs check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
-          sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
       - name: CUDA kernel launch check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
