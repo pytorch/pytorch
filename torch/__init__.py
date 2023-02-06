@@ -418,6 +418,9 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
+        # NB: If you actually care about preserving output type exactly
+        # if you do something like max(0, 0.0), it is NOT sound to treat
+        # min/max as commutative
         return b.__sym_max__(a)
     return builtins.max(a, b)  # type: ignore[operator]
 
