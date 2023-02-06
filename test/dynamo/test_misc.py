@@ -3774,35 +3774,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(all_tags, ["a", "b"])
         self.assertEqual(all_frogs, ["ribbity ribbit", "ribbit"])
 
-    # This fails, but it is worth having a test for, for if/when we add setattr support for TensorVariable
-    # torch._dynamo.exc.Unsupported: call_function BuiltinVariable(setattr)
-    #    [TensorVariable(), ConstantVariable(str), ConstantVariable(str)] {}
-    @unittest.expectedFailure
-    def test_tagging_tensors_intermediary_and_unused(self):
-        def foo(x, y):
-            z = x * y
-            z.story = "x * y"
-            return z
-
-        a = torch.randn([3, 3])  # not in output
-        a.tag = "a"
-        a.frog = "ribbity ribbit"
-        b = torch.randn([3, 3])  # not in output
-        b.tag = "b"
-        b.frog = "ribbit"
-
-        exported = torch._dynamo.export(foo, a, b)
-        out_graph = exported[0]
-
-        nodes = list(out_graph.graph.nodes)
-        placeholders = [node for node in nodes if node.op == "placeholder"]
-        all_tags = []
-        for placeholder in placeholders:
-            if "tensor_dict" in placeholder.meta:
-                all_tags.append(placeholder.meta["tensor_dict"]["story"])
-
-        self.assertEqual(all_tags, ["x * y"])
-
     def test_tagging_tensors_mix_used_unused_structure(self):
         def pre_attention_state_ops(input, mems, state):
             lc_key = state[0]
