@@ -1634,7 +1634,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         >>> def fn(x):
         ...     return x.sin()
         ...
-        >>> output, jvp_fn = linearize(fn, torch.zeros(3,0))
+        >>> output, jvp_fn = linearize(fn, torch.zeros(3, 3))
         >>> jvp_fn(torch.ones(3, 3))
         tensor([[1., 1., 1.],
                 [1., 1., 1.],
