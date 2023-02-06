@@ -2774,7 +2774,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                     # We remember to exit the inner autocast correctly to outer
                     # even after graph breaks
                     f_float16 = self.mm_breaks(a_float32, b_float32)
-                    assert(f_float16.dtype == f_float16_1.dtype)
+                    assert f_float16.dtype == f_float16_1.dtype
                 return f_float16, g_float32
 
         module = MyModule()

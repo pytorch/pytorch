@@ -74,6 +74,7 @@ from .variables.misc import (
     ClosureVariable,
     ContextWrappingVariable,
     GetAttrVariable,
+    GradModeVariable,
     PythonModuleVariable,
     UnknownVariable,
     WithExitFunctionVariable,
@@ -376,7 +377,7 @@ def break_graph_if_unsupported(*, push):
             # https://github.com/pytorch/torchdynamo/issues/207
             finally_blocks = []
             for ctx in self.block_stack:
-                if isinstance(ctx.with_context, ContextWrappingVariable):
+                if isinstance(ctx.with_context, GradModeVariable):
                     ctx_variable = ctx.with_context
                     cg = PyCodegen(self)
                     init_block, cleanup_ctx = ctx_variable.reconstruct(cg)
@@ -398,7 +399,6 @@ def break_graph_if_unsupported(*, push):
             self.output.add_output_instructions(
                 resume_call_insts,
             )
-            self.output.graph.print_tabular()
 
         return wrapper
 
