@@ -259,6 +259,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var_mean": {f16},
     "view_as_complex": {f16},
     "norm.inf": {f16},
+    "linalg.matrix_rank.hermitian": {f32, f64},
 }
 
 
@@ -336,6 +337,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.cond": {f32, f64},
     "linalg.svdvals": {f32, f64},
     "norm.nuc": {f32, f64},
+    "linalg.matrix_rank.hermitian": {f32, f64},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
