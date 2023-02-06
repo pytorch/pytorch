@@ -1166,26 +1166,14 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.nn.quantizable
 .. py:module:: torch.ao.nn.quantizable.modules
 .. py:module:: torch.ao.nn.quantized
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
 .. py:module:: torch.ao.ns
 .. py:module:: torch.ao.ns.fx
-.. py:module:: torch.ao.quantization
-.. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
 .. py:module:: torch.ao.pruning
 .. py:module:: torch.ao.pruning.scheduler
 .. py:module:: torch.ao.pruning.sparsifier
-
-.. py:module:: torch.ao.nn.qat
-.. py:module:: torch.ao.nn.qat.modules
-.. py:module:: torch.ao.nn.qat.dynamic
-.. py:module:: torch.ao.nn.qat.dynamic.modules
-.. py:module:: torch.ao.nn.quantized
-.. py:module:: torch.ao.nn.quantized.modules
-.. py:module:: torch.ao.nn.quantized.dynamic
-.. py:module:: torch.ao.nn.quantized.dynamic.modules
-
-.. py:module:: torch.ao.nn.quantized.reference
-.. py:module:: torch.ao.nn.quantized.reference.modules
