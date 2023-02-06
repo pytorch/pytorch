@@ -70,11 +70,6 @@ def vector_norm(
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
-    if dim is None:
-        # torch.amin/amax do not accept dim=None
-        x = x.flatten()
-        dim = 0
-
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
@@ -103,15 +98,15 @@ def vector_norm(
 
     # Implementation
     if ord == 0.0:
-        return refs.sum(refs.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
+        return torch.sum(torch.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
     elif ord == float("inf"):
-        return to_result_dtype(torch.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value]
+        return to_result_dtype(torch.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
     elif ord == float("-inf"):
-        return to_result_dtype(torch.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value]
+        return to_result_dtype(torch.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
-        reduce_sum = partial(refs.sum, dim=dim, keepdim=keepdim)
+        reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
