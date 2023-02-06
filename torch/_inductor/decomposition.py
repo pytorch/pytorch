@@ -7,6 +7,7 @@ import torch
 import torch._decomp as decomp
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
+from torch._decomp.decompositions import pw_cast_for_opmath
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
@@ -34,11 +35,12 @@ def register_decomposition(ops):
 
 
 @register_decomposition([aten.clamp])
+@pw_cast_for_opmath
 def clamp(x, min=None, max=None):
     if min is not None:
-        x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
+        x = x.clamp_min(min)
     if max is not None:
-        x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
+        x = x.clamp_max(max)
     return x
 
 

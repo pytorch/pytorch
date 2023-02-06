@@ -184,8 +184,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.addcdiv_,
             aten.avg_pool2d_backward,
             aten.binary_cross_entropy_with_logits,
-            aten.clamp_max,
-            aten.clamp_min,
             aten.col2im,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
