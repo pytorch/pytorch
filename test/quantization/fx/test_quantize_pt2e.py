@@ -25,6 +25,7 @@ from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
+import torch.ao.quantization._pt2e.decompositions  # noqa: F401
 from torch._decomp import get_decompositions
 from torch.fx.experimental.proxy_tensor import make_fx
 
