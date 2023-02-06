@@ -698,7 +698,7 @@ def convert_weighted_module(
     fused_module = None
     float_module = original_module
     # extract the inidividual float_module and fused module
-    if isinstance(original_module, torch.nn.intrinsic._FusedModule):
+    if isinstance(original_module, torch.ao.nn.intrinsic._FusedModule):
         fused_module = float_module
         float_module = fused_module[0]  # type: ignore[index]
 

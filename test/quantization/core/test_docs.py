@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-# import torch.nn.quantized as nnq
+# import torch.ao.nn.quantized as nnq
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
@@ -140,7 +140,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "Custom API Example::"
 
-        global_inputs = {"nnq": torch.nn.quantized}
+        global_inputs = {"nnq": torch.ao.nn.quantized}
 
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)

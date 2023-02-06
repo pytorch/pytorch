@@ -2,7 +2,7 @@ import torch
 import torchvision
 import torchvision.transforms.transforms as transforms
 import os
-import torch.quantization
+import torch.ao.quantization
 from torchvision.models.quantization.resnet import resnet18
 from torch.autograd import Variable
 
@@ -15,7 +15,7 @@ warnings.filterwarnings(
 )
 warnings.filterwarnings(
     action='default',
-    module=r'torch.quantization'
+    module=r'torch.ao.quantization'
 )
 
 """

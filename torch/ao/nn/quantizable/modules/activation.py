@@ -51,7 +51,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> multihead_attn = nnqa.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -77,8 +77,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
-        self.q_scaling_product = torch.nn.quantized.FloatFunctional()
-        # note: importing torch.nn.quantized at top creates a circular import
+        self.q_scaling_product = torch.ao.nn.quantized.FloatFunctional()
+        # note: importing torch.ao.nn.quantized at top creates a circular import
 
         # Quant/Dequant
         self.quant_attn_output = torch.ao.quantization.QuantStub()

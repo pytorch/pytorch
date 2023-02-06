@@ -4,11 +4,11 @@ across models. Example usage::
 
     import copy
     import torch
-    import torch.quantization.quantize_fx as quantize_fx
+    import torch.ao.quantization.quantize_fx as quantize_fx
     import torch.ao.ns._numeric_suite_fx as ns
 
     m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1)).eval()
-    mp = quantize_fx.prepare_fx(m, {'': torch.quantization.default_qconfig})
+    mp = quantize_fx.prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
     # We convert a copy because we need the original prepared model
     # to be available for comparisons, and `quantize_fx.convert_fx` is inplace.
     mq = quantize_fx.convert_fx(copy.deepcopy(mp))

@@ -1102,11 +1102,11 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         class ONNXExportable(torch.nn.Module):
             def __init__(self):
                 super(ONNXExportable, self).__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.fc1 = torch.nn.Linear(12, 8)
                 self.fc2 = torch.nn.Linear(8, 4)
                 self.fc3 = torch.nn.Linear(4, 6)
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)

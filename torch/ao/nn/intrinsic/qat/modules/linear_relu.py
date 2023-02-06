@@ -11,7 +11,7 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
 
     We adopt the same interface as :class:`torch.nn.Linear`.
 
-    Similar to `torch.nn.intrinsic.LinearReLU`, with FakeQuantize modules initialized to
+    Similar to `torch.ao.nn.intrinsic.LinearReLU`, with FakeQuantize modules initialized to
     default.
 
     Attributes:
@@ -45,4 +45,4 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
         if self.bias is not None:
             linear.bias = torch.nn.Parameter(self.bias.detach())
         relu = torch.nn.ReLU()
-        return torch.nn.intrinsic.LinearReLU(linear, relu)
+        return torch.ao.nn.intrinsic.LinearReLU(linear, relu)

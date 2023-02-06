@@ -10,7 +10,7 @@ import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
 
 # graph mode quantization based on fx
@@ -682,7 +682,7 @@ class TestFuseFx(QuantizationTestCase):
         }
         m = prepare_fx(model, qconfig_dict, example_inputs=(torch.randn(1, 5),))
 
-        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
+        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.ao.nn.intrinsic.modules.fused.LinearReLU))
 
     @unittest.skip("Temporarily skipping the test case, will enable after the simple"
                    "pattern format is supported")
@@ -5271,7 +5271,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         mod = M()
 
-        qconfig_dict = {"": torch.quantization.get_default_qat_qconfig()}
+        qconfig_dict = {"": torch.ao.quantization.get_default_qat_qconfig()}
         prepare_custom_config_dict = {
             "non_traceable_module_class": [UnTraceableModuleClass],
             "non_traceable_module_name": ["untraceable_module_name"],
@@ -7003,7 +7003,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quantized_nodes = {
             # is_reference
             True: ns.call_module(torch.nn.PReLU),
-            False: ns.call_module(torch.nn.quantized.PReLU),
+            False: ns.call_module(torch.ao.nn.quantized.PReLU),
         }
 
         for num_parameter, quant_type, is_reference in options:
