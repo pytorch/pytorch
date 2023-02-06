@@ -3,12 +3,11 @@
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/native/ReductionType.h>
-#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -51,6 +50,7 @@ inline vec_scalar_t<scalar_t> init_value() {
   } else if (reduce == ReductionType::MAX) {
     val = -std::numeric_limits<acc_t>::infinity();
   } else {
+    TORCH_INTERNAL_ASSERT(reduce == ReductionType::MIN);
     val = std::numeric_limits<acc_t>::infinity();
   }
   return val;
@@ -83,31 +83,51 @@ inline void init(scalar_t* out, int64_t size, const c10::optional<Scalar>& initi
   init(out, size, val);
 }
 
+// overload with `include_self`, used by scatter_reduce
 template <typename scalar_t, ReductionType reduce>
-inline void init(scalar_t* out, int64_t size, bool include_self) {
+inline void init(scalar_t* out, int64_t size, bool include_self = false) {
   using acc_t = vec_scalar_t<scalar_t>;
   if (!include_self) {
-    acc_t val = init_value<scalar_t, reduce>;
+    acc_t val = init_value<scalar_t, reduce>();
     init(out, size, val);
   }
 }
 
+template <typename scalar_t>
+inline scalar_t _max(const scalar_t& x, const scalar_t& y) {
+  return at::_isnan(y) ? y : std::max(x, y);
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _max(const Vectorized<scalar_t>& x, const Vectorized<scalar_t>& y) {
+  // vec::maximum propagates NaN
+  return vec::maximum(x, y);
+}
+
+template <typename scalar_t>
+inline scalar_t _min(const scalar_t& x, const scalar_t& y) {
+  return at::_isnan(y) ? y : std::min(x, y);
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _min(const Vectorized<scalar_t>& x, const Vectorized<scalar_t>& y) {
+  // vec::minimum propagates NaN
+  return vec::minimum(x, y);
+}
+
 // for Max and Min, propagate NaN:
-template <typename Vec, ReductionType reduce>
-inline Vec update(const Vec& x, const Vec& y) {
+template <typename T, ReductionType reduce>
+inline T update(const T& x, const T& y) {
   if (reduce == ReductionType::SUM ||
       reduce == ReductionType::MEAN) {
     return x + y;
   } else if (reduce == ReductionType::PROD) {
     return x * y;
   } else if (reduce == ReductionType::MAX) {
-    // true = all ones, false = all zeros
-    Vec mask = (y > x) | y.isnan();
-    return Vec::blendv(x, y, mask);
+    return _max(x, y);
   } else {
-    // true = all ones, false = all zeros
-    Vec mask = (y < x) | y.isnan();
-    return Vec::blendv(x, y, mask);
+    TORCH_INTERNAL_ASSERT(reduce == ReductionType::MIN);
+    return _min(x, y);
   }
 }
 
@@ -137,5 +157,4 @@ inline void write(scalar_t* out, int64_t count, int64_t K) {
 }
 
 } // namespace CPU_CAPABILITY
-} // namespace native
-} // namespace at
+} // namespace at::native

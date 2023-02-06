@@ -21,8 +21,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -362,4 +361,4 @@ Tensor embedding_backward_cuda_kernel(
   return grad_weight;
 }
 
-}}
+} // namespace at::native

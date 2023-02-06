@@ -162,6 +162,7 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/squeeze_copy_native.h>
 #include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/squeeze.h>
 #include <ATen/ops/stack_native.h>
 #include <ATen/ops/sub.h>
 #include <ATen/ops/sum.h>
@@ -252,7 +253,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
 
   TORCH_CHECK(
-      materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
+      !materialized.empty(), "torch.cat(): expected a non-empty list of Tensors");
 
   // Look for the first valid tensor.
   size_t valid = materialized.size();
@@ -522,7 +523,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
 
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
   Tensor new_indices = indices.new_empty(new_indices_size);
-  if (broadcast_sizes.size()>0) {
+  if (!broadcast_sizes.empty()) {
     // ones(broadcast_sizes).nonzero() is equivalent to
     // product(map(arange, broadcast_sizes)) but avoids creating
     // auxilary arange tensors
@@ -824,7 +825,7 @@ Tensor cat_sparse(const ITensorListRef& tensors, int64_t dim) {
 
 Tensor block_diag(TensorList tensors) {
   Tensor result;
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     result = at::empty({1, 0});
     return result;
   }
@@ -1668,7 +1669,7 @@ Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
-  return self.reshape(other.sizes());
+  return self.reshape_symint(other.sym_sizes());
 }
 
 static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
@@ -1803,7 +1804,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
 
 Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
-  grad_input.select_symint(dim, index).copy_(grad);
+  grad_input.select_symint(dim, std::move(index)).copy_(grad);
   return grad_input;
 }
 
@@ -2654,7 +2655,7 @@ void check_stack_inputs(TensorList tensors, int64_t dim) {
 
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
   if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
@@ -2684,7 +2685,7 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 
 // TODO(msubkhankulov): refactor to use _stack_out
 Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
   if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
@@ -2707,7 +2708,7 @@ Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 }
 
 Tensor hstack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
   if (rep[0].dim() == 1) {
@@ -2717,7 +2718,7 @@ Tensor hstack(TensorList tensors) {
 }
 
 Tensor& hstack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
   if (rep[0].dim() == 1) {
@@ -2727,27 +2728,27 @@ Tensor& hstack_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor vstack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat(rep, 0);
 }
 
 Tensor& vstack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat_out(result, rep, 0);
 }
 
 Tensor dstack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat(rep, 2);
 }
 Tensor& dstack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat_out(result, rep, 2);
@@ -2811,7 +2812,7 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
 }
 
 Tensor& column_stack_out(TensorList tensors, Tensor& result) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
               "column_stack expects a non-empty TensorList");
 
   auto reshaped_tensors = reshape_input_for_column_stack(tensors);
@@ -2819,7 +2820,7 @@ Tensor& column_stack_out(TensorList tensors, Tensor& result) {
 }
 
 Tensor column_stack(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0,
+  TORCH_CHECK(!tensors.empty(),
               "column_stack expects a non-empty TensorList");
 
   auto reshaped_tensors = reshape_input_for_column_stack(tensors);
@@ -2902,11 +2903,11 @@ static inline Tensor sparse_compressed_transpose(
       [&self]() { return self.row_indices(); });
 
   const auto n_batch_dim = compressed_inds.dim() - 1;
-  const auto n_dense_dim = self.dim() - n_batch_dim - 2;
+  const auto dense_dim = self.dim() - n_batch_dim - 2;
 
   // In theory it works, but missing to_dense coverage to test
   TORCH_CHECK(
-      n_dense_dim == 0,
+      dense_dim == 0,
       "transpose(): hybrid sparse compressed tensors with dense dimensions are not supported");
 
   // Classify transpose "type"
@@ -2994,7 +2995,7 @@ static inline Tensor sparse_compressed_transpose(
         // blocked: the blocks are nested under the sparse dims so they must be
         // transposed as well.
         [&]() {
-          return self.values().transpose(-2 - n_dense_dim, -1 - n_dense_dim);
+          return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
   return at::native::_sparse_compressed_tensor_unsafe(
@@ -3095,6 +3096,22 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
+std::tuple<SymDimVector, SymDimVector>
+inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
+  const auto ndim = tensor.dim();
+  const auto sym_sizes = tensor.sym_sizes();
+  const auto sym_strides = tensor.sym_strides();
+
+  SymDimVector out_sizes, out_strides;
+  for (const auto d: c10::irange(ndim)) {
+    if (!dim_mask.test(d) || sym_sizes[d] != 1) {
+      out_sizes.push_back(sym_sizes[d]);
+      out_strides.push_back(sym_strides[d]);
+    }
+  }
+  return std::make_tuple(std::move(out_sizes), std::move(out_strides));
+}
+
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -3117,18 +3134,21 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
-Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
+Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   SymDimVector sizes;
   SymDimVector strides;
-  std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
+  const auto ndim = self.dim();
+  auto mask = dims.has_value()
+      ? dim_list_to_bitset(dims, self.dim())
+      : std::bitset<dim_bitset_size>((1ull << self.dim()) - 1);
+  std::tie(sizes, strides) = inferSqueezeGeometry(self, mask);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
-    for (const auto d : dims) {
-      if (self.sizes()[d] == 1) {
+    for (const auto d : c10::irange(ndim)) {
+      if (mask.test(d) && self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
         if (d < axis) {
           ++shift;
@@ -3144,13 +3164,8 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
   // are missing for now.
   auto result = make_qtensor(self, C10_AS_INTARRAYREF_SLOW(sizes), C10_AS_INTARRAYREF_SLOW(strides), std::move(quantizer));
-  if (dim.has_value()) {
-    namedinference::propagate_names_except(result, self, {dim.value()});
-  } else {
-    auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
-    namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  }
-
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -3163,10 +3178,7 @@ Tensor squeeze(const Tensor& self) {
 }
 
 Tensor squeeze_quantized(const Tensor& self) {
-  at::Tensor result = squeeze_qtensor(self, c10::nullopt);
-  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
+  return squeeze_qtensor(self, c10::nullopt);
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -3182,8 +3194,19 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
 }
 
 Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
-  int64_t dims = self.dim();
-  dim = maybe_wrap_dim(dim, dims);
+  return squeeze_qtensor(self, dim);
+}
+
+Tensor squeeze(const Tensor& self, IntArrayRef dims) {
+  auto mask = dim_list_to_bitset(dims, self.dim());
+  auto g = inferSqueezeGeometry(self, mask);
+  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
+}
+
+Tensor squeeze_quantized(const Tensor& self, IntArrayRef dim) {
   return squeeze_qtensor(self, dim);
 }
 
@@ -3202,6 +3225,13 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
+  return self;
+}
+
+Tensor & squeeze_(Tensor &self, IntArrayRef dims) {
+  auto mask = dim_list_to_bitset(dims, self.dim());
+  auto g = inferSqueezeGeometry(self, mask);
   self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
@@ -3344,7 +3374,7 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
 
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
-  TORCH_CHECK(positions.size() > 0,
+  TORCH_CHECK(!positions.empty(),
       "flatten(tensor, dims, out_dim): dims cannot be empty");
   for (const auto i : c10::irange(positions.size() - 1)) {
     if (positions[i] + 1 == positions[i + 1]) continue;
@@ -3383,7 +3413,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
 Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
+  TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
   TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
   if (self.has_names()) {
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
@@ -3428,7 +3458,7 @@ Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
-  return self.view(other.sizes());
+  return self.view_symint(other.sym_sizes());
 }
 
 int64_t numel(const Tensor& self) {
@@ -3511,17 +3541,18 @@ std::vector<Tensor> meshgrid(TensorList tensors,
                 "but received: ", indexing);
   }
 
-  std::vector<int64_t> shape(size);
+  std::vector<c10::SymInt> shape(size);
   for(const auto i: c10::irange(size)){
     TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
                 "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
-    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
+    shape[i] = tensor_refs[i].get().sym_numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
-  std::vector<int64_t> view_shape(size, 1);
+  grids.reserve(size);
+  std::vector<c10::SymInt> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
     view_shape[i] = -1;  // select this dimension to infer
-    grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    grids.push_back(tensor_refs[i].get().view_symint(view_shape).expand_symint(shape));
     view_shape[i] = 1;  // restore to previous value
   }
 
@@ -3543,6 +3574,10 @@ Tensor numpy_T(const Tensor &self) {
         "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
     );
   }
+  if (n == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
@@ -3552,6 +3587,10 @@ Tensor numpy_T(const Tensor &self) {
 
 Tensor matrix_H(const Tensor &self) {
   const auto ndim = self.dim();
+  if (ndim == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.H is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   TORCH_CHECK(ndim == 2 || ndim == 0,
       "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
       ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
@@ -3576,14 +3615,25 @@ Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name
 } // anonymous namespace
 
 Tensor mT(const Tensor &self) {
+  if (self.dim() == 0) {
+   // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.mT is deprecated on 0-D tensors. This function is the identity in these cases.");
+  }
   return _adjoint(self, /*transpose=*/true, "mT");
 }
 
 Tensor mH(const Tensor &self) {
+  if (self.dim() == 0) {
+    // Added in PyTorch 2.0
+   TORCH_WARN_ONCE("Tensor.mH is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   return _adjoint(self, /*transpose=*/false, "mH");
 }
 
 Tensor adjoint(const Tensor &self) {
+  if (self.dim() == 0) {
+   TORCH_WARN_ONCE("adjoint() is deprecated on 0-D tensors. Consider using x.conj().");
+  }
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
@@ -3830,7 +3880,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   auto nbytes = self.storage().sym_nbytes();
   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
   auto numel = nbytes / dtype_size;
-  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto self_full_size = self.as_strided_symint({std::move(numel)}, {1}, 0);
   auto clone = self_full_size.clone();
   auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
   return out;
@@ -3847,7 +3897,7 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
 }
 at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
     auto output = clone_preserve_strides(self);
-    auto slice = output.select_symint(dim, index);
+    auto slice = output.select_symint(dim, std::move(index));
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
@@ -3883,133 +3933,7 @@ at::Tensor lift_fresh(const at::Tensor& self) {
     return self;
 }
 
-at::Tensor& _fw_primal_copy_out(const at::Tensor & self, int64_t level, at::Tensor & out) {
-  auto tmp = self._fw_primal(level);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _make_dual_copy_out(const at::Tensor & primal, const at::Tensor & tangent, int64_t level, at::Tensor & out) {
-  auto tmp = at::_make_dual(primal, tangent, level);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& view_as_real_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = at::view_as_real(self);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& view_as_complex_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = at::view_as_complex(self);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _conj_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self._conj();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _neg_view_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self._neg_view();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& as_strided_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset, at::Tensor & out) {
-  auto tmp = self.as_strided_symint(size, stride, std::move(storage_offset));
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
-  auto tmp = at::_sparse_broadcast_to(self, size);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  TORCH_CHECK(
-    out.device() == self.device(),
-    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
-    "out on ", out.device(), " and self on ", self.device());
-  auto result = self.diagonal(offset, dim1, dim2);
-  at::native::resize_output(out, result.sizes());
-  TORCH_CHECK(
-      canCast(result.scalar_type(), out.scalar_type()),
-      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
-  out.copy_(result);
-  return out;
-}
-
-
-at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand_symint(size, implicit);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& expand_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand_symint(size, implicit);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& narrow_copy_out(const at::Tensor & self, int64_t dim, int64_t start, int64_t length, at::Tensor & out) {
-  auto tmp = self.narrow(dim, start, length);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& permute_copy_out(const at::Tensor & self, at::IntArrayRef dims, at::Tensor & out) {
-  auto tmp = self.permute(dims);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, at::Tensor & out) {
-  auto tmp = self._reshape_alias(size, stride);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& select_copy_symint_out(const at::Tensor & self, int64_t dim, c10::SymInt index, at::Tensor & out) {
-  auto tmp = self.select_symint(dim, index);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& detach_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.detach();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& slice_copy_Tensor_out(const at::Tensor & self, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step, at::Tensor & out) {
-  auto tmp = self.slice(dim, start, end, step);
-  out.copy_(tmp);
-  return out;
-}
-
-
+// Autogen kernels for tensor list ops dont work on XLA. TODO(jakeszwe)
 void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, at::TensorList  out) {
   auto tmp = self.split(split_size, dim);
 
@@ -4018,7 +3942,6 @@ void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t 
     out[i].copy_(tmp[i]);
   }
 }
-
 
 void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, at::TensorList  out) {
   auto tmp = self.split_with_sizes(split_sizes, dim);
@@ -4029,84 +3952,6 @@ void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_si
   }
 }
 
-
-at::Tensor& squeeze_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.squeeze();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& squeeze_copy_dim_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
-  auto tmp = self.squeeze(dim);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& t_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.t();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& transpose_copy_int_out(const at::Tensor & self, int64_t dim0, int64_t dim1, at::Tensor & out) {
-  auto tmp = self.transpose(dim0, dim1);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& unsqueeze_copy_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
-  auto tmp = self.unsqueeze(dim);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _indices_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self._indices();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _values_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self._values();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& indices_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.indices();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& values_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.values();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& crow_indices_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.crow_indices();
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& col_indices_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.col_indices();
-  out.copy_(tmp);
-  return out;
-}
-
-
 void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
   auto tmp = self.unbind(dim);
 
@@ -4114,34 +3959,6 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
   for (const auto i : c10::irange(out.size())) {
     out[i].copy_(tmp[i]);
   }
-}
-
-
-at::Tensor& view_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
-  auto tmp = self.view_symint(size);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& view_copy_dtype_out(const at::Tensor & self, at::ScalarType dtype, at::Tensor & out) {
-  auto tmp = self.view(dtype);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& unfold_copy_out(const at::Tensor & self, int64_t dimension, int64_t size, int64_t step, at::Tensor & out) {
-  auto tmp = self.unfold(dimension, size, step);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
-  auto tmp = self.alias();
-  out.copy_(tmp);
-  return out;
 }
 
 int64_t sparse_dim_strided(const at::Tensor& self) {

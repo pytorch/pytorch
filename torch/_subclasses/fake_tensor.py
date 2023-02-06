@@ -20,6 +20,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils._stats import count
 from torch.utils.weak import WeakIdRef
 
 pytree = torch.utils._pytree
@@ -276,7 +277,6 @@ class FakeTensorConverter(object):
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
-    # You must have created the FakeTensorMode with allow_meta == True
     def __call__(
         self,
         fake_mode,
@@ -397,9 +397,7 @@ def local_scalar_dense(fake_mode, func, arg):
     lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
 )
 def data_dep(fake_mode, func, *args, **kwargs):
-    if fake_mode.throw_on_data_dependent_ops:
-        raise DataDependentOutputException(func)
-    return NotImplemented
+    raise DataDependentOutputException(func)
 
 
 # Bool Indices get Expanded as Masks
@@ -546,6 +544,13 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
 
+    @property
+    def device(self):
+        if self.fake_mode.in_kernel_invocation:
+            return torch.device("meta")
+        else:
+            return self.fake_device
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors
@@ -560,7 +565,7 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
-        return torch.Tensor._make_subclass(
+        self = torch.Tensor._make_subclass(
             cls,
             elem,
             elem.requires_grad,
@@ -568,13 +573,6 @@ class FakeTensor(torch.Tensor):
             device_for_backend_keys=device,
         )
 
-    def __init__(
-        self,
-        fake_mode,
-        elem,
-        device: Union[torch.device, str],
-        constant: Optional[torch.Tensor] = None,
-    ):
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
@@ -589,13 +587,35 @@ class FakeTensor(torch.Tensor):
         # normalize cuda device.
         if device.type == "cuda" and device.index is None:
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        self.fake_device = device
-        self.fake_mode = fake_mode
-        self.constant = constant
+        self.fake_device = device  # type: ignore[attr-defined]
+        self.fake_mode = fake_mode  # type: ignore[attr-defined]
+        self.constant = constant  # type: ignore[attr-defined]
         if FakeTensorConfig.debug:
             import traceback
 
-            self._debug_trace = traceback.extract_stack()
+            self._debug_trace = traceback.extract_stack()  # type: ignore[attr-defined]
+        return self
+
+    # In some circumstances, a conventional torch.Tensor constructor
+    # will get rewritten to call into FakeTensor.  We must provide an
+    # __init__ method that can accept the Python interpreters initialization
+    # in such a situation; we must also be able to handle direct fake
+    # tensor construction via FakeTensor().
+    #
+    # In particular, the __init__ call will look funny in the following case:
+    #
+    #   with FakeTensorMode():
+    #       x = torch.Tensor([1, 2, 3])
+    #
+    # this desugars into:
+    #
+    #   with FakeTensorMode():
+    #       x = torch.Tensor.__new__([1, 2, 3])
+    #       # NB: x is a fake tensor, because of the mode!
+    #       x.__init__([1, 2, 3])  # not the normal fake tensor args!
+    #
+    def __init__(self, *args, **kwargs):
+        super().__init__()
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -608,6 +628,7 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
     @classmethod
+    @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]
@@ -635,13 +656,6 @@ class FakeTensor(torch.Tensor):
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         assert fake_mode is not None
-
-        # if we've hit this instead of the mode, then a higher pri mode must
-        # have returned NotImplemented. Redispatching will cause an infinite
-        # loop but one of the other args may be a supported subclass
-        if hasattr(fake_mode, "tracking") and fake_mode.tracking.on_stack:
-            return NotImplemented
-
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
@@ -730,17 +744,15 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         *,
         allow_fallback_kernels=True,
-        allow_meta=False,
-        throw_on_data_dependent_ops=True,
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
-        self.allow_meta = allow_meta
 
-        # TODO: delete arg and default to true. waiting on dynamo perf regression testing
-        self.throw_on_data_dependent_ops = throw_on_data_dependent_ops
+        import torch._functorch.config
+
+        self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
 
         # A flag that controls, whether we want to invoke ops on mix of
         # real weights/global variables and fake inputs
@@ -760,6 +772,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -995,7 +1008,11 @@ class FakeTensorMode(TorchDispatchMode):
         def wrap(e, device=None):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
-            if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+            if (
+                isinstance(e, torch.Tensor)
+                and not isinstance(e, FakeTensor)
+                and converter is not None
+            ):
                 if common_device is None:
                     (
                         common_device,
@@ -1041,6 +1058,7 @@ class FakeTensorMode(TorchDispatchMode):
             t.numel() <= CONSTANT_NUMEL_LIMIT
             and not t.is_sparse
             and not isinstance(t, FakeTensor)
+            and not t.device.type == "meta"
         )
 
     def invalidate_written_to_constants(

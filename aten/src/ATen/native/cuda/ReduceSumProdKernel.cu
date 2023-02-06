@@ -8,7 +8,7 @@
 #include <ATen/jit_macros.h>
 #include <ATen/OpMathType.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct sum_functor {
@@ -21,7 +21,7 @@ struct sum_functor {
 };
 
 // jiterated specialization for `complex<Half>`
-const char sum_name[] = "sum";
+CONSTEXPR_EXCEPT_WIN_CUDA char sum_name[] = "sum";
 template <>
 struct sum_functor<c10::complex<at::Half>> {
 // jiterator reduction fails on windows
@@ -57,7 +57,7 @@ struct nansum_functor {
   }
 };
 
-const char prod_name[] = "prod";
+CONSTEXPR_EXCEPT_WIN_CUDA char prod_name[] = "prod";
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
@@ -184,4 +184,4 @@ REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

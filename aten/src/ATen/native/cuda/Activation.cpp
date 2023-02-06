@@ -20,7 +20,7 @@
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 // -----------------------------------
 // glu backward
@@ -105,4 +105,4 @@ TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
   GeluBackwardCUDAKernelImpl(*this, get_gelutype_enum(approximate));
 }
 
-}}  // namespace at::native
+}  // namespace at::native

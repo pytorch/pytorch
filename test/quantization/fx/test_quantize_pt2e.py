@@ -1,11 +1,13 @@
 # Owner(s): ["oncall: quantization"]
 import torch
+import torch.nn as nn
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
 )
+from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
@@ -22,12 +24,109 @@ from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
+import copy
+
+@skipIfNoQNNPACK
+class TestQuantizePT2E(QuantizationTestCase):
+    def test_qconfig_none(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            example_inputs = (torch.randn(1, 1, 1, 1),)
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            qconfig = get_default_qconfig("qnnpack")
+            qconfig_mapping = QConfigMapping().set_global(qconfig) \
+                                              .set_module_name("conv2", None)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m(*example_inputs)
+            m = convert_pt2e(m)
+            m(*example_inputs)
+
+            # first conv is quantized, second conv is not quantized
+            node_occurrence = {
+                # two for input of the first conv, one for output for the first conv
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+            }
+            node_list = [
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.aten.convolution.default),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.aten.convolution.default),
+            ]
+            self.checkGraphModuleNodes(
+                m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
+
+    def test_qconfig_module_type(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.linear = nn.Linear(9, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.reshape((1, -1))
+                x = self.linear(x)
+                return x
+
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            example_inputs = (torch.randn(1, 1, 3, 3),)
+
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            qconfig = get_default_qconfig("qnnpack")
+            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Conv2d, qconfig)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m(*example_inputs)
+            m = convert_pt2e(m)
+            m(*example_inputs)
+            # conv is quantized, linear is not quantized
+            node_occurrence = {
+                # two for input and weight of the conv, one for output for the conv
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+            }
+            node_list = [
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.aten.convolution.default),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ns.call_function(torch.ops.aten.addmm.default),
+            ]
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
     def test_resnet18(self):
-        import copy
         import torchvision
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)

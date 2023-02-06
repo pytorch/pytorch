@@ -6,109 +6,24 @@ import numbers
 import torch
 import torch._decomp as decomp
 from torch import Tensor
-from torch._decomp import get_decompositions
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._decomp import core_aten_decompositions, get_decompositions
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
-log = logging.getLogger(__name__)
 
-decompositions = get_decompositions(
+inductor_decompositions = get_decompositions(
     [
-        aten.linspace,
-        aten.logaddexp,
-        aten._adaptive_avg_pool2d_backward,
-        aten.addcmul,
-        aten.avg_pool2d_backward,
-        aten.binary_cross_entropy_with_logits,
-        aten.clamp_max,
-        aten.clamp_min,
-        aten.col2im,
-        aten.cudnn_batch_norm,
-        aten.cudnn_batch_norm_backward,
-        aten.detach,
-        aten.dot,
-        aten.elu,
-        aten.elu_backward,
-        aten._embedding_bag,
-        aten.embedding_dense_backward,
-        aten.expand_as,
-        aten.eye,
-        aten.fill,
+        aten.arange,
         aten.flip,
-        aten._fused_moving_avg_obs_fq_helper,
-        aten.gelu,
-        aten.gelu_backward,
-        aten.glu_backward,
-        aten.grid_sampler_2d,
-        aten.hardsigmoid,
-        aten.hardsigmoid_backward,
-        aten.upsample_bilinear2d,
-        aten.hardswish,
-        aten.hardswish_backward,
-        aten.hardtanh,
-        aten.hardtanh_backward,
-        aten.im2col,
-        aten.index_select,
-        aten.l1_loss,
-        aten.leaky_relu,
-        aten.leaky_relu_backward,
         aten.linalg_vector_norm,
-        aten.logit,
-        aten.logit_backward,
-        aten._log_softmax,
-        aten._log_softmax_backward_data,
-        aten.logsumexp.default,
-        aten.max_pool2d_with_indices_backward,
-        aten.mse_loss,
-        aten.mse_loss_backward,
-        aten.mv,
-        aten.narrow,
-        aten.native_batch_norm,
-        aten._native_batch_norm_legit,
-        aten._native_batch_norm_legit_functional,
-        aten.native_batch_norm_backward,
-        aten.native_dropout_backward,
-        aten.native_group_norm,
-        aten.native_group_norm_backward,
-        aten.native_layer_norm,
-        aten.native_layer_norm_backward,
-        aten.new_empty,
-        aten.new_full,
-        aten.new_ones,
-        aten.nll_loss_backward,
-        aten.nll_loss_forward,
-        aten.norm,
-        aten._reshape_alias,
-        aten.select_backward,
-        aten.select_scatter,
-        aten.sgn,
-        aten.sigmoid_backward,
-        aten.silu,
-        aten.silu_backward,
-        aten.slice_backward,
-        aten._softmax,
-        aten._softmax_backward_data,
-        aten.softplus,
-        aten.softplus_backward,
-        aten.stack,
         aten.std_mean.correction,
-        aten.t,
-        aten.tanh_backward,
-        aten.threshold_backward,
         aten._to_copy,
-        aten.transpose.int,
-        aten.tril.default,
-        aten.unfold,
-        aten.unfold_backward,
-        aten.upsample_bilinear2d.vec,
-        aten.upsample_nearest2d_backward,
-        aten.bucketize,
     ]
 )
+decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 
 def register_decomposition(ops):
@@ -172,7 +87,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
         n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
         if m_padded_length != 0 or k_padded_length != 0 or n_padded_length != 0:
             return pad_addmm(
-                input, mat1, mat2, m_padded_length, n_padded_length, k_padded_length
+                input, mat1, mat2, m_padded_length, k_padded_length, n_padded_length
             )
 
     return NotImplemented  # go directly to lowering
@@ -405,39 +320,6 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill])
-def masked_fill(value, mask, other):
-    if isinstance(other, numbers.Number):
-        other = torch.tensor(other, dtype=value.dtype, device=value.device)
-    assert other.numel() == 1 and other.ndim == 0
-    if other.device != value.device and other.numel() == 1:
-        other = other.to(value.device)
-    if other.dtype != value.dtype:
-        # TODO: error out on improper complex conversions
-        other = other.to(value.dtype)
-    return torch.where(mask, other, value)
-
-
-@register_decomposition([aten.nan_to_num])
-def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
-    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
-        return x
-
-    if nan is None:
-        nan = 0.0
-    if posinf is None:
-        posinf = torch.finfo(x.dtype).max
-    if neginf is None:
-        neginf = torch.finfo(x.dtype).min
-    nan, posinf, neginf = (
-        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
-    )
-    x = torch.where(x != x, nan, x)
-    x = torch.where(x == float("inf"), posinf, x)
-    x = torch.where(x == float("-inf"), neginf, x)
-    return x
-
-
 @register_decomposition([aten.all.default])
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
@@ -457,31 +339,6 @@ def copy(self, src, non_blocking=False):
         return aten.expand_copy.default(intermediate, self.size())
     else:
         return intermediate
-
-
-@register_decomposition(aten.hardswish_)
-def hardswish_(x):
-    return x.copy_(aten.hardswish(x))
-
-
-@register_decomposition(aten.hardtanh_)
-def hardtanh_(x, min_val=-1, max_val=1):
-    return x.copy_(aten.hardtanh(x, min_val, max_val))
-
-
-@register_decomposition(aten.leaky_relu_)
-def leaky_relu_(x, negative_slope=0.01):
-    return x.copy_(aten.leaky_relu(x, negative_slope))
-
-
-@register_decomposition(aten.silu_)
-def silu_(x):
-    return x.copy_(aten.silu(x))
-
-
-@register_decomposition(aten.masked_fill_)
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
 
 
 @register_decomposition([aten.baddbmm])
@@ -522,7 +379,9 @@ Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
-extra_random_decomps = get_decompositions([aten.native_dropout, aten.uniform_])
+extra_random_decomps = get_decompositions(
+    [aten.native_dropout, aten.exponential, aten.exponential_, aten.uniform_]
+)
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
 )

@@ -3,13 +3,14 @@ import logging
 import math
 import re
 import types
-from collections import OrderedDict
 from typing import Dict, List
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dynamo.utils import get_fake_value
+from torch._dynamo.variables import DynamicShapeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -182,13 +183,15 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
+            CUDAStreamContextVariable,
+            CUDAStreamVariable,
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )
 
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -267,6 +270,24 @@ class TorchVariable(VariableTracker):
             assert not (args or kwargs)
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
+            )
+        elif self.value is torch.cuda.stream:
+            log.warning(
+                "torch.cuda.stream() not fully supported, streams may be ignored"
+            )
+            assert len(args) == 1
+            return CUDAStreamContextVariable.create(tx, args[0], **options)
+        elif self.value is torch.cuda.streams.Stream:
+            return wrap_fx_proxy_cls(
+                CUDAStreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.cuda.streams.Stream,
+                    (),
+                    {},
+                ),
+                **options,
             )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
@@ -457,6 +478,43 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
+            if self.value == torch._C._nn.scaled_dot_product_attention:
+                # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
+                # in pytorch/torch/_meta_registrations.py
+                fake_query = args[0].as_proxy().node.meta["example_value"]
+                fake_key = args[1].as_proxy().node.meta["example_value"]
+                fake_value = args[2].as_proxy().node.meta["example_value"]
+                # We look through the stack to find a cuda autocast context
+                # If we do we will convert the fake tensors to torch.float16
+                is_cuda_autocast_context = False
+                for block in tx.block_stack:
+                    if (
+                        isinstance(block.with_context, AutocastModeVariable)
+                        and block.with_context.target_values[0] == "cuda"
+                    ):
+                        is_cuda_autocast_context = True
+                        break
+
+                if is_cuda_autocast_context and fake_query.device.type == "cuda":
+                    amp_dtype = torch.float16
+                    fake_query = fake_query.clone().to(amp_dtype)
+                    fake_key = fake_key.clone().to(amp_dtype)
+                    fake_value = fake_value.clone().to(amp_dtype)
+
+                backend_choice = torch._fused_sdp_choice(
+                    fake_query, fake_key, fake_value
+                )
+                if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
+                    dropout_p = kwargs.get("dropout_p")
+                    # Lets see if they passed it in as not an arg
+                    if len(args) >= 5:
+                        dropout_p = args[4]
+
+                    if dropout_p is not None and dropout_p.value != 0.0:
+                        unimplemented(
+                            "FlashAttention with dropout is not supported in cuda graphs"
+                        )
+
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
@@ -477,7 +535,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 **options,
             )
 
-            if "out" in kwargs:
+            if "out" in kwargs and not (
+                isinstance(kwargs["out"], variables.ConstantVariable)
+                and kwargs["out"].as_python_constant() is None
+            ):
                 # out variants of torch operators like torch.sort and
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
@@ -487,13 +548,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
                     ]
                     for idx, name in enumerate(output_tensor_names):
-                        assert name in tx.symbolic_locals
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                        if name in tx.symbolic_locals:
+                            tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     name = tx.find_symbolic_locals_name(kwargs["out"])
-                    assert name in tx.symbolic_locals
-                    tx.symbolic_locals[name] = tensor_variable
+                    if name in tx.symbolic_locals:
+                        tx.symbolic_locals[name] = tensor_variable
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -699,12 +760,74 @@ class TorchPyOperator(VariableTracker):
             tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name
 
+        def get_comparable_state(state):
+            # Nub out bits of state that we don't require to be
+            # equal
+            return state._replace(
+                output=state.output._replace(
+                    guard_state=GuardsCheckpointState(set()),
+                    nn_modules=None,
+                    # Timestamp is monotonically increasing so we don't
+                    # care about divergence
+                    timestamp=0,
+                    # Unused in branches
+                    graphargs=[],
+                )
+            )
+
+        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+            # Setup the subgraph we're going to capture into
+            tx.output.graph = torch.fx.Graph()
+            tx.output.graphargs = []
+            tx.output.name_to_input.clear()
+
+            args = []
+            # One argument to graph per sub_args
+            for a in sub_args:
+                if isinstance(a, TensorVariable):
+                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    args.append(a)
+                else:
+                    # call_function() needs a TensorVariable, therefore we construct
+                    # one with inner graph proxy.
+                    assert isinstance(a, torch.Tensor)
+                    proxy = tx.output.create_graph_input("arg")
+                    args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
+                # NB: we don't bother populating graphargs, as
+                # they won't actually get used by anything
+
+            output = f.call_function(tx, args, {})
+
+            # Register output to graph
+            # Modeled off of compile_and_call_fx_graph
+            # TODO: support non single Tensor output
+            assert isinstance(output, TensorVariable)
+            tx.output.guards.update(output.guards)
+            tx.output.create_node(
+                "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+            )
+
+            tx.output.side_effects.prune_dead_object_new(tx)
+            state = tx.copy_graphstate()
+
+            guards = state.output.guards
+            nn_modules = state.output.nn_modules
+
+            comparable_state = get_comparable_state(state)
+            graph = tx.output.graph
+            tx.output.graph = graph_checkpoint
+            tx.restore_graphstate(checkpoint)
+
+            return output, graph, guards, nn_modules, comparable_state
+
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
+            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+                type(args[0])
+            )  # predicate
             assert isinstance(
                 args[1], (UserFunctionVariable, NestedUserFunctionVariable)
             ), str(
@@ -735,58 +858,11 @@ class TorchPyOperator(VariableTracker):
             sub_args = args[3].unpack_var_sequence(tx)
 
             def speculate_branch(branch):
-                # Setup the subgraph we're going to capture into
-                tx.output.graph = torch.fx.Graph()
-                tx.output.graphargs = []
-                tx.output.name_to_input.clear()
-
-                # One argument to graph per sub_args
-                for a in sub_args:
-                    assert isinstance(a, TensorVariable)
-                    tx.output.create_graph_input(a.as_proxy().node.name)
-                    # NB: we don't bother populating graphargs, as
-                    # they won't actually get used by anything
-
                 # NB: 0 is predicate
                 ix = 1 if branch else 2
-
-                output = args[ix].call_function(tx, sub_args, {})
-
-                # Register output to graph
-                # Modeled off of compile_and_call_fx_graph
-                # TODO: support non single Tensor output
-                assert isinstance(output, TensorVariable)
-                tx.output.guards.update(output.guards)
-                tx.output.create_node(
-                    "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+                return speculate_subgraph(
+                    args[ix], sub_args, graph_checkpoint, checkpoint
                 )
-
-                tx.output.side_effects.prune_dead_object_new(tx)
-                state = tx.copy_graphstate()
-
-                guards = state.output.guards
-                nn_modules = state.output.nn_modules
-
-                # Nub out bits of state that we don't require to be
-                # equal
-                comparable_state = state._replace(
-                    output=state.output._replace(
-                        guard_state=GuardsCheckpointState(set()),
-                        nn_modules=None,
-                        # Timestamp is monotonically increasing so we don't
-                        # care about divergence
-                        timestamp=0,
-                        # Meh (problem is the nodes don't compare equal;
-                        # maybe nub out outputs only)
-                        name_to_input=OrderedDict(),
-                    )
-                )
-
-                graph = tx.output.graph
-                tx.output.graph = graph_checkpoint
-                tx.restore_graphstate(checkpoint)
-
-                return output, graph, guards, nn_modules, comparable_state
 
             (
                 true_r,
@@ -827,11 +903,62 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                tuple(a.as_proxy() for a in sub_args),
+                list(a.as_proxy() for a in sub_args),
             )
             # TODO: assert that the true/false return values are
             # consistent
             example_value = true_r.as_proxy().node.meta["example_value"]
+        elif self.value.__name__ == "map":
+            assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
+            assert type(args[1]) is TensorVariable
+
+            sample_shape = args[1].get_real_value().size()
+            if len(sample_shape) < 1 or sample_shape[0] == 0:
+                unimplemented(
+                    "map() operator doesn't support scalar or zero-sized tensors during tracing."
+                )
+
+            checkpoint = tx.copy_graphstate()
+            # To get the example output from map() we will need to prodive at least one sample to
+            # the loop body. In our case we will always use xs[0], and our map() won't support zero
+            # sized tensor during tracing.
+            (
+                body_r,
+                body_graph,
+                body_guards,
+                body_nn_modules,
+                body_cmp,
+            ) = speculate_subgraph(
+                args[0],
+                [
+                    get_fake_value(args[1].as_proxy().node, tx)[0],
+                    *args[2:],
+                ],
+                tx.output.graph,
+                checkpoint,
+            )
+
+            # We don't support side effects inside a map loop body for simplicity.
+            parent_cmp = get_comparable_state(checkpoint)
+            if parent_cmp != body_cmp:
+                diff = parent_cmp.diff(body_cmp)
+                raise unimplemented(
+                    f"Graph state change detected in map() loop body. Diagnostics: {diff}"
+                )
+
+            # Add guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+
+            body_name = add_subgraph(
+                "body", torch.fx.GraphModule(body_nn_modules, body_graph)
+            )
+
+            body_node = make_attr(body_name)
+            p_args = (body_node, *(arg.as_proxy() for arg in args[1:]))
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r.new_empty(
+                [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
+            )
         else:
             unimplemented(f"PyOperator {self.value.__name__}")
 

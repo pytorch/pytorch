@@ -12,9 +12,7 @@ from caffe2.python.task import Task, TaskGroup, WorkspaceType, TaskOutput
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import copy
-from future.utils import viewkeys
 from itertools import chain
-from six import binary_type, text_type
 
 
 class Visitor(object):
@@ -109,7 +107,7 @@ def analyze_step(analyzer, step):
                 if proto.should_stop_blob:
                     analyzer.need_blob(proto.should_stop_blob)
             if proto.concurrent_substeps:
-                new_blobs = set(viewkeys(ws_in)) - set(viewkeys(analyzer.workspace))
+                new_blobs = set(ws_in.keys()) - set(analyzer.workspace.keys())
                 assert len(all_new_blobs & new_blobs) == 0, (
                     'Error: Blobs created by multiple parallel steps: %s' % (
                         ', '.join(all_new_blobs & new_blobs)))
@@ -193,9 +191,9 @@ class Printer(Visitor, Text):
 
 
 def _sanitize_str(s):
-    if isinstance(s, text_type):
+    if isinstance(s, str):
         sanitized = s
-    elif isinstance(s, binary_type):
+    elif isinstance(s, bytes):
         sanitized = s.decode('ascii', errors='ignore')
     else:
         sanitized = str(s)

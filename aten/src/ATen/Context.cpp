@@ -2,18 +2,12 @@
 
 #include <ATen/Context.h>
 
-#include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
 
 #include <algorithm>
 #include <cctype>
-#include <mutex>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <thread>
 
-#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
@@ -302,7 +296,12 @@ at::QEngine Context::qEngine() const {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      qengine = at::kFBGEMM;
+      /* X86 is enabled if and only if fbgemm is available.
+       * It combines goodness of fbgemm and onednn by dispatching.
+       * If onednn not available, always dispatch to fbgemm.
+       * Make it default qengine for X86 CPU platforms.
+      */
+      qengine = at::kX86;
     }
 #endif
     return qengine;

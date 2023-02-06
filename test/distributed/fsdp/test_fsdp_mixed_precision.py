@@ -21,7 +21,6 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
@@ -81,9 +80,7 @@ mp_only_param_and_buf = MixedPrecision(
 # Nothing is cast (thus param, comm, grad, and buffer should be in the full precision)
 mp_no_mixed_precision = MixedPrecision()
 
-nccl_supports_bf16 = (
-    CUDA11OrLater and dist.is_nccl_available() and nccl.version() >= (2, 10)
-)
+nccl_supports_bf16 = dist.is_nccl_available() and nccl.version() >= (2, 10)
 
 mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
 if nccl_supports_bf16:
@@ -936,7 +933,6 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
         ).cuda()
-        c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
 
         # For submodules with different precisions, right now current design
@@ -1014,6 +1010,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs["model_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_x"].dtype, torch.float16)
         self.assertEqual(forward_inputs["l2_input_y"].dtype, torch.float32)
+
 
 if __name__ == "__main__":
     run_tests()
