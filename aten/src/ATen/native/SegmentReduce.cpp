@@ -12,6 +12,8 @@
 #include <ATen/ops/segment_reduce_native.h>
 #endif
 
+#include <iostream>
+
 namespace at {
 namespace native {
 
@@ -80,6 +82,13 @@ Tensor _segment_reduce_backward_kernel(
     const c10::optional<Scalar>& initial_opt) {
   axis = maybe_wrap_dim(axis, data.ndimension());
 
+  std::cout << "### _segment_reduce_backward_kernel: axis: " << axis << std::endl;
+  std::cout << "grad.sizes(): " << grad.sizes() << std::endl;
+  std::cout << "output.sizes(): " << output.sizes() << std::endl;
+  std::cout << "data.sizes(): " << data.sizes() << std::endl;
+  std::cout << "lengths: " << lengths << std::endl;
+  std::cout << "offsets: " << offsets << std::endl;
+
   segment_reduce_check_inputs_backward(
       grad,
       output,
@@ -89,6 +98,8 @@ Tensor _segment_reduce_backward_kernel(
       axis);
 
   auto reduction = get_reduction_enum(reduce);
+
+  std::cout << "reduction: " << reduction << std::endl;
 
   if (offsets.defined()) {
     return _segment_reduce_offsets_backward_stub(
