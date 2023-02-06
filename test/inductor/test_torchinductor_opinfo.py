@@ -22,6 +22,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
+    IS_MACOS,
+    IS_X86,
     run_tests,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -148,6 +150,9 @@ inductor_skips["cpu"] = {
     "fft.rfftn": {f16, f32, f64},
 }
 
+if IS_MACOS and IS_X86:
+    inductor_skips["cpu"]["rsqrt"] = {b8}
+
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -212,8 +217,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
@@ -288,8 +291,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -413,6 +414,10 @@ inductor_all_samples = {
     "all",
     "T",
     "H",
+    "isinf",
+    "isposinf",
+    "isneginf",
+    "nan_to_num",
     "mT",
     "mH",
 }

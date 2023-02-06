@@ -1312,6 +1312,11 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
   auto layout = self_.layout();
   TORCH_CHECK(layout == kSparseCsr || layout == kSparseCsc,
       "sparse_mm_reduce: expect self to be SparseCsr or SparseCsc.");
+  TORCH_CHECK(self.dense_dim() == 0,
+      "sparse_mm_reduce: expected non-hybrid self tensor.");
+  TORCH_CHECK(self.dim() == 2,
+      "sparse_mm_reduce: expected self to be a 2-D tensor, got ", self.dim(), "-D tensor.");
+
   if (layout == kSparseCsc) {
     self = self_.transpose(-1, -2);
   }
