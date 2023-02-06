@@ -27,7 +27,6 @@ import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._dynamo.optimizations import backends
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
@@ -803,70 +802,6 @@ def try_script(model, example_inputs):
         return torch.jit.script(model)
     except Exception:
         return None
-
-
-def speedup_experiment_onnx(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of ONNXRT and TensorFlow.
-
-    Writes to ./baseline_onnx.csv
-    """
-    if current_device == "cpu":
-        m_onnxrt = backends.onnxrt_cpu(
-            try_script(model, example_inputs), example_inputs
-        )
-    else:
-        m_onnxrt = backends.onnxrt_cuda(
-            try_script(model, example_inputs), example_inputs
-        )
-
-    if current_name != "timm_resnest":
-        m_onnx2tf = backends.onnx2tf(try_script(model, example_inputs), example_inputs)
-    else:
-        # this one takes 8+ hours to finish
-        m_onnx2tf = None
-
-    return baselines(
-        [
-            ("eager", model),
-            ("onnxrt", m_onnxrt),
-            ("onnx2tf", m_onnx2tf),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
-
-
-def speedup_experiment_trt(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of TensorRT.
-
-    Writes to ./baseline_trt.csv
-    """
-    m_onnx2trt = backends.onnx2tensorrt(
-        try_script(model, example_inputs), example_inputs
-    )
-
-    m_torch2trt = backends.torch2trt(model, example_inputs)
-
-    if current_name != "opacus_cifar10":
-        m_fx2trt = backends.fx2trt(model, example_inputs)
-    else:
-        # fx2trt infinite loops on one model
-        m_fx2trt = None
-
-    return baselines(
-        [
-            ("eager", model),
-            ("onnx2trt", m_onnx2trt),
-            ("torch2trt", m_torch2trt),
-            ("fx2trt", m_fx2trt),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
 
 
 def read_batch_size_from_file(args, filename, model_name):
@@ -1781,12 +1716,6 @@ def parse_args(args=None):
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
-        "--speedup-onnx", action="store_true", help=help(speedup_experiment_onnx)
-    )
-    group.add_argument(
-        "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
-    )
-    group.add_argument(
         "--speedup-dynamo-ts",
         action="store_true",
         help="TorchDynamo frontend with torchscript backend",
@@ -2073,35 +2002,10 @@ def run(runner, args, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.speedup_onnx:
-        experiment = speedup_experiment_onnx
-        output_filename = "baseline_onnx.csv"
-    elif args.speedup_trt:
-        experiment = speedup_experiment_trt
-        output_filename = "baseline_trt.csv"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedup_dynamo_ts.csv"
-    elif args.speedup_fx2trt:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.fx2trt_compiler, nopython=args.nopython
-        )
-        experiment = speedup_experiment_fx2trt
-        output_filename = "speedups_fx2trt.csv"
-        runner.skip_models.update(runner.failing_fx2trt_models)
-        args.float32 = True
-        args.float16 = False
-        args.cosine = True
-    elif args.speedup_fx2trt_fp16:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.fx2trt_compiler_fp16, nopython=args.nopython
-        )
-        experiment = speedup_experiment_fx2trt
-        output_filename = "speedups_fx2trt_fp16.csv"
-        args.float32 = False
-        args.float16 = True
-        args.cosine = True
     elif args.prims_nvfuser:
         optimize_ctx = torch._dynamo.optimize("prims_nvfuser", nopython=args.nopython)
         experiment = speedup_experiment
@@ -2121,18 +2025,7 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         output_filename = "nothing.csv"
     elif args.backend:
-        if args.backend == "ipex":
-            if args.bfloat16:
-                optimize_ctx = torch._dynamo.optimize(
-                    backends.ipex_bf16, nopython=args.nopython
-                )
-            else:
-                assert args.float32, "IPEX only supports fp32 and bf16 for now."
-                optimize_ctx = torch._dynamo.optimize(
-                    backends.ipex_fp32, nopython=args.nopython
-                )
-        else:
-            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
