@@ -81,10 +81,6 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-<<<<<<< HEAD
-    SymNodeVariable,
-=======
->>>>>>> 68c2122956c... Rename DynamicShapeVariable to SymNodeVariable cause thats what it is
     supported_const_comparison_ops,
     supported_tensor_comparison_ops,
     SymNodeVariable,

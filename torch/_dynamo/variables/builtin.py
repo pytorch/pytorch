@@ -27,7 +27,7 @@ from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import BaseListVariable, ListVariable, TupleVariable
-from .tensor import SymNodeVariable, FakeItemVariable, UnspecializedPythonVariable
+from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -985,9 +985,6 @@ class BuiltinVariable(VariableTracker):
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
-        )
-        from .lists import (
-            SizeVariable
         )
 
         op = self.fn
