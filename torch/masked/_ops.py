@@ -783,7 +783,7 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_nnz = new_crow_indices[-1]
             new_col_indices = col_indices.new_zeros(new_nnz)
-            new_values = torch.segment_reduce(values, reduce, offsets=crow_indices)
+            new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:
         assert len(dims) == 2

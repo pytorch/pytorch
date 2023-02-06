@@ -1900,7 +1900,7 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
+    "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
@@ -1984,7 +1984,7 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
-    xfail("segment_reduce", "lengths"),
+    xfail("_segment_reduce", "lengths"),
     xfail("norm", "nuc"),
     xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
