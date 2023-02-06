@@ -274,7 +274,7 @@ if(CAFFE2_USE_CUDNN)
     set(CAFFE2_USE_CUDNN OFF)
   else()
     if(CUDNN_VERSION VERSION_LESS "8.0.0")
-      message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
+      message(FATAL_ERROR "PyTorch requires cuDNN 8 and above.")
     endif()
   endif()
 
