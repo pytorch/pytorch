@@ -879,7 +879,7 @@ def wrap_fx_proxy_cls(
 
         options.update(specialized_props)
         assert "tensor_dict" not in proxy.node.meta
-        proxy.node.meta["tensor_dict"] = exmaple_value.__dict__
+        proxy.node.meta["tensor_dict"] = example_value.__dict__
         return target_cls(proxy, **options)
     elif (
         hasattr(proxy.node.target, "__name__")
@@ -1004,6 +1004,9 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
+        for k, v in e.__dict__.items():
+            if k not in fake_e.__dict__:
+                fake_e.__dict__[k] = v
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e
