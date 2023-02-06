@@ -3314,11 +3314,6 @@ def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
     ]
 
 
-@register_lowering(aten.std)
-def std(x, axis=None, correction=1, keepdim=False):
-    return sqrt(var_(x, axis, correction, keepdim=keepdim))
-
-
 def pow_recursive(x, y, dtype):
     if y < 0:
         return pow_recursive(ops.reciprocal(x), -y, dtype)
@@ -3612,8 +3607,10 @@ register_pointwise(
     use_libdevice_for_f64=True,
 )
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
-register_pointwise(aten.maximum)
-register_pointwise(aten.minimum)
+maximum = register_pointwise(aten.maximum)
+minimum = register_pointwise(aten.minimum)
+register_lowering(aten.clamp_min)(maximum)
+register_lowering(aten.clamp_max)(minimum)
 register_pointwise(aten.neg)
 register_pointwise(
     aten.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
