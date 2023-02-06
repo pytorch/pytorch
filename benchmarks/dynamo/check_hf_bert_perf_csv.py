@@ -16,7 +16,7 @@ def check_hf_bert_perf_csv(filename):
     for _, row in df.iterrows():
         model_name = row["name"]
         speedup = row["speedup"]
-        if speedup < 1.185:
+        if speedup < 1.200:
             failed.append(model_name)
 
         print(f"{model_name:34} {speedup}")
