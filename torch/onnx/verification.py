@@ -207,8 +207,8 @@ def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     try:
         import onnx
         from onnx import reference as onnx_reference
-    except ImportError:
-        raise ImportError("onnx >= 1.13 is required for reference evaluator.")
+    except ImportError as e:
+        raise ImportError("onnx >= 1.13 is required for reference evaluator.") from e
 
     proto = (
         onnx.load(model)
