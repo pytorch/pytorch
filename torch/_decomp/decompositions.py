@@ -2430,7 +2430,7 @@ def rnn_tanh_data(
     return out, torch.stack(final_hiddens, 0)
 
 
-def lstm_helper(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim):
+def lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim):
     gates = F.linear(hx, hh_weight, hh_bias) + inp
     chunked_gates = gates.chunk(4, chunk_dim)
     in_gate = chunked_gates[0].sigmoid()
@@ -2460,7 +2460,7 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
     step_output = []
     for inp in precomputed_input:
-        hx, cx = lstm_helper(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2)
+        hx, cx = lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2)
         step_output.append(hx)
 
     if reverse:
@@ -2517,7 +2517,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
                 (cx, orig_cx.narrow(0, last_batch_size, i - last_batch_size)), 0
             )
 
-        hx, cx = lstm_helper(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=1)
+        hx, cx = lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=1)
         last_batch_size = i
         step_output.append(hx)
 
