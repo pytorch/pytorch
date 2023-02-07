@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
+#pragma once
+
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSStream.h>
 #include <cstdio>

@@ -603,7 +603,7 @@ public:
   void emptyCache() const override { _getAllocImpl().emptyCache(); }
   ssize_t getUnalignedBufferSize(void* ptr) const override { return _getAllocImpl().getUnalignedBufferSize(ptr); }
   IntArrayRef getBufferShape(void* ptr) const override { return _getAllocImpl().getBufferShape(ptr); }
-  void setBufferShape(void* ptr, const IntArrayRef& shape) override { _getAllocImpl().setBufferShape(ptr, shape); }
+  void setBufferShape(void* ptr, const IntArrayRef& shape) const override { _getAllocImpl().setBufferShape(ptr, shape); }
   size_t getTotalAllocatedMemory() const override { return _getAllocImpl().getTotalAllocatedMemory(); }
   ssize_t getLowWatermarkValue() const override { return _getAllocImpl().getLowWatermarkValue(); }
   size_t getLowWatermarkLimit() const override { return _getAllocImpl().getLowWatermarkLimit(); }

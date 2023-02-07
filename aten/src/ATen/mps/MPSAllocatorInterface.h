@@ -1,5 +1,7 @@
 //  Copyright © 2023 Apple Inc.
 
+#pragma once
+
 #include <c10/core/Allocator.h>
 #include <c10/util/Registry.h>
 #include <ATen/core/ATen_fwd.h>
@@ -15,7 +17,7 @@ public:
   virtual void emptyCache() const = 0;
   virtual ssize_t getUnalignedBufferSize(void* ptr) const = 0;
   virtual IntArrayRef getBufferShape(void* ptr) const = 0;
-  virtual void setBufferShape(void* ptr, const IntArrayRef& shape) = 0;
+  virtual void setBufferShape(void* ptr, const IntArrayRef& shape) const = 0;
   virtual bool isSharedBuffer(void* ptr) const = 0;
   virtual bool isSharedStorageSupported() const = 0;
   virtual c10::DataPtr allocScalarBufferWithValue(void* value, size_t size) const = 0;
