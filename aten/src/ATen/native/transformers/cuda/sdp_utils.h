@@ -216,20 +216,22 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
 
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t key_size_last = params.key.size(-1);
   const int64_t value_size_last = params.value.size(-1);
-  if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
+  if (!(query_size_last == key_size_last &&
+        query_size_last == value_size_last && query_size_last % 8 == 0 &&
         query_size_last <= 128 && value_size_last % 8 == 0 &&
         value_size_last <= 128)) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.",
-        "Got Query.size(-1): ",
-        query_size_last,
-        ", Key.size(-1): ",
-        params.key.size(-1),
-        ", Value.size(-1): ",
-        params.value.size(-1),
-        " instead.");
+          "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.size(-1),
+          ", Value.size(-1): ",
+          params.value.size(-1),
+          " instead.");
     }
     return false;
   }
