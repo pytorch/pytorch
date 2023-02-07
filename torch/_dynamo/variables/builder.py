@@ -161,20 +161,18 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
-        dynamic_spec=None,
     ):
         assert source is not None
         super(VariableBuilder, self).__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
-        self.dynamic_spec = dynamic_spec
 
-    def __call__(self, value):
+    def __call__(self, value, dynamic_spec=None):
         if value in self.tx.output.side_effects:
             # TODO(jansel): add guard for alias relationship
             return self.tx.output.side_effects[value]
-        return self._wrap(value).clone(**self.options())
+        return self._wrap(value, dynamic_spec).clone(**self.options())
 
     @staticmethod
     @functools.lru_cache(None)
@@ -233,14 +231,14 @@ class VariableBuilder:
             return None
         return {source.make_guard(guard) for guard in guards}
 
-    def _wrap(self, value):
+    def _wrap(self, value, dynamic_spec=None):
         from ..comptime import comptime
 
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
         if istensor(value):
-            return self.wrap_tensor(value)
+            return self.wrap_tensor(value, dynamic_spec)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to
             # have a stricter match.
@@ -250,12 +248,18 @@ class VariableBuilder:
                 guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             else:
                 guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+
+            if dynamic_spec:
+                assert istype(dynamic_spec, (tuple, list, odict_values)) or is_namedtuple(dynamic_spec)
+                assert len(value) == len(dynamic_spec)
+            else:
+                dynamic_spec = [None] * len(value)
+
             output = [
                 VariableBuilder(
                     self.tx,
                     GetItemSource(self.get_source(), i),
-                    dynamic_spec=self.dynamic_spec[i],
-                )(item).add_guards(guards)
+                )(item, dynamic_spec=dynamic_spec[i],).add_guards(guards)
                 for i, item in enumerate(value)
             ]
             result = self.list_type(value)(output, guards=guards)
@@ -311,7 +315,12 @@ class VariableBuilder:
                 else:
                     return key
 
-            # breakpoint()
+            if dynamic_spec:
+                assert istype(dynamic_spec, (dict, collections.defaultdict, collections.OrderedDict))
+                assert dynamic_spec.keys() == value.keys()
+            else:
+                dynamic_spec = {}
+
             result = dict(
                 [
                     (
@@ -319,8 +328,7 @@ class VariableBuilder:
                         VariableBuilder(
                             self.tx,
                             GetItemSource(self.get_source(), index_source(k)),
-                            dynamic_spec=self.dynamic_spec.get(k, None),
-                        )(value[k]).add_guards(guards),
+                        )(value[k], dynamic_spec=dynamic_spec.get(k, None),).add_guards(guards),
                     )
                     for k in value.keys()
                 ]
@@ -613,7 +621,7 @@ class VariableBuilder:
             # shape Guards live their own rich life via shape_env
         )
 
-    def wrap_tensor(self, value: torch.Tensor):
+    def wrap_tensor(self, value: torch.Tensor, dynamic_spec=None):
         if self.get_source().guard_source().is_nn_module():
             return self.tx.output.register_attr_or_module(
                 value,
@@ -654,11 +662,8 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
-        # breakpoint()
-        if self.dynamic_spec and isinstance(
-            self.get_source(), (LocalInputSource, GetItemSource)
-        ):
-            self.tx.output.shape_env.tensor_specs[self.get_source()] = self.dynamic_spec
+        if config.dynamic_shapes and dynamic_spec:
+            self.tx.output.shape_env.tensor_specs[value] = dynamic_spec
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,

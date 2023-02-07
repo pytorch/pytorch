@@ -9,16 +9,23 @@ class TensorType:
     TensorType defines a type for tensors, which consists of a list of dimensions.
     Example:
         class M(torch.nn.Module):
-            def forward(self, x:TensorType((1,2,3, Dyn)), y:TensorType((1,2,3, Dyn))):
+            def forward(self, x:TensorType(Dyn, 2 , 3, Static), y:TensorType(Dyn, 2, 3, Static)):
                 return torch.add(x, y)
     """
 
-    def __init__(self, dim):
+    def __init__(self, *dims):
         self.__origin__ = TensorType
-        self.__args__ = dim
+
+        if len(dims) == 1 and isinstance(dims[0], (tuple, list)):
+            self.__args__ = dims[0]
+        else:
+            self.__args__ = dims
+
+    def __len__(self):
+        return len(self.__args__)
 
     def __repr__(self):
-        return f'TensorType[{self.__args__}]'
+        return f'TensorType{self.__args__}'
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -26,19 +33,20 @@ class TensorType:
         else:
             return False
 
+    def __getitem__(self, key):
+        return self.__args__[key]
+
     @staticmethod
     def __class_getitem__(*args):
-        if len(args) == 1 and isinstance(args[0], tuple):
-            args = args[0]
-        return TensorType(tuple(args))
+        return TensorType(*args)
 
 
-class _DynType:
+class _DynDim:
     """
-    _DynType defines a type which stands for the absence of type information.
+    _DynDim represent a dimension with dynamic size
     """
     def __init__(self):
-        self.__name__ = '_DynType'
+        self.__name__ = '_DynDim'
 
     def __eq__(self, other):
         return isinstance(other, self.__class__)
@@ -50,7 +58,26 @@ class _DynType:
         return "Dyn"
 
 
-Dyn = _DynType()
+Dyn = _DynDim()
+
+class _StaticDim:
+    """
+    _StaticDim represent a dimension with static size
+    """
+    def __init__(self):
+        self.__name__ = '_StaticDim'
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__)
+
+    def __str__(self):
+        return "Static"
+
+    def __repr__(self):
+        return "Static"
+
+Static = _StaticDim()
+
 
 @compatibility(is_backward_compatible=False)
 def is_consistent(t1, t2):
@@ -72,7 +99,7 @@ def is_consistent(t1, t2):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and \
+        return len(t1) == len(t2) and \
             all([is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
     else:
         return False
@@ -93,11 +120,11 @@ def is_more_precise(t1, t2):
     if t1 == t2:
         return True
 
-    if isinstance(t2, _DynType):
+    if isinstance(t2, _DynDim):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and \
+        return len(t1) == len(t2) and \
             all([is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
 
     else:

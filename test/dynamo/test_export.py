@@ -1753,6 +1753,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_tensor_spec(self):
         from functorch.compile import aot_module_simplified
+        from torch.fx.tensor_type import Dyn, Static, TensorType
 
         def func(x: torch.Tensor, y: torch.Tensor, ts: List[torch.Tensor], **kwargs):
             x = x.view([x.shape[0] * x.shape[1], x.shape[-1]])
@@ -1778,28 +1779,33 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             "input1": torch.empty(4, 2),
         }
         tensor_sepcs = {
-            'x': ('batch', 'seq', None),
-            'y': ('batch', None),
-            'ts': (('batch', None, None), ('batch', None),),
+            'x': TensorType(Dyn, Dyn, Static),
+            'y': TensorType(Dyn, 2),
+            'ts': (TensorType(Dyn, Static, Static), TensorType(Dyn, Static),),
             'kwargs': {
-                "input0": ('batch', 'seq', "hidden1"),
-                "input1": ('batch', "hidden2"),
+                "input0": TensorType(Dyn, Dyn, Dyn),
+                "input1": TensorType(Dyn, Dyn),
             }
         }
 
         torch._dynamo.reset()
 
+        expected_input_shapes = [
+            ["s0", "s1", "8"],
+            ["s2", "2"],
+            ["s0", "32", "8"],
+            ["s2", "2"],
+            ["s0", "s1", "s3"],
+            ["s2", "s4"],
+        ]
+
         def compiler(gm, sample_inputs):
+            for input, expected_shape in zip(sample_inputs, expected_input_shapes):
+                self.assertEqual([str(dim) for dim in input.shape], expected_shape)
+
             def inner_compiler(gm, args):
-                x, y, ts0, ts1, kw1, kw2 = sample_inputs
-                self.assertEqual([str(dim) for dim in x.shape], ["s_batch", "s_seq", "8"])
-                self.assertEqual([str(dim) for dim in y.shape], ["s_batch", "2"])
-
-                self.assertEqual([str(dim) for dim in ts0.shape], ["s_batch", "32", "8"])
-                self.assertEqual([str(dim) for dim in ts1.shape], ["s_batch", "2"])
-
-                self.assertEqual([str(dim) for dim in kw1.shape], ["s_batch", "s_seq", "s_hidden1"])
-                self.assertEqual([str(dim) for dim in kw2.shape], ["s_batch", "s_hidden2"])
+                for arg, expected_shape in zip(args, expected_input_shapes):
+                    self.assertEqual([str(dim) for dim in arg.shape], expected_shape)
 
                 return gm.forward
 
@@ -1809,17 +1815,22 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 fw_compiler=inner_compiler,
             )
 
-        opt_func = torch._dynamo.optimize(compiler, nopython=True, dynamic=True, dynamic_args=tensor_sepcs,)(func)
+        opt_func = torch._dynamo.optimize(compiler, nopython=True, dynamic=True, dynamic_spec=tensor_sepcs)(func)
         out = opt_func(*args, **kwargs)
 
-        # gm, gurad = torch._dynamo.export(
-        #     func, *args, aten_graph=True,
-        #     tracing_mode="symbolic",
-        #     dynamic_args=tensor_sepcs,
-        # )
+        gm, _ = torch._dynamo.export(
+            func, *args, aten_graph=True,
+            tracing_mode="symbolic",
+            dynamic_spec=tensor_sepcs,
+            **kwargs
+        )
 
-        # gm.print_readable()
-
+        placeholder_idx = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                fake_tensor = node.meta['val']
+                self.assertEqual([str(dim) for dim in fake_tensor.shape], expected_input_shapes[placeholder_idx])
+                placeholder_idx += 1
 
 
 if __name__ == "__main__":

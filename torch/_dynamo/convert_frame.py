@@ -191,7 +191,7 @@ def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
     export: bool = False,
-    dynamic_args=None,
+    dynamic_spec=None,
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
@@ -269,7 +269,7 @@ def convert_frame_assert(
             export,
             hooks,
             frame=frame,
-            dynamic_args=dynamic_args,
+            dynamic_spec=dynamic_spec,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -287,7 +287,7 @@ def _compile(
     export: bool,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
-    dynamic_args=None,
+    dynamic_spec=None,
 ) -> Optional[GuardedCode]:
 
     output: Optional[OutputGraph] = None
@@ -309,7 +309,7 @@ def _compile(
             one_graph,
             export,
             mutated_closure_cell_contents,
-            dynamic_args,
+            dynamic_spec,
         )
         tracer.run()
         output = tracer.output
@@ -397,10 +397,10 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, dynamic_args=None):
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, dynamic_spec=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(
-        compiler_fn, one_graph=False, dynamic_args=dynamic_args
+        compiler_fn, one_graph=False, dynamic_spec=dynamic_spec
     )
 
     def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
