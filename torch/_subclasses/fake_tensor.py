@@ -166,7 +166,7 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 # multiple tensors into fake tensors which share the same view/storage
 # structure. Like `MetaConverter`, it uses `WeakIdRef` to
 # hold a weak reference for all memoized tensors.
-class FakeTensorConverter(object):
+class FakeTensorConverter:
     @property
     def tensor_memo(self):
         return self.meta_converter.tensor_memo
