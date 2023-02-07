@@ -72,7 +72,19 @@ class GraphLowering(torch.fx.Interpreter):
                 ex.stride()
             )
         else:
-            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(
+                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+            )
+            (
+                size,
+                stride,
+                _,
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
