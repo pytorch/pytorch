@@ -612,8 +612,6 @@ class TritonKernel(Kernel):
         if hint > threshold:
             return False
 
-        # if self.reduction_hint == ReductionHint.INNER and hint < 128:
-        #    return False
         from triton import next_power_of_2
 
         # will need to recompile if we cross a larger power of 2 boundary
