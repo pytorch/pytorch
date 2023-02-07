@@ -42,6 +42,19 @@ class ImplementedSparsifier(BaseSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
+class MockLinear(nn.Linear):
+
+    def forward(self, input):
+        raise NotImplementedError("test")
+
+    @classmethod
+    def from_dense(cls, mod):
+        qlinear = cls(mod.in_features,
+                      mod.out_features)
+        return qlinear
+
+
+
 class TestBaseSparsifier(TestCase):
     def test_constructor(self):
         # Cannot instantiate the abstract base
@@ -149,6 +162,18 @@ class TestBaseSparsifier(TestCase):
                     self.assertEqual(param0.__dict__, param1.__dict__)
                 else:
                     assert mg0[key] == mg1[key]
+
+    def test_convert(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.prepare(model, [{'tensor_fqn': 'linear.weight'}])
+        new_model = sparsifier.convert(model, mapping={nn.Linear: MockLinear}, inplace=False)
+
+        assert isinstance(new_model.linear, MockLinear)
+        assert isinstance(new_model.seq[0], nn.Linear)
+        assert isinstance(new_model.head, nn.Linear)
+
+
 
     def test_mask_squash(self):
         model = Model()
@@ -415,6 +440,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             weights = module.weight
             height, width = weights.shape
             assert torch.all(weights == torch.eye(height, width) * weights)  # only diagonal to be present
+
 
     def test_sparsity_levels(self):
         nearliness_levels = list(nearliness for nearliness in range(-1, 100))
