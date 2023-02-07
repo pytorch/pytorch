@@ -149,7 +149,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& y_,
     const std::vector<int64_t> broadcasted_shape,
     const bool restrict_indices_to_rhs = false,
-    const bool distributes_with_sum = true
+    const bool distributive_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
   // This is because binary_of_t produces new values and it could be that
@@ -162,12 +162,12 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   using KernelLauncher = KernelLauncher<kernel_t>;
 
-  // If the op and sum are not commutative, coalesce is required.
+  // If the op and sum are distributive, coalesce is required.
   // If restrict_indices_to_rhs is true, x needs to be coalesced so that
   // (x.coalesce() intersection y union y).indices().counts() == y.indices().counts().
-  const Tensor x = (!distributes_with_sum || restrict_indices_to_rhs) ? x_.coalesce() : x_;
+  const Tensor x = (!distributive_with_sum || restrict_indices_to_rhs) ? x_.coalesce() : x_;
   const Tensor y = [&]() -> Tensor {
-    auto rhs = distributes_with_sum ? y_ : y_.coalesce();
+    auto rhs = distributive_with_sum ? y_ : y_.coalesce();
     if (restrict_indices_to_rhs) {
       // x is coalesced and y is marked as uncoalesced so that the intersection result
       // respects the order of indices in y.
@@ -433,7 +433,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_sparse_impl->set_nnz_and_narrow(res_nnz);
-  res._coalesced_(y_.is_coalesced() || !distributes_with_sum);
+  res._coalesced_(y_.is_coalesced() || !distributive_with_sum);
 }
 
 template <
@@ -451,7 +451,7 @@ void _sparse_binary_op_intersection_kernel_out(
     const bool restrict_indices_to_rhs = false,
     // If op distributes with the sum, the arguments are processed as is,
     // without the calls to coalesce().
-    const bool distributes_with_sum = true
+    const bool distributive_with_sum = true
 ) {
   TORCH_CHECK(
       (x.is_sparse() && y.is_sparse())
@@ -478,11 +478,11 @@ void _sparse_binary_op_intersection_kernel_out(
           // For some reason MSVC complaints about passing constexpr max_sparse_dims
           // as a template parameter claiming as if it is not know at compile time.
           kernel_t, value_selection_intersection_kernel_t, index_t, 8>(
-            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributes_with_sum);
+            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
       } else {
         _sparse_binary_op_intersection_kernel_impl<
           kernel_t, value_selection_intersection_kernel_t, index_t>(
-            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributes_with_sum);
+            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
       }
   });
 }
