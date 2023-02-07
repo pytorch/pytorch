@@ -38,7 +38,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
-    "method_to_operator",
+    "method_to_operator", "SYMPY_INTERP",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -505,6 +505,22 @@ def method_to_operator(method):
     else:
         op = getattr(operator, method_attr)
     return op
+
+SYMPY_INTERP = {
+    'Eq': operator.eq,
+    'Ne': operator.ne,
+    'Gt': operator.gt,
+    'Lt': operator.lt,
+    'Le': operator.le,
+    'Ge': operator.ge,
+    'Min': min,
+    'Max': max,
+    'Mod': operator.mod,
+    'FloorDiv': operator.floordiv,
+    'TrueDiv': operator.truediv,
+    'floor': math.floor,
+    'ceiling': math.ceil,
+}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
