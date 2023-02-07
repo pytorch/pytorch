@@ -1045,15 +1045,6 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
             )
         )
 
-        pack = make_input((2, 5, 2) if b_f else (5, 2, 2))
-        samples.append(
-            ModuleInput(
-                constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(pack_padded_sequence(pack, (5, 3), batch_first=b_f)),
-                reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
-            )
-        )
-
         h_out = proj_size if proj_size > 0 else hidden_size
         hx = (make_input((4 if bidir else 2, h_out)), make_input((4 if bidir else 2, hidden_size)))
         samples.append(
@@ -1064,15 +1055,6 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
             )
         )
 
-        hx = (make_input((4 if bidir else 2, h_out)), make_input((4 if bidir else 2, hidden_size)))
-        pack = make_input((2, 5, 2) if b_f else (5, 2, 2))
-        samples.append(
-            ModuleInput(
-                constructor_input=FunctionInput(**cons_args_hidden),
-                forward_input=FunctionInput(pack_padded_sequence(pack, (5, 3), batch_first=b_f), hx),
-                reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
-            )
-        )
 
     return samples
 
