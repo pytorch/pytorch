@@ -214,19 +214,21 @@ class Optimizer(object):
         if torch.has_cuda and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
-            if capturing and not self.defaults['capturable']:
+            if capturing and not all(group['capturable'] for group in self.param_groups):
                 raise RuntimeError("Attempting CUDA graph capture of step() for an instance of " +
                                    self.__class__.__name__ +
-                                   " but this instance was constructed with capturable=False.")
+                                   " but param_groups' capturable is False.")
 
             if (
                 (not getattr(self, "_warned_capturable_if_run_uncaptured", False))
-                and self.defaults["capturable"]
+                and all(group['capturable'] for group in self.param_groups)
                 and (not capturing)
             ):
-                print("Warning: This instance was constructed with capturable=True, but step() " +
-                      "is running without CUDA graph capture. If you never intend to graph-capture this " +
-                      "instance, capturable=True can impair performance, and you should set capturable=False.")
+                warnings.warn(
+                    "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
+                    "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
+                    "instance, capturable=True can impair performance, and you should set capturable=False."
+                )
                 self._warned_capturable_if_run_uncaptured = True
 
     def _optimizer_step_code(self):
