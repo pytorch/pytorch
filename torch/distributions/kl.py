@@ -78,7 +78,7 @@ def register_kl(type_p, type_q):
 
 
 @total_ordering
-class _Match(object):
+class _Match:
     __slots__ = ['types']
 
     def __init__(self, *types):

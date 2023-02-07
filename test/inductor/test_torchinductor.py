@@ -6877,7 +6877,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     class TritonCodeGenTests(TestCase):
         counter = itertools.count(0)
 
-        class DebugDirManager(object):
+        class DebugDirManager:
             def __init__(self):
                 self.id = next(TritonCodeGenTests.counter)
                 self.prev_debug_name = None

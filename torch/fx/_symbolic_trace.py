@@ -189,7 +189,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
 
 
 @compatibility(is_backward_compatible=False)
-class PHBase(object):
+class PHBase:
     """
     Object representing an input placeholder to `concrete_args`
     """
@@ -921,7 +921,7 @@ class _PatchedFnSetAttr(_PatchedFn):
         setattr(self.frame_dict, self.fn_name, self.orig_fn)
 
 
-class _Patcher(object):
+class _Patcher:
     def __init__(self):
         super(_Patcher, self).__init__()
         self.patches_made: List[_PatchedFn] = []

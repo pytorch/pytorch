@@ -870,7 +870,7 @@ class ops(_TestParametrizer):
 #       for the test to run. If you want to use a string argument you should
 #       probably define a new decorator instead (see below).
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
-class skipIf(object):
+class skipIf:
 
     def __init__(self, dep, reason, device_type=None):
         self.dep = dep
@@ -973,7 +973,7 @@ def largeTensorTest(size, device=None):
     return inner
 
 
-class expectedFailure(object):
+class expectedFailure:
 
     def __init__(self, device_type):
         self.device_type = device_type
@@ -994,7 +994,7 @@ class expectedFailure(object):
         return efail_fn
 
 
-class onlyOn(object):
+class onlyOn:
 
     def __init__(self, device_type):
         self.device_type = device_type
@@ -1016,7 +1016,7 @@ class onlyOn(object):
 # as a list of strings instead of providing a single device string.
 # Skips the test if the number of available devices of the variant's device
 # type is less than the 'num_required_devices' arg.
-class deviceCountAtLeast(object):
+class deviceCountAtLeast:
 
     def __init__(self, num_required_devices):
         self.num_required_devices = num_required_devices
@@ -1064,7 +1064,7 @@ def onlyNativeDeviceTypes(fn):
 # precisions (or are working with multiple dtypes) they should be specified
 # explicitly and computed using self.precision (e.g.
 # self.precision *2, max(1, self.precision)).
-class precisionOverride(object):
+class precisionOverride:
 
     def __init__(self, d):
         assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
@@ -1096,7 +1096,7 @@ class precisionOverride(object):
 # atol = 1e-4 and rtol = 0 for torch.double.
 tol = namedtuple('tol', ['atol', 'rtol'])
 
-class toleranceOverride(object):
+class toleranceOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
@@ -1119,7 +1119,7 @@ class toleranceOverride(object):
 # Examples:
 # @dtypes(torch.float32, torch.float64)
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
-class dtypes(object):
+class dtypes:
 
     def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):

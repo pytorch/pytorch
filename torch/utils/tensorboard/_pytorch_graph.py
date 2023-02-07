@@ -32,7 +32,7 @@ GETATTR_KIND = "prim::GetAttr"
 CLASSTYPE_KIND = "ClassType"
 
 
-class NodeBase(object):
+class NodeBase:
     def __init__(
         self,
         debugName=None,
@@ -118,7 +118,7 @@ class NodePyOP(NodePy):
         self.kind = node_cpp.kind()
 
 
-class GraphPy(object):
+class GraphPy:
     """Helper class to convert torch.nn.Module to GraphDef proto and visualization
     with TensorBoard.
 

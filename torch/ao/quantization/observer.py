@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 
-class _PartialWrapper(object):
+class _PartialWrapper:
     def __init__(self, p):
         self.p = p
         self.callable_args = {}

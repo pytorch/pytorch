@@ -17,7 +17,7 @@ __all__: List[str] = []
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalAdam(object):
+class _FunctionalAdam:
     def __init__(
         self,
         params: List[Tensor],

@@ -44,7 +44,7 @@ def pretty_print(benchresult, colwidth=16, sep=' '):
     return sep.join(items)
 
 # shim for torch.cuda.Event when running on cpu
-class Event(object):
+class Event:
     def __init__(self, enable_timing):
         pass
 

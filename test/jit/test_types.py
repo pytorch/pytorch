@@ -99,7 +99,7 @@ class TestTypesAndAnnotation(JitTestCase):
         FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
 
     def test_python_callable(self):
-        class MyPythonClass(object):
+        class MyPythonClass:
             @torch.jit.ignore
             def __call__(self, *args) -> str:
                 return str(type(args[0]))
@@ -246,7 +246,7 @@ class TestTypesAndAnnotation(JitTestCase):
 
 
     def test_ignoring_fn_with_nonscriptable_types(self):
-        class CFX(object):
+        class CFX:
             def __init__(self, a: List[torch.Tensor]) -> None:
                 self.a = a
 
@@ -306,7 +306,7 @@ class TestTypesAndAnnotation(JitTestCase):
         # Simple case
         with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
             @torch.jit.script
-            class BadModule(object):
+            class BadModule:
                 def __init__(self, x: int):
                     self.x = x
 
@@ -316,7 +316,7 @@ class TestTypesAndAnnotation(JitTestCase):
         # Type annotation in a loop
         with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
             @torch.jit.script
-            class BadModuleLoop(object):
+            class BadModuleLoop:
                 def __init__(self, x: int):
                     self.x = x
 
@@ -326,7 +326,7 @@ class TestTypesAndAnnotation(JitTestCase):
 
         # Type annotation in __init__, should not fail
         @torch.jit.script
-        class GoodModule(object):
+        class GoodModule:
             def __init__(self, x: int):
                 self.x: int = x
 

@@ -14,7 +14,7 @@ OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
 @dataclass
-class OpSchema(object):
+class OpSchema:
     """
     OpSchema is a data class that describes an operator input schemas, it
     includes DTensor DTensorSpecs and non-tensor args/kwargs (positional order

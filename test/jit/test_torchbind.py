@@ -65,7 +65,7 @@ class TestTorchbind(JitTestCase):
         test_equality(f, lambda x: x)
 
         # test nn module with prepare_scriptable function
-        class NonJitableClass(object):
+        class NonJitableClass:
             def __init__(self, int1, int2):
                 self.int1 = int1
                 self.int2 = int2

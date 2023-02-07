@@ -232,7 +232,7 @@ tensortype_to_dtype = {
 }
 
 
-class DuplicateWarningChecker(object):
+class DuplicateWarningChecker:
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
         self.reset()

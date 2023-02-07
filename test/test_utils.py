@@ -779,7 +779,7 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyXPUModule(object):
+class DummyXPUModule:
     @staticmethod
     def is_available():
         return True

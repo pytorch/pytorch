@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 
-class Transform(object):
+class Transform:
     """
     Abstract class for invertable transformations with computable log
     det jacobians. They are primarily used in

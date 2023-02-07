@@ -15,7 +15,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
-class _StorageBase(object):
+class _StorageBase:
     _cdata: Any
     is_sparse: bool = False
     is_sparse_csr: bool = False

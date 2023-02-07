@@ -95,7 +95,7 @@ class Metadata(
 Metadata.__new__.__defaults__ = (None, None, None)
 
 
-class Field(object):
+class Field:
     """Represents an abstract field type in a dataset.
     """
 
@@ -979,7 +979,7 @@ def from_dtype(dtype, _outer_shape=()):
     return Struct(*struct_fields)
 
 
-class _SchemaNode(object):
+class _SchemaNode:
     """This is a private class used to represent a Schema Node"""
 
     __slots__: Sequence[str] = ("name", "children", "type_str", "field")

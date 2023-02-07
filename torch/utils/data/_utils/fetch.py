@@ -4,7 +4,7 @@ single- and multi-processing data loading.
 """
 
 
-class _BaseDatasetFetcher(object):
+class _BaseDatasetFetcher:
     def __init__(self, dataset, auto_collation, collate_fn, drop_last):
         self.dataset = dataset
         self.auto_collation = auto_collation

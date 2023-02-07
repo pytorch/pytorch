@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 
-class kernel_arena_scope(object):
+class kernel_arena_scope:
     def __enter__(self):
         self.scope = te.KernelScope()
 

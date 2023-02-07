@@ -26,7 +26,7 @@ import numpy as np
 import time
 
 
-class Reader(object):
+class Reader:
     """
     Reader is an abstract class to be implemented in order to provide
     operations capable of iterating through a dataset or stream of data.
@@ -143,7 +143,7 @@ class Reader(object):
         return (read_step, fields)
 
 
-class Writer(object):
+class Writer:
     """
     Writer is an abstract class to be implemented in order to provide
     operations capable of feeding a data stream or a dataset.
@@ -207,7 +207,7 @@ class Writer(object):
         pass
 
 
-class ReaderBuilder(object):
+class ReaderBuilder:
     """ Allow usage of a reader in distributed fashion. """
     def schema(self):
         raise NotImplementedError()
@@ -256,7 +256,7 @@ class PipedReaderBuilder(ReaderBuilder):
         return output if isinstance(output, Reader) else output.reader()
 
 
-class Pipe(object):
+class Pipe:
     def __init__(self, schema=None, obj_key=None):
         self._num_writers = 0
         self._num_readers = 0

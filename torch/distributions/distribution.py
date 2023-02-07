@@ -7,7 +7,7 @@ from typing import Dict, Optional, Any, Tuple
 
 __all__ = ['Distribution']
 
-class Distribution(object):
+class Distribution:
     r"""
     Distribution is the abstract base class for probability distributions.
     """

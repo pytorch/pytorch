@@ -4,7 +4,7 @@ from multiprocessing.reduction import ForkingPickler
 import pickle
 
 
-class ConnectionWrapper(object):
+class ConnectionWrapper:
     """Proxy class for _multiprocessing.Connection which uses ForkingPickler to
     serialize objects"""
 

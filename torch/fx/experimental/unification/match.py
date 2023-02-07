@@ -4,7 +4,7 @@ from .utils import _toposort, freeze
 from .unification_tools import groupby, first  # type: ignore[import]
 
 
-class Dispatcher(object):
+class Dispatcher:
     def __init__(self, name):
         self.name = name
         self.funcs = {}

@@ -118,7 +118,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         return super(CUDAGraph, self).debug_dump(debug_path)
 
 
-class graph(object):
+class graph:
     r"""
     Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph`
     object for later replay.

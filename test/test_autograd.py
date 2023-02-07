@@ -4096,7 +4096,7 @@ Done""")
         # its output. Previously, this created a reference cycle.
         dealloc = [0]
 
-        class IncrementOnDelete(object):
+        class IncrementOnDelete:
             def __del__(self):
                 dealloc[0] += 1
 
@@ -4386,7 +4386,7 @@ Done""")
             #
             # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
             # We can test this by seeing whether Foo is not kept alive once t is destroyed
-            class Foo(object):
+            class Foo:
                 pass
             my_obj = Foo()
             meta_dict = t.grad_fn.metadata
@@ -4443,7 +4443,7 @@ Done""")
                     with detect_anomaly():
                         ginp.backward()
 
-            class Foo(object):
+            class Foo:
                 pass
             my_obj = Foo()
             meta_dict = out.grad_fn.metadata

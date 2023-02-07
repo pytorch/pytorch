@@ -42,7 +42,7 @@ def _RectifyNames(blob_references_or_names):
     return [_RectifyName(i) for i in blob_references_or_names]
 
 
-class RNNCell(object):
+class RNNCell:
     '''
     Base class for writing recurrent / stateful operations.
 
@@ -268,7 +268,7 @@ class RNNCell(object):
         return state_outputs[output_sequence_index]
 
 
-class LSTMInitializer(object):
+class LSTMInitializer:
     def __init__(self, hidden_size):
         self.hidden_size = hidden_size
 
@@ -888,7 +888,7 @@ class DropoutCell(RNNCell):
         return output
 
 
-class MultiRNNCellInitializer(object):
+class MultiRNNCellInitializer:
     def __init__(self, cells):
         self.cells = cells
 

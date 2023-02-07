@@ -69,7 +69,7 @@ get_worker_info = _utils.worker.get_worker_info
 logger = logging.getLogger(__name__)
 
 
-class _DatasetKind(object):
+class _DatasetKind:
     Map = 0
     Iterable = 1
 
@@ -565,7 +565,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked))
 
 
-class _BaseDataLoaderIter(object):
+class _BaseDataLoaderIter:
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None

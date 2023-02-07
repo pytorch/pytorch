@@ -23,7 +23,7 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 
-class LRScheduler(object):
+class LRScheduler:
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
 
@@ -910,7 +910,7 @@ class ChainedScheduler(LRScheduler):
             self._schedulers[idx].load_state_dict(s)
 
 
-class ReduceLROnPlateau(object):
+class ReduceLROnPlateau:
     """Reduce learning rate when a metric has stopped improving.
     Models often benefit from reducing the learning rate by a factor
     of 2-10 once learning stagnates. This scheduler reads a metrics

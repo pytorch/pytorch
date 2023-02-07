@@ -36,7 +36,7 @@ Device = Union[_device, str, _int, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
 
-class Storage(object):
+class Storage:
     _cdata: int
     device: torch.device
     dtype: torch.dtype

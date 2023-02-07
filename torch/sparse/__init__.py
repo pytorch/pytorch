@@ -359,7 +359,7 @@ Specifying a positive offset::
 """)
 
 
-class check_sparse_tensor_invariants(object):
+class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
 The following options exists to manage sparsr tensor invariants

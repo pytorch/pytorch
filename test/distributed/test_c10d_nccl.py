@@ -82,7 +82,7 @@ class RendezvousEnvTest(TestCase):
             "MASTER_PORT": str(common.find_free_port()),
         }
 
-        class Env(object):
+        class Env:
             def __init__(self, vars):
                 self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 

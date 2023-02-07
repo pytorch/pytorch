@@ -1016,7 +1016,7 @@ class TestFreezing(JitTestCase):
 
     def test_freeze_module_inlining(self):
         @torch.jit.script  # noqa: B903
-        class Obj(object):  # noqa: B903
+        class Obj:  # noqa: B903
             def __init__(self, x: int, y: int):
                 self.x = x
                 self.y = y
@@ -1459,7 +1459,7 @@ class TestFreezing(JitTestCase):
 
     def test_module_getattr_indirection(self):
         @torch.jit.script
-        class ValHolder(object):
+        class ValHolder:
             def __init__(self, val: int):
                 self.val: int = val
 
@@ -1914,7 +1914,7 @@ class TestFreezing(JitTestCase):
         self.expectEqual(expected, actual)
 
     def test_freeze_non_module_class_getattr(self):
-        class BoxCoder(object):
+        class BoxCoder:
             def __init__(self, bbox_xform_clip):
                 # type: (float) -> None
                 self.bbox_xform_clip = bbox_xform_clip

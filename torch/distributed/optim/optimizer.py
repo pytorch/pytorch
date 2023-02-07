@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # TODO (wanchaol): remove this once we added TorchScript
 # class reference semantics
 @jit.interface
-class _ScriptLocalOptimizerInterface(object):
+class _ScriptLocalOptimizerInterface:
     def step(self, autograd_ctx_id: int) -> None:
         pass
 
@@ -59,7 +59,7 @@ class _ScriptLocalOptimizer(nn.Module):
 
 # TODO (wanchaol): remove/merge this with ScriptLocalOptimizer once
 # we have converted all to functional optimizer in distributed.optim
-class _LocalOptimizer(object):
+class _LocalOptimizer:
     # Ideally we would only need to share a lock for instances of
     # _LocalOptimizer that deal with the same parameters. We are
     # making a simplifying assumption here that if there is more

@@ -313,7 +313,7 @@ def is_torch_jit_ignore_context_manager(stmt):
                         return True
     return False
 
-class Builder(object):
+class Builder:
     def __call__(self, ctx, node):
         method = getattr(self, 'build_' + node.__class__.__name__, None)
         if method is None:

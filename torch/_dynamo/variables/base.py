@@ -29,7 +29,7 @@ class HasPostInit(type):
         return obj
 
 
-class VariableTracker(object, metaclass=HasPostInit):
+class VariableTracker(metaclass=HasPostInit):
     """
     Base class for tracked locals and stack values
 

@@ -273,7 +273,7 @@ class _PyTreeInfo(NamedTuple):
     out_spec: Optional[pytree.TreeSpec]
 
 @compatibility(is_backward_compatible=False)
-class CodeGen(object):
+class CodeGen:
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
 

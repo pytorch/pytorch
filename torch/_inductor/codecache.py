@@ -196,7 +196,7 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-class VecISA(object):
+class VecISA:
     _bit_width: int
     _macro: str
     _arch_flags: str

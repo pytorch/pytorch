@@ -69,7 +69,7 @@ def get_execution_plan(graph_executor_state):
                            'only have one execution plan, got: {}'.format(num_plans))
     return execution_plans[0]
 
-class _AssertRaisesRegexWithHighlightContext(object):
+class _AssertRaisesRegexWithHighlightContext:
     """
     A context manager that is useful for checking that error messages highlight
     the correct part of the source code.
@@ -645,7 +645,7 @@ class JitTestCase(JitCommonTestCase):
 
         return sm
 
-class NoTracerWarnContextManager(object):
+class NoTracerWarnContextManager:
     def __enter__(self):
         self.prev = torch._C._jit_get_tracer_state_warn()
         torch._C._jit_set_tracer_state_warn(False)

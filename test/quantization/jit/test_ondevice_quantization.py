@@ -60,7 +60,7 @@ class MyConvLinearModule(torch.nn.Module):
         return (torch.rand(1, 3, 12, 7),)
 
 
-class OnDevicePTQUtils(object):
+class OnDevicePTQUtils:
     observer_module_name = ['MinMaxObserver', 'PerChannelMinMaxObserver']
 
     @staticmethod

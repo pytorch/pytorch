@@ -10,7 +10,7 @@ from .common import amp_definitely_not_available
 
 __all__ = ["OptState", "GradScaler"]
 
-class _MultiDeviceReplicator(object):
+class _MultiDeviceReplicator:
     """
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
@@ -42,7 +42,7 @@ def _refresh_per_optimizer_state():
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
 
-class GradScaler(object):
+class GradScaler:
     _scale: Optional[torch.Tensor]
     _grows_tracker: Optional[torch.Tensor]
     _per_optimizer_states: Dict[int, Dict[str, Any]]

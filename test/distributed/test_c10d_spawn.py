@@ -33,7 +33,7 @@ if NO_MULTIPROCESSING_SPAWN:
     sys.exit(0)
 
 
-class AbstractProcessGroupShareTensorTest(object):
+class AbstractProcessGroupShareTensorTest:
     world_size = 2
 
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):

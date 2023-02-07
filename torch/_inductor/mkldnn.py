@@ -21,7 +21,7 @@ from . import config
 from .fx_utils import matches_module_function_pattern
 
 
-class UnaryAttr(object):
+class UnaryAttr:
     def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
         self.op_name = op_name
         self.scalars_attr = scalars_attr if scalars_attr else []

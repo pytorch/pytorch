@@ -37,7 +37,7 @@ class PositiveGuard:
     expr: Expr
 
 
-class SizeVarAllocator(object):
+class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:

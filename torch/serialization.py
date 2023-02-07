@@ -238,7 +238,7 @@ def _is_path(name_or_buffer):
         isinstance(name_or_buffer, pathlib.Path)
 
 
-class _opener(object):
+class _opener:
     def __init__(self, file_like):
         self.file_like = file_like
 

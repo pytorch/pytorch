@@ -32,7 +32,7 @@ def reset_optimizer_instance_count():
     _optimizer_instance_count.clear()
 
 
-class Optimizer(object):
+class Optimizer:
     def __init__(self):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
         self._instance_num = _optimizer_instance_count[self.__class__.__name__]

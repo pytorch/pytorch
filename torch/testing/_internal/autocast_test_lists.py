@@ -2,7 +2,7 @@ import torch
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
-class AutocastTestLists(object):
+class AutocastTestLists:
     def _rnn_cell_args(self, n, num_chunks, is_lstm, dev, dtype):
         input = (torch.randn((n, n), device=dev, dtype=torch.float32),)
 
@@ -230,7 +230,7 @@ class AutocastTestLists(object):
                                       torch.rand((n, n), device=dev, dtype=torch.float32)), torch._C._nn),
         ]
 
-class AutocastCPUTestLists(object):
+class AutocastCPUTestLists:
     # Supplies ops and arguments for test_autocast_* in test/test_cpu.py
     def __init__(self, dev):
         super().__init__()

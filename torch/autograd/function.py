@@ -14,7 +14,7 @@ __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once
            "InplaceFunction", "NestedIOFunction"]
 
 # Formerly known as: _ContextMethodMixin
-class FunctionCtx(object):
+class FunctionCtx:
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
@@ -250,7 +250,7 @@ class FunctionCtx(object):
 # DO NOT USE: This is only defined to be able to load old serialized models
 _ContextMethodMixin = FunctionCtx
 
-class _HookMixin(object):
+class _HookMixin:
 
     @staticmethod
     def _register_hook(backward_hooks, hook):
