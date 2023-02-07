@@ -332,7 +332,6 @@ void resize_tensor(Tensor* output) {
 
 MPSGraph* make_mps_graph() {
   MPSGraph* mpsGraph = [[MPSGraph new] autorelease];
-  mpsGraph.options = MPSGraphOptionsNone;
   return mpsGraph;
 }
 
