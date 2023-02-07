@@ -7031,7 +7031,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inps = [torch.randn(2, 4, 16, 16).cuda()]
-            code = run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
 
@@ -7048,7 +7048,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, 1, K, device="cuda"),
                 torch.randn(1, N, K, device="cuda"),
             ]
-            code = run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertEqual(code.count("tl.store"), 1)
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
@@ -7074,7 +7074,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this cannot be optimized away, value too large
                 self.assertTrue("to(tl.int64)" in code)
@@ -7097,7 +7097,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this can be optimized away, value too large
                 self.assertTrue("to(tl.int64)" not in code)
