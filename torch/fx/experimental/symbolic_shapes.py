@@ -644,6 +644,7 @@ def _make_node_magic(method, func):
 
     def binary_magic_impl(self, other):
         op = method_to_operator(method)
+
         if SYM_FUNCTION_MODE:
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, SymTypes), type(r)
@@ -652,9 +653,6 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
-
-        if method in methods_if_hinted and out_hint is not None:
-            return to_node(self, methods_if_hinted[method](wrap_node(self), wrap_node(other)))
 
         assert isinstance(other, SymNode)
         other_expr = other.expr
@@ -816,6 +814,13 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        if (
+            method in methods_if_hinted and
+            self.node.hint is not None and
+            (not isinstance(other, SymTypes) or other.node.hint is not None)
+        ):
+            return methods_if_hinted[method](self, other)
+
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
