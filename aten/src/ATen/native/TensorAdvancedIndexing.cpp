@@ -1725,7 +1725,6 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const c10::string_view reduce,
  bool include_self,
  const Tensor& out) {
-  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
