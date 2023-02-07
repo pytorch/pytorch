@@ -131,7 +131,7 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
-        # Regenerate ToCs and check that they didn't change (nonretryable)
+        # Regenerate ToCs and check that they didn't change
         set -eu
 
         export PATH=~/.npm-global/bin:"$PATH"
@@ -164,7 +164,7 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
-        # Test tools (nonretryable)
+        # Test tools
         python3 -m unittest discover -vs tools/test -p 'test_*.py'
         python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 

@@ -128,7 +128,7 @@ COPY ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
-# (optional) Intall lintrunner and
+# (optional) Install linter dependencies
 ARG LINTER
 COPY ./common/install_linter.sh install_linter.sh
 RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
