@@ -29,7 +29,7 @@ from ._traverse import (
 from .utils import _element_wise_add
 
 
-# TODO: We need to refactor this code. 
+# TODO: We need to refactor this code.
 def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     r"""
     Transforms ``state_dict`` by flattening all nested ShardedTensor instances found.
