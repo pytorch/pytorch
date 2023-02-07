@@ -1052,8 +1052,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     # flat_args is used by make_fx and aot_config.fw_compiler
     # clone flat_args to avoid flat_args shape changed by inplace ops (unsqueeze_)
     tmp_flat_args = [torch._prims_common.clone_preserve_strides(x) for x in flat_args]
-    with enable_python_dispatcher():
-        fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_args)
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
@@ -1641,11 +1640,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
-        with enable_python_dispatcher():
-            flattened_joints, _ = pytree.tree_flatten(joint_inputs)
-            fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
-                *joint_inputs
-            )
+        flattened_joints, _ = pytree.tree_flatten(joint_inputs)
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
+            *joint_inputs
+        )
 
         # There should be *NO* mutating ops in the graph at this point.
         assert_functional_graph(fx_g.graph)
@@ -2137,13 +2135,10 @@ def create_aot_dispatcher_function(
         )
 
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
-    python_dispatcher_mode = (
-        enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
-    )
 
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    ), preserve_rng_state(), cross_ref, fake_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):

@@ -667,9 +667,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
-        python_dispatcher_mode: Any = nullcontext()
-        if tracing_mode == "symbolic":
-            python_dispatcher_mode = enable_python_dispatcher()
+        python_dispatcher_mode: Any = enable_python_dispatcher()
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode)
 
