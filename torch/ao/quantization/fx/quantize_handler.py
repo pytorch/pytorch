@@ -148,7 +148,7 @@ def _get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pat
                 num_tensor_args_to_observation_type)
     return pattern_to_quantize_handlers
 
-# TODO: remove this class, this is still exposed in torch.quantization
+# TODO: remove this class, this is still exposed in torch.ao.quantization
 # but we should be able to break bc
 class BinaryOpQuantizeHandler(QuantizeHandler):
     pass
@@ -194,10 +194,10 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
 class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     pass
 
-# TODO: not used, can be removed after torch.quantization namespace is deprecated
+# TODO: not used, can be removed after torch.ao.quantization namespace is deprecated
 class CustomModuleQuantizeHandler(QuantizeHandler):
     pass
 
-# TODO: not used, can be removed after torch.quantization namespace is deprecated
+# TODO: not used, can be removed after torch.ao.quantization namespace is deprecated
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
     pass
