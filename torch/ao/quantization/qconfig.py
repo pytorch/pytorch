@@ -76,7 +76,10 @@ __all__ = [
     "qconfig_equals",
 ]
 
-class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
+_qconfig_fields = [
+    "activation", "weight", "input_args", "module_attrs", "output", "version"
+]
+class QConfig(namedtuple('QConfig', _qconfig_fields, defaults=(None,) * len(_qconfig_fields))):
     """
     Describes how to quantize a layer or a part of the network by providing
     settings (observer classes) for activations and weights respectively.
@@ -94,13 +97,68 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
           activation=MinMaxObserver.with_args(dtype=torch.qint8),
           weight=default_observer.with_args(dtype=torch.qint8))
 
+
+    **QConfig v1**
+    QConfig v1 (current QConfig) was introduced when eager mode quantization is designed,
+    it has two keys: "activation" and "weight", here
+    activation means the output activation, and weight means weight attributes for weighted modules
+
+    Later we developed torchscript graph mode quantization (quantize_jit) and fx graph
+    mode quantization (quantize_fx), and now quantization in pytorch 2.0 export path
+    (quantize_pt2e), but we did not redesign QConfig, and "activation" is redefined as a
+    setting for both input and output, "weight" also expanded it's definition serving both setting for module\
+    weigt and the weight input of torch functional or torch ops (with the aid of extra
+    configurations to specify which input is weight) and we do not have a way to configure
+    the observer/fake_quant constructor for bias.
+
+    **QConfig v2**
+    This PR adds keys for the second version of QConfig, it has the following keys:
+    ["input_args", "module_attrs", "output", "version"]
+
+    "input_args": is used to configure the observer/fakequant constructors for input arguments,
+    it should have the same structure as the positional arguments e.g. for an operator with
+    the following signature: `op(arg0, arg1, arg2)`, "input_args" should look like the following:
+    ```
+    qconfig.input_args = (obs0, obs1, obs3)
+    ```
+    this can be expanded to more general structures like nested dictionary with a tuple as a value etc.
+
+    "module_attrs": is used to configure the observer/fakequant constructors for module attributes,
+     e.g. weight, it should be a dictionary from module attribute name to the observer/fake_quant class, e.g.:
+
+    qconfig.module_attrs = {"weight": obs0}
+
+    "output": is used to configure the observer/fakequant constructors for output,
+    it should match the structure of output, e.g. if output has the following structure:
+    {"key0": out0, "key1": (out1, out2)}, we will have the following output config:
+    qconfig.output = {"key0": obs0, "key1": (obs1, obs2)}
+
+    "version": should be None (meaning v1), 1 or 2
+
+    **Examples**::
+
+      # v1
+      my_qconfig = QConfig(
+          activation=MinMaxObserver.with_args(dtype=torch.qint8),
+          weight=default_observer.with_args(dtype=torch.qint8))
+      # v2
+      my_qconfig = QConfig(
+          input_args=(MinMaxObserver.with_args(dtype=torch.qint8),),
+          module_attrs={"weight": default_observer.with_args(dtype=torch.qint8)},
+          output=(MinMaxObserver.with_args(dtype=torch.qint8),)
+      )
+
     """
-    def __new__(cls, activation, weight):
+    def __new__(cls, activation=None, weight=None, input_args=None, module_attrs=None, output=None, version=None):
         # catch common mistakes
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("QConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfig, cls).__new__(cls, activation, weight)
+        assert (activation is None and weight is None) or \
+            (input_args is None and module_attrs is None and output is None), \
+            "QConfig: version 1 and version 2 keys can't be set at the same time"
+        assert version in [None, 1, 2]
+        return super(QConfig, cls).__new__(cls, activation, weight, input_args, module_attrs, output, version)
 
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
