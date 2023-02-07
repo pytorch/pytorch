@@ -3289,11 +3289,17 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
-@register_lowering([aten.var, prims.var])
-def var_(x, axis=None, correction=1, keepdim=False):
+def var_mean_(x, axis, correction, keepdim, return_mean):
+    if correction is None:
+        correction = 1
+
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
-    diffs = square(sub(x, mean(x, axis, keepdim=True)))
+    x_mean = mean(x, axis, keepdim=True)
+    if return_mean:
+        x_mean.realize()
+
+    diffs = square(sub(x, x_mean))
     sum_result = sum_(diffs, axis, keepdim)
 
     denom = sympy_product(size[i] for i in axis)
@@ -3301,17 +3307,26 @@ def var_(x, axis=None, correction=1, keepdim=False):
         denom = denom - correction
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return div(sum_result, denom)
+    x_var = div(sum_result, denom)
+    if not return_mean:
+        return x_var
+
+    x_mean = x_mean if keepdim else squeeze(x_mean, axis)
+    return x_var, x_mean
+
+
+@register_lowering([aten.var, prims.var])
+def var_(x, axis=None, *, correction=None, keepdim=False):
+    return var_mean_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+    )
 
 
 @register_lowering(aten.var_mean)
-def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
-    if correction is None:
-        correction = int(unbiased)
-    return [
-        var_(x, dim, correction=correction, keepdim=keepdim),
-        mean(x, dim, keepdim=keepdim),
-    ]
+def var_mean(x, axis=None, *, correction=None, keepdim=False):
+    return var_mean_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+    )
 
 
 def pow_recursive(x, y, dtype):
