@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import time
 import unittest
+from unittest.mock import patch
 import torch
 from torch._C import FileCheck
 from torch._dispatch.python import enable_python_dispatcher
@@ -37,8 +39,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             "stride": self.world_size,
         }
 
-    @unittest.skip("hangs in nccl somewhere. work cleanup issue?")
     @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.

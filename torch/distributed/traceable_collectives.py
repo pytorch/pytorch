@@ -147,7 +147,7 @@ c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 c10_lib_cpu.impl("all_reduce", _all_reduce)
 c10_lib_cuda.impl("all_reduce", _all_reduce)
 
-RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh, Tuple[dt.DeviceMesh, int]]
+RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dt.DeviceMesh", Tuple["dt.DeviceMesh", int]]
 
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
     rankset: List[int]
