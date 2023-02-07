@@ -1448,6 +1448,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
     if (!gradient_as_bucket_view_) {
       if (optim_in_backward_) {
+        // Return early has optimizer has already run.
         runGradCallbackForVariable(variable, [&](auto& grad) {
           return true;
         });
@@ -1469,6 +1470,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
         if (optim_in_backward_) {
+          // Return early has optimizer has already run.
           return true;
         }
         // If a parameter is globally unused, we keep its grad untouched.
