@@ -7652,7 +7652,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     )
     samples.append(diff_v_head_dim)
 
-    yield from (samples)
+    yield from samples
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
