@@ -8818,26 +8818,26 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cauchy,
            error_inputs_func=error_inputs_cauchy,
            skips=(
-              # Tests that assume input tensor has a meaningful effect on output tensor
-              DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-              DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
 
-              # AssertionError: JIT Test does not execute any logic
-              DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
 
-              # AssertionError: Tensor-likes are not close!
-              DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
 
-              # FX failed to normalize op - add the op to the op_skip list.
-              DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
-              # vmap: calling random operator not supported
-              DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-              DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               # vmap: calling random operator not supported
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
 
-              DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon','test_python_ref_executor'),
+               DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon', 'test_python_ref_executor'),
 
-              DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),

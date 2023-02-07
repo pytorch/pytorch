@@ -5191,7 +5191,8 @@ def cauchy(self, median=0, sigma=1, generator=None):
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
-        lambda: f"Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified {self.dtype}",
+        lambda: f"Cauchy distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
     )
     utils.check(
         sigma > 0.0,
