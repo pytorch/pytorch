@@ -18,6 +18,7 @@ def matmul_cat_col(a, b, c, d, e, f, *, tag, ranks, group_size):
     z = torch.cat((x, y))
     ar = torch.ops.aten.all_reduce(z, "sum", tag, ranks, group_size)
     g = torch.matmul(e, f)
+    ar = torch.ops.tr_c10d.wait(ar)
     out = torch.add(ar, g.repeat(2, 1))
     return (out, )
 
