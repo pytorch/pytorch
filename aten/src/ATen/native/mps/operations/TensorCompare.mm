@@ -465,9 +465,16 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
           MPSGraphTensor* subZeroTensor = [mpsGraph lessThanWithPrimaryTensor: nanFreeTensor
                                                               secondaryTensor: [mpsGraph constantWithScalar: 0.0 dataType: self_dtype]
                                                                          name: nil];
-          // the cast is a workaround for the issue #103149520 (crash when bool and fp16 passed to binary ops)
-          MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor: [mpsGraph castTensor: subZeroTensor toType: self_dtype name: @"castTensor"]
-                                                                 secondaryTensor: [mpsGraph isInfiniteWithTensor: nanFreeTensor name:nil]
+          MPSGraphTensor* isInfTensor = [mpsGraph isInfiniteWithTensor: nanFreeTensor name:nil];
+          // workaround for Monterey; On Ventura the output of lessThan() is always Boolean
+          if (subZeroTensor.dataType != MPSDataTypeBool) {
+            subZeroTensor = castMPSTensor(mpsGraph, subZeroTensor, kBool);
+          }
+          if (isInfTensor.dataType != MPSDataTypeBool) {
+            isInfTensor = castMPSTensor(mpsGraph, isInfTensor, kBool);
+          }
+          MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor: subZeroTensor
+                                                                 secondaryTensor: isInfTensor
                                                                             name: nil];
           MPSGraphTensor* negInfFreeTensor = [mpsGraph selectWithPredicateTensor: isNegInfTensor
                                                              truePredicateTensor: newCachedGraph->negInfReplacementTensor
