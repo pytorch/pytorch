@@ -115,8 +115,7 @@ def fuse(
             env[node.name] = fused_graph.node_copy(node, load_arg)
         # node matched in patterns and is not root is removed here
 
-    model.graph = fused_graph
-    model.recompile()
+    model = GraphModule(model, fused_graph)
     return model
 
 def _find_matches(

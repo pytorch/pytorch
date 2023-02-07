@@ -1029,7 +1029,6 @@ def convert(
 
     # remove deadcode after converting observers to quant/dequant ops
     model.graph.eliminate_dead_code()
-    model.recompile()
     model = GraphModule(model, model.graph)
 
     # TODO: maybe move this to quantize_fx.py

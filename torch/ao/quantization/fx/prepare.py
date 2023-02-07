@@ -1564,7 +1564,6 @@ def prepare(
         observed_node_names,
         is_qat
     )
-    model.recompile()
     model = GraphModule(model, model.graph)
 
     _save_state(model, node_name_to_qconfig, node_name_to_scope,

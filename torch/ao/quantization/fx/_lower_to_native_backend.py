@@ -417,9 +417,8 @@ def fold_weight(
         else:
             # copy other nodes
             env[node.name] = folded_graph.node_copy(node, load_arg)
-    quantized_model.graph = folded_graph
-    quantized_model.recompile()
-    quantized_model = GraphModule(quantized_model, quantized_model.graph)
+
+    quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
     quantized_model._register_load_state_dict_pre_hook(_load_packed_weight, with_module=True)
     return quantized_model
