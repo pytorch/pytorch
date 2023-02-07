@@ -27,6 +27,13 @@ using namespace std;
 namespace at {
 namespace mps {
 
+// Helper enum to check if a MPSGraph op is supported in a given macOS version
+enum class MacOSVersion : uint32_t {
+  MACOS_VER_13_0_PLUS = 0,
+  MACOS_VER_13_1_PLUS,
+  MACOS_VER_13_2_PLUS,
+};
+
 //-----------------------------------------------------------------
 //  MPSDevice
 //
@@ -56,7 +63,7 @@ class TORCH_API MPSDevice {
   /**
    * Returns whether running on Ventura or newer
    */
-  bool isMacOS13Plus(int32_t subVersion) const;
+  bool isMacOS13Plus(MacOSVersion version) const;
 
   MTLFunction_t metalIndexingFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
 
@@ -70,7 +77,7 @@ class TORCH_API MPSDevice {
 };
 
 TORCH_API bool is_available();
-TORCH_API bool is_macos_13_or_newer(int32_t subVersion = 0);
+TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_13_0_PLUS);
 
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 

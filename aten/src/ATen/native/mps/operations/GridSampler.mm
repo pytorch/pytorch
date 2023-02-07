@@ -134,7 +134,7 @@ Tensor grid_sampler_2d_mps(const Tensor& input, const Tensor& grid,
   bool xcode_sdk_13_2_or_higher = false;
 #endif
 
-  if (!is_macos_13_or_newer(/*subVersion=*/2) || !xcode_sdk_13_2_or_higher) {
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) || !xcode_sdk_13_2_or_higher) {
     TORCH_WARN_ONCE("MPS: grid_sampler_2d op is supported natively starting from macOS 13.1. ",
                     "Falling back on CPU. This may have performance implications.");
 
