@@ -717,8 +717,9 @@ def _rename_placeholder_targets(
 @_beartype.beartype
 def _export(
     module: torch.fx.GraphModule,
+    args,
+    *,
     opset_version: int = _constants.ONNX_DEFAULT_OPSET,
-    *args,
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
 ) -> Union["onnx.ModelProto", bytes]:
@@ -783,8 +784,8 @@ def export(
     # to _export.
     return _export(
         graph_module,
-        opset_version,
-        *args,
+        args,
+        opset_version=opset_version,
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
@@ -846,9 +847,9 @@ def export_without_kwargs(
     # Export FX graph to ONNX ModelProto.
     return _export(
         compiler.captured_graph,
-        opset_version,
         # Function optimized by _dynamo doesn't have None in args.
-        *tuple(arg for arg in bound_args if arg is not None),
+        tuple(arg for arg in bound_args if arg is not None),
+        opset_version=opset_version,
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
@@ -1005,9 +1006,8 @@ def export_without_parameters_and_buffers(
     return (
         _export(
             graph_module,
-            opset_version,
-            *bound_args,
-            *replaced_attrs,
+            (*bound_args, *replaced_attrs),
+            opset_version=opset_version,
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
         ),
