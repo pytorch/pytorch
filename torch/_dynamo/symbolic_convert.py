@@ -13,7 +13,7 @@ import types
 import typing
 import weakref
 from collections.abc import Sized
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -35,10 +35,11 @@ from .bytecode_transformation import (
     create_instruction,
     Instruction,
     is_generator,
+    transform_code_object,
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented, Unsupported
+from .exc import BackendCompilerFailed, FailedInlining, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -74,6 +75,7 @@ from .variables.misc import (
     ClosureVariable,
     ContextWrappingVariable,
     GetAttrVariable,
+    GradModeVariable,
     PythonModuleVariable,
     UnknownVariable,
     WithExitFunctionVariable,
@@ -331,8 +333,13 @@ def break_graph_if_unsupported(*, push):
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
             reason = None
+            failed_inlining = None
             try:
                 return inner_fn(self, inst)
+            except FailedInlining as excp:
+                log.debug("break_graph_if_unsupported triggered compile due to failed inlining", exc_info=True)
+                reason = GraphCompileReason("inlining failed", [])
+                failed_inlining = excp
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
@@ -362,42 +369,30 @@ def break_graph_if_unsupported(*, push):
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self, reason=reason)
+            cleanup_finally = self.output.compile_subgraph(self, reason=reason)
+
+            print("stack before inst/function at", self.stack)
+            if failed_inlining:
+                self.output.add_output_instructions(
+                    self.create_call_function_at(failed_inlining.func, failed_inlining.args, inst)
+                )
+            else:
+                self.output.add_output_instructions([inst])
+
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
                 self.push(UnknownVariable())
-
-            resume_call_insts = self.create_call_resume_at(self.next_instruction)
-
-            # Check if there is a block stack entry with GradModeVariable. And
-            # wrap the instruction causing the graph break inside a try..finally
-            # block. See more details at
-            # https://github.com/pytorch/torchdynamo/issues/207
-            finally_blocks = []
-            for ctx in self.block_stack:
-                if isinstance(ctx.with_context, ContextWrappingVariable):
-                    ctx_variable = ctx.with_context
-                    cg = PyCodegen(self)
-                    init_block, cleanup_ctx = ctx_variable.reconstruct(cg)
-                    finally_blocks.append(cleanup_ctx)
-                    self.output.add_output_instructions(init_block)
-            if len(finally_blocks) > 0:
-                self.output.add_output_instructions(
-                    [create_instruction("SETUP_FINALLY", target=finally_blocks[-1][0])]
-                )
-            self.output.add_output_instructions([inst])
-
-            if len(finally_blocks) > 0:
-                # Setup the finally blocks in
-                # Add the cleanup instructions from try..finally block
-                finally_block = ContextWrappingVariable.create_finally_block(
-                    finally_blocks, resume_call_insts[0]
-                )
-                self.output.add_output_instructions(finally_block)
+            
             self.output.add_output_instructions(
-                resume_call_insts,
+                self.create_call_resume_at(self.next_instruction)
             )
+            if cleanup_finally:
+                self.output.add_output_instructions(cleanup_finally)
+
+            # for i in self.output.output_instructions:
+            #     print("I", i)
+
             self.output.graph.print_tabular()
 
         return wrapper
@@ -506,9 +501,91 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
             self.output.guards.update(fn.guards)
             return result
+        # TODO remove
         except Exception:
             self.restore_graphstate(state)
             raise
+        # finally:
+        #     self.restore_graphstate(state)
+        #     # Wrap the function call to setup WITH 
+        #     self.create_call_function_at(fn, args, kwargs, self.current_instruction)
+        #     # We can return a `None` as `create_call_function_at` will trigger
+        #     # tracing from the beginning.
+        #     self.call_function
+        #     return ConstantVariable(None)
+    
+    def create_call_function_at(
+        self, 
+        func: types.CodeType, 
+        argnames: List[str],
+        inst
+    ) -> VariableTracker:
+        name = unique_id(f"___call_{func.co_name}_at_{inst.offset}")
+        # TODO get this from inspect.signature instead...
+        nargs = len(argnames)
+
+        cg = PyCodegen(self)
+        hooks = {b.stack_index: (b.with_context.reconstruct(cg), b.resume_fn()) for b in self.block_stack if b.stack_index and b.with_context}
+
+        def update(instructions: List[Instruction], code_options: Dict[str, Any]):
+            args = list(argnames)
+            freevars = tuple(code_options["co_cellvars"] or []) + tuple(
+                code_options["co_freevars"] or []
+            )
+            code_options["co_name"] = f"<setup with for {code_options['co_name']}>"
+            code_options["co_firstlineno"] = 0
+            code_options["co_cellvars"] = tuple()
+            code_options["co_freevars"] = freevars
+            code_options["co_argcount"] = len(args)
+            code_options["co_posonlyargcount"] = 0
+            code_options["co_kwonlyargcount"] = 0
+            code_options["co_varnames"] = tuple(
+                args + [v for v in code_options["co_varnames"] if v not in args]
+            )
+            code_options["co_flags"] = code_options["co_flags"] & ~(
+                inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
+            )
+
+            prefix = []
+            cleanup = []
+            for i in range(len(self.stack) - 1 - nargs):
+                if i in hooks:
+                    ctx, setup_and_teardown = hooks.pop(i)
+                    prefix.extend(ctx)
+                    prefix.extend(setup_and_teardown(code_options, cleanup))
+            assert not hooks
+            
+            prefix.append(create_instruction("JUMP_ABSOLUTE", target=instructions[0]))
+
+            if cleanup:
+                prefix.extend(cleanup)
+                prefix.extend(ContinueExecutionCache.unreachable_codes(code_options))
+
+            # TODO(jansel): add dead code elimination here
+            instructions[:] = prefix + instructions
+
+        new_code = transform_code_object(func, update)
+
+        print("NEW_CODE for function_at", dis.Bytecode(new_code).dis())
+
+        # Swap the previous function out
+        cg.extend_output([*cg.rot_n(nargs + 1), create_instruction("POP_TOP")])
+
+        # All of the args should already be set up on the stack
+        if new_code.co_freevars:
+            cg.make_function_with_closure(name, new_code, nargs)
+        else:
+            self.output.install_global(
+                name, types.FunctionType(new_code, self.f_globals, name)
+            )
+            cg.extend_output(cg.load_function_name(name, nargs))
+
+        cg.extend_output(
+            [
+                create_instruction("CALL_FUNCTION", nargs),
+            ]
+        )
+        return cg.get_instructions()
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
@@ -1800,9 +1877,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
             return cls.inline_call_(parent, func, args, kwargs)
-
+        
     @staticmethod
-    def inline_call_(parent, func, args, kwargs):
+    def check_inlineable(func):
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
@@ -1818,7 +1895,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented(f"inlining disallowed: {func.get_function()}")
         except NotImplementedError:
             pass  # closures
-
+            
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
@@ -1826,6 +1903,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
             )
 
+    @staticmethod
+    def inline_call_(parent, func, args, kwargs):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -1862,7 +1941,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             raise Unsupported(msg) from e
         except Exception as e:
             log.debug(f"FAILED INLINING {code}")
-            raise
+            raise FailedInlining(code, list(sub_locals.keys())) from e
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 

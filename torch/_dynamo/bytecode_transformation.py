@@ -306,10 +306,15 @@ def fix_vars(instructions: List[Instruction], code_options):
         if instructions[i].opcode in HAS_LOCAL:
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
-            instructions[i].arg = names[instructions[i].argval]
+            if not instructions[i].argval in names:
+                code_options["co_names"] + (instructions[i].argval,)
+                instructions[i].arg = len(code_options)
+            else:
+                instructions[i].arg = names[instructions[i].argval]
 
 
 def transform_code_object(code, transformations, safe=False):
+    print(dis.Bytecode(code).dis())
     keys = [
         "co_argcount",
         "co_posonlyargcount",  # python 3.8+

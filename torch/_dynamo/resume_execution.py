@@ -48,7 +48,6 @@ class ReenterWith:
                 create_instruction("POP_TOP"),
             ]
         else:
-
             with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
 
@@ -80,18 +79,15 @@ class ReenterWith:
             load_args = []
             if self.target_values is not None:
                 for val in self.target_values:
-                    if val not in code_options["co_consts"]:
-                        code_options["co_consts"] = tuple(code_options["co_consts"]) + (
-                            val,
-                        )
                     load_args.append(
                         create_instruction(
                             "LOAD_CONST",
-                            code_options["co_consts"].index(val),
+                            PyCodegen.get_const_index(code_options, val),
                             val,
                         )
                     )
 
+            print("load args", load_args)
             return [
                 *load_args,
                 create_instruction("CALL_FUNCTION", len(load_args)),

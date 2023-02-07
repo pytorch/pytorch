@@ -21,6 +21,8 @@ from typing import (
 )
 
 from typing_extensions import Protocol
+from torch._dynamo.resume_execution import ContinueExecutionCache
+from torch._dynamo.variables.misc import ContextWrappingVariable
 
 import torch.nn
 from torch import fx
@@ -459,10 +461,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
-    ):
+    ) -> Optional[List[Instruction]]:
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
+
+        May optionally return a list of instructions that corresponds to cleanup code.
         """
         from .eval_frame import disable
 
@@ -524,12 +528,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
             self.add_output_instructions(random_calls_instructions)
 
+        cleanup_finally = None
         if (
             stack_values
             and all(
                 not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
-            and all(isinstance(x, TensorVariable) for x in stack_values)
+            and all(isinstance(x, TensorVariable) or isinstance(x, ContextWrappingVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
@@ -540,11 +545,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
             )
         else:
+            # setup_fns = {b.stack_index: b.resume_fn() for b in self.root_tx.block_stack if b.stack_index is not None}
             graph_output_var = self.new_var("graph_out")
+
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
+            # cleanup = []
+            # for idx, s in enumerate(stack_values):
+            #     pass1(s)
+            #     if idx in setup_fns:
+            #         pass1.extend_output(setup_fns.get(idx)(pass1.code_options, cleanup))
             self.side_effects.codegen_update_mutated(pass1)
+
 
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
@@ -555,6 +568,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
+            # cleanup = []
+            # for idx, s in enumerate(stack_values):
+            #     pass2(s)
+            #     if idx in setup_fns:
+            #         pass2.extend_output(setup_fns.pop(idx)(pass2.code_options, cleanup))
             self.side_effects.codegen_update_mutated(pass2)
 
             output = []
@@ -568,11 +586,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 else:
                     output.append(create_instruction("POP_TOP"))
             self.add_output_instructions(output + pass2.get_instructions())
+            # cleanup_finally = cleanup
+
 
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
+        # if cleanup_finally:
+        #     return [
+        #         *cleanup_finally,
+        #         *ContinueExecutionCache.unreachable_codes(tx.code_options)
+        #     ]
 
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -604,6 +629,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
+
+        print(f"COMPILING FUNCTION {name} FOR:")
+        gm.graph.print_tabular()
 
         assert_no_fake_params_or_buffers(gm)
         with tracing(self.tracing_context):

@@ -196,6 +196,7 @@ def convert_frame_assert(
     init_logging()
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+        print("CONVERTING NEXT FRAME")
         increment_frame()
         code = frame.f_code
         input_codes.add(code)
@@ -293,6 +294,8 @@ def _compile(
 
     # from .utils import print_once;  print_once(code.co_filename)
 
+    print("transforming")
+
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -320,8 +323,11 @@ def _compile(
     try:
         for attempt in itertools.count():
             try:
+                import dis
+
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
+                print("OUT CODE\n", out_code.co_name, dis.Bytecode(out_code).dis())
                 break
             except exc.RestartAnalysis:
                 log.debug("Restarting analysis ...")

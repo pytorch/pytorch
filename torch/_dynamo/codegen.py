@@ -4,6 +4,7 @@ import re
 import sys
 import types
 from typing import List
+from torch._dynamo.variables.misc import WithExitFunctionVariable
 
 import torch.nn
 
@@ -137,6 +138,8 @@ class PyCodegen(object):
         else:
             self.uses[value] += 1
             try:
+                if isinstance(value, WithExitFunctionVariable):
+                    print("reconstructing", value)
                 output.extend(value.reconstruct(self))
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
