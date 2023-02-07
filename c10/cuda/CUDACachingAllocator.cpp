@@ -185,16 +185,16 @@ struct Block {
   stream_set stream_uses; // streams on which the block was used
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
-  BlockPool* pool; // owning memory pool
-  void* ptr; // memory address
-  bool allocated; // in-use flag
-  Block* prev; // prev block if split from a larger allocation
-  Block* next; // next block if split from a larger allocation
-  int event_count; // number of outstanding CUDA events
-  int gc_count; // counter for prioritizing older / less useful blocks for
-                // garbage collection
+  BlockPool* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  Block* prev{nullptr}; // prev block if split from a larger allocation
+  Block* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int gc_count{0}; // counter for prioritizing older / less useful blocks for
+                   // garbage collection
   std::unique_ptr<HistoryChain> history;
-  HistoryChain* history_last;
+  HistoryChain* history_last{nullptr};
 
   Block(
       int device,
@@ -208,12 +208,7 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        ptr(ptr) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
@@ -221,14 +216,7 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
-        requested_size(0),
-        pool(nullptr),
-        ptr(nullptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        requested_size(0) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
