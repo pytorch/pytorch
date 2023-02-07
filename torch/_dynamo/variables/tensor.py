@@ -26,6 +26,21 @@ from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
+supported_tensor_comparison_ops = {
+    ">": operator.gt,
+    "<": operator.lt,
+    ">=": operator.ge,
+    "<=": operator.le,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+supported_const_comparison_ops = {
+    "is": operator.is_,
+    "is not": operator.is_not,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""

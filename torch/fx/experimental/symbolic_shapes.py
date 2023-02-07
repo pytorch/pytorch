@@ -38,6 +38,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
+    "method_to_operator",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -492,6 +493,19 @@ magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
+def method_to_operator(method):
+    if method in magic_methods_on_operator_with_trailing_underscore:
+        method_attr = f"{method}_"
+    else:
+        method_attr = method
+    if method in magic_methods_on_submodule:
+        op = getattr(torch.fx.experimental.symbolic_shapes, method_attr)
+    elif method in magic_methods_on_math:
+        op = getattr(math, method_attr)
+    else:
+        op = getattr(operator, method_attr)
+    return op
+
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
@@ -518,11 +532,7 @@ def _make_node_magic(method, func):
         method_attr = method
 
     def binary_magic_impl(self, other):
-        if method in magic_methods_on_submodule:
-            op = getattr(sys.modules[__name__], method_attr)
-        else:
-            assert method not in magic_methods_on_math
-            op = getattr(operator, method_attr)
+        op = method_to_operator(method)
         if SYM_FUNCTION_MODE:
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, SymTypes), type(r)
@@ -559,12 +569,7 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in magic_methods_on_math:
-                op = getattr(math, method_attr)
-            elif method in magic_methods_on_submodule:
-                op = getattr(sys.modules[__name__], method_attr)
-            else:
-                op = getattr(operator, method_attr)
+            op = method_to_operator(method)
             r = _handle_sym_dispatch(op, (wrap_node(self),), {})
             assert isinstance(r, SymTypes), type(r)
             return r.node
@@ -875,13 +880,13 @@ class ShapeEnv(object):
         )
         return self.val_to_var[val]
 
-    # Generates a Python string which, when evaluated in a context that
+    # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
-    # on if the guards evaluated to True or not.  Primarily used by Dynamo,
+    # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()):
+    def produce_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name()) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1022,16 +1027,16 @@ class ShapeEnv(object):
             # negative inferences on shape variables
             exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
-        if exprs:
-            return " and ".join(exprs)
-        else:
-            return "True"
+        return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
-        return eval(code, {}, dict(zip(arg_names, args)))
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        if guards:
+            code = " and ".join(guards)
+            return eval(code, {}, dict(zip(arg_names, args)))
+        return True
 
     def bind_symbols(self, placeholders, args):
         # Given a paired list of placeholders (fake tensors with
