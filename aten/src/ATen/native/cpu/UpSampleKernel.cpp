@@ -797,7 +797,7 @@ struct HelperInterpBase {
     int max_interp_size;
     if (antialias) {
         support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-        max_interp_size = (int)ceil(support) * 2 + 1;
+        max_interp_size = (int) std::ceil(support) * 2 + 1;
     } else {
         support = interp_size * 0.5;
         max_interp_size = interp_size;

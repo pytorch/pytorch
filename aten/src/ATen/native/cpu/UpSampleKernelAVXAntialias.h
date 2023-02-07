@@ -26,7 +26,11 @@ Like PIL, Pillow is licensed under the open source HPND License
 #include <ATen/cpu/vec/intrinsics.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty.h>
+#endif
 
 
 namespace {
