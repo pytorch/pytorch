@@ -14,7 +14,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .dependencies import StarDep
+from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, has_triton
 from .virtualized import V
@@ -96,8 +96,8 @@ class BaseSchedulerNode:
     def update_mutated_names(self, renames: Dict[str, str]):
         self.set_read_writes(self.read_writes.rename(renames))
 
-    def add_mutation_dep(self, name, prunable=False):
-        self.set_read_writes(self.read_writes.with_read(name, prunable))
+    def add_mutation_dep(self, dep):
+        self.set_read_writes(self.read_writes.with_read(dep))
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
@@ -153,11 +153,17 @@ class BaseSchedulerNode:
             name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
 
         def should_prune(dep):
-            return (
-                isinstance(dep, StarDep)
-                and dep.prunable
-                and name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 1
-            )
+            if isinstance(dep, WeakDep):
+                is_redundant = (
+                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 1
+                )
+                # These can occur because fused nodes always gather deps from their snodes
+                # If B has a stardep on A
+                # B gets fused with C, then any time BC is fused, the stardep will reappear
+                is_self_dep = name_to_fused_node[dep.name] == self
+                return is_redundant or is_self_dep
+            else:
+                return False
 
         deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
         self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
@@ -711,15 +717,18 @@ class Scheduler:
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(alt_name)
+                node.add_mutation_dep(StarDep(alt_name))
+                other_readers = tuple(
+                    sorted([n.get_name() for n in name_to_users[alt_name]])
+                )
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
                     known_dep_node_names = dep_closure(node.get_name())
                     if other_name not in known_dep_node_names:
-                        # If this node alreay directly or indirectly depends on other_node,
-                        # we don't need to insert an extra StarDep.
-                        node.add_mutation_dep(other_name, prunable=True)
+                        # If this node already directly or indirectly depends on other_node,
+                        # we don't need to insert an extra dep.
+                        node.add_mutation_dep(WeakDep(other_name, other_readers))
                         add_user(other_name, node)
 
             # add normal non-mutation dependencies
@@ -966,6 +975,7 @@ class Scheduler:
         """
         node1_names = node1.get_names()
         computed_deps = set()
+
         for rd in node2.unmet_dependencies:
             for cd in node1.read_writes.writes:
                 # StarDep doesn't match MemoryDep, different indices don't match

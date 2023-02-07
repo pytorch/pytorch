@@ -20,7 +20,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-Dep = Union["MemoryDep", "StarDep"]
+Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
 class MemoryDep(typing.NamedTuple):
@@ -95,11 +95,10 @@ class MemoryDep(typing.NamedTuple):
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
-    prunable: bool = False
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
-            return StarDep(renames[self.name], self.prunable)
+            return StarDep(renames[self.name])
         return self
 
     def numbytes_hint(self):
@@ -117,6 +116,25 @@ class StarDep(typing.NamedTuple):
         return V.graph.sizevars.size_hint(
             sympy_product(buf.get_size())
         ) * get_dtype_size(buf.get_dtype())
+
+    def is_contiguous(self) -> bool:
+        return False
+
+
+# Used for tracking mutation ordering
+# if A reads a buffer and B mutates it
+# B must be ordered after A
+class WeakDep(typing.NamedTuple):
+    name: str
+    readers: Tuple[str]
+
+    def rename(self, renames: Dict[str, str]) -> "WeakDep":
+        if self.name in renames:
+            return WeakDep(renames[self.name], self.readers)
+        return self
+
+    def numbytes_hint(self):
+        return 1  # Purely inserted for ordering, not an actual dep
 
     def is_contiguous(self) -> bool:
         return False
@@ -144,10 +162,10 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, name: str, prunable=False) -> "ReadWrites":
-        assert isinstance(name, str)
+    def with_read(self, dep: Dep) -> "ReadWrites":
+        assert isinstance(dep, WeakDep) or isinstance(dep, StarDep)
         return ReadWrites(
-            set.union(self.reads, {StarDep(name, prunable)}),
+            set.union(self.reads, {dep}),
             self.writes,
             self.index_exprs,
             self.range_vars,
