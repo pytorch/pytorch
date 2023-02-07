@@ -1006,7 +1006,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, (SizeVariable, TupleVariable)) and isinstance(
             right, (TupleVariable, SizeVariable)
         ):
-            return BaseListVariable.list_compare(left, tx, op, right)
+            return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, BaseListVariable):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
