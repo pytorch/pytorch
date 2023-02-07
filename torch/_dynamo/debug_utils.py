@@ -567,6 +567,8 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     # agree
                     assert len(out) == 1
                     tested_output = out[0]
+                    from .utils import same
+
                     if not same(real_output, tested_output, tol=config.repro_tolerance):
                         log.error(
                             "Accuracy didn't fail, but when we reran the optimized module "
