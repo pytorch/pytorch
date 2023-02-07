@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch._dynamo as torchdynamo
+from torch.testing._internal.common_utils import xfailIfPython311
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
@@ -28,6 +29,7 @@ import copy
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
+    @xfailIfPython311
     def test_qconfig_none(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -76,6 +78,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             self.checkGraphModuleNodes(
                 m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
 
+    @xfailIfPython311
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -126,6 +129,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
+    @xfailIfPython311
     def test_resnet18(self):
         import torchvision
         with override_quantized_engine("qnnpack"):
