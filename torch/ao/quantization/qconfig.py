@@ -402,6 +402,17 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
+_default_fp32_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.float32),
+    weight=PlaceholderObserver.with_args(dtype=torch.float32)
+)
+
+_default_quint8_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.quint8),
+    # operators using this qconfig doesn't have weights
+    weight=None,
+)
+
 def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
