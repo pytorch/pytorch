@@ -6045,6 +6045,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test([3, 4], [3, 3, 3])
         run_test([3, 4], [3, 3, 3, 3])
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/94124
+        with self.assertRaises(RuntimeError):
+            x = torch.rand([], device=device, dtype=dtype)
+            coeffs = torch.rand([2, 2], device=device, dtype=dtype)
+            res = torch._compute_linear_combination(x, coeffs)
+
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.complex64)
