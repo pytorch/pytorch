@@ -253,7 +253,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   const MPSDataType mpsDataType = dataType != MPSDataTypeInvalid ? dataType :
                       _tensor.dim() == 0 ? getMPSScalarType(_tensor.scalar_type()) : getMPSDataType(_tensor.scalar_type());
 
-  if (src.is_contiguous() && src.storage_offset() && sliceViewTensor) {
+  if (src.is_view() && src.is_contiguous() && src.storage_offset() && sliceViewTensor) {
     _value = getMPSGraphTensorDataForView(src, mpsShape, mpsDataType);
   } else {
     if (!mpsShape) {
