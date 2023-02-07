@@ -39,7 +39,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, FailedInlining, unimplemented, Unsupported
+from .exc import BackendCompilerFailed, HandleFailedInlining, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -279,7 +279,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if_jump = self.create_call_resume_at(inst.target)
 
             self.output.add_output_instructions(
-                [(create_instruction(inst.opname, target=if_jump[0]))]
+                [create_instruction(inst.opname, target=if_jump[0])]
                 + if_next
                 + if_jump
             )
@@ -341,14 +341,13 @@ def break_graph_if_unsupported(*, push):
             failed_inlining = None
             try:
                 return inner_fn(self, inst)
-            except FailedInlining as excp:
+            except HandleFailedInlining as excp:
                 log.debug("break_graph_if_unsupported triggered compile due to failed inlining", exc_info=True)
                 reason = GraphCompileReason("inlining failed", [])
                 if len(self.block_stack) > 0:
                     # Only handle the inlining with context setup if there are any live context managers
+                    # Else just graph break into calling the original function
                     failed_inlining = excp
-                elif not isinstance(excp.__cause__, Unsupported):
-                    raise excp.__cause__
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
@@ -381,32 +380,29 @@ def break_graph_if_unsupported(*, push):
 
             if failed_inlining:
                 function_at = self.create_call_function_at(failed_inlining.func, failed_inlining.args, inst)
-            cleanup_finally = self.output.compile_subgraph(self, reason=reason)
-
-            print("stack before inst/function at", self.stack)
-            if failed_inlining:
-                self.output.add_output_instructions(
-                    function_at
-                )
+                cleanup_setup_with = self.output.compile_subgraph(self, reason=reason)
+                if cleanup_setup_with:
+                    # Hack to avoid the id of the cloned object be different from its referenced object
+                    self.output.add_output_instructions([create_instruction("JUMP_ABSOLUTE", target=function_at[0])])
+                    self.output.add_output_instructions(cleanup_setup_with)
+                
+                print("FUNCTION AT")
+                self.output.add_output_instructions(function_at)
             else:
+                cleanup_setup_with = self.output.compile_subgraph(self, reason=reason)
+                if cleanup_setup_with:
+                    self.output.add_output_instructions([create_instruction("JUMP_ABSOLUTE", target=inst)])
+                    self.output.add_output_instructions(cleanup_setup_with)
                 self.output.add_output_instructions([inst])
 
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
                 self.push(UnknownVariable())
-            
             self.output.add_output_instructions(
                 self.create_call_resume_at(self.next_instruction)
-            )
-            if cleanup_finally:
-                self.output.add_output_instructions(cleanup_finally)
-
-            # for i in self.output.output_instructions:
-            #     print("I", i)
-
-            self.output.graph.print_tabular()
-
+            ) 
+            [print("O", i) for i in self.output.output_instructions]
         return wrapper
 
     return decorator
@@ -513,25 +509,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
             self.output.guards.update(fn.guards)
             return result
-        # TODO remove
         except Exception:
             self.restore_graphstate(state)
             raise
-        # finally:
-        #     self.restore_graphstate(state)
-        #     # Wrap the function call to setup WITH 
-        #     self.create_call_function_at(fn, args, kwargs, self.current_instruction)
-        #     # We can return a `None` as `create_call_function_at` will trigger
-        #     # tracing from the beginning.
-        #     self.call_function
-        #     return ConstantVariable(None)
     
     def create_call_function_at(
         self, 
         func: types.CodeType, 
         argnames: List[str],
         inst
-    ) -> VariableTracker:
+    ) -> List[Instruction]:
         name = unique_id(f"___call_{func.co_name}_at_{inst.offset}")
         # TODO get this from inspect.signature instead...
         nargs = len(argnames)
@@ -573,8 +560,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     prefix.extend(ctx)
                     prefix.extend(setup_and_teardown(code_options, cleanup))
             assert not hooks
-            
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=instructions[0]))
+
+            prefix.append([create_instruction("JUMP_ABSOLUTE", target=instructions[0])])
 
             if cleanup:
                 prefix.extend(cleanup)
@@ -1887,6 +1874,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
+        InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -1923,7 +1911,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             raise Unsupported(msg) from e
         except Exception as e:
             log.debug(f"FAILED INLINING {code}, {closure_cells}")
-            raise FailedInlining(code, list(sub_locals.keys())) from e
+            if len(closure_cells) > 0:
+                # We cannot handle `HandleFailedInlining` with closure_cells for now
+                raise
+            raise HandleFailedInlining(code, list(sub_locals.keys())) from e
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 

@@ -2969,7 +2969,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             @staticmethod
             def mm_breaks(x, y):
-                torch._dynamo.graph_break()
+                # torch._dynamo.graph_break()
                 return torch.mm(x, y)
 
             def forward(self, x):
@@ -2977,11 +2977,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 b_float32 = torch.rand((8, 8), device="cpu")
 
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-                    torch._dynamo.graph_break()
+                    # torch._dynamo.graph_break()
                     with torch.autocast(
                         device_type="cpu", dtype=torch.bfloat16, enabled=False
                     ):
-                        # torch._dynamo.graph_break()
+                        torch._dynamo.graph_break()
                         # with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                         #     # Check that nested with non-inlineable function with graph break
                         #     torch._dynamo.graph_break()

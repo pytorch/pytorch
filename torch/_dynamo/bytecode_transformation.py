@@ -145,6 +145,7 @@ def virtualize_jumps(instructions):
         if inst.opcode in dis.hasjabs or inst.opcode in dis.hasjrel:
             for offset in (0, 2, 4, 6):
                 if jump_targets[inst.argval + offset].opcode != dis.EXTENDED_ARG:
+                    print("JUMP TARGET ID", jump_targets[inst.argval + offset])
                     inst.target = jump_targets[inst.argval + offset]
                     break
 
@@ -332,13 +333,11 @@ def fix_vars(instructions: List[Instruction], code_options):
                 instructions[i].arg = len(code_options["co_names"])
                 code_options["co_names"] += (instructions[i].argval,)
                 names[instructions[i].argval] = instructions[i].arg
-                print("CONAMES", code_options["co_names"])
             else:
                 instructions[i].arg = names[instructions[i].argval]
 
 
 def transform_code_object(code, transformations, safe=False):
-    print(dis.Bytecode(code).dis())
     keys = [
         "co_argcount",
         "co_posonlyargcount",  # python 3.8+
@@ -368,8 +367,6 @@ def transform_code_object(code, transformations, safe=False):
     transformations(instructions, code_options)
 
     fix_vars(instructions, code_options)
-
-    print("names", code_options["co_names"])
 
     dirty = True
     while dirty:

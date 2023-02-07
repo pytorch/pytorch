@@ -1256,7 +1256,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             with torch.enable_grad():
-                print("Hello world")  # Cause graph break
+                # print("Hello world")  # Cause graph break
                 a = torch.sin(x)
                 b = reversible(a)
                 c = torch.sigmoid(b)
@@ -1435,6 +1435,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
 
     def test_primtorch(self):
+        import logging
+        logger  =logging.getLogger()
+        logger.setLevel(logging.DEBUG)
         @torch._dynamo.optimize("eager")
         def fn(x):
             torch._refs.abs(x)
