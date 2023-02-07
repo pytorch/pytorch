@@ -395,5 +395,3 @@
   - EasyCLA
   - Lint
   - pull
-
-- flaky_rules_location_url: https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json

@@ -971,7 +971,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
+        torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -1614,7 +1614,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [
-        ("torch", torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        ("torch", torch, torch.__all__),
         ("torch.functional", torch.functional, torch.functional.__all__),
         ("torch.nn.functional", torch.nn.functional, dir(torch.nn.functional)),
         ("torch.nn.init", torch.nn.init, dir(torch.nn.init)),
