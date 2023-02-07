@@ -9,13 +9,6 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      docker-image-name:
-        required: true
-        type: string
-        default: pytorch-linux-focal-linter
-        description: Name of the docker image to run lint.
 
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
@@ -36,7 +29,7 @@ jobs:
         id: calculate-docker-image
         uses: ./.github/actions/calculate-docker-image
         with:
-          docker-image-name: ${{ inputs.docker-image-name }}
+          docker-image-name: pytorch-linux-focal-linter
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
