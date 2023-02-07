@@ -4172,6 +4172,7 @@ class Wait(ExternKernel):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
+        wrapper.writeline(f"{self.get_name()} = {input_collective} # TODO why not automatically done by codegen?")
 
     @classmethod
     def create(cls, x: "TensorBox"):
@@ -4183,9 +4184,9 @@ class Wait(ExternKernel):
     def get_alias_names(self):
         # reporting alias name here didn't impact anything.
         #
-        (input_collective,) = [t.codegen_reference() for t in self.inputs]
-        return [input_collective]
-        # return ()
+        # (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        # return [input_collective]
+        return ()
 
 
 class AllReduce(ExternKernel):
