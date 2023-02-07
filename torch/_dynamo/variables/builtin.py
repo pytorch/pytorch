@@ -1049,8 +1049,8 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_not_(self, tx, a):
-        if isinstance(a, DynamicShapeVariable):
-            return DynamicShapeVariable.create(
+        if isinstance(a, SymNodeVariable):
+            return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
                     "call_function", operator.not_, *proxy_args_kwargs([a], {})
