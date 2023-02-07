@@ -61,7 +61,7 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
   auto ximag = std::imag(x);
-  CONSTEXPR_EXCEPT_WIN_CUDA auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
+  auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
   auto sin = std::sin(ximag);
   auto cos = std::cos(ximag);
   // special case if the angle is exactly the multiple of pi/2
@@ -107,7 +107,7 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        CONSTEXPR_EXCEPT_WIN_CUDA scalar_t init = -std::numeric_limits<scalar_t>::infinity();
+        scalar_t init = -std::numeric_limits<scalar_t>::infinity();
         auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
           const opmath_t x{x_}, y{y_};
           return _log_add_exp_helper(x, y);
