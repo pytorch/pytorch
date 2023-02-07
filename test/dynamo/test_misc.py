@@ -3831,7 +3831,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-
     def test_set_custom_tensor_attribute(self):
         def fn(x):
             x.custom_attr = 3.14
