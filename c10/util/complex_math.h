@@ -290,7 +290,7 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T>& x) {
 }
 
 template <typename T>
-C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
+C10_HOST_DEVICE c10::complex<T> log1p(const c10::complex<T>& z) {
   // log1p(z) = log(1 + z)
   // Let's define 1 + z = r * e ^ (i * a), then we have
   // log(r * e ^ (i * a)) = log(r) + i * a
